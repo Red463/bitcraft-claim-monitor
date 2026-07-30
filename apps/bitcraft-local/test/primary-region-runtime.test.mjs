@@ -62,6 +62,7 @@ test("primary-region runtime publishes players and restarts only when membership
     manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
     generation: 1,
     regionId: "19",
+    claimId: "1369094286777412590",
     members,
   });
 
@@ -70,6 +71,16 @@ test("primary-region runtime publishes players and restarts only when membership
     warnings: [],
     equipment: { members: [{ playerEntityId: "101", username: "Ada" }] },
     equipmentWarnings: [],
+    construction: {
+      projects: [{
+        entityId: "9001",
+        constructionRecipeId: "3023",
+        ownerId: "1369094286777412590",
+        items: [],
+        cargos: [],
+      }],
+    },
+    constructionWarnings: [],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",
@@ -108,6 +119,28 @@ test("primary-region runtime publishes players and restarts only when membership
         },
         warnings: [],
       },
+      construction: {
+        data: {
+          projects: [{
+            entityId: "9001",
+            constructionRecipeId: "3023",
+            ownerId: "1369094286777412590",
+            items: [],
+            cargos: [],
+          }],
+        },
+        confidence: "authoritative",
+        provenance: {
+          provider: "relay",
+          sourceKey: "region:19",
+          regionId: "19",
+          database: "relay-region-19",
+          schemaFingerprint: "regional-v1",
+          sourceObservedAt: null,
+          receivedAt: "2026-07-29T20:41:00.000Z",
+        },
+        warnings: [],
+      },
     },
   });
 
@@ -124,6 +157,8 @@ test("primary-region runtime publishes players and restarts only when membership
     warnings: [],
     equipment: { members: [] },
     equipmentWarnings: [],
+    construction: { projects: [] },
+    constructionWarnings: [],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",

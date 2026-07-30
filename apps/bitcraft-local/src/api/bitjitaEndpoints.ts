@@ -1,13 +1,14 @@
 import type { ActivePanel } from "../types/app.ts";
+import { usesProviderNeutralGameData } from "./pageDomains.ts";
 
 export function marketEndpointMap(claimId: string, activePanel?: ActivePanel): Record<string, string> {
+  if (activePanel && usesProviderNeutralGameData(activePanel)) return {};
   const endpoints = {
     claim: `/claims/${claimId}`,
     members: `/claims/${claimId}/members`,
     citizens: `/claims/${claimId}/citizens`,
     buildings: `/claims/${claimId}/buildings`,
     inventories: `/claims/${claimId}/inventories`,
-    construction: `/claims/${claimId}/construction`,
     research: `/claims/${claimId}/research`,
     recruitment: `/claims/${claimId}/recruitment`,
     market: `/claims/${claimId}/market/listings?limit=200`,
@@ -23,7 +24,7 @@ export function marketEndpointMap(claimId: string, activePanel?: ActivePanel): R
 
   switch (activePanel) {
     case "dashboard":
-      add("citizens", "buildings", "construction", "research", "market");
+      add("citizens", "buildings", "research", "market");
       break;
     case "members":
       add("citizens");
@@ -39,9 +40,6 @@ export function marketEndpointMap(claimId: string, activePanel?: ActivePanel): R
       break;
     case "inventory":
       add("inventories");
-      break;
-    case "construction":
-      add("construction", "inventories");
       break;
     case "research":
       add("research");

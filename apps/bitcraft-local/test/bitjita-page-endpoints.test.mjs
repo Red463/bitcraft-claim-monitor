@@ -9,10 +9,10 @@ test("Settlement Market requests the monitored claim listing feed", () => {
   assert.equal(endpoints.market, "/claims/claim-42/market/listings?limit=200");
 });
 
-test("Craft Monitor requests active crafts for the monitored claim", () => {
+test("migrated Craft Monitor has no legacy endpoint map", () => {
   const endpoints = marketEndpointMap("claim-42", "craft-monitor");
 
-  assert.equal(endpoints.crafts, "/crafts?claimEntityId=claim-42&completed=false");
+  assert.deepEqual(endpoints, {});
 });
 
 test("global Market does not request monitored claim listings", () => {

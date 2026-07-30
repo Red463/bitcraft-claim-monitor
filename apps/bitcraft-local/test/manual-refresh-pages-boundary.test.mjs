@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+const { usesProviderNeutralGameData } = await import(
+  new URL("../src/api/pageDomains.ts", import.meta.url).href,
+);
+
 function source(path) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
@@ -53,6 +57,6 @@ test("provider-neutral Production joins selected-member Toolbelt to the active r
   assert.match(page, /useManualRefresh|manualRefreshHeaders|trackPromise/);
   assert.match(page, /request\?\.sequence/);
   assert.match(page, /\/api\/local\/player-data/);
-  assert.match(loader, /PROVIDER_NEUTRAL_PANELS[\s\S]*"craft-monitor"/);
+  assert.equal(usesProviderNeutralGameData("craft-monitor"), true);
   assert.match(loader, /loadGameData\([\s\S]*headers:\s*\{\s*\.\.\.manualHeaders\s*\}/);
 });

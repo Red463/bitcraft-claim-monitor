@@ -258,3 +258,37 @@ test("game-data route composes requested domains through a provider-neutral loca
     projectedBy: "inventories",
   });
 });
+
+test("game-data route surfaces projection warnings and partial confidence", () => {
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["construction"],
+    repository: {
+      read: () => ({
+        data: { projects: [{ entityId: "9", constructionRecipeId: "404" }] },
+        confidence: "authoritative",
+        generation: 7,
+        lastError: null,
+        provenance: relayProvenance("2026-07-29T21:00:00.000Z"),
+        warnings: [],
+      }),
+    },
+    transformDomain: (_domain, data) => ({
+      data: { ...data, projects: [] },
+      confidence: "partial",
+      warnings: ["Construction project 9 is missing global recipe 404."],
+    }),
+    now: new Date("2026-07-29T21:00:01.000Z"),
+  });
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.domains.construction.data, { projects: [] });
+  assert.equal(result.body.domains.construction.confidence, "partial");
+  assert.deepEqual(result.body.domains.construction.warnings, [
+    "Construction project 9 is missing global recipe 404.",
+  ]);
+  assert.deepEqual(result.body.partialErrors, [
+    "construction: Construction project 9 is missing global recipe 404.",
+  ]);
+});

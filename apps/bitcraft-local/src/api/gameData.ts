@@ -3,7 +3,7 @@ import type {
   DomainEnvelope,
   DomainKey,
 } from "../server/game-data/contracts.ts";
-export { pageDomains } from "./pageDomains.ts";
+export { pageDomains, usesProviderNeutralGameData } from "./pageDomains.ts";
 
 type GameDataResponse = {
   claimId: string;

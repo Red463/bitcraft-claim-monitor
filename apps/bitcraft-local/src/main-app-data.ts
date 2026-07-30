@@ -69,8 +69,15 @@ function constructionCatalog(construction: AnyRecord, key: "items" | "cargos"): 
   return new Map((construction?.[key] ?? []).map((entry: AnyRecord) => [String(entry.id), entry]));
 }
 
-function inventoryStoredTotals(inventories: AnyRecord): Map<string, number> {
-  const totals = new Map<string, number>();
+function exactQuantity(value: unknown): bigint {
+  const normalized = typeof value === "bigint"
+    ? value.toString()
+    : String(value ?? "0").replace(/,/g, "").trim();
+  return /^\d+$/.test(normalized) ? BigInt(normalized) : 0n;
+}
+
+function inventoryStoredTotals(inventories: AnyRecord): Map<string, bigint> {
+  const totals = new Map<string, bigint>();
   for (const building of inventories?.buildings ?? []) {
     for (const slot of building.inventory ?? []) {
       const contents = slot.contents ?? {};
@@ -79,7 +86,7 @@ function inventoryStoredTotals(inventories: AnyRecord): Map<string, number> {
       const itemId = contents.item_id ?? contents.itemId;
       if (itemId == null) continue;
       const key = `${type}:${itemId}`;
-      totals.set(key, (totals.get(key) ?? 0) + toNumber(contents.quantity));
+      totals.set(key, (totals.get(key) ?? 0n) + exactQuantity(contents.quantity));
     }
   }
   return totals;
@@ -98,7 +105,7 @@ function constructionMaterialRows(
   materials: AnyRecord[],
   type: "item" | "cargo",
   contributions: Map<string, number>,
-  storedTotals: Map<string, number>,
+  storedTotals: Map<string, bigint>,
   itemLookup: Map<string, AnyRecord>,
   cargoLookup: Map<string, AnyRecord>,
 ): AnyRecord[] {
@@ -113,7 +120,7 @@ function constructionMaterialRows(
       name: lookup?.name ?? `${type === "cargo" ? "Cargo" : "Item"} #${itemId}`,
       required,
       contributed: contributions.get(key) ?? 0,
-      stored: storedTotals.get(key) ?? 0,
+      stored: Number(storedTotals.get(key) ?? 0n),
       tier: lookup?.tier ?? material.tier,
       rarity: lookup?.rarityStr ?? lookup?.rarity ?? material.rarityStr ?? material.rarity,
       iconAssetName: lookup?.iconAssetName ?? material.iconAssetName,
@@ -130,6 +137,13 @@ export function buildConstructionProjects(construction: AnyRecord, inventories: 
       return {
         ...project,
         name: project.name ?? project.recipeName ?? project.buildingName ?? project.structureName ?? project.entityId,
+        materials: project.materials.map((material: AnyRecord) => ({
+          ...material,
+          stored: (
+            storedTotals.get(`${material.type === "cargo" ? "cargo" : "item"}:${material.itemId}`)
+            ?? 0n
+          ).toString(),
+        })),
       };
     }
     const contributions = new Map<string, number>();

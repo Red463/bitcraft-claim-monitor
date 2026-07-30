@@ -112,3 +112,18 @@ be a committed domain event, not a scheduled ingestion sweep.
 - Global equipment/buff descriptions remain in the existing indexed catalog
   read model. UI enrichment and Toolbelt inventory are the next vertical
   boundary; the legacy page calls are not considered retired yet.
+
+## Construction vertical evidence
+
+- `project_site_state.owner_id` was proven live to be the claim entity ID; the
+  subscription is filtered to the configured monitored claim.
+- Regional project stacks are normalized as exact contributed quantities and
+  joined to authoritative global construction-recipe requirements.
+- The Construction page is provider-neutral and combines the committed project
+  generation with the existing live inventory generation.
+- Global recipe, building, item, and cargo rows are resolved only for the
+  projects/materials in the response.
+- `domain_payload_current` is the durable last-good boundary. No Relay
+  construction table, refresh ledger, pagination state, or scheduled ingestion
+  job was added. The legacy collector/notification paths still need to be
+  switched from BitJita in Milestone 6 before this domain is soak-ready.

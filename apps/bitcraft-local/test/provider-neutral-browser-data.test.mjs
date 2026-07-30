@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const { loadGameData, pageDomains } = await import(
+const { loadGameData, pageDomains, usesProviderNeutralGameData } = await import(
   new URL("../src/api/gameData.ts", import.meta.url).href,
+);
+const { marketEndpointMap } = await import(
+  new URL("../src/api/bitjitaEndpoints.ts", import.meta.url).href,
 );
 
 test("claim overview, Members, Professions, and Leaderboard request provider-neutral local domains", async () => {
-  assert.deepEqual(pageDomains("dashboard"), ["claim", "members", "citizens", "players"]);
+  assert.deepEqual(pageDomains("dashboard"), ["claim", "members", "citizens", "players", "construction"]);
   assert.deepEqual(pageDomains("members"), ["claim", "members", "citizens", "players", "equipment", "crafts"]);
   assert.deepEqual(pageDomains("skills"), ["claim", "members", "citizens", "players", "skills"]);
   assert.deepEqual(pageDomains("leaderboard"), ["claim", "members", "citizens", "players", "skills"]);
@@ -55,8 +58,10 @@ test("claim overview, Members, Professions, and Leaderboard request provider-neu
 
 test("browser loader routes the first Milestone 3 pages through local game data", async () => {
   const source = await readFile(new URL("../src/api/bitjita.ts", import.meta.url), "utf8");
-  assert.match(source, /PROVIDER_NEUTRAL_PANELS[\s\S]*"dashboard"[\s\S]*"members"[\s\S]*"skills"[\s\S]*"leaderboard"[\s\S]*"inventory"[\s\S]*"craft-monitor"/);
-  assert.match(source, /PROVIDER_NEUTRAL_PANELS\.has\(activePanel\)/);
+  for (const panel of ["dashboard", "members", "skills", "leaderboard", "inventory", "craft-monitor"]) {
+    assert.equal(usesProviderNeutralGameData(panel), true);
+  }
+  assert.match(source, /usesProviderNeutralGameData\(activePanel\)/);
   assert.deepEqual(pageDomains("inventory"), ["claim", "members", "inventories"]);
 });
 
@@ -72,6 +77,22 @@ test("Craft Monitor uses the provider-neutral craft snapshot and local catalog p
   assert.doesNotMatch(source, /players\/\$\{memberId\}\/inventories/);
   assert.match(server, /enrichCraftsWithCatalog/);
   assert.match(server, /providerCatalogRepository\.getDescription\("crafting_recipe", recipeId\)/);
+});
+
+test("Construction uses the provider-neutral live regional snapshot and local catalog projection", async () => {
+  const source = await readFile(new URL("../src/pages/ConstructionPage.tsx", import.meta.url), "utf8");
+  const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.equal(usesProviderNeutralGameData("construction"), true);
+  assert.deepEqual(marketEndpointMap("1369094286777412590", "construction"), {});
+  assert.deepEqual(pageDomains("construction"), [
+    "claim",
+    "members",
+    "inventories",
+    "construction",
+  ]);
+  assert.doesNotMatch(source, /\/api\/bitjita/);
+  assert.match(server, /enrichConstructionWithCatalog/);
+  assert.match(server, /providerCatalogRepository\.getDescription\(kind, id\)/);
 });
 
 test("Members uses Relay equipment, passive crafts, and bounded player inventory", async () => {

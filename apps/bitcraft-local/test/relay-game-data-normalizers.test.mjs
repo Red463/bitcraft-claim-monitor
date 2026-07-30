@@ -17,9 +17,71 @@ const {
   normalizePlayerInventory,
   normalizeCitizensPayload,
   normalizeRegionalEquipment,
+  normalizeRegionalConstruction,
   normalizeRegionalPlayers,
   normalizeTimestamp,
 } = await import(new URL("../src/server/game-data/normalizers.ts", import.meta.url).href);
+
+test("regional construction rows preserve exact claim ownership and contributed stacks", () => {
+  const result = normalizeRegionalConstruction({
+    claimId: "1369094286777412590",
+    projectRows: [{
+      entityId: 1369094286998704975n,
+      constructionRecipeId: 442905423,
+      resourcePlacementRecipeId: 0,
+      items: [{
+        itemId: 3090004,
+        quantity: 5,
+        itemType: { tag: "Item", value: {} },
+      }],
+      cargos: [{
+        itemId: 1202,
+        quantity: 4,
+        itemType: { tag: "Cargo", value: {} },
+      }],
+      progress: 157,
+      lastCritOutcome: 1,
+      ownerId: 1369094286777412590n,
+      direction: 2,
+      lastHitTimestamp: {
+        __timestamp_micros_since_unix_epoch__: 1785096910248578n,
+      },
+    }, {
+      entityId: 999n,
+      constructionRecipeId: 1,
+      resourcePlacementRecipeId: 0,
+      items: [],
+      cargos: [],
+      progress: 0,
+      lastCritOutcome: 0,
+      ownerId: 888n,
+      direction: 0,
+      lastHitTimestamp: {
+        __timestamp_micros_since_unix_epoch__: 1785096910248578n,
+      },
+    }],
+  });
+
+  assert.deepEqual(result, {
+    data: {
+      projects: [{
+        entityId: "1369094286998704975",
+        constructionRecipeId: "442905423",
+        resourcePlacementRecipeId: "0",
+        ownerId: "1369094286777412590",
+        items: [{ itemId: "3090004", itemType: "item", quantity: "5" }],
+        cargos: [{ itemId: "1202", itemType: "cargo", quantity: "4" }],
+        progress: "157",
+        lastCritOutcome: 1,
+        direction: 2,
+        lastHitAt: "2026-07-26T20:15:10.248Z",
+      }],
+    },
+    warnings: [
+      "Regional project_site_state omitted cross-claim project 999 owned by 888.",
+    ],
+  });
+});
 
 test("regional equipment and buff rows are decoded into member-scoped provider data", () => {
   const result = normalizeRegionalEquipment({

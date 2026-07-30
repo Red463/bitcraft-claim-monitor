@@ -125,6 +125,7 @@ export class RelayPrimaryRegionRuntime {
         manifest: this.#manifest,
         generation: 1,
         regionId,
+        claimId: this.#claimId,
         members,
       });
       this.#session = openingSession;
@@ -187,6 +188,20 @@ export class RelayPrimaryRegionRuntime {
               receivedAt: snapshot.receivedAt,
             },
             warnings: snapshot.equipmentWarnings,
+          },
+          construction: {
+            data: snapshot.construction,
+            confidence: snapshot.constructionWarnings.length ? "partial" : "authoritative",
+            provenance: {
+              provider: "relay",
+              sourceKey,
+              regionId: snapshot.regionId,
+              database: snapshot.database,
+              schemaFingerprint: snapshot.schemaFingerprint,
+              sourceObservedAt: null,
+              receivedAt: snapshot.receivedAt,
+            },
+            warnings: snapshot.constructionWarnings,
           },
         },
       });

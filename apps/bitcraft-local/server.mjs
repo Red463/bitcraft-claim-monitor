@@ -90,6 +90,7 @@ import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import {
   createCurrentStateRepository,
   buildCatalogItemDetail,
+  enrichConstructionWithCatalog,
   enrichCraftsWithCatalog,
   enrichEquipmentWithCatalog,
   enrichInventoryWithCatalog,
@@ -10311,28 +10312,45 @@ const server = createServer(async (req, res) => {
         claimId,
         domains,
         repository: currentStateRepository,
-        transformData: (domain, data) => {
+        transformDomain: (domain, data) => {
           if (domain === "inventories") {
-            return enrichInventoryWithCatalog(
-              data,
-              (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
-            );
+            return {
+              data: enrichInventoryWithCatalog(
+                data,
+                (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+              ),
+            };
           }
           if (domain === "crafts") {
-            return enrichCraftsWithCatalog(
-              data,
-              (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
-              (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
-            );
+            return {
+              data: enrichCraftsWithCatalog(
+                data,
+                (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+                (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
+              ),
+            };
           }
           if (domain === "equipment") {
-            return enrichEquipmentWithCatalog(
+            return {
+              data: enrichEquipmentWithCatalog(
+                data,
+                (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+                (kind, id) => providerCatalogRepository.getDescription(kind, id),
+              ),
+            };
+          }
+          if (domain === "construction") {
+            const projected = enrichConstructionWithCatalog(
               data,
               (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
               (kind, id) => providerCatalogRepository.getDescription(kind, id),
             );
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
+            };
           }
-          return data;
+          return { data };
         },
       });
       return send(res, result.status, result.body);

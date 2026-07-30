@@ -57,6 +57,7 @@ try {
       manifest,
       generation: 1,
       regionId,
+      claimId,
       members,
     }).catch(reject);
   });
@@ -82,6 +83,15 @@ try {
       `Regional player verification found ${regionalRowsFound} typed rows with ${snapshot.warnings.length} warnings`,
     );
   }
+  const crossClaimProjects = snapshot.construction.projects.filter(
+    ({ ownerId }) => ownerId !== claimId,
+  );
+  if (crossClaimProjects.length || snapshot.constructionWarnings.length) {
+    throw new Error(
+      `Regional construction verification found ${crossClaimProjects.length} cross-claim projects`
+      + ` with ${snapshot.constructionWarnings.length} warnings`,
+    );
+  }
   console.log(JSON.stringify({
     ok: true,
     sourceKey: source.sourceKey,
@@ -101,8 +111,15 @@ try {
       (total, member) => total + member.buffs.buffs.length,
       0,
     ),
+    constructionProjectCount: snapshot.construction.projects.length,
+    contributedConstructionStackCount: snapshot.construction.projects.reduce(
+      (total, project) => total + project.items.length + project.cargos.length,
+      0,
+    ),
     regionalRowsFound,
-    warningCount: snapshot.warnings.length,
+    warningCount: snapshot.warnings.length
+      + snapshot.equipmentWarnings.length
+      + snapshot.constructionWarnings.length,
   }, null, 2));
 } finally {
   clearTimeout(timeout);

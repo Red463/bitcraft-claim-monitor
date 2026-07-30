@@ -1,4 +1,5 @@
 export * from "./contracts.ts";
+export * from "./constructionProjection.ts";
 export * from "./craftProjection.ts";
 export * from "./equipmentProjection.ts";
 export * from "./currentStateRepository.ts";

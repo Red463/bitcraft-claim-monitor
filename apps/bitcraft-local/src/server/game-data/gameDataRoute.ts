@@ -1,5 +1,6 @@
 import {
   DOMAIN_KEYS,
+  type Confidence,
   type CurrentStateReader,
   type DomainEnvelope,
   type DomainKey,
@@ -18,6 +19,11 @@ export function gameDataResponse(options: {
   domains: DomainKey[];
   repository: CurrentStateReader;
   transformData?: (domain: DomainKey, data: unknown) => unknown;
+  transformDomain?: (domain: DomainKey, data: unknown) => {
+    data: unknown;
+    confidence?: Confidence;
+    warnings?: string[];
+  };
   now?: Date;
   freshForMs?: number;
 }) {
@@ -45,19 +51,29 @@ export function gameDataResponse(options: {
     const observedMs = Date.parse(observedAt);
     const ageMs = Number.isFinite(observedMs) ? Math.max(0, now.getTime() - observedMs) : null;
     const stale = snapshot.lastError != null || ageMs == null || ageMs > freshForMs;
+    const transformed = options.transformDomain
+      ? options.transformDomain(domain, snapshot.data)
+      : {
+          data: options.transformData ? options.transformData(domain, snapshot.data) : snapshot.data,
+        };
+    const warnings = [
+      ...snapshot.warnings,
+      ...(Array.isArray(transformed.warnings) ? transformed.warnings : []),
+    ];
+    const confidence = transformed.confidence ?? snapshot.confidence;
     domains[domain] = {
-      data: options.transformData ? options.transformData(domain, snapshot.data) : snapshot.data,
+      data: transformed.data,
       freshness: stale ? "stale" : "fresh",
-      confidence: snapshot.confidence,
+      confidence,
       ageMs,
       provenance: snapshot.provenance,
-      warnings: snapshot.warnings,
+      warnings,
     };
     if (snapshot.lastError) partialErrors.push(`${domain}: ${snapshot.lastError}`);
-    for (const warning of snapshot.warnings) {
+    for (const warning of warnings) {
       partialErrors.push(`${domain}: ${warning}`);
     }
-    if (snapshot.confidence === "partial" && snapshot.warnings.length === 0) {
+    if (confidence === "partial" && warnings.length === 0) {
       partialErrors.push(`${domain}: data is partial.`);
     }
     if (domain === "claim") {

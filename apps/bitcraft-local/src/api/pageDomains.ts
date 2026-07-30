@@ -1,10 +1,24 @@
 import type { DomainKey } from "../server/game-data/contracts.ts";
 import type { ActivePanel } from "../types/app.ts";
 
+const PROVIDER_NEUTRAL_PANELS = new Set<ActivePanel>([
+  "dashboard",
+  "members",
+  "skills",
+  "leaderboard",
+  "inventory",
+  "craft-monitor",
+  "construction",
+]);
+
+export function usesProviderNeutralGameData(activePanel: ActivePanel): boolean {
+  return PROVIDER_NEUTRAL_PANELS.has(activePanel);
+}
+
 export function pageDomains(activePanel: ActivePanel): DomainKey[] {
   switch (activePanel) {
     case "dashboard":
-      return ["claim", "members", "citizens", "players"];
+      return ["claim", "members", "citizens", "players", "construction"];
     case "members":
       return ["claim", "members", "citizens", "players", "equipment", "crafts"];
     case "skills":

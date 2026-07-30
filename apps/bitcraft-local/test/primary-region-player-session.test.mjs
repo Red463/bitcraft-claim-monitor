@@ -42,8 +42,32 @@ function fakeBindings() {
   }]);
   const equipmentPresetState = cachedTable("preset", []);
   const activeBuffState = cachedTable("buff", []);
+  const projectSiteState = cachedTable("project", [{
+    entityId: 9001n,
+    constructionRecipeId: 3023,
+    resourcePlacementRecipeId: 0,
+    items: [{
+      itemId: 3090004,
+      quantity: 5,
+      itemType: { tag: "Item", value: {} },
+    }],
+    cargos: [],
+    progress: 157,
+    lastCritOutcome: 1,
+    ownerId: 1369094286777412590n,
+    direction: 2,
+    lastHitTimestamp: {
+      __timestamp_micros_since_unix_epoch__: 1785096910248578n,
+    },
+  }]);
   const connection = {
-    db: { playerState, equipmentState, equipmentPresetState, activeBuffState },
+    db: {
+      playerState,
+      equipmentState,
+      equipmentPresetState,
+      activeBuffState,
+      projectSiteState,
+    },
     subscriptionBuilder() {
       const builder = {
         onApplied(callback) {
@@ -122,6 +146,7 @@ test("primary-region player session subscribes only to member IDs and emits norm
     manifest,
     generation: 4,
     regionId: "19",
+    claimId: "1369094286777412590",
     members,
   });
   fake.state.onConnect(fake.connection);
@@ -130,6 +155,7 @@ test("primary-region player session subscribes only to member IDs and emits norm
     "SELECT * FROM equipment_state WHERE entity_id = 101 OR entity_id = 202",
     "SELECT * FROM equipment_preset_state WHERE player_entity_id = 101 OR player_entity_id = 202",
     "SELECT * FROM active_buff_state WHERE entity_id = 101 OR entity_id = 202",
+    "SELECT * FROM project_site_state WHERE owner_id = 1369094286777412590",
   ]);
 
   fake.state.onApplied({});
@@ -176,6 +202,21 @@ test("primary-region player session subscribes only to member IDs and emits norm
       ],
     },
     equipmentWarnings: [],
+    construction: {
+      projects: [{
+        entityId: "9001",
+        constructionRecipeId: "3023",
+        resourcePlacementRecipeId: "0",
+        ownerId: "1369094286777412590",
+        items: [{ itemId: "3090004", itemType: "item", quantity: "5" }],
+        cargos: [],
+        progress: "157",
+        lastCritOutcome: 1,
+        direction: 2,
+        lastHitAt: "2026-07-26T20:15:10.248Z",
+      }],
+    },
+    constructionWarnings: [],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",
@@ -212,6 +253,7 @@ test("primary-region player session rejects schema mismatch before loading bindi
     manifest,
     generation: 1,
     regionId: "19",
+    claimId: "1369094286777412590",
     members,
   }), /schema fingerprint mismatch/i);
   assert.equal(loaded, false);
@@ -237,12 +279,14 @@ test("primary-region player session coalesces rapid changes while a snapshot app
     manifest,
     generation: 30,
     regionId: "19",
+    claimId: "1369094286777412590",
     members,
   });
   fake.state.onConnect(fake.connection);
   fake.state.onApplied({});
   fake.state.callbacks.get("player:update")({}, {}, {});
   fake.state.callbacks.get("buff:insert")({}, {});
+  fake.state.callbacks.get("project:update")({}, {}, {});
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(snapshots.length, 1);

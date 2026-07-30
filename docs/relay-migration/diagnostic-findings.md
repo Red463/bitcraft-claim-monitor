@@ -1,5 +1,38 @@
 # Relay diagnostic findings
 
+## Construction ownership and material semantics — 2026-07-30
+
+The generated regional binding was exercised against the topology-discovered
+region 19 source, `relay-mirror-bc19`, using filtered official TypeScript
+subscriptions.
+
+- `project_site_state.owner_id` is the claim entity ID. Filtering
+  `owner_id = 1369094286777412590` returned exactly the monitored claim's one
+  active project while the region contained 803 active project rows.
+- An unbuilt project entity is not yet a `building_state` entity. Claim
+  ownership must therefore use `owner_id`, not an entity-ID join to completed
+  buildings.
+- `project_site_state.items` and `.cargos` are contributed quantities. A live
+  Exquisite Smithing Station row contained the three recipe requirements that
+  had been fully supplied and omitted the fourth missing requirement. Other
+  sampled projects contained partial cargo quantities below their global
+  recipe requirement.
+- `construction_recipe_desc.consumed_item_stacks` and
+  `.consumed_cargo_stacks` are the authoritative required quantities.
+- `construction_recipe_desc.building_description_id` joins to
+  `building_desc.id`; item and cargo inputs join to their typed global catalog
+  identities.
+- Timbersteel's observed project was construction recipe `442905423`, Sturdy
+  Large Residential House. Its five required cargo rows were present in the
+  global catalog and its regional contributed arrays were empty at observation
+  time.
+
+Runtime consequence: subscribe only to
+`project_site_state WHERE owner_id = <configured claim id>`, preserve project
+and material IDs as decimal strings, and build required/contributed material
+rows from the global catalog at the provider-neutral local route. No dedicated
+construction SQL table or scheduled construction ingestion job is justified.
+
 Captured: 2026-07-29
 Claim: `1369094286777412590`
 Derived region: `19`

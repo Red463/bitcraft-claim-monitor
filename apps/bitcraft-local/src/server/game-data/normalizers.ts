@@ -475,6 +475,108 @@ function normalizeEquippedItem(value: unknown) {
   };
 }
 
+function normalizeRegionalProjectStack(
+  value: unknown,
+  expectedKind: ItemKind,
+  label: string,
+) {
+  const stack = record(value, label);
+  const itemType = normalizeItemKind(enumLabel(stack.itemType ?? stack.item_type));
+  if (itemType !== expectedKind) {
+    throw new TypeError(`${label} must contain ${expectedKind} identity.`);
+  }
+  return {
+    itemId: decimalString(stack.itemId ?? stack.item_id, `${label} item id`),
+    itemType,
+    quantity: decimalString(stack.quantity, `${label} quantity`),
+  };
+}
+
+export function normalizeRegionalConstruction(options: {
+  claimId: string;
+  projectRows: unknown[];
+}) {
+  const claimId = decimalString(options.claimId, "regional construction claim id");
+  const projects = [];
+  const warnings: string[] = [];
+  for (const [index, value] of options.projectRows.entries()) {
+    try {
+      const row = record(value, `regional project_site_state row ${index}`);
+      const entityId = decimalString(
+        row.entityId ?? row.entity_id,
+        `regional project_site_state row ${index} entity id`,
+      );
+      const ownerId = decimalString(
+        row.ownerId ?? row.owner_id,
+        `regional project_site_state row ${index} owner id`,
+      );
+      if (ownerId !== claimId) {
+        warnings.push(
+          `Regional project_site_state omitted cross-claim project ${entityId} owned by ${ownerId}.`,
+        );
+        continue;
+      }
+      const timestamp = record(
+        row.lastHitTimestamp ?? row.last_hit_timestamp,
+        `regional project_site_state row ${index} last hit timestamp`,
+      );
+      const timestampMicros = decimalString(
+        timestamp.__timestamp_micros_since_unix_epoch__
+          ?? timestamp.microsSinceUnixEpoch
+          ?? timestamp.micros_since_unix_epoch,
+        `regional project_site_state row ${index} last hit timestamp`,
+      );
+      projects.push({
+        entityId,
+        constructionRecipeId: decimalString(
+          row.constructionRecipeId ?? row.construction_recipe_id,
+          `regional project_site_state row ${index} construction recipe id`,
+        ),
+        resourcePlacementRecipeId: decimalString(
+          row.resourcePlacementRecipeId ?? row.resource_placement_recipe_id,
+          `regional project_site_state row ${index} resource placement recipe id`,
+        ),
+        ownerId,
+        items: records(row.items).map((stack, stackIndex) => (
+          normalizeRegionalProjectStack(
+            stack,
+            "item",
+            `regional project_site_state row ${index} item ${stackIndex}`,
+          )
+        )),
+        cargos: records(row.cargos).map((stack, stackIndex) => (
+          normalizeRegionalProjectStack(
+            stack,
+            "cargo",
+            `regional project_site_state row ${index} cargo ${stackIndex}`,
+          )
+        )),
+        progress: decimalString(
+          row.progress,
+          `regional project_site_state row ${index} progress`,
+        ),
+        lastCritOutcome: integer(
+          row.lastCritOutcome ?? row.last_crit_outcome,
+          `regional project_site_state row ${index} last crit outcome`,
+        ),
+        direction: integer(
+          row.direction,
+          `regional project_site_state row ${index} direction`,
+        ),
+        lastHitAt: normalizeTimestamp(timestampMicros, "microseconds"),
+      });
+    } catch (error) {
+      warnings.push(
+        `Regional project_site_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return {
+    data: { projects },
+    warnings,
+  };
+}
+
 function normalizeEquipmentSlot(value: unknown) {
   const slot = record(value, "regional equipment slot");
   return {

@@ -8,7 +8,7 @@ import { mapWithBrowserConcurrency } from "../utils/concurrency";
 import { normalizePlayer } from "../utils/normalize";
 import { marketEndpointMap } from "./bitjitaEndpoints.ts";
 import { loadGameData } from "./gameData.ts";
-import { pageDomains } from "./pageDomains.ts";
+import { pageDomains, usesProviderNeutralGameData } from "./pageDomains.ts";
 
 /*
  * Transitional page loader. Migrated panels use the provider-neutral local
@@ -18,15 +18,6 @@ import { pageDomains } from "./pageDomains.ts";
 
 const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
-const PROVIDER_NEUTRAL_PANELS = new Set<ActivePanel>([
-  "dashboard",
-  "members",
-  "skills",
-  "leaderboard",
-  "inventory",
-  "craft-monitor",
-]);
-
 function appendPartialError(raw: AnyRecord, message: string) {
   const current = Array.isArray(raw.partialErrors) ? raw.partialErrors : [];
   raw.partialErrors = [...current, message];
@@ -128,7 +119,7 @@ export function useBitjitaData(
             : [];
           return { ...first, listings: [first, ...remaining].flatMap((page) => page.listings ?? []) };
         }
-        if (PROVIDER_NEUTRAL_PANELS.has(activePanel)) {
+        if (usesProviderNeutralGameData(activePanel)) {
           const raw = await loadGameData(
             claimId,
             pageDomains(activePanel),

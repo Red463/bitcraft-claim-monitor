@@ -1,4 +1,5 @@
 import {
+  normalizeRegionalConstruction,
   normalizeRegionalEquipment,
   normalizeRegionalPlayers,
 } from "./normalizers.ts";
@@ -35,6 +36,7 @@ type BindingConnection = {
     equipmentState: CachedTable;
     equipmentPresetState: CachedTable;
     activeBuffState: CachedTable;
+    projectSiteState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
@@ -68,6 +70,7 @@ type SessionConfig = {
   manifest: BindingManifest;
   generation: number;
   regionId: string;
+  claimId: string;
   members: Member[];
 };
 
@@ -82,6 +85,8 @@ export type RegionalPlayerSnapshot = {
   warnings: string[];
   equipment: ReturnType<typeof normalizeRegionalEquipment>["data"];
   equipmentWarnings: string[];
+  construction: ReturnType<typeof normalizeRegionalConstruction>["data"];
+  constructionWarnings: string[];
   database: string;
   regionId: string;
   schemaFingerprint: string;
@@ -112,6 +117,14 @@ export function playerStateQueries(members: Member[]): string[] {
     `SELECT * FROM equipment_preset_state WHERE ${where("player_entity_id")}`,
     `SELECT * FROM active_buff_state WHERE ${where("entity_id")}`,
   ];
+}
+
+function constructionQuery(claimIdValue: string): string {
+  const claimId = String(claimIdValue ?? "").trim();
+  if (!/^\d+$/.test(claimId)) {
+    throw new TypeError("regional construction claim id is invalid");
+  }
+  return `SELECT * FROM project_site_state WHERE owner_id = ${claimId}`;
 }
 
 export class RelayPrimaryRegionPlayerSession {
@@ -149,7 +162,10 @@ export class RelayPrimaryRegionPlayerSession {
     if (!Number.isSafeInteger(config.generation) || config.generation <= 0) {
       throw new Error("Relay regional player generation must be a positive safe integer");
     }
-    const queries = playerStateQueries(config.members);
+    const queries = [
+      ...playerStateQueries(config.members),
+      constructionQuery(config.claimId),
+    ];
     if (queries.length === 0) {
       throw new Error("Relay regional player session requires at least one claim member");
     }
@@ -198,6 +214,10 @@ export class RelayPrimaryRegionPlayerSession {
         presetRows: [...connection.db.equipmentPresetState.iter()],
         buffRows: [...connection.db.activeBuffState.iter()],
       });
+      const construction = normalizeRegionalConstruction({
+        claimId: config.claimId,
+        projectRows: [...connection.db.projectSiteState.iter()],
+      });
       const generation = this.#nextGeneration;
       this.#nextGeneration += 1;
       this.#applyInFlight = true;
@@ -206,6 +226,8 @@ export class RelayPrimaryRegionPlayerSession {
         warnings: normalized.warnings,
         equipment: equipment.data,
         equipmentWarnings: equipment.warnings,
+        construction: construction.data,
+        constructionWarnings: construction.warnings,
         database: config.database,
         regionId: config.regionId,
         schemaFingerprint: config.schemaFingerprint,
@@ -260,6 +282,7 @@ export class RelayPrimaryRegionPlayerSession {
       connection.db.equipmentState,
       connection.db.equipmentPresetState,
       connection.db.activeBuffState,
+      connection.db.projectSiteState,
     ];
   }
 

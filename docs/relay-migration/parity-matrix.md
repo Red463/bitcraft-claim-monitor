@@ -11,7 +11,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Inventory | Provider-neutral shared-storage page with local Relay catalog enrichment; Town Bank/player-bank coverage remains | Relay HTTP joined inventory plus proven Town Bank owner join | in progress |
 | Active/passive crafts | Provider-neutral current page; Relay incomplete/completed claim rows split by typed recipe metadata | Relay HTTP plus global recipe catalog | ready for soak |
 | Craft contributions | BitJita craft contribution route | Proven regional mapping | blocked on evidence |
-| Construction | BitJita construction/inventory joins | Regional state plus global catalogs | baseline |
+| Construction | Provider-neutral page over claim-filtered regional project state, global recipe/building/material catalogs, and the live inventory snapshot; legacy collector/notification reads remain to be migrated | Regional state plus global catalogs | in progress |
 | Research | BitJita research route | Regional tech state plus global catalogs | baseline |
 | Recruitment | BitJita recruitment route | Regional recruitment state | baseline |
 | Storage activity | BitJita storage logs | Relay storage-log durable copy | baseline |
