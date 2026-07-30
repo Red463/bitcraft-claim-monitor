@@ -8,7 +8,6 @@ export const COLLECTOR_PURPOSES: Record<string, string> = {
   professions: "Records profession snapshots used by comparisons and historical diagnostics.",
   production: "Feeds craft contribution history, production notifications, and related diagnostics.",
   inventory: "Supports inventory history, storage diagnostics, and stock-related change records.",
-  construction: "Records construction project and material-change history.",
   research: "Keeps research progress snapshots available for diagnostics and history.",
   market: "Tracks settlement market listings and market notification inputs.",
   region: "Refreshes regional settlement comparison data and region status diagnostics.",

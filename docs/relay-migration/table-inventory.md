@@ -126,8 +126,14 @@ be a committed domain event, not a scheduled ingestion sweep.
   projects/materials in the response.
 - `domain_payload_current` is the durable last-good boundary. No Relay
   construction table, refresh ledger, pagination state, or scheduled ingestion
-  job was added. The legacy collector/notification paths still need to be
-  switched from BitJita in Milestone 6 before this domain is soak-ready.
+  job was added.
+- The legacy construction collector setting and BitJita writer were removed.
+  Server fallback/background compositions now read the same normalized Relay
+  projection. No independent construction notification/history rows existed
+  to retain or migrate.
+- The legacy buildings-count fetch is temporarily owned by the claim collector
+  and is explicitly part of the later layout/building migration, not
+  construction current-state ownership.
 
 ## Research vertical evidence
 

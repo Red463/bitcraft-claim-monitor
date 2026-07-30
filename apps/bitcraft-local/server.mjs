@@ -2208,6 +2208,16 @@ function currentResearchProjection(claimId) {
   ).data;
 }
 
+function currentConstructionProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "construction");
+  if (!current) return { projects: [] };
+  return enrichConstructionWithCatalog(
+    current.data,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    (kind, id) => providerCatalogRepository.getDescription(kind, id),
+  ).data;
+}
+
 function currentRecruitmentProjection(claimId) {
   const current = currentStateRepository.read(String(claimId), "recruitment");
   if (!current) return { claimId: String(claimId), isRecruiting: false, recruitment: [] };
@@ -8078,17 +8088,17 @@ async function dashboardDataFresh(claimId, options = {}) {
     throw error;
   }
   const forceRefresh = options.forceRefresh === true;
-  const [claimPayload, membersPayload, citizensPayload, buildingsPayload, constructionPayload, marketPayload, craftsPayload, regionStatus] = await Promise.all([
+  const [claimPayload, membersPayload, citizensPayload, buildingsPayload, marketPayload, craftsPayload, regionStatus] = await Promise.all([
     fetchBitjita(`/claims/${id}`, { forceRefresh }),
     fetchBitjita(`/claims/${id}/members`, { forceRefresh }),
     fetchBitjita(`/claims/${id}/citizens`, { forceRefresh }).catch(() => ({ citizens: [] })),
     fetchBitjita(`/claims/${id}/buildings`, { forceRefresh }),
-    fetchBitjita(`/claims/${id}/construction`, { forceRefresh }).catch(() => ({ projects: [] })),
     fetchAllClaimListings(id, { cache: !forceRefresh }).catch(() => ({ listings: [] })),
     fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(id)}&completed=false`, { forceRefresh }).catch(() => ({ craftResults: [] })),
     fetchBitjita("/regions/status", { forceRefresh }).catch(() => ({ regions: [] })),
   ]);
   const claim = claimPayload.claim ?? claimPayload;
+  const constructionPayload = currentConstructionProjection(id);
   const researchPayload = currentResearchProjection(id);
   const members = unwrap(membersPayload, "members", []);
   const crafts = unwrap(craftsPayload, "craftResults", []);
@@ -8193,7 +8203,7 @@ function domainRowsToAppData(claimId, rowsByDomain) {
     members: payload("members", { members: [] }),
     citizens: payload("citizens", { citizens: [] }),
     buildings: payload("buildings", { buildings: [] }),
-    construction: payload("construction", { projects: [] }),
+    construction: currentConstructionProjection(claimId),
     research: currentResearchProjection(claimId),
     market: payload("market", { listings: [] }),
     crafts: payload("crafts", { craftResults: [] }),
@@ -8459,7 +8469,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
   const [
     citizensPayload,
     buildingsPayload,
-    constructionPayload,
     marketPayload,
     productionPayload,
     playerPayload,
@@ -8469,8 +8478,7 @@ async function buildCurrentClaimData(claimId, options = {}) {
     regionStatus,
   ] = await Promise.all([
     collectorDue(id, "professions", "citizens", options) ? fetchDomainPayload(previous, "citizens", { citizens: [] }, "Citizens", () => timedCollectorFetch(metrics, "professions", "citizens", () => fetchBitjita(`/claims/${id}/citizens`))) : Promise.resolve(previousPayload(previous, "citizens", { citizens: [] })),
-    collectorDue(id, "construction", "buildings", options) || collectorDue(id, "claim", "buildings", options) ? fetchDomainPayload(previous, "buildings", { buildings: [] }, "Buildings", () => timedCollectorFetch(metrics, "construction", "buildings", () => fetchBitjita(`/claims/${id}/buildings`))) : Promise.resolve(previousPayload(previous, "buildings", { buildings: [] })),
-    collectorDue(id, "construction", "construction", options) ? fetchDomainPayload(previous, "construction", { projects: [] }, "Construction", () => timedCollectorFetch(metrics, "construction", "construction", () => fetchBitjita(`/claims/${id}/construction`))) : Promise.resolve(previousPayload(previous, "construction", { projects: [] })),
+    collectorDue(id, "claim", "buildings", options) ? fetchDomainPayload(previous, "buildings", { buildings: [] }, "Buildings", () => timedCollectorFetch(metrics, "claim", "buildings", () => fetchBitjita(`/claims/${id}/buildings`))) : Promise.resolve(previousPayload(previous, "buildings", { buildings: [] })),
     collectorDue(id, "market", "market", options) ? fetchDomainPayload(previous, "market", { listings: [] }, "Market", () => timedCollectorFetch(metrics, "market", "market listings", () => fetchAllClaimListings(id, { cache: options.force !== true }))) : Promise.resolve(previousPayload(previous, "market", { listings: [] })),
     collectorDue(id, "production", "crafts", options)
       ? timedCollectorFetch(metrics, "production", "production crafts", () => settlementProductionCrafts({ claimId: id, members, forceRefresh: true })).catch((error) => {
@@ -8485,6 +8493,7 @@ async function buildCurrentClaimData(claimId, options = {}) {
     collectorDue(id, "region", "regionStatus", options) ? fetchDomainPayload(previous, "regionStatus", { regions: [] }, "Region status", () => timedCollectorFetch(metrics, "region", "region status", () => fetchBitjita("/regions/status"))) : Promise.resolve(previousPayload(previous, "regionStatus", { regions: [] })),
   ]);
   const productionCrafts = unwrap(productionPayload, "craftResults", []);
+  const constructionPayload = currentConstructionProjection(id);
   const researchPayload = currentResearchProjection(id);
   const recruitmentPayload = currentRecruitmentProjection(id);
   const contributionEntries = collectorDue(id, "production", "contributions", options)

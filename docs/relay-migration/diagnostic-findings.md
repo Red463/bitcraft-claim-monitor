@@ -118,6 +118,14 @@ and material IDs as decimal strings, and build required/contributed material
 rows from the global catalog at the provider-neutral local route. No dedicated
 construction SQL table or scheduled construction ingestion job is justified.
 
+The legacy construction collector was retired on 2026-07-30. It had no
+independent construction event/history or notification store to preserve; it
+only refreshed current BitJita project state and could overwrite the Relay
+provider's canonical `domain_payload_current` row. Dashboard fallback and
+background compositions now use the same catalog-enriched Relay projection as
+the provider-neutral page. The temporary legacy building-count fetch remains
+owned by the claim collector until the layout/building vertical replaces it.
+
 Captured: 2026-07-29
 Claim: `1369094286777412590`
 Derived region: `19`

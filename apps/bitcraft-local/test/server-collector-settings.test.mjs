@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   collectorCurrentTables,
   collectorPrimaryPayloadDomain,
+  domainPayloadKeys,
   domainCollectorDefaults,
   normalizeCollectorSettings,
   payloadDomainsForCollectors,
@@ -43,13 +44,18 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.equal(payloadDomainCollector.recruitment, undefined);
   assert.equal(collectorPrimaryPayloadDomain.research, undefined);
   assert.equal(Object.hasOwn(domainCollectorDefaults, "research"), false);
+  assert.equal(Object.hasOwn(domainCollectorDefaults, "construction"), false);
   assert.equal(Object.hasOwn(domainCollectorDefaults, "storageActivity"), false);
+  assert.equal(collectorPrimaryPayloadDomain.construction, undefined);
+  assert.equal(payloadDomainCollector.construction, undefined);
+  assert.equal(domainPayloadKeys.includes("construction"), false);
   assert.equal(collectorCurrentTables.storageActivity, undefined);
   const browserDefaults = readFileSync(
     new URL("../src/settingsDefaults.ts", import.meta.url),
     "utf8",
   );
   assert.doesNotMatch(browserDefaults, /storageActivity/);
+  assert.doesNotMatch(browserDefaults, /construction:\s*\{\s*label:\s*"Construction"/);
   assert.equal(payloadDomainCollector.regionalBuyOrders, undefined);
   assert.deepEqual(collectorCurrentTables.market, ["market_listings", "market_trades"]);
   assert.deepEqual(collectorCurrentTables.marketListings, ["market_listings", "market_events", "market_trades"]);
@@ -63,6 +69,22 @@ test("side-effect collector intervals do not monopolize production", () => {
   assert.equal(domainCollectorDefaults.marketListings.intervalSeconds, 60);
   assert.equal(domainCollectorDefaults.productionContributions.intervalSeconds, 300);
   assert.equal(Object.hasOwn(domainCollectorDefaults, "snapshotHistory"), false);
+});
+
+test("construction current state has one Relay owner and no scheduled BitJita writer", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const adminDisplay = readFileSync(
+    new URL("../src/components/admin/adminDisplay.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /function currentConstructionProjection\(claimId\)/);
+  assert.match(source, /currentStateRepository\.read\(String\(claimId\), "construction"\)/);
+  assert.match(source, /enrichConstructionWithCatalog/);
+  assert.doesNotMatch(source, /fetchBitjita\(`\/claims\/\$\{id\}\/construction`/);
+  assert.doesNotMatch(source, /collectorDue\(id, "construction"/);
+  assert.doesNotMatch(source, /timedCollectorFetch\(metrics, "construction"/);
+  assert.doesNotMatch(adminDisplay, /construction:\s*"Records construction/);
 });
 
 test("storage activity runs on the Relay live loop rather than a scheduled collector", () => {

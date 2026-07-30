@@ -101,6 +101,7 @@ test("Construction uses the provider-neutral live regional snapshot and local ca
   assert.doesNotMatch(source, /\/api\/bitjita/);
   assert.match(server, /enrichConstructionWithCatalog/);
   assert.match(server, /providerCatalogRepository\.getDescription\(kind, id\)/);
+  assert.match(server, /construction:\s*currentConstructionProjection\(claimId\)/);
 });
 
 test("Research uses the provider-neutral live regional state and global technology catalog", () => {

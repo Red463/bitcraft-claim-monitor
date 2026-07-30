@@ -146,7 +146,6 @@ export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {
   professions: { label: "Professions", enabled: true, intervalSeconds: 30 },
   production: { label: "Production", enabled: true, intervalSeconds: 30 },
   inventory: { label: "Inventory and storage", enabled: true, intervalSeconds: 60 },
-  construction: { label: "Construction", enabled: true, intervalSeconds: 60 },
   market: { label: "Market", enabled: true, intervalSeconds: 60 },
   region: { label: "Region", enabled: true, intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", enabled: true, intervalSeconds: 600 },
