@@ -714,6 +714,22 @@ export function createGameCatalogRepository(db) {
         target_id ASC
       LIMIT ?
     `),
+    findEntities: db.prepare(`
+      SELECT *
+      FROM game_catalog_entities
+      WHERE target_id = ?
+        OR name LIKE ? ESCAPE '\\' COLLATE NOCASE
+      ORDER BY
+        CASE
+          WHEN lower(name) = lower(?) THEN 0
+          WHEN name LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1
+          ELSE 2
+        END,
+        tier ASC,
+        name COLLATE NOCASE ASC,
+        kind ASC,
+        target_id ASC
+    `),
     listRawItemListRows: db.prepare(`
       SELECT
         lists.item_list_id,
@@ -1075,6 +1091,17 @@ export function createGameCatalogRepository(db) {
         normalizedQuery,
         `${escaped}%`,
         normalizedLimit,
+      ).map(mapEntityRow);
+    },
+    findEntities(query) {
+      const normalizedQuery = String(query ?? "").trim();
+      if (normalizedQuery.length < 2) return [];
+      const escaped = escapedLikePattern(normalizedQuery);
+      return statements.findEntities.all(
+        normalizedQuery,
+        `%${escaped}%`,
+        normalizedQuery,
+        `${escaped}%`,
       ).map(mapEntityRow);
     },
     listProducerRecipesForOutput(outputKey) {

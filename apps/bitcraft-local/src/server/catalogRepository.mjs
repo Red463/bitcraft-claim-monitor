@@ -416,6 +416,12 @@ export function createProviderCatalogRepository(db) {
     getEntity(catalogKey) {
       return catalog.getEntity(catalogKey);
     },
+    searchEntities(query, limit = 20) {
+      return catalog.searchEntities(query, limit);
+    },
+    findEntities(query) {
+      return catalog.findEntities(query);
+    },
     getSourceState() {
       return mapSourceState(statements.getSourceState.get(SOURCE_KEY));
     },

@@ -2,20 +2,25 @@ import React from "react";
 import { ArrowDownUp, BarChart3, MapPin, Search, ShoppingBag, Star } from "lucide-react";
 
 import { DataTable } from "../../components/main/DataTable";
+import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
 import { ItemIcon, ItemLabel } from "../../components/main/ItemDisplay";
 import { RarityBadge, TierBadge } from "../../components/main/Badges";
 import { MiniStat } from "../../components/main/Stats";
 import { toNumber, type AnyRecord } from "../../main-app-data";
 import { updateQueryState } from "../../navigation";
 import { formatCompactNumber, formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
-import { isMarketableItem } from "../../utils/items";
 import type { MapFocus } from "../map/mapUtils";
 import type { MarketItemKey, MarketRefreshProps } from "./globalMarket";
-import { marketItemType, normalizeMarketOrders } from "./globalMarket";
-
-const API = "/api/bitjita";
+import {
+  marketBrowseItemUrls,
+  marketBrowseSearchUrl,
+  marketFreshnessNotice,
+  marketItemType,
+  normalizeMarketOrders,
+} from "./globalMarket";
 
 type Props = MarketRefreshProps & {
+  claimId: string;
   mode: "browse" | "buy";
   regionId: string;
   favorites: MarketItemKey[];
@@ -26,15 +31,29 @@ type Props = MarketRefreshProps & {
 };
 
 function itemKey(item: AnyRecord): MarketItemKey {
-  return { itemType: marketItemType(item.itemType), itemId: toNumber(item.id ?? item.itemId) };
+  const itemId = String(item.id ?? item.itemId ?? "0").trim();
+  return {
+    itemType: marketItemType(item.itemType),
+    itemId: /^\d+$/.test(itemId) ? itemId : "0",
+  };
 }
 
-function marketTypePath(item: AnyRecord, history = false) {
-  const cargo = marketItemType(item.itemType) === "cargo";
-  return history ? (cargo ? "cargo" : "items") : (cargo ? "cargo" : "item");
+function decimalBigInt(value: unknown): bigint {
+  const normalized = String(value ?? "0").trim();
+  return /^\d+$/.test(normalized) ? BigInt(normalized) : 0n;
 }
 
-export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onShowMap, locationSearch, onQueryStateChange, refreshSequence, refreshHeaders, trackRefresh }: Props) {
+function compareDecimal(left: unknown, right: unknown): number {
+  const a = decimalBigInt(left);
+  const b = decimalBigInt(right);
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function multiplyDecimal(left: unknown, right: unknown): string {
+  return (decimalBigInt(left) * decimalBigInt(right)).toString();
+}
+
+export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavorite, onShowMap, locationSearch, onQueryStateChange, refreshSequence, refreshHeaders, trackRefresh }: Props) {
   const params = React.useMemo(() => new URLSearchParams(locationSearch), [locationSearch]);
   const [query, setQuery] = React.useState(mode === "browse" ? params.get("q") ?? "" : params.get("buyQ") ?? "");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
@@ -45,7 +64,7 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
     return id && name ? { id, name, itemType: toNumber(type) } : null;
   });
   const [catalogState, setCatalogState] = React.useState<{ loading: boolean; error: string; categories: string[] }>({ loading: false, error: "", categories: [] });
-  const [detailState, setDetailState] = React.useState<{ loading: boolean; error: string; detail: AnyRecord | null; history: AnyRecord | null }>({ loading: false, error: "", detail: null, history: null });
+  const [detailState, setDetailState] = React.useState<{ loading: boolean; error: string; historyError: string; detail: AnyRecord | null; history: AnyRecord | null }>({ loading: false, error: "", historyError: "", detail: null, history: null });
   const [category, setCategory] = React.useState(params.get("category") ?? "");
   const [availableOnly, setAvailableOnly] = React.useState(params.get("available") !== "false");
   const [hasSell, setHasSell] = React.useState(params.get("sell") !== "false");
@@ -62,6 +81,7 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
   const [detailTab, setDetailTab] = React.useState<"orders" | "stats">("orders");
   const [range, setRange] = React.useState<"24h" | "7d" | "30d" | "all">("30d");
   const [page, setPage] = React.useState(1);
+  const generationSequence = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
 
   React.useEffect(() => {
     if (query.trim().length < 2 || selectedItem?.name === query.trim()) {
@@ -70,26 +90,21 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
     }
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      const search = new URLSearchParams();
-      if (availableOnly) search.set("hasOrders", "true");
+      const catalogUrl = marketBrowseSearchUrl({
+        query,
+        regionId: regionId || "all",
+        availableOnly,
+        hasSell,
+        hasBuy,
+        category,
+        sort: catalogSort,
+      });
       setCatalogState((current) => ({ ...current, loading: true, error: "" }));
-      trackRefresh("global-market-catalog", fetch(`${API}/market?${search}`, { headers: refreshHeaders, signal: controller.signal }))
+      trackRefresh("global-market-catalog", fetch(catalogUrl, { headers: refreshHeaders, signal: controller.signal }))
         .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
         .then((payload) => {
-          const catalog = (payload.data?.items ?? []).filter(isMarketableItem);
-          const queryToken = query.trim().toLowerCase();
-          const categories = [...new Set<string>(catalog.map((entry: AnyRecord) => String(entry.category ?? entry.tag ?? "").trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right));
-          const items = catalog.filter((entry: AnyRecord) => {
-            if (!String(entry.name ?? entry.itemName ?? "").toLowerCase().includes(queryToken)) return false;
-            if (category && String(entry.category ?? entry.tag ?? "") !== category) return false;
-            if (hasSell && !entry.hasSellOrders && toNumber(entry.sellOrders) <= 0) return false;
-            if (hasBuy && !entry.hasBuyOrders && toNumber(entry.buyOrders) <= 0) return false;
-            return true;
-          }).sort((left: AnyRecord, right: AnyRecord) => {
-            if (catalogSort === "name") return String(left.name ?? left.itemName ?? "").localeCompare(String(right.name ?? right.itemName ?? ""));
-            if (catalogSort === "orders") return toNumber(right.orderCount ?? right.sellOrders ?? right.buyOrders) - toNumber(left.orderCount ?? left.sellOrders ?? left.buyOrders);
-            return 0;
-          });
+          const items = Array.isArray(payload.items) ? payload.items : [];
+          const categories = Array.isArray(payload.categories) ? payload.categories.map(String) : [];
           setSuggestions(items.slice(0, 12));
           setCatalogState({ loading: false, error: "", categories });
         })
@@ -101,7 +116,7 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [availableOnly, catalogSort, category, hasBuy, hasSell, query, refreshSequence, selectedItem?.name]);
+  }, [availableOnly, catalogSort, category, generationSequence, hasBuy, hasSell, query, refreshSequence, regionId, selectedItem?.name]);
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -122,20 +137,50 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
 
   React.useEffect(() => {
     if (!selectedItem) {
-      setDetailState({ loading: false, error: "", detail: null, history: null });
+      setDetailState((current) => ({ ...current, loading: false, error: "", detail: null }));
       return;
     }
     const controller = new AbortController();
-    const regionParam = regionId ? `?regionId=${encodeURIComponent(regionId)}` : "";
-    const detailUrl = `${API}/market/${marketTypePath(selectedItem)}/${selectedItem.id}`;
-    const historyUrl = `${API}/market/${marketTypePath(selectedItem, true)}/${selectedItem.id}/price-history?bucket=1%20day&limit=${range === "24h" ? "2" : range === "7d" ? "7" : range === "30d" ? "30" : "500"}${regionId ? `&regionId=${encodeURIComponent(regionId)}` : ""}`;
+    const urls = marketBrowseItemUrls({
+      itemType: marketItemType(selectedItem.itemType),
+      itemId: String(selectedItem.id),
+      regionId: regionId || "all",
+      range,
+    });
     setDetailState((current) => ({ ...current, loading: true, error: "" }));
-    trackRefresh("global-market-item-detail", Promise.all([
-      fetch(`${detailUrl}${regionParam}`, { headers: refreshHeaders, signal: controller.signal }).then((response) => response.ok ? response.json() : Promise.reject(new Error(`order book HTTP ${response.status}`))),
-      fetch(historyUrl, { headers: refreshHeaders, signal: controller.signal }).then((response) => response.ok ? response.json() : Promise.reject(new Error(`price history HTTP ${response.status}`))),
-    ])).then(([detail, history]) => setDetailState({ loading: false, error: "", detail, history }))
+    trackRefresh(
+      "global-market-item-detail",
+      fetch(urls.orderBook, { headers: refreshHeaders, signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`order book HTTP ${response.status}`))),
+    ).then((detail) => setDetailState((current) => ({ ...current, loading: false, error: "", detail })))
       .catch((error) => {
         if (!controller.signal.aborted) setDetailState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
+      });
+    return () => controller.abort();
+  }, [generationSequence, refreshSequence, regionId, selectedItem]);
+
+  React.useEffect(() => {
+    if (!selectedItem) {
+      setDetailState((current) => ({ ...current, historyError: "", history: null }));
+      return;
+    }
+    const controller = new AbortController();
+    const urls = marketBrowseItemUrls({
+      itemType: marketItemType(selectedItem.itemType),
+      itemId: String(selectedItem.id),
+      regionId: regionId || "all",
+      range,
+    });
+    trackRefresh(
+      "global-market-item-history",
+      fetch(urls.priceHistory, { headers: refreshHeaders, signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`price history HTTP ${response.status}`))),
+    ).then((history) => setDetailState((current) => ({ ...current, historyError: "", history })))
+      .catch((error) => {
+        if (!controller.signal.aborted) setDetailState((current) => ({
+          ...current,
+          historyError: error instanceof Error ? error.message : String(error),
+        }));
       });
     return () => controller.abort();
   }, [range, refreshSequence, regionId, selectedItem]);
@@ -162,38 +207,45 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
 
   const selectedKey = selectedItem ? itemKey(selectedItem) : null;
   const itemMetadata = { ...selectedItem, ...(detailState.detail?.item ?? {}) };
+  const freshnessNotice = marketFreshnessNotice(detailState.detail);
   const favorite = selectedKey ? favorites.some((entry) => entry.itemType === selectedKey.itemType && entry.itemId === selectedKey.itemId) : false;
   const orders = React.useMemo(() => normalizeMarketOrders(detailState.detail ?? {}).filter((order) => (!regionId || String(order.regionId) === regionId)), [detailState.detail, regionId]);
   const filteredOrders = React.useMemo(() => orders.filter((order) => {
     if (order.side !== orderTab) return false;
-    if (order.quantity < toNumber(minimumQuantity)) return false;
-    if (orderTab === "buy" && order.unitPrice < toNumber(minimumPrice)) return false;
+    if (compareDecimal(order.quantity, minimumQuantity) < 0) return false;
+    if (orderTab === "buy" && compareDecimal(order.unitPrice, minimumPrice) < 0) return false;
     if (locationFilter && !`${order.claimName} ${order.regionName}`.toLowerCase().includes(locationFilter.toLowerCase())) return false;
     if (playerFilter && !order.ownerName.toLowerCase().includes(playerFilter.toLowerCase())) return false;
     return true;
   }).sort(
     (a, b) => orderTab === "buy"
-      ? b.unitPrice - a.unitPrice
-      : a.unitPrice - b.unitPrice,
+      ? compareDecimal(b.unitPrice, a.unitPrice)
+      : compareDecimal(a.unitPrice, b.unitPrice),
   ), [locationFilter, minimumPrice, minimumQuantity, orderTab, orders, playerFilter]);
   const pageSize = 25;
   const pageCount = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
   const sells = orders.filter((order) => order.side === "sell");
   const buys = orders.filter((order) => order.side === "buy");
   const regionSummaries = React.useMemo(() => {
-    const byRegion = new Map<string, { name: string; sells: number; buys: number; quantity: number }>();
+    const byRegion = new Map<string, { name: string; sells: number; buys: number; quantity: bigint }>();
     for (const order of orders) {
       const key = String(order.regionId ?? "unknown");
-      const current = byRegion.get(key) ?? { name: order.regionName || (order.regionId ? `R${order.regionId}` : "Unknown region"), sells: 0, buys: 0, quantity: 0 };
+      const current = byRegion.get(key) ?? { name: order.regionName || (order.regionId ? `R${order.regionId}` : "Unknown region"), sells: 0, buys: 0, quantity: 0n };
       current[order.side === "sell" ? "sells" : "buys"] += 1;
-      current.quantity += order.quantity;
+      current.quantity += decimalBigInt(order.quantity);
       byRegion.set(key, current);
     }
     return [...byRegion.entries()].sort(([left], [right]) => toNumber(left) - toNumber(right));
   }, [orders]);
-  const bestSell = sells.length ? Math.min(...sells.map((order) => order.unitPrice)) : null;
-  const bestBuy = buys.length ? Math.max(...buys.map((order) => order.unitPrice)) : null;
-  const spread = bestSell != null && bestBuy != null ? bestSell - bestBuy : null;
+  const bestSell = sells.reduce<string | null>((best, order) => (
+    best == null || compareDecimal(order.unitPrice, best) < 0 ? order.unitPrice : best
+  ), null);
+  const bestBuy = buys.reduce<string | null>((best, order) => (
+    best == null || compareDecimal(order.unitPrice, best) > 0 ? order.unitPrice : best
+  ), null);
+  const spread = bestSell != null && bestBuy != null
+    ? (decimalBigInt(bestSell) - decimalBigInt(bestBuy)).toString()
+    : null;
   const stats = detailState.history?.priceStats ?? {};
   const priceData: AnyRecord[] = Array.isArray(detailState.history?.priceData) ? detailState.history.priceData : [];
   const chartMax = Math.max(1, ...priceData.map((row) => toNumber(row.vwap ?? row.avgPrice ?? row.price)));
@@ -225,7 +277,7 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
         </> : null}
       </div>
       {catalogState.error ? <div className="error">Market search unavailable: {catalogState.error}</div> : null}
-      {!selectedItem ? <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>{mode === "buy" ? "Choose an item to inspect live demand" : "Search the global market catalog"}</strong><span>{mode === "buy" ? "Buy orders are loaded live after item selection; no monitored-settlement cache is used." : "Use the filters above, then select an item for live orders and completed-trade statistics."}</span></div> : (
+      {!selectedItem ? <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>{mode === "buy" ? "Choose an item to inspect live demand" : "Search the global market catalog"}</strong><span>{mode === "buy" ? "Buy orders are loaded live after item selection; no monitored-settlement cache is used." : "Use the filters above, then select an item for live Relay orders. Trade history appears only when an authoritative signal is available."}</span></div> : (
         <div className="market-item-detail">
           <header>
             <div className="market-item-identity">
@@ -244,12 +296,13 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
             <button className={`toolbar-button ${favorite ? "active" : ""}`} type="button" onClick={() => selectedKey && onToggleFavorite(selectedKey)} aria-pressed={favorite}><Star size={15} fill={favorite ? "currentColor" : "none"} /> {favorite ? "Favorited" : "Favorite"}</button>
           </header>
           {detailState.error ? <div className="error">Unable to load this market: {detailState.error}</div> : null}
-          {detailState.loading && !detailState.detail ? <div className="market-loading-strip">Loading live orders and trade history…</div> : null}
+          {freshnessNotice ? <div className="info">{freshnessNotice}</div> : null}
+          {detailState.loading && !detailState.detail ? <div className="market-loading-strip">Loading live orders and locally observed history…</div> : null}
           <div className="metric-grid market-order-summary">
             <MiniStat icon={<ArrowDownUp />} label="Best Sell" value={bestSell == null ? "—" : `${formatNumber(bestSell)}g`} />
             <MiniStat icon={<ArrowDownUp />} label="Best Buy" value={bestBuy == null ? "—" : `${formatNumber(bestBuy)}g`} />
             <MiniStat icon={<ArrowDownUp />} label="Spread" value={spread == null ? "—" : `${formatNumber(spread)}g`} />
-            <MiniStat icon={<ShoppingBag />} label="Liquidity" value={formatNumber(orders.reduce((sum, order) => sum + order.quantity, 0))} />
+            <MiniStat icon={<ShoppingBag />} label="Liquidity" value={formatNumber(orders.reduce((sum, order) => sum + decimalBigInt(order.quantity), 0n))} />
             <MiniStat icon={<ShoppingBag />} label="Sell Orders" value={formatNumber(sells.length)} />
             <MiniStat icon={<ShoppingBag />} label="Buy Orders" value={formatNumber(buys.length)} />
           </div>
@@ -275,7 +328,7 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
               columns={[
                 ["Price", (order) => formatGoldAmount(order.unitPrice), (order) => order.unitPrice],
                 ["Quantity", (order) => formatNumber(order.quantity), (order) => order.quantity],
-                ["Total", (order) => formatGoldAmount(order.unitPrice * order.quantity), (order) => order.unitPrice * order.quantity],
+                ["Total", (order) => formatGoldAmount(multiplyDecimal(order.unitPrice, order.quantity)), (order) => multiplyDecimal(order.unitPrice, order.quantity)],
                 ["Region", (order) => order.regionName || (order.regionId ? `R${order.regionId}` : "—"), (order) => order.regionName || String(order.regionId ?? "")],
                 ["Settlement", (order) => order.claimName || "Unknown settlement", (order) => order.claimName],
                 [orderTab === "buy" ? "Buyer" : "Seller", (order) => order.ownerName || "—", (order) => order.ownerName],
@@ -285,9 +338,11 @@ export function MarketBrowse({ mode, regionId, favorites, onToggleFavorite, onSh
             <div className="pagination-row"><span>Page {Math.min(page, pageCount)} of {pageCount} · {formatNumber(filteredOrders.length)} orders</span><div><button className="toolbar-button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button><button className="toolbar-button" disabled={page >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Next</button></div></div>
           </> : (
             <div className="market-stats-workspace">
+              {detailState.historyError ? <div className="error">Price history unavailable: {detailState.historyError}</div> : null}
               <div className="market-range-tabs">{(["24h", "7d", "30d", "all"] as const).map((entry) => <button className={range === entry ? "active" : ""} key={entry} onClick={() => setRange(entry)}>{entry}</button>)}</div>
               <div className="metric-grid"><MiniStat icon={<BarChart3 />} label="24h VWAP" value={stats.avg24h == null ? "—" : `${formatNumber(stats.avg24h)}g`} /><MiniStat icon={<BarChart3 />} label="7d VWAP" value={stats.avg7d == null ? "—" : `${formatNumber(stats.avg7d)}g`} /><MiniStat icon={<BarChart3 />} label="30d Average" value={stats.avg30d == null ? "—" : `${formatNumber(stats.avg30d)}g`} /><MiniStat icon={<BarChart3 />} label="High / Low" value={stats.allTimeHigh == null ? "—" : `${formatNumber(stats.allTimeHigh)} / ${formatNumber(stats.allTimeLow)}g`} /><MiniStat icon={<BarChart3 />} label="Volume" value={formatNumber(stats.totalVolume)} /><MiniStat icon={<BarChart3 />} label="24h Change" value={stats.priceChange24h == null ? "—" : `${toNumber(stats.priceChange24h) >= 0 ? "+" : ""}${formatNumber(stats.priceChange24h)}%`} /></div>
               <section className="market-price-chart" aria-label={`${range} price history chart`}>{priceData.length ? priceData.map((row, index) => { const price = toNumber(row.vwap ?? row.avgPrice ?? row.price); return <span key={String(row.bucket ?? row.timestamp ?? index)} title={`${formatNumber(price)}g`} style={{ height: `${Math.max(4, (price / chartMax) * 100)}%` }} />; }) : <div className="empty-state">No completed-trade price history is available for this selection.</div>}</section>
+              {detailState.history?.coverage === "unavailable" ? <div className="info">Completed-trade history is not yet authoritative from Relay. Current buy and sell orders remain live.{detailState.history?.observedSince ? ` Observing since ${timeAgo(detailState.history.observedSince)}.` : ""}</div> : null}
               <section className="market-recent-trades"><h3>Recent trades <small>Representative item history</small></h3>{recentTrades.length ? recentTrades.slice(0, 20).map((trade, index) => <div key={String(trade.id ?? `${trade.timestamp}-${index}`)}><ItemLabel item={{ ...selectedItem, itemName: selectedItem.name }} /><span>{formatNumber(trade.quantity)} @ {formatNumber(trade.unitPrice ?? trade.price)}g</span><small>{trade.regionName ?? trade.claimName ?? "Unknown market"} · {timeAgo(trade.createdAt ?? trade.timestamp)}</small></div>) : <div className="empty-state">No recent trades were returned.</div>}</section>
             </div>
           )}

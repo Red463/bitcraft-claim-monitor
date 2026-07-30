@@ -58,6 +58,35 @@ test("provider catalog snapshot atomically preserves item/cargo identity and rem
     receivedAt: "2026-07-29T20:05:00.000Z",
     rowCount: 2,
   });
+  assert.deepEqual(
+    repository.searchEntities("timber", 10).map((row) => row.catalogKey).sort(),
+    ["cargo:42", "items:42"],
+  );
+  assert.deepEqual(
+    repository.findEntities("timber").map((row) => row.catalogKey).sort(),
+    ["cargo:42", "items:42"],
+  );
+});
+
+test("provider catalog findEntities does not truncate candidates before live-order filters", () => {
+  const db = createDb();
+  const repository = catalogRepositoryModule.createProviderCatalogRepository(db);
+  repository.replaceEntitySnapshot(Array.from({ length: 75 }, (_, index) => ({
+    kind: "item",
+    id: String(index + 1),
+    name: `Timber ${String(index + 1).padStart(3, "0")}`,
+  })), {
+    provider: "relay",
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 1,
+    receivedAt: "2026-07-30T12:00:00.000Z",
+  });
+
+  assert.equal(repository.searchEntities("timber", 50).length, 50);
+  assert.equal(repository.findEntities("timber").length, 75);
+  assert.equal(repository.findEntities("timber").at(-1).targetId, "75");
+  db.close();
 });
 
 test("provider catalog snapshot rejects malformed generations without changing last-good rows", () => {

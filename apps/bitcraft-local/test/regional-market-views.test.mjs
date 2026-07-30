@@ -234,3 +234,176 @@ test("regional market status reports per-region age and disconnected sessions as
   assert.equal(neverLoaded.freshness, "unavailable");
   assert.equal(neverLoaded.confidence, "partial");
 });
+
+test("regional market catalog view joins live order counts to item and cargo identities", () => {
+  assert.equal(
+    typeof views.regionalMarketCatalogView,
+    "function",
+    "regional market catalog view must exist",
+  );
+  const result = views.regionalMarketCatalogView({
+    activeRegionIds: ["7", "19"],
+    orders: [
+      ...snapshot.orders,
+      {
+        ...snapshot.orders[0],
+        entityId: "503",
+        side: "sell",
+        regionId: "19",
+      },
+    ],
+  }, [{
+    catalogKey: "cargo:43",
+    kind: "cargo",
+    targetId: "43",
+    name: "Timber Package",
+    tag: "Wood",
+    tier: 3,
+    rarity: "Uncommon",
+    iconAssetName: "timber.png",
+  }, {
+    catalogKey: "items:44",
+    kind: "items",
+    targetId: "44",
+    name: "Leather Strap",
+    tag: "Leather",
+    tier: 2,
+    rarity: "Common",
+    iconAssetName: "leather.png",
+  }], {
+    regionId: "19",
+    allowedRegionIds: ["7", "19"],
+    query: "timber",
+    availableOnly: true,
+    hasSell: true,
+    hasBuy: true,
+    limit: 12,
+  });
+
+  assert.deepEqual(result.categories, ["Wood"]);
+  assert.deepEqual(result.items, [{
+    id: "43",
+    itemId: "43",
+    itemType: "cargo",
+    name: "Timber Package",
+    category: "Wood",
+    tag: "Wood",
+    tier: 3,
+    rarity: "Uncommon",
+    rarityStr: "Uncommon",
+    iconAssetName: "timber.png",
+    sellOrders: 1,
+    buyOrders: 1,
+    orderCount: 2,
+    hasSellOrders: true,
+    hasBuyOrders: true,
+  }]);
+});
+
+test("regional market catalog applies live-order filters before its response limit", () => {
+  const catalogRows = Array.from({ length: 75 }, (_, index) => ({
+    kind: "items",
+    targetId: String(index + 1),
+    name: `Timber ${String(index + 1).padStart(3, "0")}`,
+  }));
+  const result = views.regionalMarketCatalogView({
+    orders: [{
+      entityId: "900",
+      side: "sell",
+      regionId: "19",
+      itemType: "item",
+      itemId: "75",
+    }],
+  }, catalogRows, {
+    query: "timber",
+    regionId: "19",
+    availableOnly: true,
+    hasSell: true,
+    limit: 12,
+  });
+
+  assert.deepEqual(result.items.map((item) => item.itemId), ["75"]);
+});
+
+test("market response freshness includes the older global catalog dependency", () => {
+  const orderStatus = {
+    freshness: "fresh",
+    confidence: "authoritative",
+    ageMs: 500,
+    warnings: [],
+  };
+  assert.deepEqual(views.combinedMarketStatus(orderStatus, {
+    receivedAt: "2026-07-30T11:58:00.000Z",
+  }, {
+    nowMs: Date.parse("2026-07-30T12:00:00.000Z"),
+    staleAfterMs: 60_000,
+  }), {
+    freshness: "stale",
+    confidence: "partial",
+    ageMs: 120_000,
+    warnings: ["Relay global catalog is older than 60 seconds."],
+  });
+
+  assert.deepEqual(views.combinedMarketStatus(orderStatus, null, {
+    nowMs: Date.parse("2026-07-30T12:00:00.000Z"),
+    staleAfterMs: 60_000,
+  }), {
+    freshness: "unavailable",
+    confidence: "unknown",
+    ageMs: null,
+    warnings: ["Relay global catalog has not loaded yet."],
+  });
+});
+
+test("regional market order-book view preserves exact prices and scopes regions", () => {
+  assert.equal(
+    typeof views.regionalMarketOrderBookView,
+    "function",
+    "regional market order-book view must exist",
+  );
+  const result = views.regionalMarketOrderBookView({
+    activeRegionIds: ["7", "19"],
+    orders: [
+      {
+        ...snapshot.orders[0],
+        entityId: "9007199254740993",
+        side: "sell",
+        price: "9007199254740993",
+        quantity: "2",
+      },
+      snapshot.orders[1],
+    ],
+  }, {
+    catalogKey: "cargo:43",
+    kind: "cargo",
+    targetId: "43",
+    name: "Timber Package",
+    tag: "Wood",
+    tier: 3,
+    rarity: "Uncommon",
+    iconAssetName: "timber.png",
+  }, {
+    itemType: "cargo",
+    itemId: "43",
+    regionId: "19",
+    allowedRegionIds: ["7", "19"],
+  });
+
+  assert.equal(result.sellOrders.length, 1);
+  assert.equal(result.buyOrders.length, 0);
+  assert.equal(result.sellOrders[0].entityId, "9007199254740993");
+  assert.equal(result.sellOrders[0].price, "9007199254740993");
+  assert.equal(result.sellOrders[0].quantity, "2");
+  assert.deepEqual(result.item, {
+    id: "43",
+    itemId: "43",
+    itemType: "cargo",
+    name: "Timber Package",
+    category: "Wood",
+    tag: "Wood",
+    tier: 3,
+    rarity: "Uncommon",
+    rarityStr: "Uncommon",
+    iconAssetName: "timber.png",
+  });
+});

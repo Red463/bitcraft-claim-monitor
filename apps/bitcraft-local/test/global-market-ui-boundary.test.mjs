@@ -42,7 +42,7 @@ test("global market money and locations use the shared legible presentation", ()
   assert.match(overview, /className="market-price-location"/);
   assert.match(deals, /formatGoldAmount\(totalPotential\)/);
   assert.match(deals, /className="market-price-location"/);
-  assert.match(browse, /formatGoldAmount\(order\.unitPrice \* order\.quantity\)/);
+  assert.match(browse, /formatGoldAmount\(multiplyDecimal\(order\.unitPrice, order\.quantity\)\)/);
   assert.doesNotMatch(overview, /formatCompactNumber\(row\.totalValue\)\}g/);
   assert.doesNotMatch(deals, /formatCompactNumber\(totalPotential\)\}g/);
 });
@@ -76,7 +76,7 @@ test("Browse sorts the complete filtered order book before pagination", () => {
   assert.match(orderWorkspace, /rows=\{filteredOrders\}/);
   assert.match(orderWorkspace, /rowOffset=\{\(Math\.min\(page,\s*pageCount\) - 1\) \* pageSize\}/);
   assert.match(orderWorkspace, /rowLimit=\{pageSize\}/);
-  assert.match(orderWorkspace, /\["Total",[\s\S]*order\.unitPrice \* order\.quantity/);
+  assert.match(orderWorkspace, /\["Total",[\s\S]*multiplyDecimal\(order\.unitPrice, order\.quantity\)/);
   assert.match(orderWorkspace, /\["Map",[\s\S]*undefined,\s*false\]/);
   assert.doesNotMatch(orderWorkspace, /<span>Sort<\/span>/);
 });
@@ -87,6 +87,25 @@ test("Browse groups availability controls and separates item identity metadata",
   assert.match(browse, /className="market-toggle-group"/);
   assert.match(browse, /className="market-item-identity"/);
   assert.match(browse, /className="market-item-meta"/);
+});
+
+test("Browse invalidates on regional-market generation events and keeps history non-blocking", () => {
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+  const generationHook = source("../src/hooks/useGameDataGeneration.ts");
+
+  assert.match(browse, /useGameDataGeneration\([^)]*"catalogs"[^)]*"regional-market"/s);
+  assert.match(browse, /generationSequence/);
+  assert.doesNotMatch(browse, /Promise\.all\(\[\s*fetch\(urls\.orderBook/);
+  assert.match(generationHook, /new EventSource/);
+  assert.match(generationHook, /setInterval/);
+  assert.match(generationHook, /\/api\/local\/game-data\/generation/);
+});
+
+test("Market source copy identifies the live Relay browse path during migration", () => {
+  const marketPage = source("../src/pages/MarketPage.tsx");
+
+  assert.match(marketPage, /Browse and regional order books use live Relay data/);
+  assert.doesNotMatch(marketPage, /Live market data is provided by BitJita/);
 });
 
 test("Deal Watch renders operational facts as labelled units", () => {

@@ -18,7 +18,17 @@ type SqliteDatabase = {
   prepare(sql: string): Statement;
 };
 
-export function createCurrentStateRepository(db: SqliteDatabase): ProviderSink & {
+export function createCurrentStateRepository(
+  db: SqliteDatabase,
+  options: {
+    onCommit?: (event: {
+      claimId: string;
+      generation: number;
+      generatedAt: string;
+      changedDomains: DomainKey[];
+    }) => void;
+  } = {},
+): ProviderSink & {
   read(claimId: string, domain: DomainKey): StoredDomainSnapshot | null;
   readHealth(): ProviderHealth | null;
   nextGeneration(claimId: string): number;
@@ -80,11 +90,15 @@ export function createCurrentStateRepository(db: SqliteDatabase): ProviderSink &
 
   return {
     async commitGeneration(batch: DomainSnapshotBatch) {
+      const changedDomains: DomainKey[] = [];
+      let generatedAt = "";
       db.exec("BEGIN IMMEDIATE");
       try {
         for (const [domain, snapshot] of Object.entries(batch.domains)) {
           if (!snapshot) continue;
+          changedDomains.push(domain as DomainKey);
           const receivedAt = snapshot.provenance.receivedAt;
+          if (!generatedAt || receivedAt > generatedAt) generatedAt = receivedAt;
           upsert.run(
             batch.claimId,
             domain,
@@ -110,6 +124,14 @@ export function createCurrentStateRepository(db: SqliteDatabase): ProviderSink &
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
+      }
+      if (changedDomains.length) {
+        options.onCommit?.({
+          claimId: batch.claimId,
+          generation: batch.generation,
+          generatedAt,
+          changedDomains,
+        });
       }
     },
     async appendEvents(events: DomainEvent[]) {

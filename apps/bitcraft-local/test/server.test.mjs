@@ -923,6 +923,22 @@ test("server collection paginates listings and protects production mutations", a
         timestamp: legacyBuyOrderNow,
         side: "buy",
       },
+      {
+        entityId: "3003",
+        claimEntityId: "4001",
+        claimName: "Test Market",
+        regionId: "19",
+        ownerEntityId: "5003",
+        ownerUsername: "Seller",
+        itemId: "30",
+        itemType: "item",
+        price: "15",
+        priceThreshold: "15",
+        quantity: "4",
+        storedCoins: "0",
+        timestamp: legacyBuyOrderNow,
+        side: "sell",
+      },
     ],
     regions: [
       {
@@ -935,7 +951,7 @@ test("server collection paginates listings and protects production mutations", a
       },
       {
         regionId: "19",
-        count: 1,
+        count: 2,
         database: "relay-region-19",
         schemaFingerprint: "regional-v1",
         receivedAt: legacyBuyOrderNow,
@@ -974,6 +990,11 @@ test("server collection paginates listings and protects production mutations", a
     ) VALUES ('items:30', 'items', '30', 0, 'Leather', 'Leather', 1, 'Common',
       NULL, NULL, ?)
   `).run(legacyBuyOrderNow);
+  staleRegionalDb.prepare(`
+    INSERT OR REPLACE INTO game_catalog_source_state (
+      source_key, provider, database_name, schema_fingerprint, generation, received_at, row_count
+    ) VALUES ('global', 'relay', 'relay-global', 'global-v1', 1, ?, 1)
+  `).run(legacyBuyOrderNow);
   staleRegionalDb.close();
   const buyOrdersBeforeSales = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=unitPrice&direction=desc`).then((response) => response.json());
   assert.equal(buyOrdersBeforeSales.total, 1);
@@ -982,6 +1003,32 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(buyOrdersBeforeSales.rows[0].totalValue, "120");
   assert.equal(buyOrdersBeforeSales.freshness, "fresh");
   assert.equal(buyOrdersBeforeSales.opportunities.length, 0);
+  assert.equal(priceHistoryRequests, 0);
+  const marketCatalog = await fetch(`${origin}/api/local/market/catalog?claimId=${claimId}&regionId=19&q=Leather&availableOnly=true&hasSell=true&hasBuy=true&limit=12`).then((response) => response.json());
+  assert.deepEqual(marketCatalog.items.map((item) => ({
+    itemId: item.itemId,
+    itemType: item.itemType,
+    sellOrders: item.sellOrders,
+    buyOrders: item.buyOrders,
+  })), [{
+    itemId: "30",
+    itemType: "item",
+    sellOrders: 1,
+    buyOrders: 1,
+  }]);
+  assert.equal(marketCatalog.freshness, "stale");
+  assert.match(marketCatalog.warnings.join(" "), /catalog subscription is disconnected/i);
+  const marketOrderBook = await fetch(`${origin}/api/local/market/order-book?claimId=${claimId}&regionId=19&itemType=item&itemId=30`).then((response) => response.json());
+  assert.deepEqual(marketOrderBook.sellOrders.map((order) => order.entityId), ["3003"]);
+  assert.deepEqual(marketOrderBook.buyOrders.map((order) => order.entityId), ["3001"]);
+  assert.equal(marketOrderBook.sellOrders[0].price, "15");
+  assert.equal(marketOrderBook.item.name, "Leather");
+  const marketPriceHistory = await fetch(`${origin}/api/local/market/price-history?claimId=${claimId}&regionId=19&itemType=item&itemId=30`).then((response) => response.json());
+  assert.equal(marketPriceHistory.coverage, "unavailable");
+  assert.equal(marketPriceHistory.observedSince, null);
+  assert.equal(marketPriceHistory.currentAsOf, legacyBuyOrderNow);
+  assert.deepEqual(marketPriceHistory.priceData, []);
+  assert.deepEqual(marketPriceHistory.recentTrades, []);
   assert.equal(priceHistoryRequests, 0);
   const allRegionalBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=all&pageSize=25`).then((response) => response.json());
   assert.deepEqual(allRegionalBuyOrders.rows.map((row) => row.regionId), ["19"]);

@@ -50,6 +50,10 @@ Live-first data policy:
 - browser requests and scheduled jobs never own live-data freshness: page
   navigation reads an already committed generation, while subscriptions and
   bounded provider refresh loops keep the next generation ready;
+- committed domain generations notify open browsers through the
+  provider-neutral local event stream; when streaming is unavailable, a
+  750-millisecond local generation poll keeps the same invalidation path
+  inside the one-second browser publication budget;
 - a migrated feature is not accepted if disabling ingestion schedules makes
   its current data stop updating, even when a scheduled fallback could mask
   the problem in production.
@@ -68,12 +72,17 @@ current-state mirror. Durable `market_events`/`market_trades` history,
 notifications, and any measured cross-region index remain separate side
 effects and must never delay publication of the live generation.
 
-Cross-region buy orders use the adaptive regional-session pattern rather than
-the legacy scheduled crawl. Each configured region publishes a bounded typed
-buy-order snapshot, and the runtime combines those snapshots into the generic
-`regional-market` last-good domain. Local filtering and catalog enrichment are
-fast enough without `market_buy_orders_current`; the table and the unproven
-`market_regional_sale_averages_current` projection are retired. Premium
+Cross-region market orders use the adaptive regional-session pattern rather
+than the legacy scheduled crawl. Each configured region publishes a bounded
+typed buy/sell-order snapshot, and the runtime combines those snapshots into
+the generic `regional-market` last-good domain. Market Browse search and order
+books join that generation to the continuously maintained local catalog on
+request; they do not wait for the legacy global-market insight job. Local
+filtering and catalog enrichment are fast enough without
+`market_buy_orders_current`; the table and the unproven
+`market_regional_sale_averages_current` projection are retired. Completed
+trade charts remain explicitly unavailable until Relay proves an authoritative
+close/trade signal, rather than deriving sales from disappearing orders. Premium
 opportunities remain unavailable until Relay exposes or proves an
 authoritative same-region sale signal. The primary region remains pinned;
 additional configured regions rotate within the connection cap on a
@@ -81,7 +90,10 @@ provider-owned 15-second loop, independently of HTTP refresh jobs. A newly
 opened region is held until its first complete generation applies or its
 30-second apply timeout expires, so connection setup cannot churn the pool
 before useful rows arrive. Per-region receive ages and connection state prevent
-a disconnected or delayed region from being reported as fresh.
+a disconnected or delayed region from being reported as fresh. Browse
+freshness also includes the global catalog subscription, so current orders
+cannot hide a stale or disconnected enrichment source. Order books publish
+independently of trade-history reads.
 
 Implementation is dependency-ordered:
 

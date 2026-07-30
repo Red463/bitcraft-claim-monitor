@@ -29,6 +29,45 @@ function regionIds(value) {
   )];
 }
 
+function itemType(value) {
+  return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo"
+    ? "cargo"
+    : "item";
+}
+
+function catalogItem(value) {
+  const source = record(value);
+  const type = itemType(source.itemType ?? source.kind);
+  const id = decimal(source.itemId ?? source.targetId ?? source.id);
+  const tag = String(source.tag ?? source.category ?? "");
+  const rarity = String(source.rarity ?? source.rarityStr ?? "");
+  return {
+    id,
+    itemId: id,
+    itemType: type,
+    name: String(source.name ?? `${type === "cargo" ? "Cargo" : "Item"} #${id}`),
+    category: tag,
+    tag,
+    tier: source.tier ?? null,
+    rarity,
+    rarityStr: rarity,
+    iconAssetName: source.iconAssetName ?? null,
+  };
+}
+
+function scopedOrders(snapshot, options = {}) {
+  const source = record(snapshot);
+  const selectedRegion = String(options.regionId ?? "all").trim().toLowerCase() || "all";
+  const allowedRegionIds = new Set(regionIds(options.allowedRegionIds));
+  return (Array.isArray(source.orders) ? source.orders : [])
+    .map(record)
+    .filter((order) => {
+      const regionId = decimal(order.regionId);
+      return (!allowedRegionIds.size || allowedRegionIds.has(regionId))
+        && (selectedRegion === "all" || regionId === selectedRegion);
+    });
+}
+
 function warningInScope(warning, allowedRegionIds) {
   if (!allowedRegionIds.size) return true;
   const match = String(warning).match(/(?:^Region|region)\s+(\d+)/);
@@ -141,6 +180,57 @@ export function regionalMarketStatus(snapshot, options = {}) {
   };
 }
 
+export function combinedMarketStatus(orderStatus, catalogSource, options = {}) {
+  const orders = record(orderStatus);
+  if (!catalogSource || typeof catalogSource !== "object" || Array.isArray(catalogSource)) {
+    return {
+      freshness: "unavailable",
+      confidence: "unknown",
+      ageMs: null,
+      warnings: ["Relay global catalog has not loaded yet."],
+    };
+  }
+  const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
+  const staleAfterMs = Math.max(1_000, Number(options.staleAfterMs) || 60_000);
+  const receivedAtMs = Date.parse(String(catalogSource.receivedAt ?? ""));
+  const catalogAgeMs = Number.isFinite(receivedAtMs) ? Math.max(0, nowMs - receivedAtMs) : null;
+  const subscription = record(options.runtimeHealth?.subscription);
+  const runtimeKnown = Object.keys(subscription).length > 0;
+  const runtimeHealthy = runtimeKnown
+    && subscription.connected === true
+    && subscription.applied === true
+    && !subscription.lastError;
+  const catalogStale = runtimeKnown
+    ? !runtimeHealthy
+    : catalogAgeMs == null || catalogAgeMs > staleAfterMs;
+  const warnings = Array.isArray(orders.warnings) ? orders.warnings.map(String) : [];
+  if (catalogStale) {
+    if (subscription.lastError) {
+      warnings.push(`Relay global catalog error: ${String(subscription.lastError)}`);
+    } else if (runtimeKnown && subscription.connected !== true) {
+      warnings.push("Relay global catalog subscription is disconnected.");
+    } else if (catalogAgeMs == null) {
+      warnings.push("Relay global catalog has no valid receive time.");
+    } else {
+      warnings.push(`Relay global catalog is older than ${Math.round(staleAfterMs / 1_000)} seconds.`);
+    }
+  }
+  const orderAgeMs = Number.isFinite(Number(orders.ageMs)) ? Number(orders.ageMs) : null;
+  const ageMs = [orderAgeMs, catalogAgeMs].filter((age) => age != null);
+  return {
+    freshness: orders.freshness === "unavailable"
+      ? "unavailable"
+      : catalogStale || orders.freshness === "stale"
+        ? "stale"
+        : "fresh",
+    confidence: catalogStale || orders.confidence !== "authoritative"
+      ? (orders.freshness === "unavailable" ? "unknown" : "partial")
+      : "authoritative",
+    ageMs: ageMs.length ? Math.max(...ageMs) : null,
+    warnings: [...new Set(warnings)],
+  };
+}
+
 export function regionalBuyOrdersView(snapshot, options = {}) {
   const source = record(snapshot);
   const selectedRegion = String(options.regionId ?? "all").trim().toLowerCase();
@@ -160,8 +250,10 @@ export function regionalBuyOrdersView(snapshot, options = {}) {
       .map((region) => [String(region.regionId), String(region.receivedAt ?? "") || null]),
   );
 
-  const rows = (Array.isArray(source.orders) ? source.orders : []).map((value) => {
-    const order = record(value);
+  const rows = (Array.isArray(source.orders) ? source.orders : [])
+    .map(record)
+    .filter((order) => String(order.side ?? "buy").toLowerCase() !== "sell")
+    .map((order) => {
     const itemType = String(order.itemType ?? "").toLowerCase() === "cargo" ? "cargo" : "item";
     const itemId = decimal(order.itemId);
     const item = record(getEntity(`${itemType === "cargo" ? "cargo" : "items"}:${itemId}`));
@@ -195,7 +287,7 @@ export function regionalBuyOrdersView(snapshot, options = {}) {
       premiumPercent: null,
       opportunityEligible: false,
     };
-  });
+    });
   const regionalRows = rows.filter((row) => (
     (!allowedRegionIds.size || allowedRegionIds.has(row.regionId))
     && (selectedRegion === "all" || row.regionId === selectedRegion)
@@ -246,5 +338,84 @@ export function regionalBuyOrdersView(snapshot, options = {}) {
     direction,
     regionId: selectedRegion || "all",
     sortableFields: Object.keys(sorters),
+  };
+}
+
+export function regionalMarketCatalogView(snapshot, catalogRows, options = {}) {
+  const counts = new Map();
+  for (const order of scopedOrders(snapshot, options)) {
+    const key = `${itemType(order.itemType)}:${decimal(order.itemId)}`;
+    const current = counts.get(key) ?? { sell: 0, buy: 0 };
+    if (String(order.side ?? "buy").toLowerCase() === "sell") current.sell += 1;
+    else current.buy += 1;
+    counts.set(key, current);
+  }
+
+  const query = String(options.query ?? options.q ?? "").trim().toLowerCase();
+  const category = String(options.category ?? "").trim();
+  const availableOnly = options.availableOnly === true || options.availableOnly === "true";
+  const hasSell = options.hasSell === true || options.hasSell === "true";
+  const hasBuy = options.hasBuy === true || options.hasBuy === "true";
+  const limit = Math.max(1, Math.min(50, Math.floor(Number(options.limit) || 12)));
+  const items = (Array.isArray(catalogRows) ? catalogRows : []).flatMap((value) => {
+    const item = catalogItem(value);
+    if (query && !item.name.toLowerCase().includes(query)) return [];
+    if (category && item.category !== category) return [];
+    const orderCounts = counts.get(`${item.itemType}:${item.itemId}`) ?? { sell: 0, buy: 0 };
+    if (availableOnly && orderCounts.sell + orderCounts.buy === 0) return [];
+    if (hasSell && orderCounts.sell === 0) return [];
+    if (hasBuy && orderCounts.buy === 0) return [];
+    return [{
+      ...item,
+      sellOrders: orderCounts.sell,
+      buyOrders: orderCounts.buy,
+      orderCount: orderCounts.sell + orderCounts.buy,
+      hasSellOrders: orderCounts.sell > 0,
+      hasBuyOrders: orderCounts.buy > 0,
+    }];
+  });
+  const sort = String(options.sort ?? "relevance").toLowerCase();
+  if (sort === "name") {
+    items.sort((left, right) => left.name.localeCompare(right.name));
+  } else if (sort === "orders") {
+    items.sort((left, right) => (
+      right.orderCount - left.orderCount || left.name.localeCompare(right.name)
+    ));
+  }
+  return {
+    items: items.slice(0, limit),
+    categories: [...new Set(items.map((item) => item.category).filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right)),
+  };
+}
+
+export function regionalMarketOrderBookView(snapshot, catalogRow, options = {}) {
+  const requestedType = itemType(options.itemType);
+  const requestedId = decimal(options.itemId);
+  const orders = scopedOrders(snapshot, options)
+    .filter((order) => (
+      itemType(order.itemType) === requestedType
+      && decimal(order.itemId) === requestedId
+    ))
+    .map((order) => ({
+      ...order,
+      entityId: decimal(order.entityId),
+      claimEntityId: decimal(order.claimEntityId),
+      regionId: decimal(order.regionId),
+      ownerEntityId: decimal(order.ownerEntityId),
+      itemId: requestedId,
+      itemType: requestedType,
+      price: decimal(order.price ?? order.priceThreshold),
+      priceThreshold: decimal(order.priceThreshold ?? order.price),
+      quantity: decimal(order.quantity),
+      storedCoins: decimal(order.storedCoins),
+    }));
+  return {
+    item: catalogItem(catalogRow ?? {
+      itemType: requestedType,
+      targetId: requestedId,
+    }),
+    sellOrders: orders.filter((order) => String(order.side).toLowerCase() === "sell"),
+    buyOrders: orders.filter((order) => String(order.side).toLowerCase() !== "sell"),
   };
 }

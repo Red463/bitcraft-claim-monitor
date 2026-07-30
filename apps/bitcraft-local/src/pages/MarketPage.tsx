@@ -31,6 +31,7 @@ const MARKET_VIEWS = [
 ];
 
 export function Market({
+  claimId,
   access,
   locationSearch,
   fallbackRegionId,
@@ -39,6 +40,7 @@ export function Market({
   onShowMap,
   onDiscordLogin,
 }: {
+  claimId: string;
   access?: EffectiveAccess | null;
   locationSearch: string;
   fallbackRegionId: string;
@@ -107,7 +109,7 @@ export function Market({
   }
 
   function openItem(item: AnyRecord) {
-    const itemId = toNumber(item.itemId ?? item.id);
+    const itemId = String(item.itemId ?? item.id ?? "0");
     const itemType = item.itemType === "cargo" || toNumber(item.itemType) === 1 ? "1" : "0";
     setView("browse");
     updateQueryState({
@@ -138,12 +140,12 @@ export function Market({
         <label className="field global-market-region"><span>Market region</span><select value={regionId || "All"} onChange={(event) => setRegionChoice(event.target.value)}><option value="All">All active regions</option>{activeRegions.map((region) => <option value={region.regionId} key={region.regionId}>{activeRegionLabel(region, fallbackRegionId)}</option>)}</select></label>
       </section>
       {currentView === "overview" ? <MarketOverview {...marketRefresh} regionId={regionId} favorites={favorites} onOpenItem={openItem} onShowMap={onShowMap} /> : null}
-      {currentView === "browse" ? <MarketBrowse {...marketRefresh} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
+      {currentView === "browse" ? <MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
       {currentView === "deals" ? <MarketDeals {...marketRefresh} sharedRegionId={regionId} activeRegions={activeRegions} onShowMap={onShowMap} /> : null}
-      {currentView === "buy-orders" ? <MarketBrowse {...marketRefresh} mode="buy" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
+      {currentView === "buy-orders" ? <MarketBrowse {...marketRefresh} claimId={claimId} mode="buy" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
       {currentView === "deal-watch" ? <DealWatchlist {...marketRefresh} monitoredRegionId={regionId || fallbackRegionId} onDiscordLogin={onDiscordLogin} /> : null}
       {currentView === "stalls" ? <MarketStalls {...marketRefresh} regionId={regionId} onShowMap={onShowMap} /> : null}
-      <footer className="global-market-source"><CircleDollarSign size={14} /><span>Live market data is provided by BitJita. Global insight snapshots are retained locally for trend calculations.</span></footer>
+      <footer className="global-market-source"><CircleDollarSign size={14} /><span>Browse and regional order books use live Relay data. Other market workspaces still use legacy sources while their Relay replacements are completed.</span></footer>
     </div>
   );
 }

@@ -31,6 +31,17 @@ function fakeBindings() {
     buildCount: 0,
   };
   const rows = {
+    sellOrderState: [{
+      entityId: 500n,
+      ownerEntityId: 700n,
+      claimEntityId: 100n,
+      itemId: 43,
+      itemType: 1,
+      priceThreshold: 31,
+      quantity: 4,
+      timestamp: { __timestamp_micros_since_unix_epoch__: 1785408000000000n },
+      storedCoins: 0,
+    }],
     buyOrderState: [{
       entityId: 501n,
       ownerEntityId: 701n,
@@ -125,7 +136,7 @@ const manifest = {
   },
 };
 
-test("regional market session publishes all buy orders after bounded claim and owner joins", async () => {
+test("regional market session publishes all buy and sell orders after bounded claim and owner joins", async () => {
   assert.ok(sessionModule, "regional market session module must exist");
   const fake = fakeBindings();
   const snapshots = [];
@@ -146,12 +157,13 @@ test("regional market session publishes all buy orders after bounded claim and o
   fake.state.onConnect(fake.connection);
   assert.deepEqual(fake.state.subscriptions[0].queries, [
     "SELECT * FROM buy_order_state",
+    "SELECT * FROM sell_order_state",
   ]);
 
   fake.state.subscriptions[0].onApplied({});
   assert.deepEqual(fake.state.subscriptions[1].queries, [
     "SELECT * FROM claim_state WHERE entity_id = 100 OR entity_id = 101",
-    "SELECT * FROM player_username_state WHERE entity_id = 701 OR entity_id = 702",
+    "SELECT * FROM player_username_state WHERE entity_id = 700 OR entity_id = 701 OR entity_id = 702",
   ]);
   assert.equal(snapshots.length, 0);
 
@@ -160,16 +172,25 @@ test("regional market session publishes all buy orders after bounded claim and o
   assert.equal(snapshots.length, 1);
   assert.deepEqual(snapshots[0].data.orders.map((order) => ({
     entityId: order.entityId,
+    side: order.side,
     claimName: order.claimName,
     ownerUsername: order.ownerUsername,
     itemType: order.itemType,
   })), [{
+    entityId: "500",
+    side: "sell",
+    claimName: "Timbersteel Trade",
+    ownerUsername: "",
+    itemType: "cargo",
+  }, {
     entityId: "501",
+    side: "buy",
     claimName: "Timbersteel Trade",
     ownerUsername: "Buyer One",
     itemType: "cargo",
   }, {
     entityId: "502",
+    side: "buy",
     claimName: "Other Market",
     ownerUsername: "Buyer Two",
     itemType: "item",
@@ -182,7 +203,10 @@ test("regional market session publishes all buy orders after bounded claim and o
   fake.state.subscriptions[2].onApplied({});
   await Promise.resolve();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(snapshots[1].data.orders[0].quantity, "7");
+  assert.equal(
+    snapshots[1].data.orders.find((order) => order.entityId === "501").quantity,
+    "7",
+  );
   assert.equal(snapshots[1].generation, 5);
 
   await session.stop();
@@ -206,12 +230,12 @@ test("regional market session rejects an order set above its explicit row budget
     manifest,
     generation: 1,
     regionId: "19",
-    maxOrders: 1,
+    maxOrders: 2,
   });
   fake.state.onConnect(fake.connection);
   fake.state.subscriptions[0].onApplied({});
   assert.equal(published, false);
-  assert.match(session.health().lastError, /order budget 1 exceeded by 2/i);
+  assert.match(session.health().lastError, /order budget 2 exceeded by 3/i);
   await session.stop();
 });
 

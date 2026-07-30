@@ -1,4 +1,4 @@
-import { normalizeRegionalBuyOrders } from "./normalizers.ts";
+import { normalizeRegionalOrders } from "./normalizers.ts";
 import { equalitySubscriptionQueries } from "./publicCraftRegionSession.ts";
 import {
   assertSchemaFingerprint,
@@ -30,6 +30,7 @@ type SubscriptionBuilder = {
 type BindingConnection = {
   db: {
     buyOrderState: CachedTable;
+    sellOrderState: CachedTable;
     claimState: CachedTable;
     playerUsernameState: CachedTable;
   };
@@ -75,7 +76,7 @@ type SessionDependencies = {
 };
 
 export type RegionalMarketSnapshot = {
-  data: ReturnType<typeof normalizeRegionalBuyOrders>["data"];
+  data: ReturnType<typeof normalizeRegionalOrders>["data"];
   warnings: string[];
   database: string;
   regionId: string;
@@ -227,7 +228,10 @@ export class RelayRegionalMarketRegionSession {
           .onError((_context, error) => (
             this.#handleBaseError(connection, connectionEpoch, error)
           ))
-          .subscribe(["SELECT * FROM buy_order_state"]);
+          .subscribe([
+            "SELECT * FROM buy_order_state",
+            "SELECT * FROM sell_order_state",
+          ]);
       })
       .onConnectError((_context, error) => {
         if (connectionEpoch !== this.#connectionEpoch || this.#stopping) return;
@@ -276,9 +280,11 @@ export class RelayRegionalMarketRegionSession {
     this.#cancelDetailRetry?.();
     this.#cancelDetailRetry = null;
     const buyRows = rows(connection.db.buyOrderState);
-    if (buyRows.length > config.maxOrders) {
+    const sellRows = rows(connection.db.sellOrderState);
+    const orderCount = buyRows.length + sellRows.length;
+    if (orderCount > config.maxOrders) {
       throw new Error(
-        `Relay regional market order budget ${config.maxOrders} exceeded by ${buyRows.length} rows`,
+        `Relay regional market order budget ${config.maxOrders} exceeded by ${orderCount} rows`,
       );
     }
     this.#refreshingDetails = true;
@@ -288,7 +294,7 @@ export class RelayRegionalMarketRegionSession {
     this.#detailSubscription = null;
     const claimIds: string[] = [];
     const ownerIds: string[] = [];
-    for (const [index, value] of buyRows.entries()) {
+    for (const [index, value] of [...buyRows, ...sellRows].entries()) {
       const row = wireRecord(value, `Relay regional market order ${index}`);
       claimIds.push(decimalInteger(
         row.claimEntityId ?? row.claim_entity_id,
@@ -378,16 +384,18 @@ export class RelayRegionalMarketRegionSession {
     const startedAt = Date.now();
     try {
       const buyRows = rows(connection.db.buyOrderState);
+      const sellRows = rows(connection.db.sellOrderState);
       const claimRows = rows(connection.db.claimState);
       const usernameRows = rows(connection.db.playerUsernameState);
-      const rowCount = buyRows.length + claimRows.length + usernameRows.length;
+      const rowCount = buyRows.length + sellRows.length + claimRows.length + usernameRows.length;
       if (rowCount > config.maxApplyRows) {
         throw new Error(
           `Relay regional market apply row budget ${config.maxApplyRows} exceeded by ${rowCount} rows`,
         );
       }
-      const normalized = normalizeRegionalBuyOrders({
+      const normalized = normalizeRegionalOrders({
         regionId: config.regionId,
+        sellRows,
         buyRows,
         claimRows,
         usernameRows,
@@ -448,9 +456,11 @@ export class RelayRegionalMarketRegionSession {
 
   #attachListeners(connection: BindingConnection): void {
     if (this.#listenersAttached) return;
-    connection.db.buyOrderState.onInsert?.(this.#baseChanged);
-    connection.db.buyOrderState.onUpdate?.(this.#baseChanged);
-    connection.db.buyOrderState.onDelete?.(this.#baseChanged);
+    for (const table of [connection.db.buyOrderState, connection.db.sellOrderState]) {
+      table.onInsert?.(this.#baseChanged);
+      table.onUpdate?.(this.#baseChanged);
+      table.onDelete?.(this.#baseChanged);
+    }
     for (const table of [connection.db.claimState, connection.db.playerUsernameState]) {
       table.onInsert?.(this.#detailChanged);
       table.onUpdate?.(this.#detailChanged);
@@ -461,9 +471,11 @@ export class RelayRegionalMarketRegionSession {
 
   #removeListeners(connection = this.#connection): void {
     if (!this.#listenersAttached || !connection) return;
-    connection.db.buyOrderState.removeOnInsert?.(this.#baseChanged);
-    connection.db.buyOrderState.removeOnUpdate?.(this.#baseChanged);
-    connection.db.buyOrderState.removeOnDelete?.(this.#baseChanged);
+    for (const table of [connection.db.buyOrderState, connection.db.sellOrderState]) {
+      table.removeOnInsert?.(this.#baseChanged);
+      table.removeOnUpdate?.(this.#baseChanged);
+      table.removeOnDelete?.(this.#baseChanged);
+    }
     for (const table of [connection.db.claimState, connection.db.playerUsernameState]) {
       table.removeOnInsert?.(this.#detailChanged);
       table.removeOnUpdate?.(this.#detailChanged);

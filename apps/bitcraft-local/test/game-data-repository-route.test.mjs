@@ -78,6 +78,43 @@ test("generation commit atomically replaces only the submitted domains", async (
   db.close();
 });
 
+test("generation commit notifies browser delivery only after the transaction succeeds", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const events = [];
+  const repository = createCurrentStateRepository(db, {
+    onCommit: (event) => events.push(event),
+  });
+
+  await repository.commitGeneration({
+    claimId: "1369094286777412590",
+    generation: 7,
+    domains: {
+      members: {
+        data: [{ playerEntityId: "1" }],
+        confidence: "joined",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+      "regional-market": {
+        data: { orders: [] },
+        confidence: "authoritative",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+    },
+  });
+
+  assert.deepEqual(events, [{
+    claimId: "1369094286777412590",
+    generation: 7,
+    generatedAt: "2026-07-30T12:00:00.000Z",
+    changedDomains: ["members", "regional-market"],
+  }]);
+  db.close();
+});
+
 test("repository resumes generations after a process restart", async () => {
   const db = new DatabaseSync(":memory:");
   applySchemaBootstrap(db);

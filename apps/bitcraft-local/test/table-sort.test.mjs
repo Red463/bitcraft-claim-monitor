@@ -15,6 +15,25 @@ test("compareSortValues sorts numeric-looking table values in both directions", 
   assert.deepEqual([...values].sort((a, b) => compareSortValues(a, b, "asc")), ["2g", "10g", "1,000g"]);
   assert.deepEqual([...values].sort((a, b) => compareSortValues(a, b, "desc")), ["1,000g", "10g", "2g"]);
 });
+
+test("compareSortValues preserves exact ordering for decimal integers beyond Number safety", () => {
+  const values = [
+    "9007199254740995",
+    "9007199254740993",
+    "9007199254740994",
+  ];
+
+  assert.deepEqual([...values].sort((a, b) => compareSortValues(a, b, "asc")), [
+    "9007199254740993",
+    "9007199254740994",
+    "9007199254740995",
+  ]);
+  assert.deepEqual([...values].sort((a, b) => compareSortValues(a, b, "desc")), [
+    "9007199254740995",
+    "9007199254740994",
+    "9007199254740993",
+  ]);
+});
 test("compareSortValues sorts localized date-time labels chronologically", () => {
   const values = ["30/05/2026, 10:38:01", "22/06/2026, 16:43:34", "29/06/2026, 04:51:21"];
 

@@ -138,3 +138,74 @@ test("regional market normalization rejects cross-claim rows and reports optiona
     "Regional market has no marketplace_state row for claim 100.",
   ]);
 });
+
+test("cross-region market normalization preserves both sell and buy order sides", () => {
+  assert.equal(
+    typeof normalizers.normalizeRegionalOrders,
+    "function",
+    "cross-region market normalizer must exist",
+  );
+  const result = normalizers.normalizeRegionalOrders({
+    regionId: "19",
+    sellRows: [{
+      entityId: 601n,
+      ownerEntityId: 801n,
+      claimEntityId: 100n,
+      itemId: 43,
+      itemType: 1,
+      priceThreshold: 31,
+      quantity: 5,
+      timestamp: { __timestamp_micros_since_unix_epoch__: 1785408180000000n },
+      storedCoins: 0,
+    }],
+    buyRows: [{
+      entityId: 602n,
+      ownerEntityId: 802n,
+      claimEntityId: 101n,
+      itemId: 43,
+      itemType: 0,
+      priceThreshold: 25,
+      quantity: 8,
+      timestamp: { __timestamp_micros_since_unix_epoch__: 1785408240000000n },
+      storedCoins: 200,
+    }],
+    claimRows: [
+      { entityId: 100n, name: "Timbersteel Trade" },
+      { entityId: 101n, name: "Other Market" },
+    ],
+    usernameRows: [
+      { entityId: 801n, username: "Seller One" },
+      { entityId: 802n, username: "Buyer One" },
+    ],
+  });
+
+  assert.deepEqual(
+    result.data.orders.map((order) => ({
+      entityId: order.entityId,
+      side: order.side,
+      itemType: order.itemType,
+      claimName: order.claimName,
+      ownerUsername: order.ownerUsername,
+      price: order.price,
+      quantity: order.quantity,
+    })),
+    [{
+      entityId: "601",
+      side: "sell",
+      itemType: "cargo",
+      claimName: "Timbersteel Trade",
+      ownerUsername: "Seller One",
+      price: "31",
+      quantity: "5",
+    }, {
+      entityId: "602",
+      side: "buy",
+      itemType: "item",
+      claimName: "Other Market",
+      ownerUsername: "Buyer One",
+      price: "25",
+      quantity: "8",
+    }],
+  );
+  assert.deepEqual(result.warnings, []);
+});

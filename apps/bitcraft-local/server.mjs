@@ -25,7 +25,13 @@ import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, 
 import { bitjitaTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
 import { currentMarketListings, marketLeaderboardFromCurrent } from "./src/server/currentMarketViews.mjs";
 import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
-import { regionalBuyOrdersView, regionalMarketStatus } from "./src/server/regionalMarketViews.mjs";
+import {
+  combinedMarketStatus,
+  regionalBuyOrdersView,
+  regionalMarketCatalogView,
+  regionalMarketOrderBookView,
+  regionalMarketStatus,
+} from "./src/server/regionalMarketViews.mjs";
 import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey, productionMetrics } from "./src/server/productionActivity.mjs";
 import { createGameCatalogRepository } from "./src/server/gameCatalog.mjs";
 import { createProviderCatalogRepository } from "./src/server/catalogRepository.mjs";
@@ -379,7 +385,22 @@ const now = new Date().toISOString();
 applyDefaultAppSettings(db, { serverRefreshSeconds: Math.round(snapshotIntervalMs / 1000), updatedAt: now });
 
 const statements = createPreparedStatements(db);
-const currentStateRepository = createCurrentStateRepository(db);
+const gameDataGenerationListeners = new Set();
+function publishGameDataGeneration(event) {
+  for (const listener of gameDataGenerationListeners) {
+    if (listener.claimId !== event.claimId) continue;
+    const changedDomains = event.changedDomains.filter((domain) => listener.domains.has(domain));
+    if (!changedDomains.length) continue;
+    try {
+      listener.response.write(`data: ${JSON.stringify({ ...event, changedDomains })}\n\n`);
+    } catch {
+      gameDataGenerationListeners.delete(listener);
+    }
+  }
+}
+const currentStateRepository = createCurrentStateRepository(db, {
+  onCommit: publishGameDataGeneration,
+});
 const relayProvider = new RelayBitCraftProvider();
 const providerCatalogRepository = createProviderCatalogRepository(db);
 const relayStorageActivityService = new RelayStorageActivityService({
@@ -453,6 +474,10 @@ const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime({
 const relayRegionalMarketStaleMs = Math.max(
   5_000,
   Number(process.env.RELAY_MARKET_REGION_STALE_MS) || 60_000,
+);
+const relayGlobalCatalogStaleMs = Math.max(
+  5_000,
+  Number(process.env.RELAY_GLOBAL_CATALOG_STALE_MS) || 60_000,
 );
 let relayProviderRefreshTimer = null;
 let relayProviderStarted = false;
@@ -7432,6 +7457,55 @@ function configuredRegionalMarketRegionIds(claimId) {
   );
 }
 
+function regionalMarketReadScope(claimId) {
+  const current = currentStateRepository.read(claimId, "regional-market");
+  const persistedActiveRegionIds = Array.isArray(current?.data?.activeRegionIds)
+    ? current.data.activeRegionIds.map(String)
+    : [];
+  const runtimeActiveRegionIds = relayRegionalMarketRuntime.health().activeRegionIds;
+  const configuredActiveRegionIds = configuredRegionalMarketRegionIds(claimId);
+  const allowedRegionIds = configuredActiveRegionIds.length
+    ? configuredActiveRegionIds
+    : runtimeActiveRegionIds.length
+      ? runtimeActiveRegionIds
+      : persistedActiveRegionIds;
+  return { current, allowedRegionIds };
+}
+
+function regionalMarketResponseStatus(current, regionId, allowedRegionIds) {
+  const orderStatus = regionalMarketStatus(current, {
+    regionId,
+    allowedRegionIds,
+    runtimeHealth: relayRegionalMarketRuntime.health(),
+    staleAfterMs: relayRegionalMarketStaleMs,
+  });
+  return combinedMarketStatus(
+    orderStatus,
+    providerCatalogRepository.getSourceState(),
+    {
+      runtimeHealth: relayGlobalCatalogRuntime.health(),
+      staleAfterMs: relayGlobalCatalogStaleMs,
+    },
+  );
+}
+
+function currentGameDataGenerationEvent(claimId, domains) {
+  const snapshots = domains
+    .map((domain) => [domain, currentStateRepository.read(claimId, domain)])
+    .filter(([, snapshot]) => snapshot);
+  return {
+    generation: snapshots.reduce(
+      (generation, [, snapshot]) => Math.max(generation, Number(snapshot.generation ?? 0)),
+      0,
+    ),
+    generatedAt: snapshots.reduce((latest, [, snapshot]) => {
+      const receivedAt = String(snapshot.provenance?.receivedAt ?? "");
+      return receivedAt > latest ? receivedAt : latest;
+    }, "") || null,
+    changedDomains: snapshots.map(([domain]) => domain),
+  };
+}
+
 function activityHistory(claimId, limit = 500) {
   const eventLimit = Math.min(Math.max(Number(limit) || 500, 1), 2000);
   const events = db.prepare("SELECT * FROM activity_events WHERE claim_id = ? ORDER BY occurred_at DESC, id DESC LIMIT ?").all(claimId, eventLimit);
@@ -8658,6 +8732,43 @@ const server = createServer(async (req, res) => {
       gameDataProvider: gameDataProviderHealth(),
     });
     if (req.method === "GET" && url.pathname === "/api/local/collector-status") return send(res, 200, collectorStatusPayload());
+    if (req.method === "GET" && url.pathname === "/api/local/game-data/generation") {
+      const claimId = String(url.searchParams.get("claimId") ?? "").trim();
+      const domains = parseDomainKeys(url.searchParams.get("domains"));
+      if (!claimId) return send(res, 400, { error: "claimId is required." });
+      if (claimId !== currentClaimId()) return send(res, 403, { error: "Requested claim is not the configured monitored claim." });
+      if (!domains.length) return send(res, 400, { error: "At least one valid domain is required." });
+      return send(res, 200, currentGameDataGenerationEvent(claimId, domains));
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/game-data/events") {
+      const claimId = String(url.searchParams.get("claimId") ?? "").trim();
+      const domains = parseDomainKeys(url.searchParams.get("domains"));
+      if (!claimId) return send(res, 400, { error: "claimId is required." });
+      if (claimId !== currentClaimId()) return send(res, 403, { error: "Requested claim is not the configured monitored claim." });
+      if (!domains.length) return send(res, 400, { error: "At least one valid domain is required." });
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.flushHeaders?.();
+      const listener = {
+        claimId,
+        domains: new Set(domains),
+        response: res,
+      };
+      gameDataGenerationListeners.add(listener);
+      res.write(`data: ${JSON.stringify(currentGameDataGenerationEvent(claimId, domains))}\n\n`);
+      const heartbeat = setInterval(() => {
+        if (!res.destroyed) res.write(": keep-alive\n\n");
+      }, 15_000);
+      req.once("close", () => {
+        clearInterval(heartbeat);
+        gameDataGenerationListeners.delete(listener);
+      });
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/local/game-data") {
       const claimId = String(url.searchParams.get("claimId") ?? "").trim();
       const domains = parseDomainKeys(url.searchParams.get("domains"));
@@ -10252,17 +10363,7 @@ const server = createServer(async (req, res) => {
       if (regionId !== "all" && !/^\d+$/.test(regionId)) {
         return send(res, 400, { error: "Region id must be numeric or all" });
       }
-      const regionalMarket = currentStateRepository.read(claimId, "regional-market");
-      const persistedActiveRegionIds = Array.isArray(regionalMarket?.data?.activeRegionIds)
-        ? regionalMarket.data.activeRegionIds.map(String)
-        : [];
-      const runtimeActiveRegionIds = relayRegionalMarketRuntime.health().activeRegionIds;
-      const configuredActiveRegionIds = configuredRegionalMarketRegionIds(claimId);
-      const allowedRegionIds = configuredActiveRegionIds.length
-        ? configuredActiveRegionIds
-        : runtimeActiveRegionIds.length
-          ? runtimeActiveRegionIds
-          : persistedActiveRegionIds;
+      const { allowedRegionIds } = regionalMarketReadScope(claimId);
       if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
         return send(res, 403, { error: "Region is outside the configured active-region scope" });
       }
@@ -10275,6 +10376,120 @@ const server = createServer(async (req, res) => {
           allowedRegionIds,
         ),
       );
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/catalog") {
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const query = String(url.searchParams.get("q") ?? "").trim();
+      const catalogRows = providerCatalogRepository.findEntities(query);
+      return send(res, 200, {
+        ...regionalMarketCatalogView(
+          current?.data,
+          catalogRows,
+          {
+            ...Object.fromEntries(url.searchParams.entries()),
+            query,
+            regionId,
+            allowedRegionIds,
+          },
+        ),
+        ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      });
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/order-book") {
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const requestedItemType = String(url.searchParams.get("itemType") ?? "").trim().toLowerCase();
+      if (requestedItemType !== "item" && requestedItemType !== "cargo") {
+        return send(res, 400, { error: "Item type must be item or cargo" });
+      }
+      const itemId = String(url.searchParams.get("itemId") ?? "").trim();
+      if (!/^\d+$/.test(itemId)) {
+        return send(res, 400, { error: "Item id must be numeric" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const catalogKey = `${requestedItemType === "cargo" ? "cargo" : "items"}:${itemId}`;
+      return send(res, 200, {
+        ...regionalMarketOrderBookView(
+          current?.data,
+          providerCatalogRepository.getEntity(catalogKey),
+          {
+            itemType: requestedItemType,
+            itemId,
+            regionId,
+            allowedRegionIds,
+          },
+        ),
+        ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      });
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/price-history") {
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const requestedItemType = String(url.searchParams.get("itemType") ?? "").trim().toLowerCase();
+      if (requestedItemType !== "item" && requestedItemType !== "cargo") {
+        return send(res, 400, { error: "Item type must be item or cargo" });
+      }
+      const itemId = String(url.searchParams.get("itemId") ?? "").trim();
+      if (!/^\d+$/.test(itemId)) {
+        return send(res, 400, { error: "Item id must be numeric" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      return send(res, 200, {
+        coverage: "unavailable",
+        observedSince: null,
+        currentAsOf: current?.provenance?.receivedAt ?? null,
+        itemType: requestedItemType,
+        itemId,
+        regionId,
+        priceStats: {
+          avg24h: null,
+          avg7d: null,
+          avg30d: null,
+          allTimeHigh: null,
+          allTimeLow: null,
+          totalVolume: 0,
+          priceChange24h: null,
+        },
+        priceData: [],
+        recentTrades: [],
+        warnings: [
+          "Relay has not exposed an authoritative completed-trade signal for this market history.",
+        ],
+      });
     }
     if (req.method === "GET" && url.pathname === "/api/local/leaderboard") {
       const refresh = manualRefreshAccess(req, res);
