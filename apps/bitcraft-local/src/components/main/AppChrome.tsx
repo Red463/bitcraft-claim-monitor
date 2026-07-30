@@ -8,7 +8,7 @@ import { AsyncState } from "./AsyncState";
 
 /*
  * Shared chrome for the public app: page headers, loading/error states, the
- * BitJita warning banner, and the sidebar refresh status widget.
+ * live-data warning banner, and the sidebar refresh status widget.
  */
 
 export function Header({ title, children }: { title: string; children?: React.ReactNode }) {
@@ -53,7 +53,7 @@ export function ApiStatusBanner({ warnings, lastUpdated, diagnostics }: { warnin
   return (
     <section className="api-status-banner">
       <div className="api-status-main">
-        <AsyncState kind="stale" title="BitJita refresh issue" detail="Showing latest saved data. Some live details may be stale." compact />
+        <AsyncState kind="stale" title="Live game data refresh issue" detail="Showing latest saved data. Some live details may be stale." compact />
         <small className="api-status-meta">{lastUpdated ? `Last successful refresh: ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Waiting for a successful refresh."}</small>
       </div>
       <details className="api-status-details">
@@ -71,7 +71,7 @@ export function ApiStatusBanner({ warnings, lastUpdated, diagnostics }: { warnin
         </ul>
         <div className="api-status-log">
           {/* The diagnostic block is intentionally copyable so users can send
-              enough context to debug transient BitJita/API issues. */}
+              enough context to debug transient data-provider issues. */}
           <span>Copyable diagnostic context</span>
           <code>{diagnosticLog}</code>
         </div>
@@ -115,8 +115,8 @@ export function RefreshStatus({
       {collectors.length ? (
         <div className="refresh-breakdown" role="tooltip">
           {/* This hover panel reports server background collectors. It is
-              diagnostic only; public pages may still be reading live BitJita
-              data through the local proxy. */}
+              diagnostic only; page data can also come directly from a current
+              provider generation. */}
           <header>
             <strong>Collector status</strong>
             <span>{collectorStatus?.intervalMs ? `Server every ${Math.round(toNumber(collectorStatus.intervalMs) / 1000)}s` : "Server schedule"}</span>
@@ -143,8 +143,8 @@ export function ApiErrorState({ message }: { message: string }) {
     <section className="api-error-state">
       <AsyncState
         kind="error"
-        title="Unable to refresh BitJita data"
-        detail="BitJita may be having a temporary issue. The app will recover automatically when the next refresh succeeds."
+        title="Unable to refresh live game data"
+        detail="The data provider may be having a temporary issue. The app will recover automatically when the next refresh succeeds."
         action={<details>
           <summary>Technical detail</summary>
           <code>{message}</code>

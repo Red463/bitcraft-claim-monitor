@@ -5,6 +5,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Surface | Current source/owner | Relay target | Status |
 |---|---|---|---|
 | Dashboard claim summary | Provider-neutral local game-data route | Relay HTTP claim snapshot | in progress |
+| Shared refresh/error chrome | Provider-neutral live game-data status, stale-data warning, and automatic-recovery copy; never attributes a mixed migration page to BitJita | Current provider generation plus persisted last-good state | ready for soak |
 | Members roster | Provider-neutral local game-data route | Relay HTTP members snapshot | in progress |
 | Member activity, skills, professions, Leaderboard, and quests | Professions and Leaderboard consume normalized Relay citizen/player domains with no provider-specific browser helper or copy; quests join member-filtered `traveler_task_state` with typed descriptions in the continuously connected primary-region session | Relay HTTP citizen levels plus member-filtered regional player/task subscription | ready for soak |
 | Member equipment, buffs, Toolbelt, and housing | Members reads the live regional equipment/buff/preset domain; selected-member Toolbelt and housing use monitored-member-only Relay HTTP lookups with 15-second memory last-good caching and no SQL table | Proven member-filtered regional subscription, global equipment/tool/buff descriptions, and bounded Relay player inventory/housing | ready for soak |
