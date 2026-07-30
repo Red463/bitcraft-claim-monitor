@@ -106,6 +106,17 @@ locations, then follows only the resulting claim and owner IDs. The local
 route performs search, active-order filtering, pagination, and catalog
 enrichment on demand. No stall SQL table or scheduled stall collector exists.
 
+Deal Watch is also a live consumer of the generic `regional-market`
+generation. Every complete generation is evaluated immediately against the
+current typed regional sell-order median, and newly enabled watches trigger an
+immediate evaluation. The 30-minute scheduled job remains only as a
+reconciliation guard. `market_deal_watches` stays as user-owned configuration
+and `market_deal_alerts` stays as durable alert/delivery history; there is no
+current-listing or baseline cache table. Because Relay has not yet proved a
+completed-sale signal, the UI labels this baseline as a live median and never
+presents it as historical sales evidence. Expired per-region last-good data
+remains readable in market pages but cannot emit a new Deal Watch alert.
+
 Implementation is dependency-ordered:
 
 1. evidence, isolation, and traffic guardrails;

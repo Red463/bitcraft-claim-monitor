@@ -83,6 +83,28 @@ export function marketBrowseSearchUrl(options: {
   return `/api/local/market/catalog?${search}`;
 }
 
+export function marketDealWatchSearchUrl(options: {
+  claimId: string;
+  regionId: string;
+  query: string;
+}) {
+  const search = new URLSearchParams({
+    claimId: String(options.claimId).trim(),
+    regionId: String(options.regionId).trim(),
+    q: String(options.query).trim(),
+    availableOnly: "true",
+    hasSell: "true",
+    hasBuy: "false",
+    limit: "8",
+  });
+  return `/api/local/market/catalog?${search}`;
+}
+
+export function marketRegionScopeUrl(claimId: string) {
+  const search = new URLSearchParams({ claimId: String(claimId).trim() });
+  return `/api/local/market/regions?${search}`;
+}
+
 export function marketBrowseItemUrls(options: {
   itemType: MarketItemType;
   itemId: string | number;

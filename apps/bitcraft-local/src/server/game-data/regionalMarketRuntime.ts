@@ -50,6 +50,11 @@ type RuntimeDependencies = {
   applyTimeoutMs?: number;
   now?: () => number;
   scheduleRotation?: (callback: () => void, intervalMs: number) => () => void;
+  onSnapshotCommitted?: (input: {
+    claimId: string;
+    currentData: RegionalMarketCombinedData;
+    observedAt: string;
+  }) => Promise<void> | void;
 };
 
 type RegionalOrder = Record<string, unknown> & {
@@ -69,6 +74,21 @@ type RegionSnapshotState = {
   database: string;
   schemaFingerprint: string;
   receivedAt: string;
+};
+
+type RegionalMarketCombinedData = {
+  activeRegionIds: string[];
+  orders: RegionalOrder[];
+  stalls: RegionalStall[];
+  regions: Array<{
+    regionId: string;
+    count: number;
+    stallCount: number;
+    database: string;
+    schemaFingerprint: string;
+    receivedAt: string;
+    warnings: string[];
+  }>;
 };
 
 function decimalInteger(value: unknown, label: string): string {
@@ -113,6 +133,7 @@ export class RelayRegionalMarketRuntime {
   readonly #applyTimeoutMs: number;
   readonly #now: () => number;
   readonly #scheduleRotation: NonNullable<RuntimeDependencies["scheduleRotation"]>;
+  readonly #onSnapshotCommitted: RuntimeDependencies["onSnapshotCommitted"];
   readonly #regions = new Map<string, RegionSnapshotState>();
   readonly #activeSessionIds = new Map<string, number>();
   #pool: AdaptiveRegionSessionPool | null = null;
@@ -123,9 +144,11 @@ export class RelayRegionalMarketRuntime {
   #nextSessionId = 0;
   #rotationCursor = 0;
   #commitTail: Promise<void> = Promise.resolve();
+  #transitionTail: Promise<void> = Promise.resolve();
   #warmPromise: Promise<void> | null = null;
   #cancelRotation: (() => void) | null = null;
   #lastError: string | null = null;
+  #transitionLastError: string | null = null;
   #started = false;
 
   constructor(dependencies: RuntimeDependencies) {
@@ -151,6 +174,7 @@ export class RelayRegionalMarketRuntime {
       timer.unref?.();
       return () => clearInterval(timer);
     });
+    this.#onSnapshotCommitted = dependencies.onSnapshotCommitted;
   }
 
   #normalizeConfig(config: RuntimeConfig): RuntimeConfig {
@@ -400,18 +424,19 @@ export class RelayRegionalMarketRuntime {
         warnings: region.warnings,
       }] : [];
     });
+    const currentData: RegionalMarketCombinedData = {
+      activeRegionIds: [...this.#activeRegionIds],
+      orders: combinedOrders,
+      stalls: combinedStalls,
+      regions,
+    };
     try {
       await this.#currentStateRepository.commitGeneration({
         claimId,
         generation: this.#currentStateRepository.nextGeneration(claimId),
         domains: {
           "regional-market": {
-            data: {
-              activeRegionIds: [...this.#activeRegionIds],
-              orders: combinedOrders,
-              stalls: combinedStalls,
-              regions,
-            },
+            data: currentData,
             confidence: warnings.length ? "partial" : "authoritative",
             provenance: {
               provider: "relay",
@@ -428,10 +453,30 @@ export class RelayRegionalMarketRuntime {
       });
       this.#regions.set(snapshot.regionId, nextRegion);
       this.#lastError = null;
+      this.#enqueueTransition({
+        claimId,
+        currentData,
+        observedAt: snapshot.receivedAt,
+      });
     } catch (error) {
       this.#lastError = error instanceof Error ? error.message : String(error);
       throw error;
     }
+  }
+
+  #enqueueTransition(input: {
+    claimId: string;
+    currentData: RegionalMarketCombinedData;
+    observedAt: string;
+  }): void {
+    if (!this.#onSnapshotCommitted) return;
+    const transition = this.#transitionTail.then(async () => {
+      await this.#onSnapshotCommitted?.(input);
+      this.#transitionLastError = null;
+    });
+    this.#transitionTail = transition.catch((error) => {
+      this.#transitionLastError = error instanceof Error ? error.message : String(error);
+    });
   }
 
   #hydrateLastGood(): void {
@@ -471,6 +516,9 @@ export class RelayRegionalMarketRuntime {
       activeRegionIds: [...this.#activeRegionIds],
       loadedRegionIds: [...this.#regions.keys()].sort(numericStringOrder),
       lastError: this.#lastError,
+      transition: {
+        lastError: this.#transitionLastError,
+      },
       pool: this.#pool?.health() ?? null,
     };
   }
@@ -485,6 +533,7 @@ export class RelayRegionalMarketRuntime {
     this.#pool = null;
     this.#activeSessionIds.clear();
     await this.#commitTail;
+    await this.#transitionTail;
     this.#relayBaseUrl = null;
     this.#claimId = null;
     this.#primaryRegionId = null;

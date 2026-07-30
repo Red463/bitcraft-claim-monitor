@@ -39,7 +39,7 @@ export type UserAuthState = {
 export type MarketDealWatchSettings = {
   maxWatchesPerUser: number;
   thresholdPercent: number;
-  minConfirmedSales: number;
+  minActiveListings: number;
   discordDmEnabled: boolean;
 };
 export type ColourRoleDefinition = { key: string; label: string; roleName: string; roleId: string; color: number };

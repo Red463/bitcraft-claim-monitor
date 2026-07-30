@@ -1703,7 +1703,7 @@ export function AdminPanel({
             </div>
             <div className="form-card nested-card">
               <h3><ShoppingCart size={17} /> Market Deal Watch</h3>
-              <p className="legend">Discord-signed-in users can watch Price Finder items. A scheduled job checks regional sell listings and alerts when prices are below confirmed sale averages.</p>
+              <p className="legend">Discord-signed-in users can watch live regional sell orders. Every committed Relay generation is checked immediately; the scheduled job is reconciliation only.</p>
               <div className="configuration-timing-grid compact-grid">
                 <label className="field unit-field">
                   <span>Max watches per user</span>
@@ -1711,11 +1711,11 @@ export function AdminPanel({
                 </label>
                 <label className="field unit-field">
                   <span>Default deal threshold</span>
-                  <div className="unit-input"><input type="number" min={1} max={95} value={draft.marketDealWatch.thresholdPercent} onChange={(event) => updateMarketDealWatchSetting({ thresholdPercent: Number(event.target.value) })} /><em>% below average</em></div>
+                  <div className="unit-input"><input type="number" min={1} max={95} value={draft.marketDealWatch.thresholdPercent} onChange={(event) => updateMarketDealWatchSetting({ thresholdPercent: Number(event.target.value) })} /><em>% below median</em></div>
                 </label>
                 <label className="field unit-field">
-                  <span>Minimum confirmed sales</span>
-                  <div className="unit-input"><input type="number" min={1} max={100} value={draft.marketDealWatch.minConfirmedSales} onChange={(event) => updateMarketDealWatchSetting({ minConfirmedSales: Number(event.target.value) })} /><em>sales</em></div>
+                  <span>Minimum active sell listings</span>
+                  <div className="unit-input"><input type="number" min={1} max={100} value={draft.marketDealWatch.minActiveListings} onChange={(event) => updateMarketDealWatchSetting({ minActiveListings: Number(event.target.value) })} /><em>listings</em></div>
                 </label>
               </div>
               <label className="toggle-line">

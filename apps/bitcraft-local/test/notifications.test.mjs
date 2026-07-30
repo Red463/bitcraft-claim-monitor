@@ -352,6 +352,40 @@ test("dealAlertToastDraft builds market deal notices with source keys and item m
     soundType: "dealAlerts",
   });
 });
+
+test("dealAlertToastDraft labels live Relay median baselines", () => {
+  const draft = dealAlertToastDraft({
+    id: 9,
+    itemName: "Slow Silk",
+    unitPrice: 60,
+    marketClaimName: "Timbersteel Trade",
+    discountPercent: 40,
+    baselineAverage: 100,
+    baselineKind: "current-sell-median",
+    sampleCount: 3,
+    createdAt: "2026-07-30T12:00:00.000Z",
+  });
+
+  assert.equal(
+    draft.body,
+    "Slow Silk: 60g at Timbersteel Trade (40% below 100g live median from 3 listings)",
+  );
+
+  const exactDraft = dealAlertToastDraft({
+    id: 10,
+    itemName: "Exact Cargo",
+    unitPrice: "90071992547409931",
+    marketClaimName: "Timbersteel Trade",
+    discountPercent: 10,
+    baselineAverage: "90071992547409999",
+    baselineKind: "current-sell-median",
+    sampleCount: 4,
+  });
+  assert.equal(
+    exactDraft.body,
+    "Exact Cargo: 90,071,992,547,409,931g at Timbersteel Trade (10% below 90,071,992,547,409,999g live median from 4 listings)",
+  );
+});
 test("productionActivityToastDraft formats production activity with crafter, building, and event time", () => {
   const helpers = {
     summary: (event) => event.summary,

@@ -1,21 +1,25 @@
 import React from "react";
-import { Bell, Search, X } from "lucide-react";
+import { Bell, X } from "lucide-react";
 
 import { RarityBadge, TierBadge } from "../../components/main/Badges";
 import { ItemIcon, ItemLabel } from "../../components/main/ItemDisplay";
 import { toNumber, type AnyRecord } from "../../main-app-data";
 import { formatNumber, timeAgo } from "../../utils/format";
-import { activeRegionLabel, useActiveRegions } from "../../hooks/useActiveRegions";
+import { activeRegionLabel, type ActiveRegion } from "../../hooks/useActiveRegions";
+import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
 import { usePersistedState } from "../../hooks/usePersistedState";
-import { isMarketableItem } from "../../utils/items";
 import { unique } from "../../utils/array";
 import type { LoadState } from "../../types/app";
-import type { MarketRefreshProps } from "./globalMarket";
+import { marketDealWatchSearchUrl, marketRegionScopeUrl, type MarketRefreshProps } from "./globalMarket";
 
-const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 
-export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeaders, trackRefresh, onDiscordLogin }: MarketRefreshProps & {
+function numericItemType(value: unknown): number {
+  return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo" ? 1 : 0;
+}
+
+export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, refreshHeaders, trackRefresh, onDiscordLogin }: MarketRefreshProps & {
+  claimId: string;
   monitoredRegionId: string;
   onDiscordLogin: (returnTo?: string) => void;
 }) {
@@ -25,17 +29,46 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
   const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
   const [regionChoice, setRegionChoice] = usePersistedState("market.dealWatch.region", defaultRegion);
-  const activeRegions = useActiveRegions();
+  const [activeRegions, setActiveRegions] = React.useState<ActiveRegion[]>([]);
   const [authState, setAuthState] = React.useState<AnyRecord>({ user: null, discordLoginEnabled: false });
   const [watchState, setWatchState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
   const [watchBusy, setWatchBusy] = React.useState("");
   const [thresholdDraft, setThresholdDraft] = React.useState("30");
+  const generationSequence = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
   const activeRegionIds = React.useMemo(() => new Set(activeRegions.map((region) => String(region.regionId))), [activeRegions]);
   const activeRegion = activeRegionIds.has(regionChoice)
     ? regionChoice
     : activeRegionIds.has(defaultRegion)
       ? defaultRegion
       : String(activeRegions[0]?.regionId ?? "");
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    trackRefresh("global-market-watch-regions", fetch(marketRegionScopeUrl(claimId), {
+      headers: refreshHeaders,
+      signal: controller.signal,
+    }))
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market regions HTTP ${response.status}`)))
+      .then((payload) => {
+        const regions = (Array.isArray(payload.regions) ? payload.regions : [])
+          .map((region: AnyRecord) => ({
+            ...region,
+            regionId: String(region.regionId ?? ""),
+          }))
+          .filter((region: ActiveRegion) => /^\d+$/.test(region.regionId));
+        setActiveRegions(regions);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setActiveRegions((current) => current.length
+            ? current
+            : /^\d+$/.test(defaultRegion)
+              ? [{ regionId: defaultRegion, regionName: `Region ${defaultRegion}`, source: "fallback" }]
+              : []);
+        }
+      });
+    return () => controller.abort();
+  }, [claimId, defaultRegion, generationSequence, refreshSequence]);
 
   React.useEffect(() => {
     if (activeRegion && regionChoice !== activeRegion) setRegionChoice(activeRegion);
@@ -48,7 +81,13 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
       .then((response) => response.status === 401 ? { watches: [], settings: null, signedOut: true } : response.ok ? response.json() : Promise.reject(new Error(`deal watches HTTP ${response.status}`)))
       .then((payload) => setWatchState({ data: payload, error: null, loading: false }))
       .catch((error) => {
-        if (!controller.signal.aborted) setWatchState({ data: null, error: error instanceof Error ? error.message : String(error), loading: false });
+        if (!controller.signal.aborted) {
+          setWatchState((current) => ({
+            ...current,
+            error: error instanceof Error ? error.message : String(error),
+            loading: false,
+          }));
+        }
       });
     return () => controller.abort();
   }, [refreshSequence]);
@@ -80,11 +119,14 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setSearchState("loading");
-      trackRefresh("global-market-watch-search", fetch(`${API}/market?hasOrders=true`, { headers: refreshHeaders, signal: controller.signal }))
+      trackRefresh("global-market-watch-search", fetch(marketDealWatchSearchUrl({
+        claimId,
+        regionId: activeRegion,
+        query,
+      }), { headers: refreshHeaders, signal: controller.signal }))
         .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
         .then((payload) => {
-          const queryToken = query.trim().toLowerCase();
-          setSuggestions((payload.data?.items ?? []).filter(isMarketableItem).filter((item: AnyRecord) => String(item.name ?? item.itemName ?? "").toLowerCase().includes(queryToken)).slice(0, 8));
+          setSuggestions((Array.isArray(payload.items) ? payload.items : []).slice(0, 8));
           setSearchState("idle");
         })
         .catch(() => {
@@ -98,7 +140,7 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [query, refreshSequence, selectedItem?.name]);
+  }, [activeRegion, claimId, generationSequence, query, refreshSequence, selectedItem?.name]);
 
   function chooseItem(item: AnyRecord) {
     setSelectedItem(item);
@@ -116,7 +158,7 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
         body: JSON.stringify({
           regionId: activeRegion,
           itemId: selectedItem.id,
-          itemType: toNumber(selectedItem.itemType),
+          itemType: numericItemType(selectedItem.itemType),
           itemName: selectedItem.name,
           tier: selectedItem.tier ?? selectedItem.itemTier,
           rarity: selectedItem.rarityStr ?? selectedItem.rarity ?? selectedItem.itemRarityStr,
@@ -194,7 +236,7 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
     ...activeRegions.map((region) => String(region.regionId ?? "")).filter(Boolean),
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b));
   const duplicateWatch = selectedItem
-    ? dealWatches.find((watch) => String(watch.regionId) === String(activeRegion) && String(watch.itemId) === String(selectedItem.id) && toNumber(watch.itemType) === toNumber(selectedItem.itemType))
+    ? dealWatches.find((watch) => String(watch.regionId) === String(activeRegion) && String(watch.itemId) === String(selectedItem.id) && numericItemType(watch.itemType) === numericItemType(selectedItem.itemType))
     : null;
 
   return (
@@ -232,7 +274,7 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
           </label>
           <label className="research-filter-field deal-watch-add-threshold">
             <span>Alert threshold</span>
-            <div className="unit-input"><input type="number" min={1} max={95} step={1} value={thresholdDraft} onChange={(event) => setThresholdDraft(event.target.value)} /><em>% below average</em></div>
+            <div className="unit-input"><input type="number" min={1} max={95} step={1} value={thresholdDraft} onChange={(event) => setThresholdDraft(event.target.value)} /><em>% below live median</em></div>
           </label>
         </div>
         {!authState.user ? (
@@ -259,7 +301,7 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
                 <ItemLabel item={{ ...watch, name: watch.itemName, tier: watch.tier, rarity: watch.rarity, iconAssetName: watch.iconAssetName }} name={String(watch.itemName ?? "Unknown item")} />
                 <div className="deal-watch-meta">
                   <div className="deal-watch-fact"><span>Region</span><strong>R{watch.regionId}</strong></div>
-                  <label className="deal-watch-fact deal-watch-threshold"><span>Alert below average</span><span><input type="number" min={1} max={95} step={1} key={String(watch.thresholdPercent)} defaultValue={Math.round(toNumber(watch.thresholdPercent) || 30)} disabled={watchBusy === String(watch.id)} onBlur={(event) => saveDealWatchThreshold(watch, event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><em>%</em></span></label>
+                  <label className="deal-watch-fact deal-watch-threshold"><span>Alert below live median</span><span><input type="number" min={1} max={95} step={1} key={String(watch.thresholdPercent)} defaultValue={Math.round(toNumber(watch.thresholdPercent) || 30)} disabled={watchBusy === String(watch.id)} onBlur={(event) => saveDealWatchThreshold(watch, event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><em>%</em></span></label>
                   <div className="deal-watch-fact"><span>Last checked</span><strong>{watch.lastCheckedAt ? timeAgo(watch.lastCheckedAt) : "Not yet"}</strong></div>
                   <div className="deal-watch-fact"><span>Last alert</span><strong>{watch.lastAlertAt ? timeAgo(watch.lastAlertAt) : "None"}</strong></div>
                 </div>

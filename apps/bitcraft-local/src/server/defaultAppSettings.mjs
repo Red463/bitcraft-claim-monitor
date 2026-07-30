@@ -28,7 +28,7 @@ export function defaultAppSettingRows({ serverRefreshSeconds, updatedAt }) {
     settingRow("default_page", "dashboard", updatedAt),
     settingRow("default_region", "", updatedAt),
     settingRow("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), updatedAt),
-    settingRow("market_deal_watch_json", JSON.stringify({ maxWatchesPerUser: 10, thresholdPercent: 30, minConfirmedSales: 3, discordDmEnabled: true }), updatedAt),
+    settingRow("market_deal_watch_json", JSON.stringify({ maxWatchesPerUser: 10, thresholdPercent: 30, minActiveListings: 3, discordDmEnabled: true }), updatedAt),
     settingRow("branding_json", JSON.stringify({}), updatedAt),
     settingRow("app_popups_json", JSON.stringify({ popups: [] }), updatedAt),
     settingRow("visitor_security_json", JSON.stringify({ fullIpRetentionDays: 7, statsRetentionDays: 180, geoipProvider: "ipapi", geoipCacheDays: 30, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "" }), updatedAt),

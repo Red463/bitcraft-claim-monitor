@@ -526,3 +526,31 @@ marked ready for soak.
 - complete global-versus-regional empire comparison;
 - bounded claim-location joins for every required layout entity class;
 - multi-region Hexite reserve aggregation.
+
+## Deal Watch live-order baseline
+
+Deal Watch no longer depends on the BitJita regional claim crawl or price
+history endpoint. Its available authoritative input is the current typed
+regional sell-order generation. For each exact `(region, itemType, itemId)`
+key, the app calculates the median unit price from active listings and requires
+the configured minimum sample count. A listing is an opportunity only when its
+exact decimal-string price is below the configured percentage threshold.
+
+This is deliberately named `current-sell-median`, not a sale average. Alert
+evidence records the generation observation time, sample count, exact median,
+and exact listing values. Even-sized samples retain an exact half-unit median
+instead of rounding toward a false threshold. The existing watch and alert tables remain because
+they own user configuration, deduplication, acknowledgement, and delivery
+history; no current market data is copied into a Deal Watch-specific table.
+Per-region `receivedAt` is checked against the regional-market stale budget,
+so an expired last-good order book can still render with stale labelling but
+cannot create a new notification.
+
+Deal Watch region choices and server-side watch validation read only the
+configured local `regional-market` scope. They do not call the legacy active
+region endpoint or its BitJita-backed status helpers.
+
+The runtime callback and unit/integration fixtures prove event-driven
+evaluation and zero price-history requests. A fresh production-session apply
+proof remains pending because region 19 readiness continued to flap during the
+2026-07-30 verifier attempts; last-good behavior remains the safe fallback.

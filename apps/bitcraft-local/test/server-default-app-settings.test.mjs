@@ -55,7 +55,7 @@ test("defaultAppSettingRows preserves JSON defaults used by admin and notificati
   assert.deepEqual(JSON.parse(rows.market_deal_watch_json), {
     maxWatchesPerUser: 10,
     thresholdPercent: 30,
-    minConfirmedSales: 3,
+    minActiveListings: 3,
     discordDmEnabled: true,
   });
   assert.deepEqual(JSON.parse(rows.app_popups_json), { popups: [] });

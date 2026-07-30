@@ -143,9 +143,9 @@ export function Market({
       {currentView === "browse" ? <MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
       {currentView === "deals" ? <MarketDeals {...marketRefresh} claimId={claimId} sharedRegionId={regionId} activeRegions={activeRegions} /> : null}
       {currentView === "buy-orders" ? <MarketBrowse {...marketRefresh} claimId={claimId} mode="buy" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
-      {currentView === "deal-watch" ? <DealWatchlist {...marketRefresh} monitoredRegionId={regionId || fallbackRegionId} onDiscordLogin={onDiscordLogin} /> : null}
+      {currentView === "deal-watch" ? <DealWatchlist {...marketRefresh} claimId={claimId} monitoredRegionId={regionId || fallbackRegionId} onDiscordLogin={onDiscordLogin} /> : null}
       {currentView === "stalls" ? <MarketStalls {...marketRefresh} claimId={claimId} regionId={regionId} onShowMap={onShowMap} /> : null}
-      <footer className="global-market-source"><CircleDollarSign size={14} /><span>Browse, order books, Overview, Deals, and Barter Stalls use live Relay data. Deal Watch remains on its legacy source while its Relay replacement is completed.</span></footer>
+      <footer className="global-market-source"><CircleDollarSign size={14} /><span>Browse, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data. Completed-sale history remains unavailable until an authoritative Relay trade signal is proven.</span></footer>
     </div>
   );
 }

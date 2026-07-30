@@ -65,6 +65,7 @@ test("regional market runtime merges configured regions into one durable live do
   assert.equal(DOMAIN_KEYS.includes("regional-market"), true);
   const handlers = new Map();
   const writes = [];
+  const committedSnapshots = [];
   const runtime = new runtimeModule.RelayRegionalMarketRuntime({
     manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
     discoverTopology: async () => topology(),
@@ -84,6 +85,7 @@ test("regional market runtime merges configured regions into one durable live do
       nextGeneration: () => writes.length + 1,
       commitGeneration: (batch) => writes.push(batch),
     },
+    onSnapshotCommitted: (snapshot) => committedSnapshots.push(snapshot),
     poolOptions: {
       maxSessions: 2,
       staggerMs: 0,
@@ -132,6 +134,7 @@ test("regional market runtime merges configured regions into one durable live do
     generation: 1,
     receivedAt: "2026-07-30T12:02:00.000Z",
   });
+  await Promise.resolve();
   assert.deepEqual(
     writes[1].domains["regional-market"].data.orders.map((row) => row.entityId),
     ["70", "190"],
@@ -148,6 +151,22 @@ test("regional market runtime merges configured regions into one durable live do
   assert.deepEqual(
     writes[1].domains["regional-market"].data.regions.map((row) => [row.regionId, row.count]),
     [["7", 1], ["19", 1]],
+  );
+  assert.deepEqual(
+    committedSnapshots.map((entry) => ({
+      claimId: entry.claimId,
+      orderIds: entry.currentData.orders.map((row) => row.entityId),
+      observedAt: entry.observedAt,
+    })),
+    [{
+      claimId: "1369094286777412590",
+      orderIds: ["190"],
+      observedAt: "2026-07-30T12:01:00.000Z",
+    }, {
+      claimId: "1369094286777412590",
+      orderIds: ["70", "190"],
+      observedAt: "2026-07-30T12:02:00.000Z",
+    }],
   );
   await runtime.stop();
 });

@@ -131,7 +131,8 @@ test("Browse invalidates on regional-market generation events and keeps history 
 test("Market source copy identifies every migrated live Relay workspace", () => {
   const marketPage = source("../src/pages/MarketPage.tsx");
 
-  assert.match(marketPage, /Browse, order books, Overview, Deals, and Barter Stalls use live Relay data/);
+  assert.match(marketPage, /Browse, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data/);
+  assert.doesNotMatch(marketPage, /Deal Watch remains on its legacy source/);
   assert.doesNotMatch(marketPage, /Live market data is provided by BitJita/);
 });
 

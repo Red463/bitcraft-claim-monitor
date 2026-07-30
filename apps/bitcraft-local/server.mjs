@@ -47,6 +47,7 @@ import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDisco
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector, payloadDomainsForCollectors } from "./src/server/collectorSettings.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
+import { evaluateLiveDealWatches, sameEnabledDealWatchRevision } from "./src/server/liveDealWatch.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess, resetLegacyMarketAccessRules } from "./src/access/accessControl.mjs";
 import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, createCraftPlanResponseWorkspace, craftPlanAuditDetails, craftPlanAuditLimit, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanAuditRows, normalizeCraftPlanConfig, recipesForTarget as catalogRecipesForTarget, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
@@ -466,6 +467,13 @@ const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
 const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
+  onSnapshotCommitted: ({ claimId, currentData, observedAt }) => {
+    void queueMarketDealWatchEvaluation({
+      claimId,
+      snapshot: currentData,
+      observedAt,
+    }).catch(() => {});
+  },
   rotationMs: Math.max(1_000, Number(process.env.RELAY_MARKET_REGION_ROTATION_MS ?? 15_000)),
   poolOptions: {
     maxSessions: Math.max(1, Number(process.env.RELAY_MARKET_REGION_MAX_SESSIONS ?? 4)),
@@ -678,10 +686,10 @@ const scheduledJobRegistry = {
   },
   market_deal_watch: {
     label: "Market deal watch",
-    description: "Checks watched Price Finder items for sell listings below confirmed regional sale averages.",
+    description: "Reconciles enabled watches against the current Relay sell-order generation; live generations trigger checks immediately.",
     schedule: "interval@1800",
     enabled: true,
-    run: runMarketDealWatchJob,
+    run: queueMarketDealWatchEvaluation,
   },
   empire_hexite_reserves_refresh: {
     label: "Empire Hexite reserves",
@@ -5694,207 +5702,191 @@ function dealWatchRow(row) {
   };
 }
 
-function normalizeRegionalSellListing(listing, regionId, regionName, fallbackClaim = {}) {
-  const base = normalizeListing(listing);
-  const marketClaimId = String(listing.claimEntityId ?? listing.claimId ?? fallbackClaim.entityId ?? fallbackClaim.claimId ?? "").trim();
-  const itemTypeRaw = listing.itemType ?? listing.item_type ?? base.itemType ?? 0;
-  const itemType = String(itemTypeRaw === "cargo" ? 1 : itemTypeRaw === "item" ? 0 : itemTypeRaw ?? 0);
-  return {
-    listingKey: base.key,
-    regionId: String(listing.regionId ?? regionId ?? "").trim(),
-    regionName: String(listing.regionName ?? regionName ?? ""),
-    marketClaimId,
-    marketClaimName: String(listing.claimName ?? listing.claim?.name ?? fallbackClaim.name ?? fallbackClaim.claimName ?? "Unknown settlement"),
-    sellerName: String(listing.ownerUsername ?? listing.ownerName ?? listing.owner ?? "Unknown seller"),
-    itemId: String(listing.itemId ?? listing.item_id ?? base.itemId ?? "").trim(),
-    itemType,
-    itemName: base.itemName,
-    tier: base.tier,
-    rarity: base.rarity,
-    iconAssetName: listing.iconAssetName ?? null,
-    quantity: base.quantity,
-    unitPrice: base.price,
-    totalValue: base.totalValue,
-    listedAt: base.listedAt,
-    raw: listing,
-  };
+function currentDealWatchStillEligible(watch) {
+  const latest = statements.dealWatchByIdForUser.get(watch.id, watch.user_id);
+  return sameEnabledDealWatchRevision(watch, latest);
 }
 
-function priceHistoryWindowAverage(payload, windowDays, minSales) {
-  const buckets = unwrap(payload, "buckets", []);
-  const stats = payload?.priceStats && typeof payload.priceStats === "object" ? payload.priceStats : {};
-  const statsAverage = toNumber(windowDays === 7 ? stats.avg7d : stats.avg30d);
-  const statsSales = toNumber(stats.totalTrades ?? stats.salesCount ?? stats.tradeCount);
-  if (statsAverage > 0 && statsSales >= minSales) {
-    return { averageUnitPrice: statsAverage, salesCount: statsSales, windowDays, raw: { source: `priceStats.avg${windowDays}d`, priceStats: stats } };
-  }
-  const relevantBuckets = windowDays === 7 ? buckets.slice(-7) : buckets.slice(-30);
-  let salesCount = 0;
-  let unitsSold = 0;
-  let totalValue = 0;
-  for (const bucket of relevantBuckets) {
-    const totals = priceHistoryBucketTotals(bucket);
-    salesCount += totals.salesCount;
-    unitsSold += totals.unitsSold;
-    totalValue += totals.totalValue;
-  }
-  if (salesCount < minSales || unitsSold <= 0 || totalValue <= 0) return null;
-  return {
-    averageUnitPrice: totalValue / unitsSold,
-    salesCount,
-    unitsSold,
-    totalValue,
-    windowDays,
-    firstBucketAt: relevantBuckets[0]?.bucket ?? relevantBuckets[0]?.date ?? relevantBuckets[0]?.start ?? null,
-    lastBucketAt: relevantBuckets.at(-1)?.bucket ?? relevantBuckets.at(-1)?.date ?? relevantBuckets.at(-1)?.start ?? null,
-    raw: { source: "bucketTotals", bucketCount: relevantBuckets.length, priceStats: stats },
-  };
+let pendingMarketDealWatchEvaluation = null;
+let marketDealWatchEvaluationDrain = null;
+
+function queueMarketDealWatchEvaluation(input = {}) {
+  pendingMarketDealWatchEvaluation = pendingMarketDealWatchEvaluation
+    ? {
+        ...pendingMarketDealWatchEvaluation,
+        ...input,
+        jobKey: input.jobKey ?? pendingMarketDealWatchEvaluation.jobKey,
+      }
+    : input;
+  if (marketDealWatchEvaluationDrain) return marketDealWatchEvaluationDrain;
+  marketDealWatchEvaluationDrain = (async () => {
+    let result = null;
+    while (pendingMarketDealWatchEvaluation) {
+      const next = pendingMarketDealWatchEvaluation;
+      pendingMarketDealWatchEvaluation = null;
+      result = await runMarketDealWatchJob(next);
+    }
+    return result;
+  })().catch((error) => {
+    console.warn("[deal-watch] Live Relay evaluation failed:", errorMessage(error));
+    throw error;
+  }).finally(() => {
+    marketDealWatchEvaluationDrain = null;
+    if (pendingMarketDealWatchEvaluation) {
+      void queueMarketDealWatchEvaluation().catch(() => {});
+    }
+  });
+  return marketDealWatchEvaluationDrain;
 }
 
-async function dealBaselineForItem(regionId, itemId, itemType, minSales) {
-  const historyKind = marketPriceHistoryKind(itemType);
-  const payload = await fetchBitjita(`/market/${historyKind}/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=30&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: 10000 });
-  return priceHistoryWindowAverage(payload, 7, minSales) ?? priceHistoryWindowAverage(payload, 30, minSales);
-}
-
-async function runMarketDealWatchJob({ jobKey } = {}) {
+async function runMarketDealWatchJob({ jobKey, claimId: requestedClaimId, snapshot, observedAt } = {}) {
   const settings = getSettings();
   const dealSettings = settings.marketDealWatch ?? marketDealWatchSettings();
-  const watches = statements.listEnabledDealWatches.all();
-  if (!watches.length) return { checked: 0, alerts: 0, regions: 0, reason: "No enabled deal watches" };
-  const byRegion = new Map();
-  for (const watch of watches) {
-    const key = `${watch.claim_id}:${watch.region_id}`;
-    if (!byRegion.has(key)) byRegion.set(key, []);
-    byRegion.get(key).push(watch);
+  const activeClaimId = currentClaimId();
+  const claimId = String(requestedClaimId ?? activeClaimId);
+  if (claimId !== activeClaimId) {
+    return {
+      checked: 0,
+      alerts: 0,
+      regions: 0,
+      reason: `Ignored superseded claim generation ${claimId}`,
+    };
   }
+  const watches = statements.listEnabledDealWatches.all()
+    .filter((watch) => String(watch.claim_id) === claimId);
+  if (!watches.length) return { checked: 0, alerts: 0, regions: 0, reason: "No enabled deal watches" };
+  const stored = snapshot == null
+    ? currentStateRepository.read(claimId, "regional-market")
+    : null;
+  const currentData = snapshot ?? stored?.data;
+  const currentObservedAt = String(
+    observedAt
+      ?? stored?.provenance?.receivedAt
+      ?? new Date().toISOString(),
+  );
+  if (!currentData || typeof currentData !== "object" || Array.isArray(currentData)) {
+    const message = "Live Relay regional market has not loaded yet";
+    const now = new Date().toISOString();
+    for (const watch of watches) {
+      statements.updateDealWatchChecked.run(now, null, null, message, now, watch.id);
+    }
+    return {
+      checked: watches.length,
+      alerts: 0,
+      regions: new Set(watches.map((watch) => String(watch.region_id))).size,
+      failures: [message],
+    };
+  }
+  if (jobKey) {
+    updateScheduledJobProgress(jobKey, {
+      step: "Reconciling live Relay order generation",
+      checked: 0,
+      alerts: 0,
+    });
+  }
+  const evaluated = evaluateLiveDealWatches(currentData, watches, {
+    minActiveListings: dealSettings.minActiveListings,
+    maxRegionAgeMs: relayRegionalMarketStaleMs,
+    observedAt: currentObservedAt,
+  });
+  const watchesById = new Map(watches.map((watch) => [String(watch.id), watch]));
   const now = new Date().toISOString();
-  let checked = 0;
-  let alerts = 0;
   const failures = [];
-  for (const [groupKey, groupWatches] of byRegion.entries()) {
-    const [, regionId] = groupKey.split(":");
-    if (jobKey) updateScheduledJobProgress(jobKey, { step: `Loading R${regionId} markets`, regionId, checked, alerts });
-    let claimPayload;
-    try {
-      claimPayload = await fetchRegionClaimList(regionId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      failures.push(`R${regionId}: ${message}`);
-      for (const watch of groupWatches) statements.updateDealWatchChecked.run(now, null, null, message, now, watch.id);
+  for (const check of evaluated.checks) {
+    const watch = watchesById.get(String(check.watchId));
+    if (!watch) continue;
+    if (!check.baseline) failures.push(`${watch.item_name}: ${check.error}`);
+    statements.updateDealWatchChecked.run(
+      now,
+      check.baseline ? 0 : null,
+      check.baseline?.unitPrice ?? null,
+      check.error,
+      now,
+      watch.id,
+    );
+  }
+  let alerts = 0;
+  for (const opportunity of evaluated.opportunities) {
+    const watch = watchesById.get(String(opportunity.watchId));
+    if (!watch) continue;
+    if (!currentDealWatchStillEligible(watch)) {
+      void queueMarketDealWatchEvaluation().catch(() => {});
       continue;
     }
-    const claims = unwrap(claimPayload, "claims", []);
-    const regionName = claims.find((claim) => claim.regionName)?.regionName ?? `R${regionId}`;
-    const watchedKeys = new Set(groupWatches.map((watch) => `${watch.item_type}:${watch.item_id}`));
-    let completedClaims = 0;
-    const listingPages = await mapWithConcurrency(claims, 3, async (claim) => {
-      const marketClaimId = String(claim.entityId ?? claim.claimId ?? "").trim();
-      if (!marketClaimId) return [];
-      try {
-        const payload = await fetchAllClaimListings(marketClaimId, { side: "sell" });
-        completedClaims += 1;
-        if (jobKey) updateScheduledJobProgress(jobKey, { step: `Scanning R${regionId} markets`, regionId, current: completedClaims, total: claims.length, checked, alerts });
-        return unwrap(payload, "listings", [])
-          .map((listing) => normalizeRegionalSellListing(listing, regionId, regionName, claim))
-          .filter((listing) => watchedKeys.has(`${listing.itemType}:${listing.itemId}`));
-      } catch (error) {
-        failures.push(`${claim.name ?? marketClaimId}: ${error instanceof Error ? error.message : String(error)}`);
-        completedClaims += 1;
-        return [];
-      }
+    const createdAt = new Date().toISOString();
+    const rawJson = JSON.stringify({
+      listing: opportunity.raw,
+      baseline: opportunity.baseline,
     });
-    const listings = listingPages.flat();
-    const baselineCache = new Map();
-    for (const watch of groupWatches) {
-      checked += 1;
-      const baselineKey = `${watch.region_id}:${watch.item_type}:${watch.item_id}`;
-      let baseline = baselineCache.get(baselineKey);
+    const result = statements.insertDealAlert.run(
+      watch.id, watch.user_id, watch.discord_id, watch.claim_id, watch.region_id, watch.item_id, watch.item_type, watch.item_name,
+      watch.tier, watch.rarity, watch.icon_asset_name,
+      opportunity.listingKey, opportunity.marketClaimId, opportunity.marketClaimName, opportunity.sellerName,
+      opportunity.quantity, opportunity.unitPrice, opportunity.totalValue,
+      0, opportunity.baseline.unitPrice, opportunity.baseline.sampleCount,
+      opportunity.discountPercent, "pending", null, createdAt, rawJson,
+    );
+    if (!result.changes) continue;
+    alerts += 1;
+    statements.updateDealWatchAlerted.run(createdAt, createdAt, watch.id);
+    const alert = publicDealAlertRow({
+      id: result.lastInsertRowid,
+      watch_id: watch.id,
+      user_id: watch.user_id,
+      discord_id: watch.discord_id,
+      claim_id: watch.claim_id,
+      region_id: watch.region_id,
+      item_id: watch.item_id,
+      item_type: watch.item_type,
+      item_name: watch.item_name,
+      tier: watch.tier,
+      rarity: watch.rarity,
+      icon_asset_name: watch.icon_asset_name,
+      listing_key: opportunity.listingKey,
+      market_claim_id: opportunity.marketClaimId,
+      market_claim_name: opportunity.marketClaimName,
+      seller_name: opportunity.sellerName,
+      quantity: opportunity.quantity,
+      unit_price: opportunity.unitPrice,
+      total_value: opportunity.totalValue,
+      baseline_window_days: 0,
+      baseline_average: opportunity.baseline.unitPrice,
+      sales_count: opportunity.baseline.sampleCount,
+      discount_percent: opportunity.discountPercent,
+      dm_status: "pending",
+      dm_error: null,
+      created_at: createdAt,
+      read_at: null,
+      raw_json: rawJson,
+    });
+    if (dealSettings.discordDmEnabled) {
+      if (
+        !currentDealWatchStillEligible(watch)
+        || getSettings().marketDealWatch?.discordDmEnabled === false
+      ) {
+        statements.updateDealAlertDm.run("skipped", "Watch or delivery setting changed before Discord delivery", result.lastInsertRowid);
+        void queueMarketDealWatchEvaluation().catch(() => {});
+        continue;
+      }
       try {
-        if (!baselineCache.has(baselineKey)) {
-          baseline = await dealBaselineForItem(watch.region_id, watch.item_id, watch.item_type, dealSettings.minConfirmedSales);
-          baselineCache.set(baselineKey, baseline ?? null);
-        }
+        await sendDiscordDirectMessage(watch.discord_id, dealAlertDiscordPayload(alert));
+        statements.updateDealAlertDm.run("sent", null, result.lastInsertRowid);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        statements.updateDealWatchChecked.run(now, null, null, message, now, watch.id);
-        failures.push(`${watch.item_name}: ${message}`);
-        continue;
+        statements.updateDealAlertDm.run("failed", error instanceof Error ? error.message : String(error), result.lastInsertRowid);
+        recordDiscordDeliverySafe({ status: "failed", eventType: "market_deal_watch", summary: `Deal alert: ${watch.item_name}`, error: error instanceof Error ? error.message : String(error), metadata: { userId: watch.discord_id, regionId: watch.region_id, itemId: watch.item_id } });
       }
-      if (!baseline) {
-        statements.updateDealWatchChecked.run(now, null, null, `Not enough confirmed regional sales (${dealSettings.minConfirmedSales}+ required)`, now, watch.id);
-        continue;
-      }
-      statements.updateDealWatchChecked.run(now, baseline.windowDays, baseline.averageUnitPrice, null, now, watch.id);
-      const maxPrice = baseline.averageUnitPrice * (1 - (toNumber(watch.threshold_percent) || dealSettings.thresholdPercent) / 100);
-      for (const listing of listings.filter((entry) => entry.itemId === String(watch.item_id) && entry.itemType === String(watch.item_type) && toNumber(entry.unitPrice) > 0 && toNumber(entry.unitPrice) <= maxPrice)) {
-        const discountPercent = Math.max(0, ((baseline.averageUnitPrice - listing.unitPrice) / baseline.averageUnitPrice) * 100);
-        const createdAt = new Date().toISOString();
-        const result = statements.insertDealAlert.run(
-          watch.id, watch.user_id, watch.discord_id, watch.claim_id, watch.region_id, watch.item_id, watch.item_type, watch.item_name,
-          watch.tier ?? listing.tier, watch.rarity ?? listing.rarity, watch.icon_asset_name ?? listing.iconAssetName,
-          listing.listingKey, listing.marketClaimId, listing.marketClaimName, listing.sellerName, listing.quantity, listing.unitPrice, listing.totalValue,
-          baseline.windowDays, baseline.averageUnitPrice, baseline.salesCount, discountPercent, "pending", null, createdAt,
-          JSON.stringify({ listing: listing.raw, baseline: baseline.raw }),
-        );
-        if (!result.changes) continue;
-        alerts += 1;
-        statements.updateDealWatchAlerted.run(createdAt, createdAt, watch.id);
-        const alert = publicDealAlertRow({
-          id: result.lastInsertRowid,
-          watch_id: watch.id,
-          user_id: watch.user_id,
-          discord_id: watch.discord_id,
-          claim_id: watch.claim_id,
-          region_id: watch.region_id,
-          item_id: watch.item_id,
-          item_type: watch.item_type,
-          item_name: watch.item_name,
-          tier: watch.tier ?? listing.tier,
-          rarity: watch.rarity ?? listing.rarity,
-          icon_asset_name: watch.icon_asset_name ?? listing.iconAssetName,
-          listing_key: listing.listingKey,
-          market_claim_id: listing.marketClaimId,
-          market_claim_name: listing.marketClaimName,
-          seller_name: listing.sellerName,
-          quantity: listing.quantity,
-          unit_price: listing.unitPrice,
-          total_value: listing.totalValue,
-          baseline_window_days: baseline.windowDays,
-          baseline_average: baseline.averageUnitPrice,
-          sales_count: baseline.salesCount,
-          discount_percent: discountPercent,
-          dm_status: "pending",
-          dm_error: null,
-          created_at: createdAt,
-          read_at: null,
-          raw_json: JSON.stringify({ listing: listing.raw, baseline: baseline.raw }),
-        });
-        if (dealSettings.discordDmEnabled) {
-          try {
-            await sendDiscordDirectMessage(watch.discord_id, dealAlertDiscordPayload(alert));
-            statements.updateDealAlertDm.run("sent", null, result.lastInsertRowid);
-          } catch (error) {
-            statements.updateDealAlertDm.run("failed", error instanceof Error ? error.message : String(error), result.lastInsertRowid);
-            recordDiscordDeliverySafe({ status: "failed", eventType: "market_deal_watch", summary: `Deal alert: ${watch.item_name}`, error: error instanceof Error ? error.message : String(error), metadata: { userId: watch.discord_id, regionId: watch.region_id, itemId: watch.item_id } });
-          }
-        } else {
-          statements.updateDealAlertDm.run("skipped", "Discord DM alerts disabled", result.lastInsertRowid);
-        }
-      }
+    } else {
+      statements.updateDealAlertDm.run("skipped", "Discord DM alerts disabled", result.lastInsertRowid);
     }
   }
-  return { checked, alerts, regions: byRegion.size, failures: failures.slice(0, 20) };
-}
-function priceHistoryBucketTotals(bucket) {
-  const unitsSold = toNumber(bucket.quantity ?? bucket.unitsSold ?? bucket.volume ?? bucket.totalQuantity);
-  const totalValue = toNumber(bucket.totalPrice ?? bucket.totalValue ?? bucket.value ?? bucket.revenue);
-  const salesCount = toNumber(bucket.salesCount ?? bucket.tradeCount ?? bucket.trades ?? bucket.count) || unitsSold;
-  return { unitsSold, totalValue, salesCount };
-}
-
-function marketPriceHistoryKind(itemType) {
-  return toNumber(itemType) === 1 || String(itemType ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
+  return {
+    checked: evaluated.checks.length,
+    alerts,
+    regions: new Set(watches.map((watch) => String(watch.region_id))).size,
+    failures: failures.slice(0, 20),
+    source: "relay-live-generation",
+    observedAt: currentObservedAt,
+  };
 }
 
 function marketTradeBackfillKey(claimId, playerId) {
@@ -7184,6 +7176,45 @@ function regionalMarketReadScope(claimId) {
       ? runtimeActiveRegionIds
       : persistedActiveRegionIds;
   return { current, allowedRegionIds };
+}
+
+function regionalMarketRegionRows(claimId) {
+  const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+  const data = current?.data && typeof current.data === "object" && !Array.isArray(current.data)
+    ? current.data
+    : {};
+  const metadata = new Map(
+    (Array.isArray(data.regions) ? data.regions : [])
+      .map((region) => [String(region?.regionId ?? ""), region])
+      .filter(([regionId]) => /^\d+$/.test(regionId)),
+  );
+  const names = new Map();
+  for (const order of Array.isArray(data.orders) ? data.orders : []) {
+    const regionId = String(order?.regionId ?? "");
+    const regionName = String(order?.regionName ?? "").trim();
+    if (/^\d+$/.test(regionId) && regionName && !names.has(regionId)) {
+      names.set(regionId, regionName);
+    }
+  }
+  return {
+    current,
+    regions: allowedRegionIds.map((regionId) => {
+      const status = regionalMarketStatus(current, {
+        regionId,
+        allowedRegionIds,
+        runtimeHealth: relayRegionalMarketRuntime.health(),
+        staleAfterMs: relayRegionalMarketStaleMs,
+      });
+      return {
+        regionId,
+        regionName: names.get(regionId) ?? `Region ${regionId}`,
+        receivedAt: metadata.get(regionId)?.receivedAt ?? null,
+        freshness: status.freshness,
+        ageMs: status.ageMs,
+        warnings: status.warnings,
+      };
+    }),
+  };
 }
 
 function regionalMarketResponseStatus(current, regionId, allowedRegionIds) {
@@ -9887,7 +9918,11 @@ const server = createServer(async (req, res) => {
         ? requireAppUserSession(req, res)
         : requireAppUser(req, res);
       if (!appUser) return;
-      const claimId = String(url.searchParams.get("claimId") ?? getSettings().claimId ?? "").trim();
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
       if (req.method === "GET") {
         const watches = statements.listDealWatchesForUser.all(appUser.id, claimId).map(dealWatchRow);
         return send(res, 200, { watches, settings: getSettings().marketDealWatch });
@@ -9899,14 +9934,17 @@ const server = createServer(async (req, res) => {
         if (count >= dealSettings.maxWatchesPerUser) return send(res, 409, { error: `Watch limit reached (${dealSettings.maxWatchesPerUser})` });
         const regionId = String(body.regionId ?? "").trim();
         const itemId = String(body.itemId ?? "").trim();
-        const itemType = String(body.itemType ?? 0).trim() || "0";
+        const rawItemType = String(body.itemType ?? 0).trim().toLowerCase() || "0";
+        const itemType = rawItemType === "cargo" ? "1" : rawItemType === "item" ? "0" : rawItemType;
         const itemName = String(body.itemName ?? "").trim();
         if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Choose a single region before watching an item" });
-        const activeRegions = await fetchCachedActiveRegions();
-        if (!activeRegions.regions.some((region) => String(region.regionId) === regionId)) {
-          return send(res, 400, { error: "That region is not currently active" });
+        if (!/^\d+$/.test(itemId)) return send(res, 400, { error: "Item id must be a decimal integer" });
+        if (itemType !== "0" && itemType !== "1") return send(res, 400, { error: "Item type must be item or cargo" });
+        const { allowedRegionIds } = regionalMarketReadScope(claimId);
+        if (!allowedRegionIds.includes(regionId)) {
+          return send(res, 400, { error: "That region is outside the configured active-region scope" });
         }
-        if (!itemId || !itemName) return send(res, 400, { error: "Item details are required" });
+        if (!itemName) return send(res, 400, { error: "Item details are required" });
         if (statements.dealWatchByUserItem.get(appUser.id, claimId, regionId, itemId, itemType)) return send(res, 409, { error: "This item is already on your deal watchlist for that region" });
         const nowIso = new Date().toISOString();
         const threshold = Math.min(Math.max(toNumber(body.thresholdPercent) || dealSettings.thresholdPercent, 1), 95);
@@ -9925,6 +9963,7 @@ const server = createServer(async (req, res) => {
           nowIso,
           nowIso,
         );
+        void queueMarketDealWatchEvaluation().catch(() => {});
         return send(res, 201, { watch: dealWatchRow(statements.dealWatchByIdForUser.get(result.lastInsertRowid, appUser.id)) });
       }
     }
@@ -9940,6 +9979,7 @@ const server = createServer(async (req, res) => {
         statements.updateDealWatch.run(enabled, threshold, new Date().toISOString(), id, appUser.id);
         const row = statements.dealWatchByIdForUser.get(id, appUser.id);
         if (!row) return send(res, 404, { error: "Watch not found" });
+        if (row.enabled) void queueMarketDealWatchEvaluation().catch(() => {});
         return send(res, 200, { watch: dealWatchRow(row) });
       }
       if (req.method === "DELETE") {
@@ -10154,6 +10194,19 @@ const server = createServer(async (req, res) => {
           allowedRegionIds,
         ),
       );
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/regions") {
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const { current, regions } = regionalMarketRegionRows(claimId);
+      return send(res, 200, {
+        claimId,
+        regions,
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      });
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/catalog") {
       const configuredClaimId = currentClaimId();

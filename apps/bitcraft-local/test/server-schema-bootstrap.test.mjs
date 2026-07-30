@@ -63,6 +63,26 @@ test("applySchemaBootstrap executes the complete bootstrap SQL once", () => {
   assert.deepEqual(statements, [schemaBootstrapSql]);
 });
 
+test("fresh Deal Watch history stores exact market amounts as text", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+
+  const watchColumns = new Map(
+    db.prepare("PRAGMA table_info(market_deal_watches)").all()
+      .map((column) => [column.name, column.type]),
+  );
+  const alertColumns = new Map(
+    db.prepare("PRAGMA table_info(market_deal_alerts)").all()
+      .map((column) => [column.name, column.type]),
+  );
+
+  assert.equal(watchColumns.get("last_baseline_average"), "TEXT");
+  for (const column of ["quantity", "unit_price", "total_value", "baseline_average"]) {
+    assert.equal(alertColumns.get(column), "TEXT");
+  }
+  db.close();
+});
+
 test("membership history schema is additive and preserves existing data", () => {
   const db = new DatabaseSync(":memory:");
   db.exec("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)");

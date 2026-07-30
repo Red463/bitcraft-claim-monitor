@@ -67,11 +67,12 @@ test("only Settlement Market requests monitored market history", () => {
   assert.equal(localHistoryIncludeForPanel("dashboard"), "activity,market,dashboard");
 });
 
-test("global Market and Deal Watch use only regions reported active", () => {
+test("global Market and Deal Watch use their intended provider-neutral region scopes", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
   const dealWatch = readFileSync(new URL("../src/pages/market/DealWatchlist.tsx", import.meta.url), "utf8");
   assert.match(marketPage, /const activeRegions = useActiveRegions\(\);/);
-  assert.match(dealWatch, /const activeRegions = useActiveRegions\(\);/);
+  assert.match(dealWatch, /marketRegionScopeUrl\(claimId\)/);
+  assert.doesNotMatch(dealWatch, /useActiveRegions\(\)/);
   assert.doesNotMatch(marketPage, /useActiveRegions\(fallbackRegionId\)/);
   assert.doesNotMatch(dealWatch, /useActiveRegions\(defaultRegion\)/);
 });

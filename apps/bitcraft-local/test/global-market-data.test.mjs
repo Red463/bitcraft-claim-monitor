@@ -91,6 +91,20 @@ test("market browse request URLs use only provider-neutral local routes", () => 
   });
 });
 
+test("Deal Watch item search is scoped to live Relay sell orders", () => {
+  assert.equal(typeof globalMarket.marketDealWatchSearchUrl, "function");
+  assert.equal(typeof globalMarket.marketRegionScopeUrl, "function");
+  assert.equal(globalMarket.marketDealWatchSearchUrl({
+    claimId: "1369094286777412590",
+    regionId: "19",
+    query: "Leather & Hide",
+  }), "/api/local/market/catalog?claimId=1369094286777412590&regionId=19&q=Leather+%26+Hide&availableOnly=true&hasSell=true&hasBuy=false&limit=8");
+  assert.equal(
+    globalMarket.marketRegionScopeUrl("1369094286777412590"),
+    "/api/local/market/regions?claimId=1369094286777412590",
+  );
+});
+
 test("market browse surfaces stale and unavailable live-order state", () => {
   assert.equal(typeof globalMarket.marketFreshnessNotice, "function");
   assert.equal(globalMarket.marketFreshnessNotice({

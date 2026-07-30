@@ -1063,6 +1063,8 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(marketOverview.mostLiquid[0].itemName, "Leather");
   assert.equal(marketOverview.movers.length, 0);
   assert.equal(marketOverview.moverBaseline, "unavailable");
+  const marketRegions = await fetch(`${origin}/api/local/market/regions?claimId=${claimId}`).then((response) => response.json());
+  assert.deepEqual(marketRegions.regions.map((region) => region.regionId), ["19"]);
   const liveDeals = await fetch(`${origin}/api/local/market/deals?claimId=${claimId}`).then((response) => response.json());
   assert.equal(liveDeals.deals[0].buyPrice, "15");
   assert.equal(liveDeals.deals[0].sellPrice, "20");
@@ -1118,35 +1120,73 @@ test("server collection paginates listings and protects production mutations", a
   dealDb.close();
   const dealCookie = `bitcraft_user_session=${encodeURIComponent(dealSessionToken)}`;
   const dealCsrfToken = createHash("sha256").update(`csrf:${dealSessionToken}`).digest("base64url");
+  const foreignClaimDealWatch = await fetch(`${origin}/api/local/market/deal-watches?claimId=999999999`, {
+    method: "POST",
+    headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
+    body: JSON.stringify({ regionId: "19", itemId: 31, itemType: 0, itemName: "Slow Silk" }),
+  });
+  assert.equal(foreignClaimDealWatch.status, 403);
+  const malformedDealWatch = await fetch(`${origin}/api/local/market/deal-watches`, {
+    method: "POST",
+    headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
+    body: JSON.stringify({ regionId: "19", itemId: "31x", itemType: "unknown", itemName: "Slow Silk" }),
+  });
+  assert.equal(malformedDealWatch.status, 400);
   const createdDealWatch = await fetch(`${origin}/api/local/market/deal-watches`, {
     method: "POST",
     headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
-    body: JSON.stringify({ regionId: "19", itemId: 30, itemType: 0, itemName: "Leather", tier: 2, rarity: "Common", iconAssetName: "leather.png" }),
+    body: JSON.stringify({ regionId: "19", itemId: 31, itemType: 0, itemName: "Slow Silk", tier: 2, rarity: "Common", iconAssetName: "slow-silk.png" }),
   });
   assert.equal(createdDealWatch.status, 201);
+  const createdDealWatchPayload = await createdDealWatch.json();
   const duplicateDealWatch = await fetch(`${origin}/api/local/market/deal-watches`, {
     method: "POST",
     headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
-    body: JSON.stringify({ regionId: "19", itemId: 30, itemType: 0, itemName: "Leather" }),
+    body: JSON.stringify({ regionId: "19", itemId: 31, itemType: 0, itemName: "Slow Silk" }),
   });
   assert.equal(duplicateDealWatch.status, 409);
   currentListings = [
-    { entityId: "deal-sell-1", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Seller", ownerEntityId: "seller-1", itemId: 30, itemType: "0", itemName: "Leather", itemTier: 2, itemRarityStr: "Common", iconAssetName: "leather.png", quantity: 2, price: 6, side: "sell", timestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
+    { entityId: "deal-sell-1", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Seller", ownerEntityId: "seller-1", itemId: 31, itemType: "0", itemName: "Slow Silk", itemTier: 2, itemRarityStr: "Common", iconAssetName: "slow-silk.png", quantity: 2, price: 57, side: "sell", timestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
     { entityId: "deal-sell-filler", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Seller", ownerEntityId: "seller-1", itemId: 20, itemType: "0", itemName: "Oak Plank", quantity: 1, price: 100, side: "sell", timestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
   ];
+  const liveDealDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
+  const liveDealSnapshot = JSON.parse(liveDealDb.prepare(
+    "SELECT data_json FROM domain_payload_current WHERE claim_id = ? AND domain = 'regional-market'",
+  ).get(claimId).data_json);
+  liveDealSnapshot.orders.push(
+    { entityId: "3101", claimEntityId: "4001", claimName: "Test Market", regionId: "19", ownerEntityId: "5101", ownerUsername: "Silk Seller One", itemId: "31", itemType: "item", price: "60", priceThreshold: "60", quantity: "2", storedCoins: "0", timestamp: legacyBuyOrderNow, side: "sell" },
+    { entityId: "3102", claimEntityId: "4001", claimName: "Test Market", regionId: "19", ownerEntityId: "5102", ownerUsername: "Silk Seller Two", itemId: "31", itemType: "item", price: "100", priceThreshold: "100", quantity: "3", storedCoins: "0", timestamp: legacyBuyOrderNow, side: "sell" },
+    { entityId: "3103", claimEntityId: "4001", claimName: "Test Market", regionId: "19", ownerEntityId: "5103", ownerUsername: "Silk Seller Three", itemId: "31", itemType: "item", price: "140", priceThreshold: "140", quantity: "4", storedCoins: "0", timestamp: legacyBuyOrderNow, side: "sell" },
+  );
+  liveDealDb.prepare(
+    "UPDATE domain_payload_current SET data_json = ?, received_at = ?, updated_at = ? WHERE claim_id = ? AND domain = 'regional-market'",
+  ).run(JSON.stringify(liveDealSnapshot), legacyBuyOrderNow, legacyBuyOrderNow, claimId);
+  liveDealDb.close();
+  const immediateDealWatch = await fetch(`${origin}/api/local/market/deal-watches/${createdDealWatchPayload.watch.id}`, {
+    method: "PATCH",
+    headers: { cookie: dealCookie, origin, "content-type": "application/json", "x-csrf-token": dealCsrfToken },
+    body: JSON.stringify({ enabled: true }),
+  });
+  assert.equal(immediateDealWatch.status, 200);
+  await waitForCondition("immediate market deal watch alert", async () => {
+    const payload = await fetch(`${origin}/api/local/market/deal-alerts`, { headers: { cookie: dealCookie, origin } }).then((response) => response.json());
+    return payload.alerts?.length === 1 ? payload : null;
+  });
   const dealJob = await fetch(`${origin}/api/local/admin/jobs/run`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
     body: JSON.stringify({ key: "market_deal_watch" }),
   });
   assert.equal(dealJob.status, 202);
-  await waitForCondition("market deal watch alert", async () => {
-    const payload = await fetch(`${origin}/api/local/market/deal-alerts`, { headers: { cookie: dealCookie, origin } }).then((response) => response.json());
-    return payload.alerts?.length === 1 ? payload : null;
-  });
+  await new Promise((resolve) => setTimeout(resolve, 150));
   const dealAlerts = await fetch(`${origin}/api/local/market/deal-alerts`, { headers: { cookie: dealCookie, origin } }).then((response) => response.json());
-  assert.equal(dealAlerts.alerts[0].baselineWindowDays, 7);
+  assert.equal(dealAlerts.alerts[0].baselineWindowDays, 0);
+  assert.equal(dealAlerts.alerts[0].baselineKind, "current-sell-median");
+  assert.equal(dealAlerts.alerts[0].sampleCount, 3);
+  assert.equal(dealAlerts.alerts[0].unitPrice, "60");
   assert.equal(Math.round(dealAlerts.alerts[0].discountPercent), 40);
+  assert.equal(priceHistoryRequests, 0);
+  assert.equal(slowPriceHistoryResponded, false);
   const duplicateDealJob = await fetch(`${origin}/api/local/admin/jobs/run`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
