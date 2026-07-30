@@ -47,50 +47,6 @@ export const schemaBootstrapSql = `
     imported_at TEXT NOT NULL,
     raw_json TEXT NOT NULL
   );
-  CREATE TABLE IF NOT EXISTS market_buy_orders_current (
-    claim_id TEXT NOT NULL,
-    order_key TEXT NOT NULL,
-    region_id TEXT NOT NULL,
-    region_name TEXT,
-    market_claim_id TEXT,
-    market_claim_name TEXT,
-    buyer_entity_id TEXT,
-    buyer_name TEXT,
-    item_id TEXT,
-    item_type TEXT,
-    item_name TEXT NOT NULL,
-    tier TEXT,
-    rarity TEXT,
-    icon_asset_name TEXT,
-    quantity REAL,
-    unit_price REAL,
-    total_value REAL,
-    stored_coins REAL,
-    listed_at TEXT,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1,
-    raw_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, order_key)
-  );
-  CREATE TABLE IF NOT EXISTS market_regional_sale_averages_current (
-    claim_id TEXT NOT NULL,
-    region_id TEXT NOT NULL,
-    item_id TEXT NOT NULL,
-    item_type TEXT NOT NULL DEFAULT '0',
-    item_name TEXT,
-    average_unit_price REAL,
-    sales_count REAL,
-    units_sold REAL,
-    total_value REAL,
-    window_days INTEGER NOT NULL DEFAULT 7,
-    first_bucket_at TEXT,
-    last_bucket_at TEXT,
-    raw_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, region_id, item_id, item_type)
-  );
   CREATE TABLE IF NOT EXISTS global_market_price_snapshots (
     captured_at TEXT NOT NULL,
     item_type TEXT NOT NULL,
@@ -848,9 +804,6 @@ export const schemaBootstrapSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_market_events_claim_time ON market_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_trades_claim_time ON market_trades (claim_id, occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_market_buy_orders_region ON market_buy_orders_current (claim_id, region_id, active, unit_price DESC);
-  CREATE INDEX IF NOT EXISTS idx_market_buy_orders_item ON market_buy_orders_current (claim_id, region_id, item_id, item_type, active);
-  CREATE INDEX IF NOT EXISTS idx_market_regional_sale_avg_item ON market_regional_sale_averages_current (claim_id, region_id, item_id, item_type);
   CREATE INDEX IF NOT EXISTS idx_global_market_price_item_time ON global_market_price_snapshots (item_type, item_id, captured_at DESC);
   CREATE INDEX IF NOT EXISTS idx_global_market_price_time ON global_market_price_snapshots (captured_at DESC);
   CREATE INDEX IF NOT EXISTS idx_craft_plan_settings_updated ON craft_plan_settings (updated_at DESC);

@@ -18,10 +18,10 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Recruitment | Members reads claim-filtered live regional posting state enriched from the global skill catalog; legacy endpoint and collector ownership retired | Regional recruitment state plus global skill catalog | ready for soak |
 | Storage activity | Relay live HTTP tail on the 15-second provider loop, with bounded container rotation, exact item/cargo catalog enrichment, and idempotent durable copy into `activity_events`; legacy scheduled collector retired | Relay storage-log durable copy | ready for soak |
 | Settlement market | Local Market and Dashboard current-listing metrics read the generic `market` generation from a continuously connected claim-scoped regional session. Orders join exact owner usernames and typed item/cargo catalog identities; analytics/history still use legacy observed rows | Regional buy/sell/marketplace state plus local catalog projection; transition history after sale semantics are proven | in progress |
-| Global market tools | BitJita search/history/trades | Local aggregation and region pool | baseline |
+| Global market tools | Regional buy-order current state now comes from bounded typed regional sessions and the generic `regional-market` generation with no scheduled cache table. Item search, complete order-book UI, deals, hubs, trade volume, price history, and player-trade paths still use BitJita and must migrate | Local catalog/order aggregation, authoritative observed history, and adaptive region pool | in progress |
 | Market sale notifications | BitJita trade corroboration | Authoritative close/trade evidence | blocked on evidence |
 | Region | BitJita region/status/trade volume | Configured regional sessions | baseline |
-| Adaptive region-session pool | Typed pool foundation pins the monitored region, single-flights concurrent opens, enforces configured-region and hard connection limits including in-flight opens, staggers warmups, and closes idle non-primary sessions. The Public Craft runtime is its first live consumer and refreshes configured leases on the 15-second provider loop | Shared runtime owner for cross-region crafts, market, region, map, and empires | in progress |
+| Adaptive region-session pool | Typed pool foundation pins the monitored region, single-flights concurrent opens, enforces configured-region and hard connection limits including in-flight opens, staggers warmups, and closes idle non-primary sessions. Public Craft and regional-market runtimes are live consumers. Regional market owns a 15-second rotation loop, reconnects with bounded jittered backoff, reconciles settings without restart, and reports freshness from each region's own receive age | Shared runtime owner for cross-region crafts, market, region, map, and empires | in progress |
 | Empires/watchtowers/siege | BitJita empire routes | Proven global rows or regional sessions | blocked on evidence |
 | Deposits | Empires Hexite Deposits tab reads the provider-neutral 15-second Relay snapshot with last-good fallback; `unknown` and overdue rows are never promoted to active; no deposit-specific table or scheduled job | Relay HTTP deposits with explicit state | ready for soak |
 | Map/layout | BitJita layout/player routes | Claim parents and bounded location rows | blocked on evidence |
@@ -34,11 +34,13 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 
 ## Scheduled/background inventory
 
-The worker currently owns settlement snapshots, market listings/history,
-production lifecycle/contributions, trade backfill, regional
-buy-order averages, catalog refreshes, empire Hexite refreshes, Discord outbox,
-scheduled reports, health evaluation, and notification generation. Each job
-must be reconnected to normalized domains before its BitJita path is removed.
+The worker still owns legacy settlement snapshots, market history,
+production lifecycle/contributions, trade backfill, empire Hexite refreshes,
+Discord outbox, scheduled reports, health evaluation, and notification
+generation. Each remaining ingestion job must be reconnected to normalized
+domains before its BitJita path is removed. Regional buy-order acquisition and
+catalog refresh orchestration have already been removed from this scheduled
+path.
 
 Storage activity is no longer a scheduled ingestion job. The Relay live loop
 backfills each newly observed storage container from the retained upstream

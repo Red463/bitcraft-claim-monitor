@@ -884,49 +884,113 @@ test("server collection paginates listings and protects production mutations", a
   const appDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'current_claim_state'").get().count, 0);
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'market_listings'").get().count, 0);
-  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'market_buy_orders_current'").get().count, 1);
-  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM market_buy_orders_current WHERE claim_id = ?").get(claimId).count, 0);
+  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'market_buy_orders_current'").get().count, 0);
+  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'market_regional_sale_averages_current'").get().count, 0);
   appDb.close();
-  const staleRegionalDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   const legacyBuyOrderNow = new Date().toISOString();
+  const regionalMarketData = {
+    activeRegionIds: ["9", "19"],
+    orders: [
+      {
+        entityId: "3001",
+        claimEntityId: "4001",
+        claimName: "Test Market",
+        regionId: "19",
+        ownerEntityId: "5001",
+        ownerUsername: "Buyer",
+        itemId: "30",
+        itemType: "item",
+        price: "12",
+        priceThreshold: "12",
+        quantity: "10",
+        storedCoins: "120",
+        timestamp: legacyBuyOrderNow,
+        side: "buy",
+      },
+      {
+        entityId: "3002",
+        claimEntityId: "4002",
+        claimName: "Old Market",
+        regionId: "9",
+        ownerEntityId: "5002",
+        ownerUsername: "Old Buyer",
+        itemId: "999",
+        itemType: "item",
+        price: "1",
+        priceThreshold: "1",
+        quantity: "1",
+        storedCoins: "1",
+        timestamp: legacyBuyOrderNow,
+        side: "buy",
+      },
+    ],
+    regions: [
+      {
+        regionId: "9",
+        count: 1,
+        database: "relay-region-9",
+        schemaFingerprint: "regional-v1",
+        receivedAt: legacyBuyOrderNow,
+        warnings: [],
+      },
+      {
+        regionId: "19",
+        count: 1,
+        database: "relay-region-19",
+        schemaFingerprint: "regional-v1",
+        receivedAt: legacyBuyOrderNow,
+        warnings: [],
+      },
+    ],
+  };
+  const staleRegionalDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   staleRegionalDb.prepare(`
-    INSERT OR REPLACE INTO market_buy_orders_current (
-      claim_id, order_key, region_id, region_name, market_claim_id, market_claim_name,
-      buyer_entity_id, buyer_name, item_id, item_type, item_name, quantity, unit_price,
-      total_value, stored_coins, first_seen, last_seen, active, raw_json, updated_at
-    )
-    VALUES (?, 'legacy-leather-order', '19', 'Test Region', 'market-19', 'Test Market', 'buyer-19', 'Buyer', '30', '0', 'Leather', 10, 12, 120, 120, ?, ?, 1, '{}', ?)
-  `).run(claimId, legacyBuyOrderNow, legacyBuyOrderNow, legacyBuyOrderNow);
+    INSERT OR REPLACE INTO domain_payload_current (
+      claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at,
+      last_error, updated_at, provider, source_key, region_id, database_name,
+      schema_fingerprint, source_observed_at, received_at, freshness, confidence,
+      generation, warnings_json
+    ) VALUES (?, 'regional-market', ?, ?, ?, ?, NULL, ?, 'relay', 'region:19', '19',
+      'relay-region-19', 'regional-v1', NULL, ?, 'fresh', 'authoritative', 99, '[]')
+  `).run(
+    claimId,
+    JSON.stringify(regionalMarketData),
+    legacyBuyOrderNow,
+    legacyBuyOrderNow,
+    legacyBuyOrderNow,
+    legacyBuyOrderNow,
+    legacyBuyOrderNow,
+  );
+  staleRegionalDb.prepare(
+    "UPDATE app_settings SET value = '19', updated_at = ? WHERE key = 'default_region'",
+  ).run(legacyBuyOrderNow);
+  staleRegionalDb.prepare(
+    "UPDATE app_settings SET value = '', updated_at = ? WHERE key = 'active_region_overrides'",
+  ).run(legacyBuyOrderNow);
   staleRegionalDb.prepare(`
-    INSERT OR REPLACE INTO market_buy_orders_current (
-      claim_id, order_key, region_id, region_name, market_claim_id, market_claim_name,
-      buyer_entity_id, buyer_name, item_id, item_type, item_name, quantity, unit_price,
-      total_value, stored_coins, first_seen, last_seen, active, raw_json, updated_at
-    )
-    VALUES (?, 'stale-r9-order', '9', 'Old Region', 'old-claim', 'Old Market', 'buyer-9', 'Old Buyer', '999', '0', 'Old Regional Item', 1, 1, 1, 1, ?, ?, 1, '{}', ?)
-  `).run(claimId, new Date().toISOString(), new Date().toISOString(), new Date().toISOString());
-  staleRegionalDb.prepare(`
-    INSERT OR REPLACE INTO market_regional_sale_averages_current (
-      claim_id, region_id, item_id, item_type, item_name, average_unit_price, sales_count,
-      units_sold, total_value, window_days, first_bucket_at, last_bucket_at, raw_json, updated_at
-    )
-    VALUES (?, '9', '999', '0', 'Old Regional Item', 1, 3, 3, 3, 7, '2026-05-18', '2026-05-20', '{}', ?)
-  `).run(claimId, new Date().toISOString());
-  staleRegionalDb.prepare(`
-    INSERT OR REPLACE INTO market_regional_sale_averages_current (
-      claim_id, region_id, item_id, item_type, item_name, average_unit_price, sales_count,
-      units_sold, total_value, window_days, first_bucket_at, last_bucket_at, raw_json, updated_at
-    )
-    VALUES (?, '19', '998', '0', 'Empty Old Baseline', 0, 0, 0, 0, 7, NULL, NULL, '{"buckets":[]}', ?)
-  `).run(claimId, new Date().toISOString());
+    INSERT OR REPLACE INTO game_catalog_entities (
+      catalog_key, kind, target_id, item_type, name, tag, tier, rarity,
+      icon_asset_name, item_list_id, updated_at
+    ) VALUES ('items:30', 'items', '30', 0, 'Leather', 'Leather', 1, 'Common',
+      NULL, NULL, ?)
+  `).run(legacyBuyOrderNow);
   staleRegionalDb.close();
   const buyOrdersBeforeSales = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=unitPrice&direction=desc`).then((response) => response.json());
   assert.equal(buyOrdersBeforeSales.total, 1);
   assert.equal(buyOrdersBeforeSales.rows[0].itemName, "Leather");
+  assert.equal(buyOrdersBeforeSales.rows[0].unitPrice, "12");
+  assert.equal(buyOrdersBeforeSales.rows[0].totalValue, "120");
+  assert.equal(buyOrdersBeforeSales.freshness, "fresh");
   assert.equal(buyOrdersBeforeSales.opportunities.length, 0);
   assert.equal(priceHistoryRequests, 0);
-  const regionalBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=3&search=Leather&pageSize=25&sort=unitPrice&direction=desc`).then((response) => response.json());
-  assert.equal(regionalBuyOrders.total, 0);
+  const allRegionalBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=all&pageSize=25`).then((response) => response.json());
+  assert.deepEqual(allRegionalBuyOrders.rows.map((row) => row.regionId), ["19"]);
+  const regionalBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=9&search=Leather&pageSize=25&sort=unitPrice&direction=desc`);
+  assert.equal(regionalBuyOrders.status, 403);
+  const foreignClaimBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=999999999&regionId=19`);
+  assert.equal(foreignClaimBuyOrders.status, 403);
+  const unconfiguredRegionBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=3`);
+  assert.equal(unconfiguredRegionBuyOrders.status, 403);
   const baselineJob = await fetch(`${origin}/api/local/admin/jobs/run`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -938,10 +1002,6 @@ test("server collection paginates listings and protects production mutations", a
   }).then((response) => response.json());
   const runningBaselineJob = runningBaselineJobs.jobs.find((job) => job.key === "regional_buy_order_sale_baselines_refresh");
   assert.equal(runningBaselineJob, undefined);
-  const scopedBaselineDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
-  assert.equal(scopedBaselineDb.prepare("SELECT COUNT(*) AS count FROM market_regional_sale_averages_current WHERE claim_id = ? AND region_id = '9'").get(claimId).count, 1);
-  assert.equal(scopedBaselineDb.prepare("SELECT active FROM market_buy_orders_current WHERE claim_id = ? AND order_key = 'stale-r9-order'").get(claimId).active, 1);
-  scopedBaselineDb.close();
   assert.equal(priceHistoryRequests, 0);
   const buyOrdersAfterBaselineJob = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=premium&direction=desc`).then((response) => response.json());
   assert.equal(buyOrdersAfterBaselineJob.opportunities.length, 0);
@@ -1942,18 +2002,10 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(historyOnlySaleMetadata.sellerEntityId, "player-1");
   assert.equal(historyOnlySaleMetadata.totalValue, 1);
 
-  const opportunityDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
-  const opportunityNow = new Date().toISOString();
-  opportunityDb.prepare(`
-    INSERT OR REPLACE INTO market_regional_sale_averages_current (
-      claim_id, region_id, item_id, item_type, item_name, average_unit_price, sales_count,
-      units_sold, total_value, window_days, first_bucket_at, last_bucket_at, raw_json, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(claimId, "19", "30", "0", "Leather", 10, 3, 3, 30, 7, "2026-05-18", "2026-05-20", "{}", opportunityNow);
-  opportunityDb.close();
   const buyOrdersAfterSales = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=premium&direction=desc`).then((response) => response.json());
-  assert.equal(buyOrdersAfterSales.opportunities.length, 1);
-  assert.equal(Math.round(buyOrdersAfterSales.opportunities[0].premiumPercent), 20);
+  assert.equal(buyOrdersAfterSales.opportunities.length, 0);
+  assert.equal(buyOrdersAfterSales.rows[0].opportunityEligible, false);
+  assert.equal(buyOrdersAfterSales.rows[0].premiumPercent, null);
 
   const browserSnapshot = await fetch(`${origin}/api/local/snapshot`, {
     method: "POST",
@@ -2104,4 +2156,72 @@ test("retired recipe catalog refresh route, scheduler key, and tables are absent
   assert.equal(tables.has("recipe_catalog_entries"), false);
   assert.equal(tables.has("game_catalog_refresh_runs"), false);
   assert.equal(tables.has("game_catalog_refresh_targets"), false);
+});
+
+test("regional market retirement cleanup runs after the older collector marker", async (t) => {
+  const dataDir = path.join(appDir, `.test-data-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  await mkdir(dataDir, { recursive: true });
+  let child = null;
+  const start = async () => {
+    const appPort = await availablePort();
+    child = spawn(process.execPath, ["server.mjs"], {
+      cwd: appDir,
+      env: {
+        ...process.env,
+        NODE_ENV: "production",
+        LEGAL_CONFIGURATION_CONFIRMED: "true",
+        BITCRAFT_TEST: "true",
+        ENABLE_SERVER_POLLING: "false",
+        ENABLE_SCHEDULED_JOBS: "false",
+        BITCRAFT_PROCESS_ROLE: "all",
+        APP_HOST: "127.0.0.1",
+        APP_PORT: String(appPort),
+        BITCRAFT_LOCAL_DATA_DIR: dataDir,
+      },
+      stdio: "ignore",
+    });
+    await waitForHealth(`http://127.0.0.1:${appPort}`, child);
+  };
+  t.after(async () => {
+    if (child) await stop(child);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  await start();
+  await stop(child);
+  child = null;
+  const databasePath = path.join(dataDir, "bitcraft-local.sqlite");
+  const oldDatabase = new DatabaseSync(databasePath);
+  const now = new Date().toISOString();
+  oldDatabase.prepare(`
+    INSERT OR REPLACE INTO app_settings (key, value, updated_at)
+    VALUES (?, ?, ?)
+  `).run(
+    "collector_settings_json",
+    JSON.stringify({
+      market: { enabled: true, intervalSeconds: 60 },
+      buyOrders: { enabled: false, intervalSeconds: 3600 },
+    }),
+    now,
+  );
+  oldDatabase.prepare(`
+    INSERT OR REPLACE INTO app_settings (key, value, updated_at)
+    VALUES ('regional_buy_order_collector_retired_at', ?, ?)
+  `).run(now, now);
+  oldDatabase.close();
+
+  await start();
+  const migratedDatabase = new DatabaseSync(databasePath, { readOnly: true });
+  const collectorSettings = JSON.parse(
+    migratedDatabase.prepare("SELECT value FROM app_settings WHERE key = 'collector_settings_json'").get().value,
+  );
+  const markerCount = migratedDatabase.prepare(`
+    SELECT COUNT(*) AS count
+    FROM app_settings
+    WHERE key IN ('regional_buy_order_collector_retired_at', 'regional_buy_order_state_retired_at')
+  `).get().count;
+  migratedDatabase.close();
+  assert.equal(Object.hasOwn(collectorSettings, "buyOrders"), false);
+  assert.equal(collectorSettings.market.enabled, true);
+  assert.equal(markerCount, 0);
 });

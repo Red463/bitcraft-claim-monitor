@@ -4,11 +4,6 @@ export const additiveColumnMigrations = [
   { table: "market_events", column: "item_type", definition: "TEXT" },
   { table: "market_events", column: "trade_id", definition: "TEXT" },
   { table: "market_events", column: "source_key", definition: "TEXT" },
-  { table: "market_buy_orders_current", column: "icon_asset_name", definition: "TEXT" },
-  { table: "market_buy_orders_current", column: "active", definition: "INTEGER NOT NULL DEFAULT 1" },
-  { table: "market_buy_orders_current", column: "updated_at", definition: "TEXT" },
-  { table: "market_regional_sale_averages_current", column: "item_name", definition: "TEXT" },
-  { table: "market_regional_sale_averages_current", column: "window_days", definition: "INTEGER NOT NULL DEFAULT 7" },
   { table: "activity_events", column: "source_key", definition: "TEXT" },
   { table: "admin_users", column: "active", definition: "INTEGER NOT NULL DEFAULT 1" },
   { table: "admin_users", column: "last_login_at", definition: "TEXT" },
@@ -123,6 +118,8 @@ export function applyLegacySchemaCleanup(db) {
     DROP TABLE IF EXISTS game_catalog_refresh_targets;
     DROP TABLE IF EXISTS game_catalog_refresh_runs;
     DROP TABLE IF EXISTS market_listings;
+    DROP TABLE IF EXISTS market_buy_orders_current;
+    DROP TABLE IF EXISTS market_regional_sale_averages_current;
     DELETE FROM scheduled_jobs WHERE job_key = 'recipe_catalog_refresh';
   `);
 }

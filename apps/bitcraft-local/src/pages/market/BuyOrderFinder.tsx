@@ -48,7 +48,7 @@ export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: strin
         .then((response) => response.ok ? response.json() : Promise.reject(new Error(`buy orders HTTP ${response.status}`)))
         .then((payload) => setState({ data: payload, error: null, loading: false }))
         .catch(() => {
-          if (!controller.signal.aborted) setState({ data: null, error: "Unable to load cached buy orders", loading: false });
+          if (!controller.signal.aborted) setState((current) => ({ ...current, error: "Relay regional market unavailable", loading: false }));
         });
     }, 180);
     return () => {
@@ -100,7 +100,7 @@ export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: strin
     <section className="price-finder buy-order-finder">
       <div className="command-filter-header price-finder-header">
         <span className="command-filter-title"><ShoppingBag size={15} /> Buy order lookup</span>
-        <span>{state.loading ? "Updating cached orders..." : `${formatNumber(total)} cached orders`}</span>
+        <span>{state.loading ? "Updating live orders..." : `${formatNumber(total)} live orders`}</span>
       </div>
       <div className="price-finder-controls">
         <label className="research-filter-field price-item-search">
@@ -126,7 +126,7 @@ export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: strin
           </select>
         </label>
       </div>
-      {state.error ? <div className="error">Unable to load cached buy orders: {state.error}</div> : null}
+      {state.error ? <div className="error">Unable to load live buy orders: {state.error}</div> : null}
       <div className="metric-grid">
         <MiniStat icon={<ShoppingBag />} label="Current Buy Orders" value={formatNumber(total)} />
         <MiniStat icon={<CircleDollarSign />} label="Best Unit Price" value={bestOrder ? `${formatNumber(bestOrder.unitPrice)}g` : "-"} />
@@ -135,7 +135,7 @@ export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: strin
         <MiniStat icon={<ShoppingCart />} label="Markets Visible" value={formatNumber(marketCount)} />
       </div>
       <section className="buy-order-opportunities">
-        <h3><TrendingUp size={17} /> Best Opportunities <small>Requires 3+ same-region sales in the last 7 days</small></h3>
+        <h3><TrendingUp size={17} /> Best Opportunities <small>Requires authoritative same-region sale observations</small></h3>
         {opportunities.length ? (
           <div className="opportunity-strip">
             {opportunities.map((order) => (
@@ -151,7 +151,7 @@ export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: strin
             ))}
           </div>
         ) : (
-          <div className="empty-state price-empty"><TrendingUp />No high-confidence opportunities yet. Orders still appear in the table below.</div>
+          <div className="empty-state price-empty"><TrendingUp />No authoritative sale baseline is available yet. Live orders still appear below.</div>
         )}
       </section>
       <section>
@@ -191,7 +191,7 @@ export function BuyOrderFinder({ monitoredRegionId }: { monitoredRegionId: strin
               ))}
             </tbody>
           </table>
-          {!rows.length ? <div className="empty-state price-empty"><ShoppingBag />{state.loading ? "Loading cached buy orders..." : total ? "No buy orders match your search." : "No cached buy orders are available for this region yet. The regional buy-order collector may not have populated it."}</div> : null}
+          {!rows.length ? <div className="empty-state price-empty"><ShoppingBag />{state.loading ? "Loading live buy orders..." : total ? "No buy orders match your search." : "No live buy orders are available for this region yet. Relay may still be loading it."}</div> : null}
         </div>
         <div className="pagination-row">
           <span>{formatNumber(total)} matching orders - page {page} of {pageCount}</span>

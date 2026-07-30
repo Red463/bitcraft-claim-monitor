@@ -50,6 +50,8 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS snapshots/);
   assert.doesNotMatch(schemaBootstrapSql, /idx_snapshots_/);
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_listings/);
+  assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_buy_orders_current/);
+  assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_regional_sale_averages_current/);
 });
 
 test("applySchemaBootstrap executes the complete bootstrap SQL once", () => {
@@ -86,6 +88,10 @@ test("fresh Relay schema keeps market history without a duplicate current-listin
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'market_events'").get().count,
     1,
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name IN ('market_buy_orders_current', 'market_regional_sale_averages_current')").get().count,
+    0,
   );
   db.close();
 });

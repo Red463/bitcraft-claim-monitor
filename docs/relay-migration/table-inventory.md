@@ -27,7 +27,7 @@ Disposition values:
 | `game_catalog_refresh_runs`, `game_catalog_refresh_targets` | retire | None | Removed with the catalog crawl job, admin route, UI controls, recovery queue, repository methods, and prepared statements. Subscription generation/source health now owns catalog ingestion and restart recovery. |
 | `settlement_state_current` | review | Settlement notification/activity derivation | Merge or retain as a narrow derived-current projection only if it has independent indexed or transition semantics beyond `domain_payload_current`. |
 | `market_listings` | retire | None | Removed from bootstrap and existing clone databases. Current Local Market, Dashboard, and leaderboard listing state is projected directly from the latest complete generic `market` generation. Listing transitions are derived from consecutive Relay generations and appended independently to history; they do not justify a duplicate current-state table. |
-| `market_buy_orders_current`, `market_regional_sale_averages_current` | review | Legacy cross-region market aggregation | Keep only if representative measurements prove an indexed derived-current benefit. Any retained projection must update from committed regional order events, never from a long scheduled sweep. |
+| `market_buy_orders_current`, `market_regional_sale_averages_current` | retire | None | Removed from bootstrap and existing clone databases. Configured regional sessions merge exact buy-order generations into the generic `regional-market` last-good domain, and the local view filters, sorts, pages, and enriches that committed generation without a second SQL mirror. Regional sale averages are not retained because Relay has not yet proved an authoritative sold-versus-cancelled signal; the app returns no premium opportunity instead of persisting an invented baseline. |
 | `market_events`, `market_trades`, `global_market_price_snapshots` | keep-history | Normalized listing/trade transitions | Required for locally observed charts, sold-versus-removed evidence, deduplication, and notification history. |
 | `activity_events` | keep-history | Normalized domain transitions; Relay storage-log events arrive from the 15-second live loop and deduplicate by region plus upstream log ID | Required for the Activity page and notification/audit history. Relay storage logs expire upstream, so this is durable history rather than a current-data cache. |
 | `production_jobs`, `production_contributions` | keep-history | Craft lifecycle and proven contribution events | Required for lifecycle notifications and locally observed contribution history. Current craft state stays in normalized domains. |
@@ -116,8 +116,31 @@ be a committed domain event, not a scheduled ingestion sweep.
 - Event/history/outbox persistence is queued after the current generation
   commits. A persistence failure is reported through provider health but does
   not hold back or roll back live page data.
-- `market_buy_orders_current` and `market_regional_sale_averages_current`
-  remain under review only for measured cross-region indexed aggregation.
+- Configured regional market sessions subscribe to `buy_order_state`, derive
+  bounded claim and owner equality joins, and merge independently complete
+  regions into the generic `regional-market` generation.
+- The regional buy-order view performs exact-decimal filtering, sorting,
+  paging, and catalog enrichment directly over that generation. No measured
+  query cost justified another SQL current-state projection.
+- The monitored region stays pinned. Additional configured regions rotate
+  within the explicit connection cap on a provider-owned 15-second loop; this
+  loop remains active when scheduled ingestion and reconciliation jobs are
+  disabled. Each non-primary session remains in the pool until its first
+  complete generation applies or a 30-second apply timeout expires.
+- Disconnected sessions reconnect with 1/2/4/8/16/30-second jittered backoff.
+  Failed claim/owner detail subscriptions clear their in-progress state and
+  retry without replacing the last-good generation.
+- Each committed region retains its own receive time. API freshness is derived
+  from the selected region's age and live connection health, so a newer
+  generation from another region cannot make old data appear fresh.
+- Claim, primary-region, and configured active-region changes reconcile the
+  runtime without requiring a process restart.
+- `market_buy_orders_current` and `market_regional_sale_averages_current` have
+  been removed from bootstrap, migrations, collectors, runtime reads/writes,
+  and integration fixtures.
+- Opportunity scoring remains empty until an authoritative same-region sale
+  signal is proven. Locally observed but region-ambiguous trades are not used
+  to label a removed order as sold.
 
 ## Active/passive craft vertical evidence
 

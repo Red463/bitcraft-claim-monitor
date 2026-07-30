@@ -19,6 +19,7 @@ export const DOMAIN_KEYS = [
   "recruitment",
   "equipment",
   "market",
+  "regional-market",
   "region",
   "empires",
   "layout",

@@ -25,6 +25,7 @@ import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, 
 import { bitjitaTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
 import { currentMarketListings, marketLeaderboardFromCurrent } from "./src/server/currentMarketViews.mjs";
 import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
+import { regionalBuyOrdersView, regionalMarketStatus } from "./src/server/regionalMarketViews.mjs";
 import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey, productionMetrics } from "./src/server/productionActivity.mjs";
 import { createGameCatalogRepository } from "./src/server/gameCatalog.mjs";
 import { createProviderCatalogRepository } from "./src/server/catalogRepository.mjs";
@@ -105,6 +106,7 @@ import {
   RelayPlayerDataService,
   RelayPrimaryRegionRuntime,
   RelayPublicCraftRuntime,
+  RelayRegionalMarketRuntime,
   RelayStorageActivityService,
   runtimeHealthWithPersistedSnapshot,
 } from "./dist-server/game-data/index.js";
@@ -438,11 +440,26 @@ const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
     staggerMs: Math.max(0, Number(process.env.RELAY_REGION_STAGGER_MS ?? 250)),
   },
 });
+const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+  rotationMs: Math.max(1_000, Number(process.env.RELAY_MARKET_REGION_ROTATION_MS ?? 15_000)),
+  poolOptions: {
+    maxSessions: Math.max(1, Number(process.env.RELAY_MARKET_REGION_MAX_SESSIONS ?? 4)),
+    idleCloseMs: Math.max(10_000, Number(process.env.RELAY_MARKET_REGION_IDLE_CLOSE_MS ?? 60_000)),
+    staggerMs: Math.max(0, Number(process.env.RELAY_MARKET_REGION_STAGGER_MS ?? 250)),
+  },
+});
+const relayRegionalMarketStaleMs = Math.max(
+  5_000,
+  Number(process.env.RELAY_MARKET_REGION_STALE_MS) || 60_000,
+);
 let relayProviderRefreshTimer = null;
 let relayProviderStarted = false;
 let relayPrimaryRegionStarted = false;
 let relayClaimMarketStarted = false;
 let relayPublicCraftStarted = false;
+let relayRegionalMarketStarted = false;
 function gameDataProviderHealth() {
   const processHealth = relayProvider.health();
   const health = processHealth.running ? processHealth : currentStateRepository.readHealth() ?? processHealth;
@@ -466,12 +483,18 @@ function gameDataProviderHealth() {
     snapshot: currentStateRepository.read(currentClaimId(), "market"),
     providerHealth: health,
   });
+  const regionalMarket = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayRegionalMarketRuntime.health(),
+    snapshot: currentStateRepository.read(currentClaimId(), "regional-market"),
+    providerHealth: health,
+  });
   return {
     ...health,
     globalCatalog,
     primaryRegion,
     publicCrafts,
     claimMarket,
+    regionalMarket,
   };
 }
 const craftPlanProgressAudit = createCraftPlanProgressAuditRepository(db, {
@@ -1070,21 +1093,18 @@ function currentClaimId() {
 }
 
 function migrateRetiredBuyOrderCollector() {
-  const markerKey = "regional_buy_order_collector_retired_at";
-  if (statements.getSetting.get(markerKey)?.value) return;
   const now = new Date().toISOString();
   const source = safeJson(statements.getSetting.get("collector_settings_json")?.value, {});
   const current = source && typeof source === "object" && !Array.isArray(source) ? source : {};
-  const existingBuyOrders = current.buyOrders && typeof current.buyOrders === "object" ? current.buyOrders : {};
-  statements.upsertSetting.run("collector_settings_json", JSON.stringify({
-    ...current,
-    buyOrders: {
-      ...existingBuyOrders,
-      enabled: false,
-    },
-  }), now);
+  if (Object.hasOwn(current, "buyOrders")) {
+    delete current.buyOrders;
+    statements.upsertSetting.run("collector_settings_json", JSON.stringify(current), now);
+  }
   db.prepare("DELETE FROM scheduled_jobs WHERE job_key = ?").run("regional_buy_order_sale_baselines_refresh");
-  statements.upsertSetting.run(markerKey, now, now);
+  db.prepare("DELETE FROM app_settings WHERE key IN (?, ?)").run(
+    "regional_buy_order_collector_retired_at",
+    "regional_buy_order_state_retired_at",
+  );
 }
 
 function migrateMarketAccessSplit() {
@@ -5909,40 +5929,6 @@ async function regionalEmpireWatchtowers(regionId, inactiveDays = 14, options = 
     };
   }, options);
 }
-function buyOrderKey(listing) {
-  return String(listing.entityId ?? listing.id ?? `${listing.claimEntityId ?? "claim"}:${listing.itemType ?? ""}:${listing.itemId ?? ""}:${listing.ownerEntityId ?? ""}:${listing.price ?? ""}`);
-}
-
-function normalizeRegionalBuyOrder(listing, regionId, regionName, fallbackClaim = {}) {
-  const quantity = toNumber(listing.quantity);
-  const unitPrice = toNumber(listing.priceThreshold ?? listing.unitPrice ?? listing.price);
-  const marketClaimId = String(listing.claimEntityId ?? fallbackClaim.entityId ?? fallbackClaim.claimId ?? "").trim();
-  const itemTypeRaw = listing.itemType ?? listing.item_type;
-  const itemType = String(itemTypeRaw === "cargo" ? 1 : itemTypeRaw === "item" ? 0 : itemTypeRaw ?? 0);
-  const listedAt = listing.timestamp ?? listing.createdAt ?? listing.updatedAt ?? null;
-  return {
-    orderKey: buyOrderKey(listing),
-    regionId: String(listing.regionId ?? regionId ?? "").trim(),
-    regionName: String(listing.regionName ?? regionName ?? ""),
-    marketClaimId,
-    marketClaimName: String(listing.claimName ?? listing.claim?.name ?? fallbackClaim.name ?? fallbackClaim.claimName ?? "Unknown settlement"),
-    buyerEntityId: String(listing.ownerEntityId ?? listing.ownerId ?? ""),
-    buyerName: String(listing.ownerUsername ?? listing.ownerName ?? listing.owner ?? "Unknown buyer"),
-    itemId: String(listing.itemId ?? listing.item_id ?? ""),
-    itemType,
-    itemName: String(listing.itemName ?? listing.name ?? "Unknown item"),
-    tier: listing.itemTier ?? listing.tier ?? null,
-    rarity: listing.itemRarityStr ?? listing.rarityStr ?? listing.itemRarity ?? listing.rarity ?? null,
-    iconAssetName: listing.iconAssetName ?? null,
-    quantity,
-    unitPrice,
-    totalValue: quantity * unitPrice,
-    storedCoins: toNumber(listing.storedCoins),
-    listedAt,
-    raw: listing,
-  };
-}
-
 function dealWatchRow(row) {
   if (!row) return null;
   return {
@@ -6161,74 +6147,6 @@ async function runMarketDealWatchJob({ jobKey } = {}) {
   }
   return { checked, alerts, regions: byRegion.size, failures: failures.slice(0, 20) };
 }
-async function fetchRegionalBuyOrders(claimId, regionIds) {
-  const uniqueRegionIds = [...new Set(regionIds.map((id) => String(id ?? "").trim()).filter((id) => /^\d+$/.test(id)))];
-  const failures = [];
-  const orders = [];
-  for (const [regionIndex, regionId] of uniqueRegionIds.entries()) {
-    collectorProgress("buyOrders", `Loading R${regionId} settlements`, { current: regionIndex + 1, total: uniqueRegionIds.length });
-    let claimPayload;
-    try {
-      claimPayload = await fetchRegionClaimList(regionId);
-    } catch (error) {
-      failures.push(`R${regionId} claims: ${error instanceof Error ? error.message : String(error)}`);
-      continue;
-    }
-    const claims = unwrap(claimPayload, "claims", []);
-    const regionName = claims.find((claim) => claim.regionName)?.regionName ?? `R${regionId}`;
-    let completedClaims = 0;
-    const pages = await mapWithConcurrency(claims, 3, async (claim) => {
-      const marketClaimId = String(claim.entityId ?? claim.claimId ?? "").trim();
-      if (!marketClaimId) {
-        completedClaims += 1;
-        collectorProgress("buyOrders", `Scanning R${regionId} markets`, { current: completedClaims, total: claims.length });
-        return [];
-      }
-      try {
-        const payload = await fetchAllClaimListings(marketClaimId, { side: "buy" });
-        completedClaims += 1;
-        collectorProgress("buyOrders", `Scanning R${regionId} markets`, { current: completedClaims, total: claims.length });
-        return unwrap(payload, "listings", []).map((listing) => normalizeRegionalBuyOrder(listing, regionId, regionName, claim));
-      } catch (error) {
-        failures.push(`${claim.name ?? marketClaimId}: ${error instanceof Error ? error.message : String(error)}`);
-        completedClaims += 1;
-        collectorProgress("buyOrders", `Scanning R${regionId} markets`, { current: completedClaims, total: claims.length });
-        return [];
-      }
-    });
-    orders.push(...pages.flat());
-  }
-  return {
-    regions: uniqueRegionIds,
-    orders,
-    saleAverages: [],
-    failures: failures.slice(0, 50),
-    partialError: failures.length ? `${failures.length} regional buy-order market request${failures.length === 1 ? "" : "s"} failed` : null,
-  };
-}
-
-function regionalSaleAverageKey(order) {
-  const regionId = String(order.regionId ?? "").trim();
-  const itemId = String(order.itemId ?? "").trim();
-  const itemType = String(order.itemType ?? 0).trim() || "0";
-  return regionId && itemId ? `${regionId}:${itemType}:${itemId}` : "";
-}
-
-function currentMonitoredRegionId(claimId) {
-  const id = String(claimId ?? "").trim();
-  if (!id) return "";
-  const rowsByDomain = readDomainPayloadMap(id);
-  const claimPayload = rowsByDomain.claim?.data ?? {};
-  const claimData = claimPayload.claim ?? claimPayload;
-  const directRegionId = String(claimData.regionId ?? claimData.region_id ?? claimData.region ?? "").trim();
-  if (/^\d+$/.test(directRegionId)) return directRegionId;
-  const regionPayload = rowsByDomain.region?.data ?? {};
-  const regionClaims = unwrap(regionPayload, "claims", []);
-  const monitoredRegionClaim = regionClaims.find((claim) => String(claim.entityId ?? claim.id ?? claim.claimId ?? "") === id);
-  const fallbackRegionId = String(monitoredRegionClaim?.regionId ?? monitoredRegionClaim?.region_id ?? "").trim();
-  return /^\d+$/.test(fallbackRegionId) ? fallbackRegionId : "";
-}
-
 function priceHistoryBucketTotals(bucket) {
   const unitsSold = toNumber(bucket.quantity ?? bucket.unitsSold ?? bucket.volume ?? bucket.totalQuantity);
   const totalValue = toNumber(bucket.totalPrice ?? bucket.totalValue ?? bucket.value ?? bucket.revenue);
@@ -6238,196 +6156,6 @@ function priceHistoryBucketTotals(bucket) {
 
 function marketPriceHistoryKind(itemType) {
   return toNumber(itemType) === 1 || String(itemType ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
-}
-
-async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [], options = {}) {
-  const now = Date.now();
-  const staleBefore = new Date(now - 6 * 60 * 60 * 1000).toISOString();
-  const useCache = options.useCache !== false;
-  const progressKey = Object.hasOwn(options, "progressKey") ? options.progressKey : "buyOrders";
-  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
-  const onAverage = typeof options.onAverage === "function" ? options.onAverage : null;
-  const requestTimeoutMs = Math.max(1000, Math.min(toNumber(options.requestTimeoutMs ?? process.env.REGIONAL_SALE_BASELINE_REQUEST_TIMEOUT_MS) || 10000, 60000));
-  const uniqueOrders = [...new Map(orders
-    .filter((order) => regionalSaleAverageKey(order))
-    .map((order) => [regionalSaleAverageKey(order), order])).values()];
-  let completed = 0;
-  const reportProgress = async (extra = {}) => {
-    if (progressKey) collectorProgress(progressKey, "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
-    if (onProgress) await onProgress({ current: completed, total: uniqueOrders.length, ...extra });
-  };
-  const averages = await mapWithConcurrency(uniqueOrders, 3, async (order) => {
-    const regionId = String(order.regionId ?? "").trim();
-    const itemId = String(order.itemId ?? "").trim();
-    const itemType = String(order.itemType ?? 0).trim() || "0";
-    const currentItem = order.itemName ?? itemId;
-    const cached = useCache ? db.prepare(`
-      SELECT * FROM market_regional_sale_averages_current
-      WHERE claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ? AND updated_at >= ?
-    `).get(String(claimId), regionId, itemId, itemType, staleBefore) : null;
-    await reportProgress({ currentItem, currentRegionId: regionId, phase: "checking" });
-    if (cached) {
-      completed += 1;
-      const average = {
-        regionId,
-        itemId,
-        itemType,
-        itemName: cached.item_name,
-        averageUnitPrice: toNumber(cached.average_unit_price),
-        salesCount: toNumber(cached.sales_count),
-        unitsSold: toNumber(cached.units_sold),
-        totalValue: toNumber(cached.total_value),
-        windowDays: toNumber(cached.window_days) || 7,
-        firstBucketAt: cached.first_bucket_at,
-        lastBucketAt: cached.last_bucket_at,
-        raw: safeJson(cached.raw_json, {}),
-      };
-      if (onAverage) await onAverage(average, { current: completed, total: uniqueOrders.length });
-      await reportProgress({ currentItem, currentRegionId: regionId, phase: "cached" });
-      return average;
-    }
-    try {
-      await reportProgress({ currentItem, currentRegionId: regionId, phase: "fetching" });
-      const historyKind = marketPriceHistoryKind(itemType);
-      const payload = await fetchBitjita(`/market/${historyKind}/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=30&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: requestTimeoutMs });
-      const buckets = unwrap(payload, "buckets", []);
-      const stats = payload?.priceStats && typeof payload.priceStats === "object" ? payload.priceStats : {};
-      let salesCount = 0;
-      let unitsSold = 0;
-      let totalValue = 0;
-      for (const bucket of buckets) {
-        const totals = priceHistoryBucketTotals(bucket);
-        salesCount += totals.salesCount;
-        unitsSold += totals.unitsSold;
-        totalValue += totals.totalValue;
-      }
-      const statsAverage = toNumber(stats.avg7d);
-      const statsSalesCount = toNumber(stats.totalTrades ?? stats.salesCount ?? stats.tradeCount);
-      const statsUnitsSold = toNumber(stats.totalVolume ?? stats.unitsSold ?? stats.volume ?? stats.totalQuantity);
-      if (statsAverage > 0) {
-        salesCount = statsSalesCount || salesCount;
-        unitsSold = statsUnitsSold || unitsSold;
-        totalValue = unitsSold > 0 ? statsAverage * unitsSold : totalValue;
-      }
-      completed += 1;
-      if (salesCount <= 0 || (statsAverage <= 0 && (unitsSold <= 0 || totalValue <= 0))) {
-        db.prepare(`
-          DELETE FROM market_regional_sale_averages_current
-          WHERE claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ?
-        `).run(String(claimId), regionId, itemId, itemType);
-        await reportProgress({ currentItem, currentRegionId: regionId, phase: "no_sales" });
-        return null;
-      }
-      const average = {
-        regionId,
-        itemId,
-        itemType,
-        itemName: order.itemName ?? null,
-        averageUnitPrice: statsAverage > 0 ? statsAverage : unitsSold > 0 ? totalValue / unitsSold : 0,
-        salesCount,
-        unitsSold,
-        totalValue,
-        windowDays: 7,
-        firstBucketAt: buckets[0]?.bucket ?? buckets[0]?.date ?? buckets[0]?.start ?? null,
-        lastBucketAt: buckets.at(-1)?.bucket ?? buckets.at(-1)?.date ?? buckets.at(-1)?.start ?? null,
-        raw: {
-          priceStats: stats,
-          bucketCount: buckets.length,
-          source: statsAverage > 0 ? "priceStats.avg7d" : "bucketTotals",
-        },
-      };
-      if (onAverage) await onAverage(average, { current: completed, total: uniqueOrders.length });
-      await reportProgress({ currentItem, currentRegionId: regionId, phase: "saved" });
-      return average;
-    } catch (error) {
-      failures.push(`R${regionId} ${order.itemName ?? itemId} sales history: ${error instanceof Error ? error.message : String(error)}`);
-      completed += 1;
-      await reportProgress({ currentItem, currentRegionId: regionId, phase: "failed", lastFailure: failures.at(-1) });
-      return null;
-    }
-  });
-  return averages.filter(Boolean);
-}
-
-async function runRegionalBuyOrderSaleBaselineRefreshJob({ jobKey } = {}) {
-  const claimId = String(getSettings().claimId ?? "").trim();
-  if (!claimId) return { refreshed: false, reason: "No claim ID configured", orderCount: 0, averageCount: 0 };
-  const regionId = currentMonitoredRegionId(claimId);
-  if (!regionId) return { refreshed: false, reason: "No monitored region is known yet", orderCount: 0, averageCount: 0 };
-  const cleanupAt = new Date().toISOString();
-  db.prepare("UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ? AND region_id <> ?").run(cleanupAt, claimId, regionId);
-  db.prepare("DELETE FROM market_regional_sale_averages_current WHERE claim_id = ? AND region_id <> ?").run(claimId, regionId);
-  db.prepare(`
-    DELETE FROM market_regional_sale_averages_current
-    WHERE claim_id = ? AND region_id = ?
-      AND (
-        average_unit_price <= 0 OR sales_count <= 0 OR units_sold <= 0 OR total_value <= 0
-        OR raw_json LIKE '%"buckets":[]%'
-      )
-  `).run(claimId, regionId);
-  const rows = db.prepare(`
-    SELECT *
-    FROM market_buy_orders_current
-    WHERE claim_id = ? AND active = 1 AND region_id = ?
-    ORDER BY region_id ASC, item_name ASC
-  `).all(claimId, regionId);
-  const orders = rows.map((row) => ({
-    orderKey: row.order_key,
-    regionId: row.region_id,
-    itemId: row.item_id,
-    itemType: row.item_type,
-    itemName: row.item_name,
-  }));
-  if (!orders.length) return { refreshed: true, orderCount: 0, averageCount: 0, failures: [] };
-  const failures = [];
-  let written = 0;
-  const uniqueItemCount = [...new Set(orders.map((order) => regionalSaleAverageKey(order)).filter(Boolean))].length;
-  const progressBase = {
-    orderCount: orders.length,
-    uniqueItemCount,
-    regionId,
-    averageCount: 0,
-    failureCount: 0,
-    stage: "fetching_sale_baselines",
-  };
-  updateScheduledJobProgress(jobKey, { ...progressBase, current: 0, total: uniqueItemCount });
-  await fetchRegionalBuyOrderSaleAverages(claimId, orders, failures, {
-    useCache: false,
-    progressKey: null,
-    onAverage: async (average) => {
-      const refreshedAt = new Date().toISOString();
-      db.exec("BEGIN");
-      try {
-        written += persistRegionalSaleAverages(claimId, [average], refreshedAt);
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-      updateScheduledJobProgress(jobKey, {
-        ...progressBase,
-        averageCount: written,
-        failureCount: failures.length,
-      });
-    },
-    onProgress: async ({ current, total }) => {
-      updateScheduledJobProgress(jobKey, {
-        ...progressBase,
-        current,
-        total,
-        averageCount: written,
-        failureCount: failures.length,
-      });
-    },
-  });
-  return {
-    refreshed: true,
-    orderCount: orders.length,
-    uniqueItemCount,
-    averageCount: written,
-    failureCount: failures.length,
-    failures: failures.slice(0, 20),
-  };
 }
 
 function marketTradeBackfillKey(claimId, playerId) {
@@ -7234,7 +6962,6 @@ function domainRowsToAppData(claimId, rowsByDomain) {
     region: payload("region", { claims: [] }),
     regionStatus: payload("regionStatus", { regions: [] }),
     tradeVolume: payload("tradeVolume", {}),
-    regionalBuyOrders: payload("regionalBuyOrders", { regions: [], orders: [] }),
     inventories: payload("inventories", { buildings: [] }),
     recruitment: currentRecruitmentProjection(claimId),
     layout: payload("layout", {}),
@@ -7297,133 +7024,6 @@ function inventoryStoredTotalsFromPayload(inventories) {
   return totals;
 }
 
-function persistRegionalBuyOrdersCurrent(claimId, payload, collectedAt) {
-  const claimIdText = String(claimId ?? "").trim();
-  if (!claimIdText || !payload || typeof payload !== "object") return 0;
-  const orders = Array.isArray(payload.orders) ? payload.orders : [];
-  const regions = [...new Set([
-    ...unwrap(payload, "regions", []),
-    ...orders.map((order) => order.regionId),
-  ].map((regionId) => String(regionId ?? "").trim()).filter((regionId) => /^\d+$/.test(regionId)))];
-  const upsertBuyOrder = db.prepare(`
-    INSERT INTO market_buy_orders_current (
-      claim_id, order_key, region_id, region_name, market_claim_id, market_claim_name,
-      buyer_entity_id, buyer_name, item_id, item_type, item_name, tier, rarity, icon_asset_name,
-      quantity, unit_price, total_value, stored_coins, listed_at, first_seen, last_seen, active,
-      raw_json, updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    ON CONFLICT(claim_id, order_key) DO UPDATE SET
-      region_id = excluded.region_id,
-      region_name = excluded.region_name,
-      market_claim_id = excluded.market_claim_id,
-      market_claim_name = excluded.market_claim_name,
-      buyer_entity_id = excluded.buyer_entity_id,
-      buyer_name = excluded.buyer_name,
-      item_id = excluded.item_id,
-      item_type = excluded.item_type,
-      item_name = excluded.item_name,
-      tier = excluded.tier,
-      rarity = excluded.rarity,
-      icon_asset_name = excluded.icon_asset_name,
-      quantity = excluded.quantity,
-      unit_price = excluded.unit_price,
-      total_value = excluded.total_value,
-      stored_coins = excluded.stored_coins,
-      listed_at = excluded.listed_at,
-      last_seen = excluded.last_seen,
-      active = 1,
-      raw_json = excluded.raw_json,
-      updated_at = excluded.updated_at
-  `);
-  let written = 0;
-  for (const regionId of regions) {
-    db.prepare("UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ? AND region_id = ?").run(collectedAt, claimIdText, regionId);
-  }
-  for (const order of orders) {
-    const orderKey = String(order.orderKey ?? "").trim();
-    const regionId = String(order.regionId ?? "").trim();
-    const itemName = String(order.itemName ?? "").trim();
-    if (!orderKey || !regionId || !itemName) continue;
-    const quantity = toNumber(order.quantity);
-    const unitPrice = toNumber(order.unitPrice);
-    upsertBuyOrder.run(
-      claimIdText,
-      orderKey,
-      regionId,
-      order.regionName ?? null,
-      order.marketClaimId ?? null,
-      order.marketClaimName ?? null,
-      order.buyerEntityId ?? null,
-      order.buyerName ?? null,
-      order.itemId ?? null,
-      order.itemType ?? "0",
-      itemName,
-      order.tier ?? null,
-      order.rarity ?? null,
-      order.iconAssetName ?? null,
-      quantity,
-      unitPrice,
-      order.totalValue ?? quantity * unitPrice,
-      toNumber(order.storedCoins),
-      order.listedAt ?? null,
-      order.firstSeen ?? collectedAt,
-      collectedAt,
-      JSON.stringify(order.raw ?? order),
-      collectedAt,
-    );
-    written += 1;
-  }
-  return written;
-}
-
-function persistRegionalSaleAverages(claimId, averages, collectedAt) {
-  const claimIdText = String(claimId ?? "").trim();
-  const upsertRegionalSaleAverage = db.prepare(`
-    INSERT INTO market_regional_sale_averages_current (
-      claim_id, region_id, item_id, item_type, item_name, average_unit_price, sales_count,
-      units_sold, total_value, window_days, first_bucket_at, last_bucket_at, raw_json, updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(claim_id, region_id, item_id, item_type) DO UPDATE SET
-      item_name = excluded.item_name,
-      average_unit_price = excluded.average_unit_price,
-      sales_count = excluded.sales_count,
-      units_sold = excluded.units_sold,
-      total_value = excluded.total_value,
-      window_days = excluded.window_days,
-      first_bucket_at = excluded.first_bucket_at,
-      last_bucket_at = excluded.last_bucket_at,
-      raw_json = excluded.raw_json,
-      updated_at = excluded.updated_at
-  `);
-  let written = 0;
-  for (const average of Array.isArray(averages) ? averages : []) {
-    const regionId = String(average.regionId ?? "").trim();
-    const itemId = String(average.itemId ?? "").trim();
-    const itemType = String(average.itemType ?? 0).trim() || "0";
-    if (!claimIdText || !regionId || !itemId) continue;
-    upsertRegionalSaleAverage.run(
-      claimIdText,
-      regionId,
-      itemId,
-      itemType,
-      average.itemName ?? null,
-      toNumber(average.averageUnitPrice),
-      toNumber(average.salesCount),
-      toNumber(average.unitsSold),
-      toNumber(average.totalValue),
-      toNumber(average.windowDays) || 7,
-      average.firstBucketAt ?? null,
-      average.lastBucketAt ?? null,
-      JSON.stringify(average.raw ?? average),
-      collectedAt,
-    );
-    written += 1;
-  }
-  return written;
-}
-
 function persistDomainPayloads(claimId, data, attemptedAt, collectedAt, metrics = null, domains = domainPayloadKeys) {
   const payloadWriteStartedAt = Date.now();
   for (const domain of domains) {
@@ -7433,7 +7033,6 @@ function persistDomainPayloads(claimId, data, attemptedAt, collectedAt, metrics 
     statements.upsertDomainPayload.run(String(claimId), domain, JSON.stringify(payload), collectedAt, attemptedAt, collectedAt, domainError ? String(domainError) : null, collectedAt);
     recordCollectorPayloadWrite(metrics, domain, Date.now() - domainStartedAt);
   }
-  if (domains.includes("regionalBuyOrders")) persistRegionalBuyOrdersCurrent(claimId, data?.regionalBuyOrders, collectedAt);
   if (metrics) metrics.domainPayloadWriteDurationMs = Math.max(Date.now() - payloadWriteStartedAt, 0);
 }
 
@@ -7530,9 +7129,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
     collectorDue(id, "region", "region", options) && derivedRegionId ? fetchDomainPayload(previous, "region", { claims: [] }, "Region claims", () => timedCollectorFetch(metrics, "region", "region claims", () => fetchCachedRegionClaims(derivedRegionId))) : Promise.resolve(previousPayload(previous, "region", { claims: [] })),
     collectorDue(id, "market", "tradeVolume", options) && derivedRegionId ? fetchDomainPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] }, "Trade volume", () => timedCollectorFetch(metrics, "market", "trade volume", () => fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(derivedRegionId))}`))) : Promise.resolve(previousPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] })),
   ]);
-  // Retained in the snapshot payload for non-destructive rollback only. The
-  // regional collector is retired; global buy orders now load live item-first.
-  const regionalBuyOrders = previousPayload(previous, "regionalBuyOrders", { regions: [], orders: [] });
   const players = unwrap(playerPayload, "players", Array.isArray(playerPayload) ? playerPayload : []);
   return {
     claim: claimPayloadWithRegion,
@@ -7553,7 +7149,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
     region,
     regionStatus,
     tradeVolume,
-    regionalBuyOrders,
     inventories: inventoriesPayload,
     recruitment: recruitmentPayload,
     layout: layoutPayload,
@@ -7804,128 +7399,37 @@ function marketHistory(claimId, limit, owner = "") {
   return { liveListings, events, sales, topItems, daily, totals, pending };
 }
 
-function marketBuyOrders(claimId, params = {}) {
+function marketBuyOrders(claimId, params = {}, allowedRegionIds = []) {
   const id = String(claimId ?? "").trim();
-  const requestedRegion = String(params.regionId ?? "").trim();
-  const regionId = requestedRegion && requestedRegion.toLowerCase() !== "all" ? requestedRegion : "";
-  const query = String(params.search ?? params.q ?? "").trim().toLowerCase();
-  const page = Math.max(1, Math.floor(Number(params.page) || 1));
-  const pageSize = [25, 50, 100].includes(Number(params.pageSize)) ? Number(params.pageSize) : 50;
-  const direction = String(params.direction ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
-  const sort = String(params.sort ?? "unitPrice");
-  const where = ["claim_id = ?", "active = 1"];
-  const args = [id];
-  if (regionId) {
-    where.push("region_id = ?");
-    args.push(regionId);
-  }
-  if (query) {
-    const pattern = `%${escapeSqlLike(query)}%`;
-    where.push(`(
-      lower(item_name) LIKE ? ESCAPE '\\'
-      OR lower(COALESCE(buyer_name, '')) LIKE ? ESCAPE '\\'
-      OR lower(COALESCE(market_claim_name, '')) LIKE ? ESCAPE '\\'
-      OR lower(COALESCE(region_name, '')) LIKE ? ESCAPE '\\'
-      OR lower(COALESCE(rarity, '')) LIKE ? ESCAPE '\\'
-    )`);
-    args.push(pattern, pattern, pattern, pattern, pattern);
-  }
-  const rows = db.prepare(`
-    SELECT * FROM market_buy_orders_current
-    WHERE ${where.join(" AND ")}
-    ORDER BY last_seen DESC
-  `).all(...args);
-  const salesByItem = new Map();
-  const salesArgs = [id];
-  const salesRegionClause = regionId ? " AND region_id = ?" : "";
-  if (regionId) salesArgs.push(regionId);
-  for (const row of db.prepare(`
-    SELECT region_id, item_id, item_type, sales_count AS salesCount, units_sold AS unitsSold, total_value AS totalValue, average_unit_price AS averageUnitPrice
-    FROM market_regional_sale_averages_current
-    WHERE claim_id = ? AND window_days = 7${salesRegionClause}
-  `).all(...salesArgs)) {
-    const units = toNumber(row.unitsSold);
-    const total = toNumber(row.totalValue);
-    if (!row.item_id || units <= 0 || toNumber(row.salesCount) < 3) continue;
-    salesByItem.set(`${row.region_id}:${row.item_type ?? 0}:${row.item_id}`, {
-      salesCount: toNumber(row.salesCount),
-      averageUnitPrice: toNumber(row.averageUnitPrice) || total / units,
-    });
-  }
-  const normalized = rows.map((row) => {
-    const raw = safeJson(row.raw_json, {});
-    const sales = salesByItem.get(`${row.region_id}:${row.item_type ?? 0}:${row.item_id}`) ?? null;
-    const averageUnitPrice = sales?.averageUnitPrice ?? null;
-    const premiumPercent = averageUnitPrice && averageUnitPrice > 0 ? ((toNumber(row.unit_price) - averageUnitPrice) / averageUnitPrice) * 100 : null;
-    return {
-      orderKey: row.order_key,
-      regionId: row.region_id,
-      regionName: row.region_name,
-      marketClaimId: row.market_claim_id,
-      marketClaimName: row.market_claim_name,
-      buyerEntityId: row.buyer_entity_id,
-      buyerName: row.buyer_name,
-      itemId: row.item_id,
-      itemType: row.item_type,
-      itemName: row.item_name,
-      tier: row.tier,
-      rarity: row.rarity,
-      rarityStr: row.rarity,
-      iconAssetName: row.icon_asset_name ?? raw.iconAssetName,
-      quantity: toNumber(row.quantity),
-      unitPrice: toNumber(row.unit_price),
-      totalValue: toNumber(row.total_value),
-      storedCoins: toNumber(row.stored_coins),
-      listedAt: row.listed_at,
-      firstSeen: row.first_seen,
-      lastSeen: row.last_seen,
-      averageUnitPrice,
-      salesCount: sales?.salesCount ?? 0,
-      premiumPercent,
-      opportunityEligible: premiumPercent != null && premiumPercent > 0,
-    };
-  });
-  const sorters = {
-    item: (row) => row.itemName ?? "",
-    tier: (row) => toNumber(row.tier),
-    rarity: (row) => row.rarity ?? "",
-    region: (row) => toNumber(row.regionId),
-    buyer: (row) => row.buyerName ?? "",
-    settlement: (row) => row.marketClaimName ?? "",
-    quantity: (row) => toNumber(row.quantity),
-    unitPrice: (row) => toNumber(row.unitPrice),
-    totalValue: (row) => toNumber(row.totalValue),
-    premium: (row) => row.premiumPercent ?? -Infinity,
-    lastSeen: (row) => new Date(row.lastSeen ?? row.listedAt ?? 0).getTime(),
-  };
-  const sorter = sorters[sort] ?? sorters.unitPrice;
-  normalized.sort((a, b) => {
-    const av = sorter(a);
-    const bv = sorter(b);
-    if (typeof av === "string" || typeof bv === "string") return direction === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
-    return direction === "asc" ? toNumber(av) - toNumber(bv) : toNumber(bv) - toNumber(av);
-  });
-  const opportunities = normalized
-    .filter((row) => row.opportunityEligible)
-    .sort((a, b) => (b.premiumPercent ?? 0) - (a.premiumPercent ?? 0) || toNumber(b.totalValue) - toNumber(a.totalValue))
-    .slice(0, 5);
-  const offset = (page - 1) * pageSize;
-  const total = normalized.length;
-  const unfilteredRegionRows = rows.length;
+  const current = currentStateRepository.read(id, "regional-market");
+  const runtimeHealth = relayRegionalMarketRuntime.health();
   return {
-    rows: normalized.slice(offset, offset + pageSize),
-    opportunities,
-    total,
-    unfilteredRegionRows,
-    page,
-    pageSize,
-    pageCount: Math.max(1, Math.ceil(total / pageSize)),
-    sort,
-    direction,
-    regionId: regionId || "all",
-    sortableFields: Object.keys(sorters),
-    collectorStatus: collectorStatusPayload().collectors.buyOrders,
+    ...regionalBuyOrdersView(current?.data, {
+      ...params,
+      allowedRegionIds,
+      observedAt: current?.provenance?.receivedAt ?? null,
+      getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    }),
+    ...regionalMarketStatus(current, {
+      regionId: params.regionId,
+      allowedRegionIds,
+      runtimeHealth,
+      staleAfterMs: relayRegionalMarketStaleMs,
+    }),
+    generatedAt: current?.provenance?.receivedAt ?? null,
+    runtimeHealth,
   };
+}
+
+function configuredRegionalMarketRegionIds(claimId) {
+  const settings = getSettings();
+  const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+  const claimRegionId = String(
+    claim.regionId ?? claim.region_id ?? claim.region ?? "",
+  ).trim();
+  return parseRegionIds(
+    `${claimRegionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+  );
 }
 
 function activityHistory(claimId, limit = 500) {
@@ -10739,7 +10243,38 @@ const server = createServer(async (req, res) => {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/buy-orders") {
-      return send(res, 200, marketBuyOrders(url.searchParams.get("claimId") ?? getSettings().claimId, Object.fromEntries(url.searchParams.entries())));
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const regionalMarket = currentStateRepository.read(claimId, "regional-market");
+      const persistedActiveRegionIds = Array.isArray(regionalMarket?.data?.activeRegionIds)
+        ? regionalMarket.data.activeRegionIds.map(String)
+        : [];
+      const runtimeActiveRegionIds = relayRegionalMarketRuntime.health().activeRegionIds;
+      const configuredActiveRegionIds = configuredRegionalMarketRegionIds(claimId);
+      const allowedRegionIds = configuredActiveRegionIds.length
+        ? configuredActiveRegionIds
+        : runtimeActiveRegionIds.length
+          ? runtimeActiveRegionIds
+          : persistedActiveRegionIds;
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      return send(
+        res,
+        200,
+        marketBuyOrders(
+          claimId,
+          Object.fromEntries(url.searchParams.entries()),
+          allowedRegionIds,
+        ),
+      );
     }
     if (req.method === "GET" && url.pathname === "/api/local/leaderboard") {
       const refresh = manualRefreshAccess(req, res);
@@ -10889,6 +10424,37 @@ function startBackgroundTasks() {
           relayPublicCraftStarted = true;
         } catch (error) {
           if (!isTestRuntime) console.warn(`Relay public-craft startup failed: ${errorMessage(error)}`);
+        }
+      }
+      if (!relayRegionalMarketStarted) {
+        try {
+          const settings = getSettings();
+          const activeRegionIds = parseRegionIds(
+            `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+          );
+          await relayRegionalMarketRuntime.start({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds,
+          });
+          relayRegionalMarketStarted = true;
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay regional-market startup failed: ${errorMessage(error)}`);
+        }
+      } else {
+        try {
+          const settings = getSettings();
+          await relayRegionalMarketRuntime.reconcile({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds: parseRegionIds(
+              `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+            ),
+          });
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay regional-market reconcile failed: ${errorMessage(error)}`);
         }
       }
       try {

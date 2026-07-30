@@ -13,6 +13,12 @@ SQLite remains the application's durable local read model, history store, and
 cross-process boundary. It must not retain tables, queues, or job state whose
 only purpose was working around BitJita bulk-request sizes or rate limits.
 
+Fast access takes precedence over completing lower-priority durable side
+effects. A validated current generation is published before history
+aggregation, notification delivery, reporting, compaction, or reconciliation.
+Those side effects consume the committed generation asynchronously and surface
+their own failures without holding the current-data path open.
+
 The public browser remains isolated from Relay and SpacetimeDB. It reads local
 provider-neutral routes only.
 
@@ -196,6 +202,8 @@ apply time.
 | Received subscription change to committed normalized generation | p95 at or below 2 seconds; p99 at or below 5 seconds |
 | Committed generation to an open browser update | p95 at or below 1 second |
 | Incremental derived-current update after its source generation | p95 at or below 2 seconds |
+| Process restart to serving a durable last-good generation | At or below 2 seconds after the local API listener is ready; no Relay reconnect is required first |
+| First-ever clone startup with no last-good data | Publish each ready domain independently; no page waits for an unrelated catalog, region, or history domain |
 | Primary HTTP operational domains | Provisional refresh target of 15 seconds, tightened only within confirmed Relay limits |
 | Lower-change HTTP domains | Provisional refresh target of 60 seconds, with immediate priority refresh when requested and safe |
 | Selected-entity HTTP details | Return memory-cached data immediately within a 15-second budget; otherwise one coalesced bounded request, with stale last-good fallback |
@@ -283,6 +291,14 @@ storage hierarchy. “The old implementation queried this table” is not
 evidence. A retained current table whose writer is a scheduled ingestion job
 fails this policy.
 
+When both the generic committed generation and a dedicated table contain the
+same current rows, the dedicated table is removed. If a page needs faster
+filtering or joins, prefer an in-memory index rebuilt from the committed
+generation. Retain a SQL projection only when representative benchmarks show
+that the API latency budget cannot otherwise be met, or when cross-process
+sharing and restart recovery would be materially degraded. Record the before
+and after p95 latency in the table inventory.
+
 Initial candidates requiring explicit dependency proof are:
 
 | Existing table or group | Planned disposition |
@@ -290,7 +306,7 @@ Initial candidates requiring explicit dependency proof are:
 | `recipe_catalog_entries` | Retired. Planner and recipe-detail readers now use the normalized `game_catalog_*` projection. |
 | `game_catalog_refresh_runs`, `game_catalog_refresh_targets` | Retired. Continuous global subscription health and generation state replace catalog refresh orchestration. |
 | `settlement_state_current` | Merge or retire if `domain_payload_current` and typed projections become its only source and cover every reader. |
-| `market_buy_orders_current`, `market_regional_sale_averages_current` | Keep only when they provide a measured indexed derived-current benefit; update them from order events rather than a long scheduled sweep. |
+| `market_buy_orders_current`, `market_regional_sale_averages_current` | Retired. The generic `regional-market` generation supports local buy-order queries without a duplicate current table, and no authoritative regional sale signal exists to justify a current sale-average projection. |
 | `scheduled_jobs` | Keep for legitimate maintenance and delivery work; delete retired ingestion-job definitions and UI controls. |
 | `domain_payload_current`, `provider_source_health`, `provider_subscription_health` | Keep as the atomic last-good and operational boundary unless a typed projection demonstrably replaces the same responsibility. |
 | `game_catalog_*` normalized entity/recipe tables | Keep as the durable catalog read model; remove refresh bookkeeping that no longer applies. |
@@ -337,7 +353,10 @@ the next vertical begins, the domain must pass all of these checks:
 7. disabling all ingestion and reconciliation schedules leaves healthy
    current-state updates and browser access fully operational;
 8. source-to-commit, commit-to-API, and commit-to-browser latency meet the
-   budgets above under representative row counts.
+   budgets above under representative row counts;
+9. history, notification, report, outbox, and analytics writers can be delayed
+   or failed in tests without delaying the current generation or its browser
+   visibility.
 
 History appenders, notification outboxes, backups, and integrity jobs may trail
 the current generation without delaying it. If one of those durable side

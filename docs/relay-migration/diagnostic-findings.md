@@ -377,10 +377,22 @@ and subscribes to bounded equality filters in `player_username_state`. Item and
 Cargo identities are projected through separate local catalog keys. No
 cross-claim row is allowed to commit.
 
-This current state is stored only as the generic `market` last-good domain and
-is consumed by Local Market and Dashboard. Legacy market tables are not the
-live page source and remain only until transition history, sale corroboration,
-notifications, and regional aggregation ownership are resolved.
+This claim-scoped current state is stored only as the generic `market`
+last-good domain and is consumed by Local Market and Dashboard. The duplicate
+`market_listings` table has been retired; transition history and notifications
+consume consecutive committed generations asynchronously.
+
+Cross-region buy-order acquisition now follows the same typed pattern through
+bounded configured-region sessions and publishes a combined
+`regional-market` last-good generation. `market_buy_orders_current` and
+`market_regional_sale_averages_current` are retired. The latter is deliberately
+not replaced: the observed close state does not distinguish a completed sale
+from a cancelled listing, so premium-opportunity scoring stays unavailable
+until an authoritative same-region sale signal is proven. Region snapshots
+retain independent receive times; capped non-primary sessions rotate on a
+provider-owned loop, disconnected sockets retry with bounded jittered backoff,
+and selected-region API freshness becomes stale when its own observation is
+old or its live session is disconnected.
 
 ## Hexite deposit HTTP semantics
 

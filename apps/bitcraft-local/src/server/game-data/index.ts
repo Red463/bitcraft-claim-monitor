@@ -19,6 +19,8 @@ export * from "./primaryRegionRuntime.ts";
 export * from "./publicCraftRegionSession.ts";
 export * from "./publicCraftProjection.ts";
 export * from "./publicCraftRuntime.ts";
+export * from "./regionalMarketRegionSession.ts";
+export * from "./regionalMarketRuntime.ts";
 export * from "./researchProjection.ts";
 export * from "./researchTierPresets.ts";
 export * from "./recruitmentProjection.ts";

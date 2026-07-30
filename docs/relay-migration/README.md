@@ -40,6 +40,13 @@ Live-first data policy:
 - calculation-heavy features such as Craft Planner execute against
   continuously maintained local normalized indexes, so they neither repeat
   large Relay reads nor wait for a scheduled catalog build;
+- current generations publish before history, notification, analytics, report,
+  or reconciliation side effects, so those durable workflows cannot delay an
+  operational page;
+- after restart, the API serves the durable last-good generation immediately
+  without waiting for Relay reconnection, while a first-ever empty clone
+  publishes ready domains independently instead of waiting for a full-system
+  load;
 - browser requests and scheduled jobs never own live-data freshness: page
   navigation reads an already committed generation, while subscriptions and
   bounded provider refresh loops keep the next generation ready;
@@ -60,6 +67,21 @@ the generic `market` generation used by Local Market and Dashboard.
 current-state mirror. Durable `market_events`/`market_trades` history,
 notifications, and any measured cross-region index remain separate side
 effects and must never delay publication of the live generation.
+
+Cross-region buy orders use the adaptive regional-session pattern rather than
+the legacy scheduled crawl. Each configured region publishes a bounded typed
+buy-order snapshot, and the runtime combines those snapshots into the generic
+`regional-market` last-good domain. Local filtering and catalog enrichment are
+fast enough without `market_buy_orders_current`; the table and the unproven
+`market_regional_sale_averages_current` projection are retired. Premium
+opportunities remain unavailable until Relay exposes or proves an
+authoritative same-region sale signal. The primary region remains pinned;
+additional configured regions rotate within the connection cap on a
+provider-owned 15-second loop, independently of HTTP refresh jobs. A newly
+opened region is held until its first complete generation applies or its
+30-second apply timeout expires, so connection setup cannot churn the pool
+before useful rows arrive. Per-region receive ages and connection state prevent
+a disconnected or delayed region from being reported as fresh.
 
 Implementation is dependency-ordered:
 

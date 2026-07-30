@@ -154,6 +154,23 @@ test("market listing activity is subscription-driven rather than scheduled", () 
   assert.match(source, /onSnapshotCommitted/);
 });
 
+test("regional buy orders are subscription-driven with no SQL current cache", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(source, /RelayRegionalMarketRuntime/);
+  assert.match(source, /currentStateRepository\.read\([^,]+,\s*"regional-market"\)/);
+  assert.match(source, /relayRegionalMarketRuntime\.reconcile/);
+  assert.doesNotMatch(source, /relayRegionalMarketRuntime\.warmActiveRegions/);
+  assert.match(source, /delete current\.buyOrders/);
+  assert.doesNotMatch(source, /const markerKey = "regional_buy_order_(?:collector|state)_retired_at"/);
+  assert.doesNotMatch(source, /fetchRegionalBuyOrders/);
+  assert.doesNotMatch(source, /fetchRegionalBuyOrderSaleAverages/);
+  assert.doesNotMatch(source, /persistRegionalBuyOrdersCurrent/);
+  assert.doesNotMatch(source, /persistRegionalSaleAverages/);
+  assert.doesNotMatch(source, /market_buy_orders_current/);
+  assert.doesNotMatch(source, /market_regional_sale_averages_current/);
+  assert.doesNotMatch(source, /existingBuyOrders|buyOrders:\s*\{/);
+});
+
 test("collector status resolves the claim once without rebuilding all public settings per collector", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const start = source.indexOf("function collectorStatusPayload");

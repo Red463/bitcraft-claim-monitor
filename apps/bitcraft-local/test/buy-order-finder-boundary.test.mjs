@@ -12,3 +12,13 @@ test("global Buy Orders uses the item-first live market browser", () => {
   assert.match(marketBrowse, /no monitored-settlement cache is used/);
   assert.doesNotMatch(marketBrowse, /\/api\/local\/market\/buy-orders/);
 });
+
+test("regional Buy Order Finder describes committed Relay data as live rather than cached", () => {
+  const buyOrderFinder = readFileSync(new URL("../src/pages/market/BuyOrderFinder.tsx", import.meta.url), "utf8");
+
+  assert.match(buyOrderFinder, /Updating live orders/);
+  assert.match(buyOrderFinder, /live orders/);
+  assert.match(buyOrderFinder, /Relay may still be loading/);
+  assert.match(buyOrderFinder, /setState\(\(current\) => \(\{ \.\.\.current, error: "Relay regional market unavailable", loading: false \}\)\)/);
+  assert.doesNotMatch(buyOrderFinder, /cached buy orders|cached orders/i);
+});

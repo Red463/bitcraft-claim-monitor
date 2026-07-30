@@ -1535,6 +1535,126 @@ export function normalizeRegionalMarket(options: {
   };
 }
 
+export function normalizeRegionalBuyOrders(options: {
+  regionId: string;
+  buyRows: unknown[];
+  claimRows: unknown[];
+  usernameRows: unknown[];
+}) {
+  const regionId = decimalString(options.regionId, "regional buy-order region id");
+  const warnings: string[] = [];
+
+  function indexRows(values: unknown[], label: string): Map<string, WireRecord> {
+    const indexed = new Map<string, WireRecord>();
+    for (const [index, value] of values.entries()) {
+      try {
+        const row = record(value, `${label} row ${index}`);
+        const entityId = decimalString(
+          row.entityId ?? row.entity_id,
+          `${label} row ${index} entity id`,
+        );
+        if (!indexed.has(entityId)) indexed.set(entityId, row);
+      } catch (error) {
+        warnings.push(
+          `${label} omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return indexed;
+  }
+
+  const claims = indexRows(options.claimRows, "Regional claim_state");
+  const usernames = indexRows(options.usernameRows, "Regional player_username_state");
+  const orders: Array<Record<string, unknown>> = [];
+  for (const [index, value] of options.buyRows.entries()) {
+    try {
+      const row = record(value, `Regional buy_order_state row ${index}`);
+      const entityId = decimalString(
+        row.entityId ?? row.entity_id,
+        `Regional buy_order_state row ${index} entity id`,
+      );
+      const claimEntityId = decimalString(
+        row.claimEntityId ?? row.claim_entity_id,
+        `Regional buy order ${entityId} claim id`,
+      );
+      const ownerEntityId = decimalString(
+        row.ownerEntityId ?? row.owner_entity_id,
+        `Regional buy order ${entityId} owner id`,
+      );
+      const itemTypeValue = integer(
+        row.itemType ?? row.item_type,
+        `Regional buy order ${entityId} item type`,
+      );
+      if (itemTypeValue !== 0 && itemTypeValue !== 1) {
+        throw new TypeError(`Regional buy order ${entityId} item type must be 0 or 1.`);
+      }
+      const timestamp = record(
+        row.timestamp,
+        `Regional buy order ${entityId} timestamp`,
+      );
+      const claim = claims.get(claimEntityId);
+      const username = usernames.get(ownerEntityId);
+      if (!claim) {
+        warnings.push(
+          `Regional buy order ${entityId} has no claim_state row for ${claimEntityId}.`,
+        );
+      }
+      if (!username) {
+        warnings.push(
+          `Regional buy order ${entityId} has no player_username_state row for ${ownerEntityId}.`,
+        );
+      }
+      const price = decimalString(
+        row.priceThreshold ?? row.price_threshold,
+        `Regional buy order ${entityId} price`,
+      );
+      orders.push({
+        entityId,
+        claimEntityId,
+        claimName: claim ? String(claim.name ?? "") : "",
+        regionId,
+        ownerEntityId,
+        ownerUsername: username ? String(username.username ?? "") : "",
+        itemId: decimalString(
+          row.itemId ?? row.item_id,
+          `Regional buy order ${entityId} item id`,
+        ),
+        itemType: itemTypeValue === 1 ? "cargo" : "item",
+        price,
+        priceThreshold: price,
+        quantity: decimalString(
+          row.quantity,
+          `Regional buy order ${entityId} quantity`,
+        ),
+        storedCoins: decimalString(
+          row.storedCoins ?? row.stored_coins ?? 0,
+          `Regional buy order ${entityId} stored coins`,
+        ),
+        timestamp: normalizeTimestamp(
+          decimalString(
+            timestamp.__timestamp_micros_since_unix_epoch__
+              ?? timestamp.microsSinceUnixEpoch
+              ?? timestamp.micros_since_unix_epoch,
+            `Regional buy order ${entityId} timestamp micros`,
+          ),
+          "microseconds",
+        ),
+        side: "buy",
+      });
+    } catch (error) {
+      warnings.push(
+        `Regional buy_order_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  orders.sort((left, right) => {
+    const leftId = BigInt(String(left.entityId));
+    const rightId = BigInt(String(right.entityId));
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+  });
+  return { data: { orders }, warnings };
+}
+
 export function normalizeClaimCrafts(value: unknown) {
   const payload = record(value, "Relay claim crafts payload");
   const crafts = Array.isArray(payload.crafts) ? payload.crafts : [];
