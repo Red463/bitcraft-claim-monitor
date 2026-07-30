@@ -1,7 +1,7 @@
 function exactInteger(value, label) {
   const text = String(value ?? "").trim();
   if (!/^-?\d+$/.test(text)) throw new TypeError(`${label} must be an exact integer`);
-  return text;
+  return BigInt(text).toString();
 }
 
 function boundedCount(value, label) {

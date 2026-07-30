@@ -90,12 +90,16 @@ export function applySettlementStateMigration(db) {
           captured_at,
           CASE
             WHEN supplies IS NULL THEN NULL
-            WHEN supplies = CAST(supplies AS INTEGER) THEN CAST(CAST(supplies AS INTEGER) AS TEXT)
+            WHEN supplies BETWEEN -9007199254740991 AND 9007199254740991
+              AND supplies = CAST(supplies AS INTEGER)
+              THEN CAST(CAST(supplies AS INTEGER) AS TEXT)
             ELSE NULL
           END,
           CASE
             WHEN treasury IS NULL THEN NULL
-            WHEN treasury = CAST(treasury AS INTEGER) THEN CAST(CAST(treasury AS INTEGER) AS TEXT)
+            WHEN treasury BETWEEN -9007199254740991 AND 9007199254740991
+              AND treasury = CAST(treasury AS INTEGER)
+              THEN CAST(CAST(treasury AS INTEGER) AS TEXT)
             ELSE NULL
           END,
           members_count,
@@ -118,12 +122,16 @@ export function applySettlementStateMigration(db) {
           s.captured_at,
           CASE
             WHEN s.supplies IS NULL THEN NULL
-            WHEN s.supplies = CAST(s.supplies AS INTEGER) THEN CAST(CAST(s.supplies AS INTEGER) AS TEXT)
+            WHEN s.supplies BETWEEN -9007199254740991 AND 9007199254740991
+              AND s.supplies = CAST(s.supplies AS INTEGER)
+              THEN CAST(CAST(s.supplies AS INTEGER) AS TEXT)
             ELSE NULL
           END,
           CASE
             WHEN s.treasury IS NULL THEN NULL
-            WHEN s.treasury = CAST(s.treasury AS INTEGER) THEN CAST(CAST(s.treasury AS INTEGER) AS TEXT)
+            WHEN s.treasury BETWEEN -9007199254740991 AND 9007199254740991
+              AND s.treasury = CAST(s.treasury AS INTEGER)
+              THEN CAST(CAST(s.treasury AS INTEGER) AS TEXT)
             ELSE NULL
           END,
           s.members_count,

@@ -195,6 +195,57 @@ test("settlement transitions coalesce overlapping notifications and recover afte
   assert.deepEqual(successes, ["claim:3|members:3|inventories:3|market:3"]);
 });
 
+test("settlement transitions retry transient failures without another commit", async () => {
+  const snapshots = settlementSnapshots();
+  let attempts = 0;
+  const failures = [];
+  const successes = [];
+  const coordinator = createRelaySettlementTransitionCoordinator({
+    configuredClaimId: () => "claim-1",
+    readDomainSnapshot: (_claimId, domain) => snapshots[domain],
+    applySettlementTransition: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("database is busy");
+    },
+    retryDelaysMs: [0, 0],
+    onFailure: (error) => failures.push(error.message),
+    onSuccess: () => successes.push("success"),
+  });
+
+  coordinator.onCommit({ claimId: "claim-1", generation: 1, changedDomains: ["claim"] });
+  await coordinator.whenIdle();
+
+  assert.equal(attempts, 2);
+  assert.deepEqual(failures, ["database is busy"]);
+  assert.deepEqual(successes, ["success"]);
+});
+
+test("settlement transition retries stop after the bounded backoff is exhausted", async () => {
+  const snapshots = settlementSnapshots();
+  let attempts = 0;
+  const failures = [];
+  const coordinator = createRelaySettlementTransitionCoordinator({
+    configuredClaimId: () => "claim-1",
+    readDomainSnapshot: (_claimId, domain) => snapshots[domain],
+    applySettlementTransition: async () => {
+      attempts += 1;
+      throw new Error("database remains busy");
+    },
+    retryDelaysMs: [0, 0],
+    onFailure: (error) => failures.push(error.message),
+  });
+
+  coordinator.onCommit({ claimId: "claim-1", generation: 1, changedDomains: ["claim"] });
+  await coordinator.whenIdle();
+
+  assert.equal(attempts, 3);
+  assert.deepEqual(failures, [
+    "database remains busy",
+    "database remains busy",
+    "database remains busy",
+  ]);
+});
+
 test("equivalent committed settlement summaries do not duplicate transition evaluation", async () => {
   const snapshots = settlementSnapshots();
   const applied = [];
@@ -208,26 +259,38 @@ test("equivalent committed settlement summaries do not duplicate transition eval
 
   coordinator.onCommit({ claimId: "claim-1", generation: 1, changedDomains: ["claim"] });
   await coordinator.whenIdle();
-  snapshots.members = {
+  snapshots.claim = {
     generation: 2,
-    data: [{ entityId: "same-member-new-row", claimEntityId: "claim-1" }],
+    data: {
+      ...snapshots.claim.data,
+      supplies: "09007199254740993125",
+      treasury: "09007199254740993000",
+    },
   };
-  coordinator.onCommit({ claimId: "claim-1", generation: 2, changedDomains: ["members"] });
+  coordinator.onCommit({ claimId: "claim-1", generation: 2, changedDomains: ["claim"] });
   await coordinator.whenIdle();
   snapshots.members = {
     generation: 3,
+    data: [{ entityId: "same-member-new-row", claimEntityId: "claim-1" }],
+  };
+  coordinator.onCommit({ claimId: "claim-1", generation: 3, changedDomains: ["members"] });
+  await coordinator.whenIdle();
+  snapshots.members = {
+    generation: 4,
     data: [
       { entityId: "same-member-new-row", claimEntityId: "claim-1" },
       { entityId: "member-2", claimEntityId: "claim-1" },
     ],
   };
-  coordinator.onCommit({ claimId: "claim-1", generation: 3, changedDomains: ["members"] });
+  coordinator.onCommit({ claimId: "claim-1", generation: 4, changedDomains: ["members"] });
   await coordinator.whenIdle();
 
   assert.equal(applied.length, 2);
+  assert.equal(applied[0].summary.supplies, "9007199254740993125");
+  assert.equal(applied[0].summary.treasury, "9007199254740993000");
   assert.equal(applied[0].summary.membersCount, 1);
   assert.equal(applied[1].summary.membersCount, 2);
-  assert.equal(applied[1].vector, "claim:1|members:3|inventories:1|market:1");
+  assert.equal(applied[1].vector, "claim:2|members:4|inventories:1|market:1");
 });
 
 test("server gives committed Relay domains sole ownership of settlement transitions", () => {

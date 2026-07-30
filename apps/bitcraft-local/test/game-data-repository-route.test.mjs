@@ -215,6 +215,61 @@ test("stale settlement domain writes do not notify the Relay transition coordina
   db.close();
 });
 
+test("repository commit resolves before synchronous settlement transition work begins", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const claimId = "1369094286777412590";
+  const order = [];
+  let repository;
+  const coordinator = createRelaySettlementTransitionCoordinator({
+    configuredClaimId: () => claimId,
+    readDomainSnapshot: (readClaimId, domain) => repository.read(readClaimId, domain),
+    applySettlementTransition: async () => {
+      order.push("transition");
+    },
+  });
+  repository = createCurrentStateRepository(db, {
+    onCommit: (event) => coordinator.onCommit(event),
+  });
+
+  await repository.commitGeneration({
+    claimId,
+    generation: 1,
+    domains: {
+      claim: {
+        data: { entityId: claimId, regionId: "19", supplies: "100", treasury: "200" },
+        confidence: "joined",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+      members: {
+        data: [{ entityId: "member-1", claimEntityId: claimId }],
+        confidence: "joined",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+      inventories: {
+        data: { claim: { entityId: claimId }, dimensions: [], buildings: [] },
+        confidence: "joined",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+      market: {
+        data: { claimId, regionId: "19", marketplaces: [], listings: [] },
+        confidence: "authoritative",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+    },
+  });
+  order.push("commit-resolved");
+  await coordinator.whenIdle();
+
+  assert.deepEqual(order, ["commit-resolved", "transition"]);
+  db.close();
+});
+
 test("repository resumes generations after a process restart", async () => {
   const db = new DatabaseSync(":memory:");
   applySchemaBootstrap(db);

@@ -1,5 +1,6 @@
 const REQUIRED_DOMAINS = ["claim", "members", "inventories", "market"];
 const RELEVANT_DOMAINS = new Set(REQUIRED_DOMAINS);
+const DEFAULT_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
 
 function normalizedClaimId(value) {
   return String(value ?? "").trim();
@@ -14,7 +15,7 @@ function record(value) {
 function exactInteger(value, label) {
   const text = String(value ?? "").trim();
   if (!/^-?\d+$/.test(text)) throw new Error(`Relay settlement ${label} is malformed`);
-  return text;
+  return BigInt(text).toString();
 }
 
 function validGeneration(value) {
@@ -116,17 +117,55 @@ export function createRelaySettlementTransitionCoordinator({
   onAttempt,
   onSuccess,
   onFailure,
+  retryDelaysMs = DEFAULT_RETRY_DELAYS_MS,
 }) {
   let pendingEvent = null;
   let running = false;
   let scheduled = false;
+  let retryEvent = null;
+  let retryTimer = null;
+  let retryAttempt = 0;
   const lastAppliedFingerprintByClaim = new Map();
   const idleWaiters = new Set();
+  const boundedRetryDelays = Array.isArray(retryDelaysMs)
+    ? retryDelaysMs
+      .map((delay) => Number(delay))
+      .filter((delay) => Number.isFinite(delay) && delay >= 0)
+    : DEFAULT_RETRY_DELAYS_MS;
 
   function resolveIdle() {
-    if (running || scheduled || pendingEvent) return;
+    if (running || scheduled || pendingEvent || retryEvent || retryTimer) return;
     for (const resolve of idleWaiters) resolve();
     idleWaiters.clear();
+  }
+
+  function scheduleRetry(event) {
+    if (retryAttempt >= boundedRetryDelays.length) {
+      retryAttempt = 0;
+      retryEvent = null;
+      return;
+    }
+    const delay = boundedRetryDelays[retryAttempt];
+    retryAttempt += 1;
+    retryEvent = event;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      const eventToRetry = retryEvent;
+      retryEvent = null;
+      if (
+        eventToRetry
+        && normalizedClaimId(configuredClaimId()) === normalizedClaimId(eventToRetry.claimId)
+      ) {
+        const pendingGeneration = validGeneration(pendingEvent?.generation);
+        if (pendingGeneration == null || eventToRetry.generation >= pendingGeneration) {
+          pendingEvent = eventToRetry;
+        }
+        schedule();
+      } else {
+        retryAttempt = 0;
+        resolveIdle();
+      }
+    }, delay);
   }
 
   async function applyPendingEvents() {
@@ -141,6 +180,7 @@ export function createRelaySettlementTransitionCoordinator({
         if (normalizedClaimId(configuredClaimId()) !== claimId) continue;
 
         let attempt;
+        let transitionStarted = false;
         try {
           const snapshots = readCompleteSettlement(readDomainSnapshot, claimId, event);
           const summary = composeSummary(snapshots, claimId);
@@ -153,11 +193,22 @@ export function createRelaySettlementTransitionCoordinator({
             fingerprint,
           };
           attempt = safelyNotify(onAttempt, event, context);
+          transitionStarted = true;
           await applySettlementTransition(claimId, summary, context);
           lastAppliedFingerprintByClaim.set(claimId, fingerprint);
+          retryAttempt = 0;
           safelyNotify(onSuccess, event, context, attempt);
         } catch (error) {
           safelyNotify(onFailure, error, event, attempt);
+          const pendingGeneration = validGeneration(pendingEvent?.generation);
+          if (
+            transitionStarted
+            && (pendingGeneration == null || pendingGeneration < event.generation)
+          ) {
+            scheduleRetry(event);
+          } else {
+            retryAttempt = 0;
+          }
         }
       }
     } finally {
@@ -169,7 +220,7 @@ export function createRelaySettlementTransitionCoordinator({
   function schedule() {
     if (scheduled || running) return;
     scheduled = true;
-    queueMicrotask(() => {
+    setImmediate(() => {
       void applyPendingEvents();
     });
   }
@@ -185,6 +236,13 @@ export function createRelaySettlementTransitionCoordinator({
       const generation = validGeneration(event.generation);
       if (generation == null) return false;
       const normalizedEvent = { ...event, claimId, generation, changedDomains };
+      const retryGeneration = validGeneration(retryEvent?.generation);
+      if (retryTimer && retryGeneration != null && generation >= retryGeneration) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+        retryEvent = null;
+        retryAttempt = 0;
+      }
       const pendingClaimId = normalizedClaimId(pendingEvent?.claimId);
       if (
         !pendingEvent
@@ -197,7 +255,9 @@ export function createRelaySettlementTransitionCoordinator({
       return true;
     },
     whenIdle() {
-      if (!running && !scheduled && !pendingEvent) return Promise.resolve();
+      if (!running && !scheduled && !pendingEvent && !retryEvent && !retryTimer) {
+        return Promise.resolve();
+      }
       return new Promise((resolve) => idleWaiters.add(resolve));
     },
   };

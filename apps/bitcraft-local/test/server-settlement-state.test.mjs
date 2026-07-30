@@ -244,6 +244,33 @@ test("settlementStateActivityChanges treats an unavailable previous exact metric
   }), []);
 });
 
+test("settlement exact integers are canonicalized before comparison and persistence", async () => {
+  const {
+    settlementStateActivityChanges,
+    settlementStateSummary,
+  } = await import("../src/server/settlementState.mjs");
+
+  const summary = settlementStateSummary({
+    claimId: "claim-1",
+    claim: { supplies: "00010", treasury: "-00020" },
+    membersCount: 1,
+    market: { listings: [] },
+  });
+  assert.equal(summary.supplies, "10");
+  assert.equal(summary.treasury, "-20");
+  assert.deepEqual(settlementStateActivityChanges({
+    supplies: "10",
+    treasury: "-20",
+    members_count: 1,
+    buildings_count: null,
+    market_count: 0,
+  }, {
+    ...summary,
+    supplies: "00010",
+    treasury: "-00020",
+  }), []);
+});
+
 test("server records settlement activity before upserting current state without snapshot inserts", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const start = source.indexOf("function recordSettlementState");
@@ -304,6 +331,67 @@ test("settlement checkpoint migration converts legacy REAL amounts to TEXT witho
     { supplies: "125", treasury: "450" },
   );
   assert.equal(db.prepare("SELECT summary FROM activity_events WHERE id = 1").get().summary, "preserve me");
+  db.close();
+});
+
+test("settlement checkpoint migration invalidates rounded unsafe REAL baselines", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE settlement_state_current (
+      claim_id TEXT PRIMARY KEY,
+      captured_at TEXT NOT NULL,
+      supplies REAL,
+      treasury REAL,
+      members_count INTEGER,
+      buildings_count INTEGER,
+      market_count INTEGER,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO settlement_state_current VALUES (
+      'a', '2026-07-30T10:00:00.000Z', 9007199254740993, -9007199254740993,
+      3, 2, 5, '2026-07-30T10:00:00.000Z'
+    );
+  `);
+
+  applySettlementStateMigration(db);
+
+  assert.deepEqual(
+    { ...db.prepare("SELECT claim_id, supplies, treasury FROM settlement_state_current").get() },
+    { claim_id: "a", supplies: null, treasury: null },
+  );
+  db.close();
+});
+
+test("legacy snapshot migration invalidates rounded unsafe REAL baselines without dropping the row", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      claim_id TEXT NOT NULL,
+      captured_at TEXT NOT NULL,
+      supplies REAL,
+      treasury REAL,
+      members_count INTEGER,
+      buildings_count INTEGER,
+      market_count INTEGER,
+      raw_json TEXT NOT NULL
+    );
+    INSERT INTO snapshots (
+      claim_id, captured_at, supplies, treasury, members_count,
+      buildings_count, market_count, raw_json
+    ) VALUES (
+      'a', '2026-07-30T10:00:00.000Z', 9007199254740993, -9007199254740993,
+      3, 2, 5, '{}'
+    );
+  `);
+
+  applySettlementStateMigration(db);
+
+  assert.deepEqual(
+    { ...db.prepare("SELECT claim_id, supplies, treasury, members_count FROM settlement_state_current").get() },
+    { claim_id: "a", supplies: null, treasury: null, members_count: 3 },
+  );
+  assert.equal(db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='snapshots'").get(), undefined);
   db.close();
 });
 
