@@ -3,8 +3,8 @@ export const schemaBootstrapSql = `
   CREATE TABLE IF NOT EXISTS settlement_state_current (
     claim_id TEXT PRIMARY KEY,
     captured_at TEXT NOT NULL,
-    supplies REAL,
-    treasury REAL,
+    supplies TEXT,
+    treasury TEXT,
     members_count INTEGER,
     buildings_count INTEGER,
     market_count INTEGER,

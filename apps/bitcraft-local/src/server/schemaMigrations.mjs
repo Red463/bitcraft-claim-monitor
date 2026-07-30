@@ -52,8 +52,8 @@ export function applySettlementStateMigration(db) {
     CREATE TABLE IF NOT EXISTS settlement_state_current (
       claim_id TEXT PRIMARY KEY,
       captured_at TEXT NOT NULL,
-      supplies REAL,
-      treasury REAL,
+      supplies TEXT,
+      treasury TEXT,
       members_count INTEGER,
       buildings_count INTEGER,
       market_count INTEGER,
@@ -63,6 +63,49 @@ export function applySettlementStateMigration(db) {
 
   db.exec("BEGIN IMMEDIATE");
   try {
+    const checkpointColumns = db.prepare("PRAGMA table_info(settlement_state_current)").all();
+    const checkpointTypes = new Map(checkpointColumns.map((column) => [
+      String(column.name),
+      String(column.type ?? "").toUpperCase(),
+    ]));
+    if (checkpointTypes.get("supplies") !== "TEXT" || checkpointTypes.get("treasury") !== "TEXT") {
+      db.exec(`
+        ALTER TABLE settlement_state_current RENAME TO settlement_state_current_legacy_amounts;
+        CREATE TABLE settlement_state_current (
+          claim_id TEXT PRIMARY KEY,
+          captured_at TEXT NOT NULL,
+          supplies TEXT,
+          treasury TEXT,
+          members_count INTEGER,
+          buildings_count INTEGER,
+          market_count INTEGER,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO settlement_state_current (
+          claim_id, captured_at, supplies, treasury, members_count,
+          buildings_count, market_count, updated_at
+        )
+        SELECT
+          claim_id,
+          captured_at,
+          CASE
+            WHEN supplies IS NULL THEN NULL
+            WHEN supplies = CAST(supplies AS INTEGER) THEN CAST(CAST(supplies AS INTEGER) AS TEXT)
+            ELSE NULL
+          END,
+          CASE
+            WHEN treasury IS NULL THEN NULL
+            WHEN treasury = CAST(treasury AS INTEGER) THEN CAST(CAST(treasury AS INTEGER) AS TEXT)
+            ELSE NULL
+          END,
+          members_count,
+          buildings_count,
+          market_count,
+          updated_at
+        FROM settlement_state_current_legacy_amounts;
+        DROP TABLE settlement_state_current_legacy_amounts;
+      `);
+    }
     const hasLegacySnapshots = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'snapshots'").get();
     if (hasLegacySnapshots) {
       db.exec(`
@@ -71,7 +114,19 @@ export function applySettlementStateMigration(db) {
           buildings_count, market_count, updated_at
         )
         SELECT
-          s.claim_id, s.captured_at, s.supplies, s.treasury, s.members_count,
+          s.claim_id,
+          s.captured_at,
+          CASE
+            WHEN s.supplies IS NULL THEN NULL
+            WHEN s.supplies = CAST(s.supplies AS INTEGER) THEN CAST(CAST(s.supplies AS INTEGER) AS TEXT)
+            ELSE NULL
+          END,
+          CASE
+            WHEN s.treasury IS NULL THEN NULL
+            WHEN s.treasury = CAST(s.treasury AS INTEGER) THEN CAST(CAST(s.treasury AS INTEGER) AS TEXT)
+            ELSE NULL
+          END,
+          s.members_count,
           s.buildings_count, s.market_count, s.captured_at
         FROM snapshots s
         WHERE NOT EXISTS (

@@ -2309,7 +2309,7 @@ test("server collection paginates listings and protects production mutations", a
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ claimId, claim: {}, market: { listings: [] } }),
   });
-  assert.equal(browserSnapshot.status, 403);
+  assert.equal(browserSnapshot.status, 404);
 
   const forgedSettings = await fetch(`${origin}/api/local/admin/settings`, {
     method: "PUT",

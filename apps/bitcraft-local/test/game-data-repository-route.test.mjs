@@ -20,6 +20,9 @@ const { gameDataResponse } = await import(
 const { parseDomainKeys } = await import(
   new URL("../src/server/game-data/gameDataRoute.ts", import.meta.url).href,
 );
+const { createRelaySettlementTransitionCoordinator } = await import(
+  new URL("../src/server/relaySettlementTransitionCoordinator.mjs", import.meta.url).href,
+);
 
 function relayProvenance(receivedAt, sourceObservedAt = receivedAt) {
   return {
@@ -142,6 +145,73 @@ test("stale generation commits do not publish unchanged craft snapshots", async 
 
   assert.deepEqual(events, []);
   assert.equal(repository.read("1369094286777412590", "crafts").generation, 7);
+  db.close();
+});
+
+test("stale settlement domain writes do not notify the Relay transition coordinator", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const applications = [];
+  let repository;
+  const coordinator = createRelaySettlementTransitionCoordinator({
+    configuredClaimId: () => "1369094286777412590",
+    readDomainSnapshot: (claimId, domain) => repository.read(claimId, domain),
+    applySettlementTransition: async (_claimId, summary) => applications.push(summary),
+  });
+  repository = createCurrentStateRepository(db, {
+    onCommit: (event) => coordinator.onCommit(event),
+  });
+  const claimId = "1369094286777412590";
+  await repository.commitGeneration({
+    claimId,
+    generation: 7,
+    domains: {
+      claim: {
+        data: { entityId: claimId, regionId: "19", supplies: "100", treasury: "200" },
+        confidence: "joined",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+      members: {
+        data: [{ entityId: "member-1", claimEntityId: claimId }],
+        confidence: "joined",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+      inventories: {
+        data: { claim: { entityId: claimId }, dimensions: [], buildings: [] },
+        confidence: "joined",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+      market: {
+        data: { claimId, regionId: "19", marketplaces: [], listings: [] },
+        confidence: "authoritative",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+    },
+  });
+  await coordinator.whenIdle();
+
+  await repository.commitGeneration({
+    claimId,
+    generation: 6,
+    domains: {
+      claim: {
+        data: { entityId: claimId, regionId: "19", supplies: "999", treasury: "999" },
+        confidence: "joined",
+        provenance: relayProvenance("2026-07-30T12:01:00.000Z"),
+        warnings: [],
+      },
+    },
+  });
+  await coordinator.whenIdle();
+
+  assert.equal(applications.length, 1);
+  assert.equal(applications[0].supplies, "100");
+  assert.equal(repository.read(claimId, "claim").generation, 7);
   db.close();
 });
 

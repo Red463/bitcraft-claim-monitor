@@ -155,8 +155,10 @@ test("production lifecycle follows committed Relay crafts while contribution syn
   assert.ok(contributionStart > activityStart);
   assert.ok(snapshotStart > contributionStart);
   assert.match(source, /productionRelayLifecycleCoordinator\?\.onCommit\(event\)/);
+  assert.match(source, /settlementRelayTransitionCoordinator\?\.onCommit\(event\)/);
   assert.doesNotMatch(source.slice(snapshotStart), /await runProductionActivityCollector\(claimId, currentData\);/);
-  assert.match(source, /recordSettlementState\(\{/);
+  assert.doesNotMatch(source.slice(snapshotStart), /recordSettlementState\(/);
+  assert.doesNotMatch(source, /url\.pathname === "\/api\/local\/snapshot"/);
   assert.doesNotMatch(source, /sideEffectCollectorDue\("snapshotHistory"/);
   assert.doesNotMatch(source, /collector(?:Attempt|Success|Failure)\("snapshotHistory"/);
   assert.match(activityFunction, /syncProductionJobActivityForSnapshot/);

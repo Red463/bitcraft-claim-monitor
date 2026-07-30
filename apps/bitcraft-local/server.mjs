@@ -29,6 +29,7 @@ import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { createRelayClaimScopeFence } from "./src/server/relayClaimScopeFence.mjs";
 import { createRelayProductionLifecycleCoordinator } from "./src/server/relayProductionLifecycleCoordinator.mjs";
+import { createRelaySettlementTransitionCoordinator } from "./src/server/relaySettlementTransitionCoordinator.mjs";
 import { relayReconnectDelayMs } from "./src/server/relayRuntimeBackoff.mjs";
 import {
   empireClaimMembersView,
@@ -150,7 +151,7 @@ import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaInd
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
-import { runSettlementStateTransaction, settlementStateActivityChanges, settlementStateSummary } from "./src/server/settlementState.mjs";
+import { runSettlementStateTransaction, settlementStateActivityChanges } from "./src/server/settlementState.mjs";
 import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
 import {
   buildDiscordAuthorizeUrl,
@@ -406,8 +407,10 @@ applyDefaultAppSettings(db, { serverRefreshSeconds: Math.round(snapshotIntervalM
 const statements = createPreparedStatements(db);
 const gameDataGenerationListeners = new Set();
 let productionRelayLifecycleCoordinator = null;
+let settlementRelayTransitionCoordinator = null;
 function publishGameDataGeneration(event) {
   productionRelayLifecycleCoordinator?.onCommit(event);
+  settlementRelayTransitionCoordinator?.onCommit(event);
   for (const listener of gameDataGenerationListeners) {
     if (listener.claimId !== event.claimId) continue;
     const changedDomains = event.changedDomains.filter((domain) => listener.domains.has(domain));
@@ -446,6 +449,30 @@ productionRelayLifecycleCoordinator = createRelayProductionLifecycleCoordinator(
   onAttempt: () => collectorAttempt("production", "Applying committed Relay crafts"),
   onSuccess: (_event, _snapshot, startedAt) => collectorSuccess("production", startedAt),
   onFailure: (error, _event, startedAt) => collectorFailure("production", startedAt, error),
+});
+settlementRelayTransitionCoordinator = createRelaySettlementTransitionCoordinator({
+  configuredClaimId: currentClaimId,
+  readDomainSnapshot: (claimId, domain) => currentStateRepository.read(claimId, domain),
+  applySettlementTransition: async (_claimId, summary, context) => {
+    recordSettlementState(summary, context.snapshots.claim.data);
+  },
+  onAttempt: () => {
+    setCollectorStatus("settlementTransitions", {
+      label: "Settlement transitions",
+      enabled: true,
+      source: "relay-commits",
+    });
+    return collectorAttempt("settlementTransitions", "Applying committed Relay settlement domains");
+  },
+  onSuccess: (_event, _context, startedAt) => collectorSuccess("settlementTransitions", startedAt),
+  onFailure: (error, _event, startedAt) => {
+    setCollectorStatus("settlementTransitions", {
+      label: "Settlement transitions",
+      enabled: true,
+      source: "relay-commits",
+    });
+    collectorFailure("settlementTransitions", startedAt ?? Date.now(), error);
+  },
 });
 const relayStorageActivityService = new RelayStorageActivityService({
   http: new RelayHttpClient({ baseUrl: relayBaseUrl }),
@@ -5121,12 +5148,10 @@ function persistProductionContributions(records) {
   }
 }
 
-function recordSettlementState(payload) {
+function recordSettlementState(summary, claim = {}) {
   const now = new Date().toISOString();
-  const summary = settlementStateSummary(payload);
   const claimId = summary.claimId;
   if (!claimId) throw new Error("Missing claim id");
-  const claim = payload.claim ?? {};
   const supplyMeta = supplyRunwayMetadata(claim, summary.supplies);
   runSettlementStateTransaction({
     db,
@@ -6526,9 +6551,8 @@ async function runProductionContributionCollector(claimId, currentData, force = 
   }
 }
 async function collectServerSnapshot(force = false) {
-  // Polling is a side-effect loop: it records current settlement state, imports activity/trade
-  // history, and drives Discord notifications. Browser tabs should treat this as
-  // supporting data, not as their exclusive source for live settlement state.
+  // Polling remains only for unresolved contribution and completed-sale
+  // imports. Committed Relay generations own live settlement transitions.
   if ((!serverPollingEnabled && !force) || pollStatus.running) return;
   pollStatus.running = true;
   pollStatus.intervalMs = serverRefreshIntervalMs();
@@ -6540,15 +6564,7 @@ async function collectServerSnapshot(force = false) {
     const currentData = domainRowsToAppData(claimId, readDomainPayloadMap(claimId));
     const claim = currentData.claim?.claim ?? currentData.claim;
     const members = unwrap(currentData.members, "members", []);
-    const buildings = unwrap(currentData.buildings, "buildings", []);
     await sendScheduledSupplyReportIfDue(claim).catch((error) => console.warn(`Discord supply report failed: ${error instanceof Error ? error.message : String(error)}`));
-    recordSettlementState({
-      claimId,
-      claim,
-      membersCount: members.length,
-      buildingsCount: buildings.length,
-      market: currentData.market ?? { listings: [] },
-    });
     await runProductionContributionCollector(claimId, currentData, force);
     const marketStartedAt = collectorAttempt("marketTrades");
     const marketTradeResult = await importMemberSellTrades(claimId, members, { budget: marketTradeJobBudget });
@@ -9534,11 +9550,6 @@ const server = createServer(async (req, res) => {
         if (!backup) return send(res, 404, { error: "Backup not found" });
         return sendBinary(res, 200, await readFile(path.join(backupDir, name)), "application/vnd.sqlite3", { "content-disposition": `attachment; filename="${name}"` });
       }
-    }
-    if (req.method === "POST" && url.pathname === "/api/local/snapshot") {
-      if (!rateLimit(req, res, "local-snapshot", RATE_LIMITS.expensiveLocal)) return;
-      if (isProduction) return send(res, 403, { error: "Browser snapshot collection is disabled in production" });
-      return send(res, 200, recordSettlementState(await readJson(req, BODY_LIMITS.snapshot)));
     }
     if (url.pathname === "/api/local/market/deal-watches") {
       const appUser = req.method === "GET"
