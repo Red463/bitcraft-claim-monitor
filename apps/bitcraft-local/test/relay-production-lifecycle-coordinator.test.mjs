@@ -50,6 +50,37 @@ test("production lifecycle fences generations by the currently configured claim"
   assert.deepEqual(applied, ["claim-1", "claim-2"]);
 });
 
+test("claim switch replaces old-claim pending work even when its generation is smaller", async () => {
+  let configuredClaimId = "claim-1";
+  const snapshots = new Map([
+    ["claim-1", craftSnapshot(99, [{ entityId: "old-craft" }])],
+    ["claim-2", craftSnapshot(1, [{ entityId: "new-craft" }])],
+  ]);
+  let releaseOldApply;
+  const oldApply = new Promise((resolve) => { releaseOldApply = resolve; });
+  const applied = [];
+  const coordinator = createRelayProductionLifecycleCoordinator({
+    configuredClaimId: () => configuredClaimId,
+    readCraftSnapshot: (claimId) => snapshots.get(claimId),
+    enrichCrafts: (data) => data,
+    applyProductionLifecycle: async (claimId, _payload, context) => {
+      applied.push([claimId, context.snapshot.generation]);
+      if (claimId === "claim-1") await oldApply;
+    },
+  });
+
+  coordinator.onCommit({ claimId: "claim-1", generation: 99, changedDomains: ["crafts"] });
+  await flushAsyncWork();
+  snapshots.set("claim-1", craftSnapshot(100, [{ entityId: "old-craft" }]));
+  coordinator.onCommit({ claimId: "claim-1", generation: 100, changedDomains: ["crafts"] });
+  configuredClaimId = "claim-2";
+  coordinator.onCommit({ claimId: "claim-2", generation: 1, changedDomains: ["crafts"] });
+  releaseOldApply();
+  await coordinator.whenIdle();
+
+  assert.deepEqual(applied, [["claim-1", 99], ["claim-2", 1]]);
+});
+
 test("production lifecycle notifications return before side effects settle", async () => {
   let releaseApply;
   const applyStarted = new Promise((resolve) => { releaseApply = resolve; });
@@ -103,6 +134,42 @@ test("production lifecycle coalesces overlapping generations while keeping appli
   await coordinator.whenIdle();
   assert.deepEqual(appliedGenerations, [1, 3]);
   assert.equal(maxActive, 1);
+});
+
+test("duplicate generation queued during an in-flight apply does not reopen collector health", async () => {
+  let releaseApply;
+  const heldApply = new Promise((resolve) => { releaseApply = resolve; });
+  const health = { attempts: 0, successes: 0, running: false };
+  let applications = 0;
+  const coordinator = createRelayProductionLifecycleCoordinator({
+    configuredClaimId: () => "claim-1",
+    readCraftSnapshot: () => craftSnapshot(1, [{ entityId: "craft-1" }]),
+    enrichCrafts: (data) => data,
+    applyProductionLifecycle: async () => {
+      applications += 1;
+      await heldApply;
+    },
+    onAttempt: () => {
+      health.attempts += 1;
+      health.running = true;
+    },
+    onSuccess: () => {
+      health.successes += 1;
+      health.running = false;
+    },
+    onFailure: () => {
+      health.running = false;
+    },
+  });
+
+  coordinator.onCommit({ claimId: "claim-1", generation: 1, changedDomains: ["crafts"] });
+  await flushAsyncWork();
+  coordinator.onCommit({ claimId: "claim-1", generation: 1, changedDomains: ["crafts"] });
+  releaseApply();
+  await coordinator.whenIdle();
+
+  assert.deepEqual(health, { attempts: 1, successes: 1, running: false });
+  assert.equal(applications, 1);
 });
 
 test("production lifecycle preserves rows when Relay crafts are missing or malformed", async () => {

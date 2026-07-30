@@ -3,13 +3,17 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+const productionLifecycle = readFileSync(
+  new URL("../src/server/productionLifecycle.mjs", import.meta.url),
+  "utf8",
+);
 
 test("event-driven Discord notifications are enqueued and delivered by the worker outbox", () => {
   assert.match(server, /enqueueDiscordActivity/);
   assert.match(server, /processDiscordNotificationOutbox/);
   assert.match(server, /setInterval\(processDiscordNotificationOutbox/);
-  assert.match(server, /const sourceKey = `production_started:/);
-  assert.match(server, /const sourceKey = `production_completed:/);
+  assert.match(productionLifecycle, /const sourceKey = `production_started:/);
+  assert.match(productionLifecycle, /const sourceKey = `production_completed:/);
   assert.match(server, /sourceKey: `youtube_video:/);
   assert.match(server, /sourceKey: `app_update:/);
 });

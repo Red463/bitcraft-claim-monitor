@@ -61,6 +61,8 @@ export function createRelayProductionLifecycleCoordinator({
         const claimId = normalizedClaimId(event.claimId);
         if (normalizedClaimId(configuredClaimId()) !== claimId) continue;
         const lastAppliedGeneration = lastAppliedGenerationByClaim.get(claimId) ?? -1;
+        const eventGeneration = validGeneration(event.generation);
+        if (eventGeneration != null && eventGeneration <= lastAppliedGeneration) continue;
 
         const attempt = safelyNotify(onAttempt, event);
         try {
@@ -68,7 +70,6 @@ export function createRelayProductionLifecycleCoordinator({
           if (!snapshot?.data) throw new Error("Relay crafts snapshot is unavailable");
           if (!validCraftPayload(snapshot.data)) throw new Error("Relay crafts snapshot is malformed");
           const snapshotGeneration = validGeneration(snapshot.generation);
-          const eventGeneration = validGeneration(event.generation);
           if (snapshotGeneration == null || eventGeneration == null || snapshotGeneration < eventGeneration) {
             throw new Error("Relay crafts snapshot is stale");
           }
@@ -103,7 +104,14 @@ export function createRelayProductionLifecycleCoordinator({
       if (!Array.isArray(event?.changedDomains) || !event.changedDomains.includes("crafts")) return false;
       const generation = validGeneration(event.generation);
       if (generation == null || generation <= (lastAppliedGenerationByClaim.get(claimId) ?? -1)) return false;
-      if (!pendingEvent || generation >= validGeneration(pendingEvent.generation)) pendingEvent = event;
+      const pendingClaimId = normalizedClaimId(pendingEvent?.claimId);
+      if (
+        !pendingEvent
+        || pendingClaimId !== claimId
+        || generation >= validGeneration(pendingEvent.generation)
+      ) {
+        pendingEvent = event;
+      }
       schedule();
       return true;
     },
