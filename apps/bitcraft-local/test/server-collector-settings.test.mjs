@@ -57,8 +57,8 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.doesNotMatch(browserDefaults, /storageActivity/);
   assert.doesNotMatch(browserDefaults, /construction:\s*\{\s*label:\s*"Construction"/);
   assert.equal(payloadDomainCollector.regionalBuyOrders, undefined);
-  assert.deepEqual(collectorCurrentTables.market, ["market_listings", "market_trades"]);
-  assert.deepEqual(collectorCurrentTables.marketListings, ["market_listings", "market_events", "market_trades"]);
+  assert.deepEqual(collectorCurrentTables.market, ["market_trades"]);
+  assert.equal(collectorCurrentTables.marketListings, undefined);
   assert.deepEqual(collectorCurrentTables.productionContributions, ["production_jobs", "production_contributions"]);
   assert.equal(collectorCurrentTables.buyOrders, undefined);
   assert.equal(Object.hasOwn(domainCollectorDefaults, "buyOrders"), false);
@@ -66,7 +66,7 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
 });
 
 test("side-effect collector intervals do not monopolize production", () => {
-  assert.equal(domainCollectorDefaults.marketListings.intervalSeconds, 60);
+  assert.equal(domainCollectorDefaults.marketListings, undefined);
   assert.equal(domainCollectorDefaults.productionContributions.intervalSeconds, 300);
   assert.equal(Object.hasOwn(domainCollectorDefaults, "snapshotHistory"), false);
 });
@@ -115,9 +115,9 @@ test("empire membership tracking has an independent bounded cadence", () => {
 });
 
 test("collector settings still clamp submitted intervals to the existing bounds", () => {
-  const normalized = normalizeCollectorSettings({ marketListings: { intervalSeconds: 2 } });
+  const normalized = normalizeCollectorSettings({ productionContributions: { intervalSeconds: 2 } });
 
-  assert.equal(normalized.marketListings.intervalSeconds, 15);
+  assert.equal(normalized.productionContributions.intervalSeconds, 15);
 });
 test("production activity and settlement state rows are not gated by contribution sync cadence", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
@@ -146,23 +146,18 @@ test("production activity and settlement state rows are not gated by contributio
   assert.doesNotMatch(contributionFunction, /syncProductionJobActivityForSnapshot|deliverProductionNotifications|recordProductionJobs/);
 });
 
-test("market listing activity sync fetches live listings when the side-effect collector runs", () => {
+test("market listing activity is subscription-driven rather than scheduled", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
-  const marketStart = source.indexOf("async function runMarketListingsCollector");
-  const productionStart = source.indexOf("async function runProductionActivityCollector");
-  const marketFunction = source.slice(marketStart, productionStart);
-
-  assert.ok(marketStart > -1);
-  assert.ok(productionStart > marketStart);
-  assert.match(marketFunction, /fetchAllClaimListings\(claimId, \{ cache: false \}\)/);
-  assert.match(marketFunction, /syncMarketListingsForSnapshot\(claimId, marketPayload,/);
-  assert.doesNotMatch(marketFunction, /currentData\.market \?\? \{ listings: \[\] \}/);
+  assert.doesNotMatch(source, /runMarketListingsCollector/);
+  assert.doesNotMatch(source, /syncMarketListingsForSnapshot/);
+  assert.match(source, /createRelayMarketTransitionWriter/);
+  assert.match(source, /onSnapshotCommitted/);
 });
 
 test("collector status resolves the claim once without rebuilding all public settings per collector", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const start = source.indexOf("function collectorStatusPayload");
-  const end = source.indexOf("async function runMarketListingsCollector", start);
+  const end = source.indexOf("function claimEmpireId", start);
   const implementation = source.slice(start, end);
 
   assert.ok(start > -1);

@@ -197,7 +197,7 @@ test("settlementStateActivityChanges does not emit an activity event without a p
 test("server records settlement activity before upserting current state without snapshot inserts", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const start = source.indexOf("function recordSettlementState");
-  const end = source.indexOf("async function syncMarketListingsForSnapshot", start);
+  const end = source.indexOf("async function syncProductionJobActivityForSnapshot", start);
   const implementation = source.slice(start, end);
 
   assert.ok(start > -1);

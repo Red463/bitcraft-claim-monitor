@@ -22,7 +22,9 @@ import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySe
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
-import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatchesListing } from "./src/server/marketActivity.mjs";
+import { bitjitaTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
+import { currentMarketListings, marketLeaderboardFromCurrent } from "./src/server/currentMarketViews.mjs";
+import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
 import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey, productionMetrics } from "./src/server/productionActivity.mjs";
 import { createGameCatalogRepository } from "./src/server/gameCatalog.mjs";
 import { createProviderCatalogRepository } from "./src/server/catalogRepository.mjs";
@@ -409,9 +411,23 @@ const relayPrimaryRegionRuntime = new RelayPrimaryRegionRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
 });
+const relayMarketTransitionWriter = createRelayMarketTransitionWriter(db, {
+  addActivity,
+  processOutbox: kickDiscordNotificationOutbox,
+});
 const relayClaimMarketRuntime = new RelayClaimMarketRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
+  onSnapshotCommitted: ({ claimId, previousData, currentData, observedAt }) => (
+    relayMarketTransitionWriter.apply({
+      claimId,
+      previous: previousData == null
+        ? null
+        : enrichMarketSnapshot(claimId, previousData),
+      current: enrichMarketSnapshot(claimId, currentData),
+      observedAt,
+    })
+  ),
 });
 const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
   manifest: relayBindingManifest,
@@ -1522,6 +1538,24 @@ function currentInventoryProjection(claimId) {
     current.data,
     (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
   );
+}
+
+function enrichMarketSnapshot(claimId, data) {
+  const claim = currentStateRepository.read(String(claimId), "claim")?.data ?? null;
+  return enrichMarketWithCatalog(data, {
+    getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    claim,
+  }).data;
+}
+
+function currentMarketProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "market");
+  return {
+    data: current?.data
+      ? enrichMarketSnapshot(claimId, current.data)
+      : { claimId: String(claimId), listings: [], marketplaces: [] },
+    observedAt: current?.provenance?.receivedAt ?? null,
+  };
 }
 
 function currentCraftPlanProjection(claimId) {
@@ -4890,94 +4924,6 @@ function isDeployableStorage(building) {
 }
 
 
-function usedTradeIdsForListing(listingKey) {
-  const rows = db.prepare("SELECT trade_id FROM market_events WHERE listing_key = ? AND trade_id IS NOT NULL").all(listingKey);
-  return new Set(rows.flatMap((row) => String(row.trade_id).split(",")).filter(Boolean));
-}
-
-async function findConfirmedTrade(listing, minQuantity = 1) {
-  if (!listing.ownerEntityId) return null;
-  try {
-    const usedTradeIds = usedTradeIdsForListing(listing.key);
-    const matches = [];
-    let offset = 0;
-    while (offset < 1000) {
-      const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api/market/player/${listing.ownerEntityId}/trades`);
-      url.searchParams.set("type", "sell");
-      url.searchParams.set("limit", "200");
-      url.searchParams.set("offset", String(offset));
-      url.searchParams.set("orderEntityId", listing.key);
-      const response = await fetch(url, { headers: { accept: "application/json", "x-app-identifier": appIdentifier } });
-      if (!response.ok) return null;
-      const trades = unwrap(await response.json(), "trades", []);
-      matches.push(...trades.filter((trade) => tradeMatchesListing(trade, listing) && (!trade.id || !usedTradeIds.has(String(trade.id)))));
-      const matchedQuantity = matches.reduce((total, trade) => total + toNumber(trade.quantity), 0);
-      if (matchedQuantity >= minQuantity) {
-        const totalPrice = matches.reduce((total, trade) => total + toNumber(trade.totalPrice ?? trade.total_price ?? toNumber(trade.quantity) * toNumber(trade.price ?? trade.unitPrice)), 0);
-        return {
-          ...matches[0],
-          id: matches.map((trade) => trade.id).filter(Boolean).join(","),
-          quantity: matchedQuantity,
-          totalPrice,
-          matchedTrades: matches,
-        };
-      }
-      if (trades.length < 200) break;
-      offset += trades.length;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function findPendingMarketConfirmations(claimId) {
-  const confirmations = [];
-  for (const event of statements.pendingMarketEvents.all(claimId)) {
-    let raw = {};
-    try {
-      raw = JSON.parse(event.raw_json ?? "{}");
-    } catch {
-      raw = {};
-    }
-    const listing = {
-      key: event.listing_key,
-      itemName: event.item_name,
-      side: event.side ?? "sell",
-      owner: event.owner,
-      ownerEntityId: event.owner_entity_id ?? raw.ownerEntityId,
-      itemId: event.item_id ?? raw.itemId,
-      itemType: event.item_type ?? raw.itemType,
-      quantity: toNumber(event.quantity),
-      price: toNumber(event.price),
-      totalValue: toNumber(event.total_value),
-      tier: event.tier,
-      rarity: event.rarity,
-      raw,
-    };
-    const trade = await findConfirmedTrade(listing, listing.quantity);
-    if (!trade) continue;
-    confirmations.push({ event, listing, trade });
-  }
-  return confirmations;
-}
-
-function applyPendingMarketConfirmations(claimId, now, confirmations) {
-  for (const { event, listing, trade } of confirmations) {
-    const nextType = event.event_type === "partial_quantity_drop" ? "partial_sale" : "sale";
-    for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
-    statements.confirmMarketEvent.run(nextType, trade.id ?? null, JSON.stringify(trade), event.id);
-    addActivity(
-      claimId,
-      "market_sale_confirmed",
-      `Confirmed sale: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
-      now,
-      { ...listing, tradeId: trade.id ?? null },
-      `market_sale_confirmed:${listing.key}:${trade.id ?? ""}`,
-    );
-  }
-}
-
 function insertConfirmedMarketTrade(claimId, trade, listing = {}, importedAt = new Date().toISOString()) {
   const tradeId = String(trade.id ?? "").trim();
   if (!tradeId) return 0;
@@ -5004,30 +4950,6 @@ function insertConfirmedMarketTrade(claimId, trade, listing = {}, importedAt = n
     importedAt,
     JSON.stringify(trade),
   ).changes);
-}
-
-function addMarketEvent(claimId, eventType, listing, occurredAt) {
-  const sourceKey = marketEventSourceKey(eventType, listing);
-  statements.insertMarketEvent.run(
-    claimId,
-    eventType,
-    listing.key,
-    listing.itemName,
-    listing.side,
-    listing.owner,
-    listing.ownerEntityId,
-    listing.itemId == null ? null : String(listing.itemId),
-    listing.itemType == null ? null : String(listing.itemType),
-    listing.quantity,
-    listing.price,
-    listing.totalValue,
-    listing.tier == null ? null : String(listing.tier),
-    listing.rarity,
-    occurredAt,
-    listing.tradeId,
-    sourceKey,
-    JSON.stringify(listing.raw),
-  );
 }
 
 function craftOutputCatalog(craftsPayload) {
@@ -5140,117 +5062,6 @@ function recordSettlementState(payload) {
     processOutbox: kickDiscordNotificationOutbox,
   });
   return { ok: true, capturedAt: now };
-}
-
-async function syncMarketListingsForSnapshot(claimId, marketPayload, now) {
-  const market = unwrap(marketPayload, "listings", []);
-  const normalizedListings = market.map(normalizeListing);
-  const seen = new Set(normalizedListings.map((listing) => listing.key));
-  const existingListings = new Map(normalizedListings.map((listing) => [listing.key, statements.listingByKey.get(listing.key)]));
-  const partialCandidates = normalizedListings
-    .map((listing) => ({ listing, existing: existingListings.get(listing.key) }))
-    .filter(({ listing, existing }) => existing && listing.quantity < toNumber(existing.quantity))
-    .map(({ listing, existing }) => ({ listing, soldQuantity: toNumber(existing.quantity) - listing.quantity }));
-  const closedCandidates = statements.activeListings.all(claimId).filter((active) => !seen.has(active.listing_key)).map((active) => {
-    const raw = safeJson(active.raw_json);
-    return {
-      active,
-      listing: {
-        key: active.listing_key,
-        itemName: active.item_name,
-        side: active.side ?? "sell",
-        owner: active.owner,
-        ownerEntityId: active.owner_entity_id ?? raw.ownerEntityId,
-        itemId: active.item_id ?? raw.itemId,
-        itemType: active.item_type ?? raw.itemType,
-        quantity: toNumber(active.quantity),
-        price: toNumber(active.price),
-        totalValue: toNumber(active.total_value),
-        tier: active.tier,
-        rarity: active.rarity,
-        raw,
-      },
-    };
-  });
-  const [partialChecks, closedChecks, pendingConfirmations] = await Promise.all([
-    mapWithConcurrency(partialCandidates, 4, async ({ listing, soldQuantity }) => ({ listing, soldQuantity, trade: await findConfirmedTrade(listing, soldQuantity) })),
-    mapWithConcurrency(closedCandidates, 4, async ({ active, listing }) => ({ active, listing, trade: await findConfirmedTrade(listing, listing.quantity) })),
-    findPendingMarketConfirmations(claimId),
-  ]);
-  const partialResults = new Map(partialChecks.map((result) => [result.listing.key, result]));
-  const closedResults = new Map(closedChecks.map((result) => [result.listing.key, result]));
-
-  db.exec("BEGIN");
-  try {
-    for (const listing of normalizedListings) {
-      const existing = existingListings.get(listing.key);
-      statements.upsertListing.run(
-        listing.key,
-        claimId,
-        listing.itemName,
-        listing.side,
-        listing.owner,
-        listing.ownerEntityId,
-        listing.itemId == null ? null : String(listing.itemId),
-        listing.itemType == null ? null : String(listing.itemType),
-        listing.quantity,
-        listing.price,
-        listing.totalValue,
-        listing.tier == null ? null : String(listing.tier),
-        listing.rarity,
-        existing?.first_seen ?? listing.listedAt ?? now,
-        now,
-        JSON.stringify(listing.raw),
-      );
-      if (!existing) {
-        addMarketEvent(claimId, "new_listing", listing, now);
-        addActivity(
-          claimId,
-          "market_new_listing",
-          `New market listing: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
-          now,
-          listing,
-          `market_new_listing:${listing.key}`,
-        );
-      } else if (listing.quantity < toNumber(existing.quantity)) {
-        const { soldQuantity, trade } = partialResults.get(listing.key);
-        const partial = { ...listing, quantity: soldQuantity, totalValue: soldQuantity * listing.price, tradeId: trade?.id ?? null, raw: trade ?? listing.raw };
-        if (trade) for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
-        addMarketEvent(claimId, trade ? "partial_sale" : "partial_quantity_drop", partial, now);
-        addActivity(
-          claimId,
-          trade ? "market_sale" : "market_quantity_drop",
-          `${trade ? "Partial sale" : "Quantity dropped"}: ${listing.itemName} x${soldQuantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
-          now,
-          partial,
-          `${trade ? "market_sale" : "market_quantity_drop"}:${listing.key}:${trade?.id ?? `${soldQuantity}:${listing.quantity}`}`,
-        );
-      }
-    }
-
-    for (const { active, listing } of closedCandidates) {
-      const trade = closedResults.get(listing.key)?.trade;
-      const eventType = trade ? "sale" : "removed_or_cancelled";
-      const closedListing = { ...listing, tradeId: trade?.id ?? null, raw: trade ?? listing.raw };
-      if (trade) for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
-      statements.markListingClosed.run(eventType, now, now, active.listing_key);
-      addMarketEvent(claimId, eventType, closedListing, now);
-      addActivity(
-        claimId,
-        trade ? "market_sale" : "market_removed_or_cancelled",
-        `${trade ? "Sold" : "Removed/cancelled"}: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
-        now,
-        closedListing,
-        `${trade ? "market_sale" : "market_removed_or_cancelled"}:${listing.key}:${trade?.id ?? ""}`,
-      );
-    }
-
-    applyPendingMarketConfirmations(claimId, now, pendingConfirmations);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
 }
 
 async function syncProductionJobActivityForSnapshot(claimId, craftsPayload, now) {
@@ -7829,19 +7640,6 @@ function empireMembershipAdminPayload() {
   };
 }
 
-async function runMarketListingsCollector(claimId, currentData, force = false) {
-  if (!sideEffectCollectorDue("marketListings", force)) return;
-  const startedAt = collectorAttempt("marketListings");
-  try {
-    const marketPayload = await fetchAllClaimListings(claimId, { cache: false });
-    await syncMarketListingsForSnapshot(claimId, marketPayload, new Date().toISOString());
-    collectorSuccess("marketListings", startedAt);
-  } catch (error) {
-    collectorFailure("marketListings", startedAt, error);
-    throw error;
-  }
-}
-
 function claimEmpireId(claim) {
   return String(claim?.empireEntityId ?? claim?.empireId ?? "").trim();
 }
@@ -7926,7 +7724,6 @@ async function collectServerSnapshot(force = false) {
       market: currentData.market ?? { listings: [] },
     });
     await runEmpireMembershipCollector(claim, force);
-    await runMarketListingsCollector(claimId, currentData, force);
     await runProductionActivityCollector(claimId, currentData);
     await runProductionContributionCollector(claimId, currentData, force);
     const marketStartedAt = collectorAttempt("marketTrades");
@@ -7952,7 +7749,11 @@ function marketHistory(claimId, limit, owner = "") {
   const tradeOwnerClause = selectedOwner ? " AND lower(COALESCE(seller_username, '')) = lower(?)" : "";
   const tradeArgs = selectedOwner ? [claimId, selectedOwner] : [claimId];
   const eventLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
-  const liveListings = db.prepare(`SELECT listing_key, item_name, quantity, price, total_value, owner, owner_entity_id, item_id, item_type, tier, rarity, side, first_seen, last_seen, raw_json FROM market_listings WHERE claim_id = ? AND status = 'active'${ownerClause}`).all(...args);
+  const currentMarket = currentMarketProjection(claimId);
+  const liveListings = currentMarketListings(currentMarket.data, {
+    owner: selectedOwner,
+    observedAt: currentMarket.observedAt,
+  });
   const events = db.prepare(`SELECT * FROM market_events WHERE claim_id = ?${ownerClause} ORDER BY occurred_at DESC, id DESC LIMIT ?`).all(...args, eventLimit)
     .map((event) => event.event_type === "sold_or_removed" ? { ...event, event_type: "removed_or_cancelled" } : event);
   const sales = db.prepare(`
@@ -8268,65 +8069,18 @@ function activityLeaderboard(claimId) {
 }
 
 function marketLeaderboard(claimId) {
-  const activeListings = db.prepare(`
-    SELECT owner, owner_entity_id, quantity, price, total_value, last_seen
-    FROM market_listings
-    WHERE claim_id = ? AND status = 'active'
-  `).all(claimId);
   const trades = db.prepare(`
     SELECT seller_username, seller_entity_id, quantity, total_price, occurred_at
     FROM market_trades
     WHERE claim_id = ?
     ORDER BY occurred_at DESC, trade_id DESC
   `).all(claimId);
-  const members = new Map();
-  const getMember = (name, id = "") => {
-    const memberName = normalizedMemberName(name);
-    if (!memberName) return null;
-    const key = String(id || memberName).toLowerCase();
-    const current = members.get(key) ?? {
-      memberId: id || null,
-      name: memberName,
-      activeListings: 0,
-      activeListingValue: 0,
-      confirmedSales: 0,
-      confirmedSaleValue: 0,
-      unitsSold: 0,
-      lastSaleAt: null,
-    };
-    if (!current.memberId && id) current.memberId = id;
-    members.set(key, current);
-    return current;
-  };
-  for (const listing of activeListings) {
-    const member = getMember(listing.owner, listing.owner_entity_id);
-    if (!member) continue;
-    member.activeListings += 1;
-    member.activeListingValue += toNumber(listing.total_value) || toNumber(listing.quantity) * toNumber(listing.price);
-  }
-  for (const trade of trades) {
-    const member = getMember(trade.seller_username, trade.seller_entity_id);
-    if (!member) continue;
-    member.confirmedSales += 1;
-    member.confirmedSaleValue += toNumber(trade.total_price);
-    member.unitsSold += toNumber(trade.quantity);
-    const occurredAt = trade.occurred_at ?? "";
-    if (!member.lastSaleAt || String(occurredAt) > member.lastSaleAt) member.lastSaleAt = occurredAt;
-  }
-  const memberList = Array.from(members.values())
-    .sort((a, b) => b.confirmedSaleValue - a.confirmedSaleValue || b.activeListingValue - a.activeListingValue || String(a.name).localeCompare(String(b.name)));
-  return {
-    summary: {
-      memberCount: memberList.length,
-      activeListings: activeListings.length,
-      activeListingValue: memberList.reduce((sum, row) => sum + toNumber(row.activeListingValue), 0),
-      confirmedSales: trades.length,
-      confirmedSaleValue: memberList.reduce((sum, row) => sum + toNumber(row.confirmedSaleValue), 0),
-      unitsSold: memberList.reduce((sum, row) => sum + toNumber(row.unitsSold), 0),
-      lastSaleAt: trades[0]?.occurred_at ?? null,
-    },
-    members: memberList,
-  };
+  const currentMarket = currentMarketProjection(claimId);
+  return marketLeaderboardFromCurrent({
+    snapshot: currentMarket.data,
+    trades,
+    observedAt: currentMarket.observedAt,
+  });
 }
 
 function contributionLeaderboard(claimId) {
@@ -8490,7 +8244,6 @@ function safeJson(value, fallback = {}) {
 
 function databaseStatus() {
   const countTables = {
-    market_listings: "market_listings",
     market_events: "market_events",
     market_trades: "market_trades",
     activity_events: "activity_events",

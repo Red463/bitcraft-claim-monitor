@@ -26,7 +26,8 @@ Disposition values:
 | `recipe_catalog_entries` | retire | None | Removed from bootstrap and existing clone databases. `/api/local/recipe-detail` now composes the provider-neutral detail response directly from the continuously projected `game_catalog_*` catalog. |
 | `game_catalog_refresh_runs`, `game_catalog_refresh_targets` | retire | None | Removed with the catalog crawl job, admin route, UI controls, recovery queue, repository methods, and prepared statements. Subscription generation/source health now owns catalog ingestion and restart recovery. |
 | `settlement_state_current` | review | Settlement notification/activity derivation | Merge or retain as a narrow derived-current projection only if it has independent indexed or transition semantics beyond `domain_payload_current`. |
-| `market_listings`, `market_buy_orders_current`, `market_regional_sale_averages_current` | review | Legacy listing transitions and incremental local aggregation | Current Local Market and Dashboard listing reads no longer use these tables: the typed claim session publishes directly to the generic `market` domain. Keep only proven transition/history/notification or measured cross-region aggregation columns after sold-versus-cancelled semantics are implemented; remove legacy current-fetch and scheduled-sweep ownership. |
+| `market_listings` | retire | None | Removed from bootstrap and existing clone databases. Current Local Market, Dashboard, and leaderboard listing state is projected directly from the latest complete generic `market` generation. Listing transitions are derived from consecutive Relay generations and appended independently to history; they do not justify a duplicate current-state table. |
+| `market_buy_orders_current`, `market_regional_sale_averages_current` | review | Legacy cross-region market aggregation | Keep only if representative measurements prove an indexed derived-current benefit. Any retained projection must update from committed regional order events, never from a long scheduled sweep. |
 | `market_events`, `market_trades`, `global_market_price_snapshots` | keep-history | Normalized listing/trade transitions | Required for locally observed charts, sold-versus-removed evidence, deduplication, and notification history. |
 | `activity_events` | keep-history | Normalized domain transitions; Relay storage-log events arrive from the 15-second live loop and deduplicate by region plus upstream log ID | Required for the Activity page and notification/audit history. Relay storage logs expire upstream, so this is durable history rather than a current-data cache. |
 | `production_jobs`, `production_contributions` | keep-history | Craft lifecycle and proven contribution events | Required for lifecycle notifications and locally observed contribution history. Current craft state stays in normalized domains. |
@@ -106,8 +107,17 @@ be a committed domain event, not a scheduled ingestion sweep.
   locally.
 - Local Market and Dashboard read this generic generation immediately; no
   market-specific current-state table or scheduled acquisition job was added.
-- Existing market SQL tables remain under review only for transition history,
-  corroborated sales, notifications, and measured cross-region indexes.
+- `market_listings` has been removed from schema bootstrap, prepared
+  statements, admin inspection, scheduled collectors, runtime readers, and
+  runtime writers.
+- Consecutive Relay generations produce idempotent `new_listing`,
+  `partial_quantity_drop`, and `removed_or_cancelled` events. The first
+  generation is a baseline and does not emit notification spam.
+- Event/history/outbox persistence is queued after the current generation
+  commits. A persistence failure is reported through provider health but does
+  not hold back or roll back live page data.
+- `market_buy_orders_current` and `market_regional_sale_averages_current`
+  remain under review only for measured cross-region indexed aggregation.
 
 ## Active/passive craft vertical evidence
 

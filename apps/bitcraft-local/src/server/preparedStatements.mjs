@@ -19,42 +19,10 @@ export function createPreparedStatements(db) {
       market_count = excluded.market_count,
       updated_at = excluded.updated_at
   `),
-  listingByKey: db.prepare("SELECT * FROM market_listings WHERE listing_key = ?"),
-  activeListings: db.prepare("SELECT listing_key, item_name, quantity, price, total_value, owner, owner_entity_id, item_id, item_type, tier, rarity, side, first_seen, last_seen, raw_json FROM market_listings WHERE claim_id = ? AND status = 'active'"),
-  upsertListing: db.prepare(`
-    INSERT INTO market_listings (listing_key, claim_id, item_name, side, owner, owner_entity_id, item_id, item_type, quantity, price, total_value, tier, rarity, first_seen, last_seen, status, sold_at, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?)
-    ON CONFLICT(listing_key) DO UPDATE SET
-      item_name = excluded.item_name,
-      side = excluded.side,
-      owner = excluded.owner,
-      owner_entity_id = excluded.owner_entity_id,
-      item_id = excluded.item_id,
-      item_type = excluded.item_type,
-      quantity = excluded.quantity,
-      price = excluded.price,
-      total_value = excluded.total_value,
-      tier = excluded.tier,
-      rarity = excluded.rarity,
-      last_seen = excluded.last_seen,
-      status = 'active',
-      sold_at = NULL,
-      raw_json = excluded.raw_json
-  `),
-  markListingClosed: db.prepare("UPDATE market_listings SET status = ?, sold_at = ?, last_seen = ? WHERE listing_key = ? AND status = 'active'"),
   insertMarketEvent: db.prepare(`
     INSERT OR IGNORE INTO market_events (claim_id, event_type, listing_key, item_name, side, owner, owner_entity_id, item_id, item_type, quantity, price, total_value, tier, rarity, occurred_at, trade_id, source_key, raw_json)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
-  pendingMarketEvents: db.prepare(`
-    SELECT * FROM market_events
-    WHERE claim_id = ?
-      AND event_type = 'partial_quantity_drop'
-      AND trade_id IS NULL
-    ORDER BY occurred_at DESC
-    LIMIT 50
-  `),
-  confirmMarketEvent: db.prepare("UPDATE market_events SET event_type = ?, trade_id = ?, raw_json = ? WHERE id = ?"),
   resolveMarketEvent: db.prepare("UPDATE market_events SET event_type = ?, raw_json = ? WHERE id = ? AND claim_id = ?"),
   insertMarketTrade: db.prepare(`
     INSERT OR IGNORE INTO market_trades (

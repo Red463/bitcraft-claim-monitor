@@ -315,6 +315,35 @@ The inventory is updated at the end of every vertical milestone. Final
 BitJita closure includes an assertion that every `retire` entry is absent from
 the schema and every retained table has a current owner and update trigger.
 
+## Per-domain live-readiness gate
+
+A domain is not complete merely because its Relay rows can be collected. Before
+the next vertical begins, the domain must pass all of these checks:
+
+1. its first complete generation becomes locally readable as soon as the
+   subscription applies or bounded HTTP refresh completes;
+2. later changes publish without waiting for a scheduler tick, page reload, or
+   user-triggered bulk refresh;
+3. page reads remain local and return the latest complete generation
+   immediately, including an explicitly aged last-good generation during an
+   outage;
+4. calculation-heavy reads use live-maintained normalized indexes or bounded
+   generation-keyed computation, never an upstream page-load query;
+5. every legacy current/cache/refresh table touched by the domain is either
+   removed in the same vertical or retained with the measured exception
+   evidence required above;
+6. every retired table is removed from schema bootstrap, prepared statements,
+   admin inspection, scheduled-job definitions, tests, and runtime references;
+7. disabling all ingestion and reconciliation schedules leaves healthy
+   current-state updates and browser access fully operational;
+8. source-to-commit, commit-to-API, and commit-to-browser latency meet the
+   budgets above under representative row counts.
+
+History appenders, notification outboxes, backups, and integrity jobs may trail
+the current generation without delaying it. If one of those durable side
+effects fails, current data still publishes and Admin exposes the side-effect
+failure for retry or repair.
+
 ## Milestone integration
 
 ### Milestone 1
@@ -342,6 +371,9 @@ the schema and every retained table has a current owner and update trigger.
   its legacy collector or cache.
 - Start each vertical with the generic committed domain snapshot and add no
   dedicated SQL table unless the measured exception gate is satisfied.
+- Complete the per-domain table removal in that vertical once replacement,
+  restart, outage, and runtime-access proofs pass; do not accumulate obsolete
+  tables for a Milestone 6 bulk cleanup.
 - Update derived planner, market, construction, map, and empire projections
   incrementally from committed domain changes.
 - Construction, research, recruitment, equipment, buffs, layout, and current

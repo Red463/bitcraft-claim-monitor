@@ -49,6 +49,7 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
   }
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS snapshots/);
   assert.doesNotMatch(schemaBootstrapSql, /idx_snapshots_/);
+  assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_listings/);
 });
 
 test("applySchemaBootstrap executes the complete bootstrap SQL once", () => {
@@ -71,6 +72,21 @@ test("membership history schema is additive and preserves existing data", () => 
   assert.equal(db.prepare("SELECT value FROM app_settings WHERE key = 'claim_id'").get().value, "123");
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM empire_membership_tracking").get().count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM empire_membership_periods").get().count, 0);
+  db.close();
+});
+
+test("fresh Relay schema keeps market history without a duplicate current-listing table", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'market_listings'").get().count,
+    0,
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'market_events'").get().count,
+    1,
+  );
   db.close();
 });
 

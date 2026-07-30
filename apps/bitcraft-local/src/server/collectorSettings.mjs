@@ -13,7 +13,6 @@ export const domainCollectorDefaults = {
   market: { label: "Market", intervalSeconds: 60 },
   region: { label: "Region", intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", intervalSeconds: 600 },
-  marketListings: { label: "Market listing sync", intervalSeconds: 60 },
   empireMembership: { label: "Empire membership history", intervalSeconds: 60 },
   productionContributions: { label: "Production contribution sync", intervalSeconds: 300 },
   marketTrades: { label: "Member market trades", intervalSeconds: 60 },
@@ -57,9 +56,8 @@ export function payloadDomainsForCollectors(collectorKeys = []) {
 
 export const collectorCurrentTables = {
   production: ["production_contributions"],
-  market: ["market_listings", "market_trades"],
+  market: ["market_trades"],
   mapCatalog: ["domain_payload_current"],
-  marketListings: ["market_listings", "market_events", "market_trades"],
   productionContributions: ["production_jobs", "production_contributions"],
   marketTrades: ["market_trades"],
 };

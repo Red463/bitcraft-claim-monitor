@@ -149,7 +149,6 @@ export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {
   market: { label: "Market", enabled: true, intervalSeconds: 60 },
   region: { label: "Region", enabled: true, intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", enabled: true, intervalSeconds: 600 },
-  marketListings: { label: "Market listing sync", enabled: true, intervalSeconds: 60 },
   empireMembership: { label: "Empire membership history", enabled: true, intervalSeconds: 60 },
   productionContributions: { label: "Production contribution sync", enabled: true, intervalSeconds: 300 },
   marketTrades: { label: "Member market trades", enabled: true, intervalSeconds: 60 },

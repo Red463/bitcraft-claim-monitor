@@ -32,7 +32,6 @@ test("createPreparedStatements prepares critical server statement keys", () => {
   for (const key of [
     "getSettlementState",
     "upsertSettlementState",
-    "upsertListing",
     "insertActivity",
     "getSetting",
     "upsertSetting",
@@ -64,7 +63,10 @@ test("createPreparedStatements prepares critical server statement keys", () => {
   assert.match(statements.upsertSettlementState.sql, /ON CONFLICT\(claim_id\) DO UPDATE/);
   assert.equal(Object.hasOwn(statements, "latestSnapshot"), false);
   assert.equal(Object.hasOwn(statements, "insertSnapshot"), false);
-  assert.match(statements.upsertListing.sql, /INSERT INTO market_listings/);
+  assert.equal(Object.hasOwn(statements, "listingByKey"), false);
+  assert.equal(Object.hasOwn(statements, "activeListings"), false);
+  assert.equal(Object.hasOwn(statements, "upsertListing"), false);
+  assert.equal(Object.hasOwn(statements, "markListingClosed"), false);
   assert.match(statements.upsertSetting.sql, /INSERT INTO app_settings/);
   assert.match(statements.insertDiscordAdmin.sql, /INSERT INTO admin_users/);
   assert.match(statements.upsertDiscordYouTubeChannel.sql, /INSERT INTO discord_youtube_channels/);

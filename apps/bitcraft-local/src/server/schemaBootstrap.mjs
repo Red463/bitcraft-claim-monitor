@@ -10,23 +10,6 @@ export const schemaBootstrapSql = `
     market_count INTEGER,
     updated_at TEXT NOT NULL
   );
-  CREATE TABLE IF NOT EXISTS market_listings (
-    listing_key TEXT PRIMARY KEY,
-    claim_id TEXT NOT NULL,
-    item_name TEXT NOT NULL,
-    side TEXT,
-    owner TEXT,
-    quantity REAL,
-    price REAL,
-    total_value REAL,
-    tier TEXT,
-    rarity TEXT,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    status TEXT NOT NULL,
-    sold_at TEXT,
-    raw_json TEXT NOT NULL
-  );
   CREATE TABLE IF NOT EXISTS market_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     claim_id TEXT NOT NULL,

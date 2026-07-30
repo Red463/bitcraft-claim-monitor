@@ -35,12 +35,17 @@ Live-first data policy:
   cross-process, or restart-recovery value and must update from domain events;
 - legacy tables that only supported BitJita bulk fetching, rate limiting, or
   refresh orchestration are removed after dependency and recovery proofs;
+- table retirement is part of each vertical-domain delivery, not a cleanup
+  deferred until the end of the migration;
 - calculation-heavy features such as Craft Planner execute against
   continuously maintained local normalized indexes, so they neither repeat
   large Relay reads nor wait for a scheduled catalog build;
 - browser requests and scheduled jobs never own live-data freshness: page
   navigation reads an already committed generation, while subscriptions and
-  bounded provider refresh loops keep the next generation ready.
+  bounded provider refresh loops keep the next generation ready;
+- a migrated feature is not accepted if disabling ingestion schedules makes
+  its current data stop updating, even when a scheduled fallback could mask
+  the problem in production.
 
 The first cross-region implementation of this policy is Public Craft Finder:
 configured regional sessions follow public markers through bounded typed
@@ -50,10 +55,11 @@ remains usable from last-good state during a Relay outage.
 
 Local Market follows the same rule for the monitored settlement: typed
 claim-scoped order subscriptions and bounded owner joins continuously publish
-the generic `market` generation used by Local Market and Dashboard. Existing
-market tables are not the current page source; they remain only where durable
-transition history, notifications, or measured cross-region indexes still
-justify them.
+the generic `market` generation used by Local Market and Dashboard.
+`market_listings` has been retired rather than retained as a duplicate
+current-state mirror. Durable `market_events`/`market_trades` history,
+notifications, and any measured cross-region index remain separate side
+effects and must never delay publication of the live generation.
 
 Implementation is dependency-ordered:
 

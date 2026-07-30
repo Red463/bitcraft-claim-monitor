@@ -11,6 +11,7 @@ type BindingManifest = Parameters<RelayClaimMarketRegionSession["start"]>[0]["ma
 type CurrentStateRepository = {
   nextGeneration(claimId: string): number;
   commitGeneration(batch: DomainSnapshotBatch): Promise<void> | void;
+  read?(claimId: string, domain: "market"): { data: unknown } | null;
 };
 
 type ClaimMarketSession = {
@@ -28,6 +29,12 @@ type RuntimeDependencies = {
   currentStateRepository: CurrentStateRepository;
   discoverTopology?: (baseUrl: string) => Promise<RelayTopology>;
   createSession?: ClaimMarketSessionFactory;
+  onSnapshotCommitted?: (input: {
+    claimId: string;
+    previousData: unknown | null;
+    currentData: RegionalClaimMarketSnapshot["data"];
+    observedAt: string;
+  }) => Promise<void> | void;
 };
 
 function decimalInteger(value: unknown, label: string): string {
@@ -41,12 +48,14 @@ export class RelayClaimMarketRuntime {
   readonly #currentStateRepository: CurrentStateRepository;
   readonly #discoverTopology: (baseUrl: string) => Promise<RelayTopology>;
   readonly #createSession: ClaimMarketSessionFactory;
+  readonly #onSnapshotCommitted: RuntimeDependencies["onSnapshotCommitted"];
   #session: ClaimMarketSession | null = null;
   #relayBaseUrl: string | null = null;
   #claimId: string | null = null;
   #regionId: string | null = null;
   #sessionEpoch = 0;
   #commitTail: Promise<void> = Promise.resolve();
+  #transitionTail: Promise<void> = Promise.resolve();
   #source: {
     sourceKey: `region:${number}`;
     regionId: string;
@@ -55,6 +64,7 @@ export class RelayClaimMarketRuntime {
     uri: string;
   } | null = null;
   #lastError: string | null = null;
+  #transitionLastError: string | null = null;
 
   constructor(dependencies: RuntimeDependencies) {
     this.#manifest = dependencies.manifest;
@@ -62,6 +72,7 @@ export class RelayClaimMarketRuntime {
     this.#discoverTopology = dependencies.discoverTopology ?? discoverRelayTopology;
     this.#createSession = dependencies.createSession
       ?? ((options) => new RelayClaimMarketRegionSession(options));
+    this.#onSnapshotCommitted = dependencies.onSnapshotCommitted;
   }
 
   async start(config: {
@@ -150,6 +161,7 @@ export class RelayClaimMarketRuntime {
       throw new Error("Relay claim-market snapshot escaped its configured claim or region");
     }
     const sourceKey = `region:${Number(snapshot.regionId)}` as const;
+    const previousData = this.#currentStateRepository.read?.(claimId, "market")?.data ?? null;
     try {
       await this.#currentStateRepository.commitGeneration({
         claimId,
@@ -172,10 +184,32 @@ export class RelayClaimMarketRuntime {
         },
       });
       this.#lastError = null;
+      this.#enqueueTransition({
+        claimId,
+        previousData,
+        currentData: snapshot.data,
+        observedAt: snapshot.receivedAt,
+      });
     } catch (error) {
       this.#lastError = error instanceof Error ? error.message : String(error);
       throw error;
     }
+  }
+
+  #enqueueTransition(input: {
+    claimId: string;
+    previousData: unknown | null;
+    currentData: RegionalClaimMarketSnapshot["data"];
+    observedAt: string;
+  }) {
+    if (!this.#onSnapshotCommitted) return;
+    const transition = this.#transitionTail.then(async () => {
+      await this.#onSnapshotCommitted?.(input);
+      this.#transitionLastError = null;
+    });
+    this.#transitionTail = transition.catch((error) => {
+      this.#transitionLastError = error instanceof Error ? error.message : String(error);
+    });
   }
 
   health() {
@@ -189,6 +223,9 @@ export class RelayClaimMarketRuntime {
         lastError: null,
       },
       lastError: this.#lastError,
+      transition: {
+        lastError: this.#transitionLastError,
+      },
     };
   }
 
@@ -196,6 +233,7 @@ export class RelayClaimMarketRuntime {
     this.#sessionEpoch += 1;
     await this.#session?.stop();
     await this.#commitTail;
+    await this.#transitionTail;
     this.#session = null;
     this.#relayBaseUrl = null;
     this.#claimId = null;

@@ -1,7 +1,4 @@
 export const additiveColumnMigrations = [
-  { table: "market_listings", column: "owner_entity_id", definition: "TEXT" },
-  { table: "market_listings", column: "item_id", definition: "TEXT" },
-  { table: "market_listings", column: "item_type", definition: "TEXT" },
   { table: "market_events", column: "owner_entity_id", definition: "TEXT" },
   { table: "market_events", column: "item_id", definition: "TEXT" },
   { table: "market_events", column: "item_type", definition: "TEXT" },
@@ -125,6 +122,7 @@ export function applyLegacySchemaCleanup(db) {
     DROP TABLE IF EXISTS recipe_catalog_entries;
     DROP TABLE IF EXISTS game_catalog_refresh_targets;
     DROP TABLE IF EXISTS game_catalog_refresh_runs;
+    DROP TABLE IF EXISTS market_listings;
     DELETE FROM scheduled_jobs WHERE job_key = 'recipe_catalog_refresh';
   `);
 }

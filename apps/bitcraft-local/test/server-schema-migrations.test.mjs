@@ -12,9 +12,6 @@ import {
 
 test("additiveColumnMigrations preserves bootstrap column migration order", () => {
   assert.deepEqual(additiveColumnMigrations, [
-    { table: "market_listings", column: "owner_entity_id", definition: "TEXT" },
-    { table: "market_listings", column: "item_id", definition: "TEXT" },
-    { table: "market_listings", column: "item_type", definition: "TEXT" },
     { table: "market_events", column: "owner_entity_id", definition: "TEXT" },
     { table: "market_events", column: "item_id", definition: "TEXT" },
     { table: "market_events", column: "item_type", definition: "TEXT" },
@@ -217,7 +214,7 @@ test("recipe activity kind migrates old catalog rows safely as crafts", () => {
 
 test("applyAdditiveColumnMigrations adds only missing columns", () => {
   const existingColumns = new Map([
-    ["market_listings", new Set(["owner_entity_id"])],
+    ["example_table", new Set(["owner_entity_id"])],
     ["market_events", new Set()],
   ]);
   const calls = [];
@@ -233,12 +230,12 @@ test("applyAdditiveColumnMigrations adds only missing columns", () => {
   };
 
   applyAdditiveColumnMigrations(db, [
-    { table: "market_listings", column: "owner_entity_id", definition: "TEXT" },
+    { table: "example_table", column: "owner_entity_id", definition: "TEXT" },
     { table: "market_events", column: "source_key", definition: "TEXT" },
   ]);
 
   assert.deepEqual(calls, [
-    ["prepare", "PRAGMA table_info(market_listings)"],
+    ["prepare", "PRAGMA table_info(example_table)"],
     ["prepare", "PRAGMA table_info(market_events)"],
     ["exec", "ALTER TABLE market_events ADD COLUMN source_key TEXT"],
   ]);
@@ -261,5 +258,6 @@ test("applyLegacySchemaCleanup drops legacy server-owned cache tables", () => {
   assert.match(executed[0], /DROP TABLE IF EXISTS recipe_catalog_entries/);
   assert.match(executed[0], /DROP TABLE IF EXISTS game_catalog_refresh_targets/);
   assert.match(executed[0], /DROP TABLE IF EXISTS game_catalog_refresh_runs/);
+  assert.match(executed[0], /DROP TABLE IF EXISTS market_listings/);
   assert.match(executed[0], /DELETE FROM scheduled_jobs WHERE job_key = 'recipe_catalog_refresh'/);
 });

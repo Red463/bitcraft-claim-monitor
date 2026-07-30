@@ -143,3 +143,143 @@ test("claim-market runtime preserves last-good when its regional source is unava
   }), /region 19 source is not ready/i);
   assert.equal(constructed, false);
 });
+
+test("claim-market runtime publishes current data without waiting for transition history", async () => {
+  assert.ok(runtimeModule, "claim-market runtime module must exist");
+  let onSnapshot;
+  let resolveTransition;
+  let transitionInput = null;
+  const transitionGate = new Promise((resolve) => {
+    resolveTransition = resolve;
+  });
+  const previousData = {
+    claimId: "100",
+    regionId: "19",
+    marketplaces: [],
+    listings: [{ entityId: "1", quantity: "10" }],
+  };
+  const currentData = {
+    claimId: "100",
+    regionId: "19",
+    marketplaces: [],
+    listings: [{ entityId: "1", quantity: "6" }],
+  };
+  const writes = [];
+  const runtime = new runtimeModule.RelayClaimMarketRuntime({
+    manifest: {
+      schemas: {
+        regional: { fingerprint: "regional-v1", bindingsGenerated: true },
+      },
+    },
+    discoverTopology: async () => topology(),
+    createSession: (options) => {
+      onSnapshot = options.onSnapshot;
+      return {
+        start: async () => {},
+        stop: async () => {},
+        health: () => ({
+          connected: true,
+          applied: true,
+          lastAppliedAt: "2026-07-30T15:00:00.000Z",
+          lastError: null,
+        }),
+      };
+    },
+    currentStateRepository: {
+      nextGeneration: () => 13,
+      read: () => ({ data: previousData }),
+      commitGeneration: (batch) => writes.push(batch),
+    },
+    onSnapshotCommitted: async (input) => {
+      transitionInput = input;
+      await transitionGate;
+    },
+  });
+  await runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "100",
+    regionId: "19",
+  });
+
+  await onSnapshot({
+    data: currentData,
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 1,
+    receivedAt: "2026-07-30T15:00:00.000Z",
+  });
+  await Promise.resolve();
+
+  assert.equal(writes.length, 1);
+  assert.deepEqual(transitionInput, {
+    claimId: "100",
+    previousData,
+    currentData,
+    observedAt: "2026-07-30T15:00:00.000Z",
+  });
+  assert.equal(runtime.health().transition.lastError, null);
+
+  resolveTransition();
+  await runtime.stop();
+});
+
+test("claim-market runtime reports transition failures without rolling back current data", async () => {
+  assert.ok(runtimeModule, "claim-market runtime module must exist");
+  let onSnapshot;
+  const writes = [];
+  const runtime = new runtimeModule.RelayClaimMarketRuntime({
+    manifest: {
+      schemas: {
+        regional: { fingerprint: "regional-v1", bindingsGenerated: true },
+      },
+    },
+    discoverTopology: async () => topology(),
+    createSession: (options) => {
+      onSnapshot = options.onSnapshot;
+      return {
+        start: async () => {},
+        stop: async () => {},
+        health: () => ({
+          connected: true,
+          applied: true,
+          lastAppliedAt: "2026-07-30T15:00:00.000Z",
+          lastError: null,
+        }),
+      };
+    },
+    currentStateRepository: {
+      nextGeneration: () => 13,
+      read: () => null,
+      commitGeneration: (batch) => writes.push(batch),
+    },
+    onSnapshotCommitted: async () => {
+      throw new Error("history disk unavailable");
+    },
+  });
+  await runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "100",
+    regionId: "19",
+  });
+
+  await onSnapshot({
+    data: {
+      claimId: "100",
+      regionId: "19",
+      marketplaces: [],
+      listings: [],
+    },
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 1,
+    receivedAt: "2026-07-30T15:00:00.000Z",
+  });
+  await runtime.stop();
+
+  assert.equal(writes.length, 1);
+  assert.equal(runtime.health().transition.lastError, "history disk unavailable");
+});

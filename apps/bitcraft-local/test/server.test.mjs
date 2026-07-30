@@ -162,8 +162,8 @@ test("server collection paginates listings and protects production mutations", a
   const requestedPages = [];
   const seasonalClaimId = "seasonal-claim";
   const listings = [
-    { entityId: "listing-1", itemName: "Bronze Ingot", ownerUsername: "Tester", ownerEntityId: "player-1", itemId: 10, itemType: "item", quantity: 12, price: 4, side: "sell" },
-    { entityId: "listing-2", itemName: "Oak Plank", ownerUsername: "Tester", ownerEntityId: "player-1", itemId: 20, itemType: "item", quantity: 8, price: 6, side: "sell" },
+    { entityId: "1001", itemName: "Bronze Ingot", ownerUsername: "Tester", ownerEntityId: "player-1", itemId: 10, itemType: "item", quantity: 12, price: 4, side: "sell" },
+    { entityId: "1002", itemName: "Oak Plank", ownerUsername: "Tester", ownerEntityId: "player-1", itemId: 20, itemType: "item", quantity: 8, price: 6, side: "sell" },
   ];
   const buyListings = [
     { entityId: "buy-listing-1", claimEntityId: claimId, claimName: "Timbersteel Trade", regionId: 19, regionName: "Zephra", ownerUsername: "Buyer", ownerEntityId: "buyer-1", itemId: 30, itemType: "0", itemName: "Leather", itemTier: 2, itemRarityStr: "Common", iconAssetName: "leather.png", quantity: 10, price: 12, storedCoins: 120, side: "buy", timestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
@@ -883,6 +883,7 @@ test("server collection paginates listings and protects production mutations", a
   );
   const appDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'current_claim_state'").get().count, 0);
+  assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'market_listings'").get().count, 0);
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'market_buy_orders_current'").get().count, 1);
   assert.equal(appDb.prepare("SELECT COUNT(*) AS count FROM market_buy_orders_current WHERE claim_id = ?").get(claimId).count, 0);
   appDb.close();
@@ -1700,6 +1701,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(typeof pollJson.collectorStatus.collectors.production.payloadWriteDurationMs, "number");
   assert.equal(typeof pollJson.collectorStatus.collectors.production.rowCount, "number");
   const baselineHistory = await fetch(`${origin}/api/local/market/history?claimId=${claimId}&owner=Tester`).then((response) => response.json());
+  assert.ok(baselineHistory.totals, JSON.stringify(baselineHistory));
   assert.equal(baselineHistory.totals.confirmedSales, 1);
   assert.equal(baselineHistory.totals.confirmedUnits, 5);
   assert.equal(baselineHistory.totals.trackedValue, 50);
@@ -1733,7 +1735,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(storageEvent.summary, "Tester deposited 12 Bronze Ingot to Ingots");
   assert.equal(JSON.parse(storageEvent.metadata_json).containerName, "Ingots");
   assert.equal(baselineActivity.total >= baselineActivity.events.length, true);
-  assert.equal(baselineActivity.events.filter((event) => event.event_type === "market_new_listing").length >= 2, true);
+  assert.equal(baselineActivity.events.filter((event) => event.event_type === "market_new_listing").length, 0);
   const notificationSecretDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   notificationSecretDb.prepare(`
     INSERT INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json, source_key)
@@ -1758,7 +1760,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(notificationActivity.events.length >= 2, true);
   assert.equal(notificationActivity.events.every((event) => ["market_new_listing", "market_sale", "market_sale_confirmed", "production_started", "production_completed"].includes(event.event_type)), true);
   assert.equal(notificationActivity.events.some((event) => event.event_type === "production_started"), true);
-  assert.equal(notificationActivity.events.filter((event) => event.event_type === "market_new_listing").length >= 2, true);
+  assert.equal(notificationActivity.events.filter((event) => event.event_type === "market_new_listing").length, 1);
   assert.equal(notificationActivity.events.some((event) => event.event_type === "storage"), false);
   const secretNotification = notificationActivity.events.find((event) => event.source_key === "release-secret-sentinel");
   assert.ok(secretNotification);
@@ -1771,9 +1773,6 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(JSON.stringify(notificationActivity).includes("test-discord-bot-token"), false);
   assert.equal(JSON.stringify(notificationActivity).includes("test-setup-key"), false);
   assert.equal(JSON.stringify(notificationActivity).includes("test-discord-oauth-secret"), false);
-  const listingMutationDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
-  listingMutationDb.prepare("DELETE FROM market_listings WHERE listing_key = ?").run("listing-1");
-  listingMutationDb.close();
   const repeatPoll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -1781,7 +1780,7 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(repeatPoll.status, 200);
   const repeatActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&q=${encodeURIComponent("New market listing")}&limit=20`).then((response) => response.json());
-  assert.equal(repeatActivity.events.filter((event) => event.event_type === "market_new_listing").length >= 2, true);
+  assert.equal(repeatActivity.events.filter((event) => event.event_type === "market_new_listing").length, 1);
   const activitySearch = await fetch(`${origin}/api/local/activity?claimId=${claimId}&q=${encodeURIComponent("Bronze Ingot")}&limit=5`).then((response) => response.json());
   assert.equal(activitySearch.searchedAllHistory, true);
   assert.equal(activitySearch.total >= 1, true);
@@ -1812,8 +1811,8 @@ test("server collection paginates listings and protects production mutations", a
   craftEntityRevision = 1;
   trades = [
     historicalTrade,
-    { id: "fill-1", orderEntityId: "listing-1", itemId: 10, itemType: "item", sellerEntityId: "player-1", quantity: 1, price: 4, totalPrice: 4 },
-    { id: "fill-2", orderEntityId: "listing-1", itemId: 10, itemType: "item", sellerEntityId: "player-1", quantity: 2, price: 4, totalPrice: 8 },
+    { id: "fill-1", orderEntityId: "1001", itemId: 10, itemType: "item", sellerEntityId: "player-1", quantity: 1, price: 4, totalPrice: 4 },
+    { id: "fill-2", orderEntityId: "1001", itemId: 10, itemType: "item", sellerEntityId: "player-1", quantity: 2, price: 4, totalPrice: 8 },
   ];
   const secondPoll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",
@@ -1828,13 +1827,13 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(pageOneRequests, pageTwoRequests);
   assert.ok(pageOneRequests >= 4);
   assert.equal(history.liveListings.length, 2);
-  assert.equal(history.totals.newListings, 2);
-  assert.equal(history.totals.confirmedSales, 3);
-  assert.equal(history.totals.confirmedUnits, 8);
-  assert.equal(history.totals.trackedValue, 62);
-  assert.equal(history.sales.length, 3);
+  assert.equal(history.totals.newListings ?? 0, 0);
+  assert.equal(history.totals.confirmedSales, 1);
+  assert.equal(history.totals.confirmedUnits, 5);
+  assert.equal(history.totals.trackedValue, 50);
+  assert.equal(history.sales.length, 1);
   assert.equal(history.topItems.some((item) => item.itemName === "Leather" && item.unitsSold === 5), true);
-  assert.equal(history.events.some((event) => event.event_type === "partial_sale"), true);
+  assert.equal(history.events.some((event) => event.event_type === "partial_sale"), false);
   const secondActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
   assert.equal(secondActivity.events.filter((event) => event.event_type === "storage").length, 1);
   assert.equal(secondActivity.events.filter((event) => event.event_type === "production_started").length, 2);
@@ -1849,9 +1848,9 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(thirdPoll.status, 200);
   const afterOldFills = await fetch(`${origin}/api/local/market/history?claimId=${claimId}&owner=Tester`).then((response) => response.json());
-  assert.equal(afterOldFills.totals.confirmedSales, 3);
-  assert.equal(afterOldFills.totals.confirmedUnits, 8);
-  assert.equal(afterOldFills.events.some((event) => event.event_type === "partial_quantity_drop"), true);
+  assert.equal(afterOldFills.totals.confirmedSales, 1);
+  assert.equal(afterOldFills.totals.confirmedUnits, 5);
+  assert.equal(afterOldFills.events.some((event) => event.event_type === "partial_quantity_drop"), false);
   const thirdActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
   assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started").length, 2);
   assert.equal(thirdActivity.events.filter((event) => event.event_type === "production_started" && event.summary.includes("Public Output")).length, 1);
@@ -1865,11 +1864,11 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(contributionLeaderboard.contribution.summary.contributorCount, 1);
   assert.equal(contributionLeaderboard.contribution.contributors[0].totalProgress, 78);
   assert.equal(contributionLeaderboard.market.summary.activeListings, 2);
-  assert.equal(contributionLeaderboard.market.summary.confirmedSales, 3);
-  assert.equal(contributionLeaderboard.market.summary.confirmedSaleValue, 62);
+  assert.equal(contributionLeaderboard.market.summary.confirmedSales, 1);
+  assert.equal(contributionLeaderboard.market.summary.confirmedSaleValue, 50);
   assert.equal(contributionLeaderboard.market.members[0].name, "Tester");
   assert.equal(contributionLeaderboard.market.members[0].activeListings, 2);
-  assert.equal(contributionLeaderboard.market.members[0].confirmedSales, 3);
+  assert.equal(contributionLeaderboard.market.members[0].confirmedSales, 1);
   assert.equal(contributionLeaderboard.activity.members.some((member) => member.name === "Tester" && member.storageEvents === 1), true);
   assert.equal(contributionLeaderboard.activity.members.some((member) => member.name === "Tester" && member.totalEvents > 0), true);
   assert.equal(contributionLeaderboard.activity.summary.ignoredRows > 0, true);
