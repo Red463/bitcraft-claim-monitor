@@ -179,6 +179,25 @@ test("Map uses live Relay identity and catalog inputs without the unused legacy 
   assert.doesNotMatch(normalizer, /raw\?\.layout|\blayout,/);
 });
 
+test("Region composes live regional claims and global status without legacy page requests", async () => {
+  const { normalizeData } = await import(new URL("../src/utils/normalize.ts", import.meta.url).href);
+  assert.equal(usesProviderNeutralGameData("region"), true);
+  assert.deepEqual(pageDomains("region"), [
+    "claim",
+    "members",
+    "players",
+    "region",
+    "region-claims",
+  ]);
+  assert.deepEqual(legacyPageEndpointMap("1369094286777412590", "region"), {});
+  const normalized = normalizeData({
+    region: { regions: [{ regionId: "19", signedInPlayers: 12 }] },
+    "region-claims": { claims: [{ entityId: "42", name: "Settlement" }] },
+  });
+  assert.equal(normalized.region[0].name, "Settlement");
+  assert.equal(normalized.regionStatus[0].signedInPlayers, 12);
+});
+
 test("Public Craft Finder uses the live cross-region Relay projection without browser upstream calls", async () => {
   assert.equal(usesProviderNeutralGameData("publiccrafts"), true);
   assert.deepEqual(pageDomains("publiccrafts"), ["claim", "public-crafts"]);

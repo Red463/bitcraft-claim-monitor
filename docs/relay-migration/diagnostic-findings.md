@@ -547,6 +547,33 @@ the session health model. The runtime correctly preserves last-good data, but
 a successful applied-session proof remains required before this surface is
 marked ready for soak.
 
+## Regional claim rankings — 2026-07-30
+
+The regional database itself is the bounded source for `claim_state`,
+`claim_local_state`, and `building_claim_desc`. Claim identity joins on
+`entity_id`; current treasury, supplies, tile count, location, and building
+description identity come from the matching local-state row. That
+`building_description_id` joins `building_claim_desc.building_id` for tier
+metadata.
+
+Owner display names are the only unbounded secondary relation. The session
+collects the exact `owner_player_entity_id` values present in the regional
+claim rows and subscribes to `player_username_state` with chunked equality
+queries for those IDs only. It never opens an unfiltered username or location
+subscription.
+
+The join is staged as a numbered `region-claims` generation and is published
+only after its required subscriptions validate. Insert, update, delete,
+reconnect, and region changes rebuild the complete projection; last-good data
+remains available during failure. The Region page composes this current
+generation with global region metadata without a scheduled ingestion job or
+ranking-specific SQL table.
+
+The legacy trade-volume values were scheduled BitJita aggregates, not fields
+present in these authoritative current rows. Their cards and payloads are
+retired rather than relabelled. They can return only after a completed-trade
+signal is proven.
+
 ## Remaining diagnostic blockers
 
 - authoritative evidence distinguishing a completed sale from removal or

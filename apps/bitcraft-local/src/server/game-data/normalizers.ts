@@ -136,6 +136,116 @@ export function normalizeGlobalRegions(
   });
 }
 
+export function normalizeRegionalClaims(options: {
+  regionId: string;
+  claimRows: unknown[];
+  localRows: unknown[];
+  claimTypeRows: unknown[];
+  usernameRows: unknown[];
+}) {
+  const regionId = decimalString(options.regionId, "regional claims region id");
+  const warnings: string[] = [];
+  const localById = new Map<string, WireRecord>();
+  const tierByBuildingId = new Map<string, number>();
+  const usernameById = new Map<string, string>();
+
+  for (const [index, value] of options.localRows.entries()) {
+    try {
+      const row = record(value, `Regional claim_local_state row ${index}`);
+      localById.set(
+        decimalString(row.entityId ?? row.entity_id, `Regional claim_local_state row ${index} entity id`),
+        row,
+      );
+    } catch (error) {
+      throw error;
+    }
+  }
+  for (const [index, value] of options.claimTypeRows.entries()) {
+    try {
+      const row = record(value, `Regional building_claim_desc row ${index}`);
+      const buildingId = decimalString(
+        row.buildingId ?? row.building_id,
+        `Regional building_claim_desc row ${index} building id`,
+      );
+      tierByBuildingId.set(buildingId, integer(row.tier, `Regional building_claim_desc ${buildingId} tier`));
+    } catch (error) {
+      throw error;
+    }
+  }
+  for (const [index, value] of options.usernameRows.entries()) {
+    try {
+      const row = record(value, `Regional player_username_state row ${index}`);
+      usernameById.set(
+        decimalString(row.entityId ?? row.entity_id, `Regional player_username_state row ${index} entity id`),
+        String(row.username ?? "").trim(),
+      );
+    } catch (error) {
+      warnings.push(`Regional player_username_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const claims: Array<Record<string, unknown>> = [];
+  for (const [index, value] of options.claimRows.entries()) {
+    try {
+      const row = record(value, `Regional claim_state row ${index}`);
+      const entityId = decimalString(
+        row.entityId ?? row.entity_id,
+        `Regional claim_state row ${index} entity id`,
+      );
+      const ownerPlayerEntityId = decimalString(
+        row.ownerPlayerEntityId ?? row.owner_player_entity_id,
+        `Regional claim ${entityId} owner id`,
+      );
+      const ownerBuildingEntityId = decimalString(
+        row.ownerBuildingEntityId ?? row.owner_building_entity_id,
+        `Regional claim ${entityId} owner building id`,
+      );
+      const local = localById.get(entityId);
+      if (!local) warnings.push(`Regional claim ${entityId} has no claim_local_state row.`);
+      const ownerPlayerUsername = usernameById.get(ownerPlayerEntityId) || null;
+      if (!ownerPlayerUsername) {
+        warnings.push(`Regional claim ${entityId} owner ${ownerPlayerEntityId} has no username row.`);
+      }
+      const buildingDescriptionId = local
+        ? decimalString(
+            local.buildingDescriptionId ?? local.building_description_id,
+            `Regional claim ${entityId} building description id`,
+          )
+        : null;
+      const location = local?.location == null
+        ? null
+        : record(local.location, `Regional claim ${entityId} location`);
+      claims.push({
+        entityId,
+        ownerPlayerEntityId,
+        ownerBuildingEntityId,
+        ownerPlayerUsername,
+        name: String(row.name ?? "").trim(),
+        neutral: row.neutral === true,
+        supplies: local ? integer(local.supplies, `Regional claim ${entityId} supplies`) : null,
+        treasury: local
+          ? decimalString(local.treasury, `Regional claim ${entityId} treasury`)
+          : null,
+        numTiles: local
+          ? integer(local.numTiles ?? local.num_tiles, `Regional claim ${entityId} tile count`)
+          : null,
+        tier: buildingDescriptionId ? tierByBuildingId.get(buildingDescriptionId) ?? null : null,
+        locationX: location ? integer(location.x, `Regional claim ${entityId} location x`) : null,
+        locationZ: location ? integer(location.z, `Regional claim ${entityId} location z`) : null,
+        locationDimension: location
+          ? decimalString(location.dimension, `Regional claim ${entityId} location dimension`)
+          : null,
+      });
+    } catch (error) {
+      throw error;
+    }
+  }
+  claims.sort((left, right) => (
+    BigInt(String(left.entityId)) < BigInt(String(right.entityId)) ? -1 : 1
+  ));
+  return { data: { regionId, claims }, warnings };
+}
+
 function normalizeDescriptionStack(value: unknown) {
   const stack = record(value, "catalog item stack");
   return {

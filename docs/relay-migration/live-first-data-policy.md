@@ -320,6 +320,7 @@ Initial candidates requiring explicit dependency proof are:
 | `game_catalog_*` normalized entity/recipe tables | Keep as the durable catalog read model; remove refresh bookkeeping that no longer applies. |
 | Selected-player inventory, Toolbelt, and housing | No dedicated table. Fetch one monitored member through `/api/local/player-data`, coalesce in flight, and retain independent 15-second process-memory last-good entries. |
 | Legacy claim layout payload | Retired. The Map UI never read it; claim focus comes from the live claim domain and player tracking passes live member/player IDs to the existing map integration. No Relay subscription or SQL projection replaces unused data. |
+| Legacy Region claim/status/trade-volume payloads | Retired. Region metadata and rankings publish continuously as generic `region` and `region-claims` generations. Unsupported trade aggregates are removed until an authoritative completed-trade signal exists. |
 | Market, activity, membership, production, notification, and audit history | Keep according to explicit retention because Relay supplies current state, not the application's observation history. |
 
 No table is kept merely because the legacy application had it, and no table is

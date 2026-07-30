@@ -121,6 +121,7 @@ import {
   RelayPrimaryRegionRuntime,
   RelayPublicCraftRuntime,
   RelayRegionalMarketRuntime,
+  RelayRegionClaimsRuntime,
   RelayStorageActivityService,
   runtimeHealthWithPersistedSnapshot,
 } from "./dist-server/game-data/index.js";
@@ -442,6 +443,11 @@ const relayPrimaryRegionRuntime = new RelayPrimaryRegionRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
 });
+const relayRegionClaimsRuntime = new RelayRegionClaimsRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+  reconnectDelayMs: relayReconnectDelayMs,
+});
 const relayMarketTransitionWriter = createRelayMarketTransitionWriter(db, {
   addActivity,
   processOutbox: kickDiscordNotificationOutbox,
@@ -507,6 +513,7 @@ let relayPrimaryRegionStarted = false;
 let relayClaimMarketStarted = false;
 let relayPublicCraftStarted = false;
 let relayRegionalMarketStarted = false;
+let relayRegionClaimsStarted = false;
 const relayClaimScopeFence = createRelayClaimScopeFence([
   {
     stop: async () => {
@@ -521,6 +528,11 @@ const relayClaimScopeFence = createRelayClaimScopeFence([
   {
     stop: async () => {
       try { await relayClaimMarketRuntime.stop(); } finally { relayClaimMarketStarted = false; }
+    },
+  },
+  {
+    stop: async () => {
+      try { await relayRegionClaimsRuntime.stop(); } finally { relayRegionClaimsStarted = false; }
     },
   },
   {
@@ -557,6 +569,11 @@ function gameDataProviderHealth() {
     snapshot: currentStateRepository.read(currentClaimId(), "regional-market"),
     providerHealth: health,
   });
+  const regionClaims = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayRegionClaimsRuntime.health(),
+    snapshot: currentStateRepository.read(currentClaimId(), "region-claims"),
+    providerHealth: health,
+  });
   return {
     ...health,
     globalCatalog,
@@ -564,6 +581,7 @@ function gameDataProviderHealth() {
     publicCrafts,
     claimMarket,
     regionalMarket,
+    regionClaims,
   };
 }
 function globalRegionSubscriptionHealth() {
@@ -1468,7 +1486,6 @@ function audit(user, action, details = {}) {
 
 const adminLoginAttempts = createAdminLoginAttemptStore();
 const empireScoutInflight = new Map();
-const regionCache = new Map();
 const regionClaimListCache = new Map();
 const empireScoutCache = new Map();
 const claimDetailCache = new Map();
@@ -6185,58 +6202,6 @@ async function fetchCachedCraftContributions(craftId, options = {}) {
   return value;
 }
 
-async function fetchAllRegionClaims(regionId, options = {}) {
-  const base = `/claims?regionId=${encodeURIComponent(regionId)}&limit=100&sort=supplies&order=desc`;
-  const first = await fetchBitjita(`${base}&page=1`, { forceRefresh: options.forceRefresh === true });
-  const totalPages = Math.max(Math.ceil(toNumber(first.count) / 100), 1);
-  const pages = totalPages > 1
-    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`, { forceRefresh: options.forceRefresh === true }))
-    : [];
-  const claims = [first, ...pages].flatMap((page) => unwrap(page, "claims", []));
-  const details = await mapWithConcurrency(claims, 8, async (claim) => {
-    try {
-      return await fetchCachedClaimDetail(claim.entityId);
-    } catch {
-      return null;
-    }
-  });
-  return {
-    ...first,
-    claims: claims.map((claim, index) => {
-      const detail = details[index];
-      return detail ? { ...claim, ...(detail.claim ?? detail) } : claim;
-    }),
-  };
-}
-
-async function fetchCachedRegionClaims(regionId, options = {}) {
-  const key = String(regionId);
-  const cached = regionCache.get(key);
-  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
-  const value = await fetchAllRegionClaims(key, options);
-  regionCache.set(key, { expiresAt: Date.now() + 10 * 60 * 1000, value });
-  return value;
-}
-
-function claimRegionIdFromKnownData(claim, regionStatusPayload, previousRegionPayload, claimId) {
-  const directRegionId = String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? "").trim();
-  if (/^\d+$/.test(directRegionId)) return directRegionId;
-  const claimRegionName = String(claim?.regionName ?? claim?.region_name ?? "").trim().toLowerCase();
-  if (claimRegionName) {
-    for (const region of unwrap(regionStatusPayload, "regions", [])) {
-      const regionName = String(region?.regionName ?? region?.name ?? "").trim().toLowerCase();
-      const regionId = String(region?.regionId ?? region?.id ?? region?.entityId ?? "").trim();
-      if (regionName && regionName === claimRegionName && /^\d+$/.test(regionId)) return regionId;
-    }
-  }
-  for (const regionClaim of unwrap(previousRegionPayload, "claims", [])) {
-    const regionClaimId = String(regionClaim?.entityId ?? regionClaim?.id ?? regionClaim?.claimId ?? "").trim();
-    const regionId = String(regionClaim?.regionId ?? regionClaim?.region_id ?? "").trim();
-    if (regionClaimId === String(claimId ?? "") && /^\d+$/.test(regionId)) return regionId;
-  }
-  return "";
-}
-
 function passiveCraftTimestamp(value) {
   const parsed = new Date(String(value ?? ""));
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
@@ -6581,21 +6546,20 @@ async function dashboardDataFresh(claimId, options = {}) {
     throw error;
   }
   const forceRefresh = options.forceRefresh === true;
-  const [claimPayload, membersPayload, citizensPayload, buildingsPayload, marketPayload, craftsPayload, regionStatus] = await Promise.all([
+  const [claimPayload, membersPayload, citizensPayload, buildingsPayload, marketPayload, craftsPayload] = await Promise.all([
     fetchBitjita(`/claims/${id}`, { forceRefresh }),
     fetchBitjita(`/claims/${id}/members`, { forceRefresh }),
     fetchBitjita(`/claims/${id}/citizens`, { forceRefresh }).catch(() => ({ citizens: [] })),
     fetchBitjita(`/claims/${id}/buildings`, { forceRefresh }),
     fetchAllClaimListings(id, { cache: !forceRefresh }).catch(() => ({ listings: [] })),
     fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(id)}&completed=false`, { forceRefresh }).catch(() => ({ craftResults: [] })),
-    fetchBitjita("/regions/status", { forceRefresh }).catch(() => ({ regions: [] })),
   ]);
   const claim = claimPayload.claim ?? claimPayload;
   const constructionPayload = currentConstructionProjection(id);
   const researchPayload = currentResearchProjection(id);
   const members = unwrap(membersPayload, "members", []);
   const crafts = unwrap(craftsPayload, "craftResults", []);
-  const [playerPayload, contributionEntries, region, tradeVolume] = await Promise.all([
+  const [playerPayload, contributionEntries] = await Promise.all([
     playerDetailSummaries({ members, forceRefresh }),
     mapWithConcurrency(crafts.filter((craft) => craft.entityId), 4, async (craft) => {
       try {
@@ -6604,8 +6568,6 @@ async function dashboardDataFresh(claimId, options = {}) {
         return [String(craft.entityId), []];
       }
     }),
-    claim?.regionId ? fetchCachedRegionClaims(claim.regionId).catch(() => ({ claims: [] })) : Promise.resolve({ claims: [] }),
-    claim?.regionId ? fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim.regionId))}`, { forceRefresh }).catch(() => ({ buckets: [], items: [], regions: [] })) : Promise.resolve({ buckets: [], items: [], regions: [] }),
   ]);
   return {
     claim: claimPayload,
@@ -6623,9 +6585,8 @@ async function dashboardDataFresh(claimId, options = {}) {
       failures: playerPayload.failures ?? [],
     },
     contributions: Object.fromEntries(contributionEntries),
-    region,
-    regionStatus,
-    tradeVolume,
+    region: currentStateRepository.read(id, "region-claims")?.data ?? { claims: [] },
+    regionStatus: currentStateRepository.read(id, "region")?.data ?? { regions: [] },
   };
 }
 
@@ -6703,9 +6664,8 @@ function domainRowsToAppData(claimId, rowsByDomain) {
     players: unwrap(payload("players", { players: [] }), "players", []),
     playerDetailDiagnostics: payload("playerDetailDiagnostics", {}),
     contributions: payload("contributions", {}),
-    region: payload("region", { claims: [] }),
-    regionStatus: payload("regionStatus", { regions: [] }),
-    tradeVolume: payload("tradeVolume", {}),
+    region: payload("region-claims", { claims: [] }),
+    regionStatus: payload("region", { regions: [] }),
     inventories: payload("inventories", { buildings: [] }),
     recruitment: currentRecruitmentProjection(claimId),
     skills: payload("skills", {}),
@@ -6837,7 +6797,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
     playerPayload,
     inventoriesPayload,
     skillsPayload,
-    regionStatus,
   ] = await Promise.all([
     collectorDue(id, "professions", "citizens", options) ? fetchDomainPayload(previous, "citizens", { citizens: [] }, "Citizens", () => timedCollectorFetch(metrics, "professions", "citizens", () => fetchBitjita(`/claims/${id}/citizens`))) : Promise.resolve(previousPayload(previous, "citizens", { citizens: [] })),
     collectorDue(id, "claim", "buildings", options) ? fetchDomainPayload(previous, "buildings", { buildings: [] }, "Buildings", () => timedCollectorFetch(metrics, "claim", "buildings", () => fetchBitjita(`/claims/${id}/buildings`))) : Promise.resolve(previousPayload(previous, "buildings", { buildings: [] })),
@@ -6851,7 +6810,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
     collectorDue(id, "players", "players", options) ? fetchDomainPayload(previous, "players", { players: [] }, "Player details", () => timedCollectorFetch(metrics, "players", "player details", () => playerDetailSummaries({ members }))) : Promise.resolve(previousPayload(previous, "players", { players: [] })),
     collectorDue(id, "inventory", "inventories", options) ? fetchDomainPayload(previous, "inventories", { buildings: [] }, "Inventories", () => timedCollectorFetch(metrics, "inventory", "inventories", () => fetchBitjita(`/claims/${id}/inventories`))) : Promise.resolve(previousPayload(previous, "inventories", { buildings: [] })),
     collectorDue(id, "mapCatalog", "skills", options) || collectorDue(id, "professions", "skills", options) ? fetchDomainPayload(previous, "skills", { skills: [] }, "Skills catalogue", () => timedCollectorFetch(metrics, collectorDue(id, "mapCatalog", "skills", options) ? "mapCatalog" : "professions", "skills catalogue", () => fetchBitjita("/skills"))) : Promise.resolve(previousPayload(previous, "skills", { skills: [] })),
-    collectorDue(id, "region", "regionStatus", options) ? fetchDomainPayload(previous, "regionStatus", { regions: [] }, "Region status", () => timedCollectorFetch(metrics, "region", "region status", () => fetchBitjita("/regions/status"))) : Promise.resolve(previousPayload(previous, "regionStatus", { regions: [] })),
   ]);
   const productionCrafts = unwrap(productionPayload, "craftResults", []);
   const constructionPayload = currentConstructionProjection(id);
@@ -6860,16 +6818,22 @@ async function buildCurrentClaimData(claimId, options = {}) {
   const contributionEntries = collectorDue(id, "production", "contributions", options)
     ? Object.entries(await timedCollectorFetch(metrics, "production", "craft contributions", () => craftContributionMap(productionCrafts)))
     : Object.entries(previousPayload(previous, "contributions", {}));
-  const derivedRegionId = claimRegionIdFromKnownData(claim, regionStatus, previousPayload(previous, "region", { claims: [] }), id);
+  const providerClaim = currentStateRepository.read(id, "claim")?.data ?? {};
+  const derivedRegionId = String(
+    claim?.regionId
+    ?? claim?.region_id
+    ?? claim?.region
+    ?? providerClaim.regionId
+    ?? getSettings().defaultRegion
+    ?? "",
+  ).trim();
   const claimPayloadWithRegion = derivedRegionId && !String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? "").trim()
     ? (claimPayload?.claim
       ? { ...claimPayload, claim: { ...claimPayload.claim, regionId: derivedRegionId } }
       : { ...claimPayload, regionId: derivedRegionId })
     : claimPayload;
-  const [region, tradeVolume] = await Promise.all([
-    collectorDue(id, "region", "region", options) && derivedRegionId ? fetchDomainPayload(previous, "region", { claims: [] }, "Region claims", () => timedCollectorFetch(metrics, "region", "region claims", () => fetchCachedRegionClaims(derivedRegionId))) : Promise.resolve(previousPayload(previous, "region", { claims: [] })),
-    collectorDue(id, "market", "tradeVolume", options) && derivedRegionId ? fetchDomainPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] }, "Trade volume", () => timedCollectorFetch(metrics, "market", "trade volume", () => fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(derivedRegionId))}`))) : Promise.resolve(previousPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] })),
-  ]);
+  const region = currentStateRepository.read(id, "region-claims")?.data ?? { claims: [] };
+  const regionStatus = currentStateRepository.read(id, "region")?.data ?? { regions: [] };
   const players = unwrap(playerPayload, "players", Array.isArray(playerPayload) ? playerPayload : []);
   return {
     claim: claimPayloadWithRegion,
@@ -6889,7 +6853,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
     contributions: Object.fromEntries(contributionEntries),
     region,
     regionStatus,
-    tradeVolume,
     inventories: inventoriesPayload,
     recruitment: recruitmentPayload,
     skills: skillsPayload,
@@ -8618,6 +8581,21 @@ const server = createServer(async (req, res) => {
           // The route below deliberately serves last-good envelopes when present.
         }
       }
+      if (refresh.forceRefresh && domains.includes("region-claims") && relayRegionClaimsStarted) {
+        try {
+          const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+          const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();
+          if (regionId) {
+            await relayRegionClaimsRuntime.reconcile({
+              claimId,
+              regionId,
+              force: true,
+            });
+          }
+        } catch {
+          // The route below deliberately serves last-good envelopes when present.
+        }
+      }
       const result = gameDataResponse({
         configuredClaimId: currentClaimId(),
         claimId,
@@ -9146,15 +9124,6 @@ const server = createServer(async (req, res) => {
         const message = error instanceof Error ? error.message : String(error);
         return send(res, error?.statusCode ?? (message === "Analytics consent is required" ? 403 : 400), { error: message });
       }
-    }
-    if (req.method === "GET" && url.pathname === "/api/local/region/claims") {
-      if (!rateLimit(req, res, "region-claims", RATE_LIMITS.expensiveLocal)) return;
-      const refresh = manualRefreshAccess(req, res);
-      if (!refresh) return;
-      const { forceRefresh } = refresh;
-      const regionId = String(url.searchParams.get("regionId") ?? "").trim();
-      if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
-      return send(res, 200, await fetchCachedRegionClaims(regionId, { forceRefresh }));
     }
     if (req.method === "GET" && url.pathname === "/api/local/regions/active") {
       if (!rateLimit(req, res, "regions-active", RATE_LIMITS.expensiveLocal)) return;
@@ -10724,6 +10693,20 @@ function startBackgroundTasks() {
         }
       } catch (error) {
         if (!isTestRuntime) console.warn(`Relay claim-market startup failed: ${errorMessage(error)}`);
+      }
+      try {
+        if (!relayRegionClaimsStarted) {
+          await relayRegionClaimsRuntime.start({
+            relayBaseUrl,
+            claimId,
+            regionId,
+          });
+          relayRegionClaimsStarted = true;
+        } else {
+          await relayRegionClaimsRuntime.reconcile({ claimId, regionId });
+        }
+      } catch (error) {
+        if (!isTestRuntime) console.warn(`Relay regional-claims startup failed: ${errorMessage(error)}`);
       }
       if (!Array.isArray(members) || members.length === 0) {
         return;

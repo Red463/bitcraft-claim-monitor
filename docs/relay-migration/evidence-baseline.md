@@ -76,6 +76,12 @@ member-filtered equipment/preset/buff rows, and that global rows are not a
 complete market source. Exact observations are recorded in
 [diagnostic-findings.md](./diagnostic-findings.md).
 
+Regional claim rankings now use the region-scoped claim/local/tier tables and
+bounded exact-owner username subscriptions. The live Region surface does not
+depend on the retired scheduled claim crawl, `regionStatus` or `tradeVolume`
+payloads, or a dedicated ranking table. Trade metrics remain intentionally
+absent until the completed-trade evidence gate is satisfied.
+
 The live primary-region verifier now exercises those member-filtered equipment,
 preset, and buff subscriptions alongside `player_state`. Their normalized
 current domain is committed without introducing a new SQL cache table.

@@ -39,7 +39,7 @@ test("due collectors select only the domain payloads they own", () => {
 test("collector domain maps preserve current refresh and cache ownership", () => {
   assert.equal(collectorPrimaryPayloadDomain.production, "crafts");
   assert.equal(collectorPrimaryPayloadDomain.mapCatalog, "skills");
-  assert.equal(payloadDomainCollector.tradeVolume, "market");
+  assert.equal(payloadDomainCollector.tradeVolume, undefined);
   assert.equal(payloadDomainCollector.research, undefined);
   assert.equal(payloadDomainCollector.recruitment, undefined);
   assert.equal(collectorPrimaryPayloadDomain.research, undefined);
@@ -51,6 +51,11 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.equal(domainPayloadKeys.includes("construction"), false);
   assert.equal(domainPayloadKeys.includes("layout"), false);
   assert.equal(payloadDomainCollector.layout, undefined);
+  assert.equal(domainPayloadKeys.includes("regionStatus"), false);
+  assert.equal(domainPayloadKeys.includes("tradeVolume"), false);
+  assert.equal(payloadDomainCollector.regionStatus, undefined);
+  assert.equal(payloadDomainCollector.tradeVolume, undefined);
+  assert.equal(Object.hasOwn(domainCollectorDefaults, "region"), false);
   assert.equal(collectorCurrentTables.storageActivity, undefined);
   const browserDefaults = readFileSync(
     new URL("../src/settingsDefaults.ts", import.meta.url),
@@ -98,6 +103,17 @@ test("storage activity runs on the Relay live loop rather than a scheduled colle
   assert.doesNotMatch(source, /collector(?:Attempt|Success|Failure)\("storageActivity"/);
   assert.doesNotMatch(source, /\/logs\/storage/);
   assert.match(source, /relayHttp\.storageLogs\(\{/);
+});
+
+test("regional rankings run on a live typed session rather than BitJita pagination or a scheduled collector", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /RelayRegionClaimsRuntime/);
+  assert.doesNotMatch(source, /function fetchCachedRegionClaims/);
+  assert.doesNotMatch(source, /function fetchAllRegionClaims/);
+  assert.doesNotMatch(source, /fetchBitjita\("\/regions\/status"/);
+  assert.doesNotMatch(source, /fetchBitjita\(`\/stats\/trade-volume/);
+  assert.doesNotMatch(source, /url\.pathname === "\/api\/local\/region\/claims"/);
 });
 
 test("empire membership tracking has an independent bounded cadence", () => {

@@ -174,8 +174,7 @@ export function useGameData(
         const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
         const readsPlayerDetail = activePanel === "map" || activePanel === "leaderboard";
         const readsProductionDetail = activePanel === "craft-monitor";
-        const readsRegionDetail = activePanel === "region";
-        const [playerResults, contributionResults, regionPayload, tradeVolumePayload] = await Promise.all([
+        const [playerResults, contributionResults] = await Promise.all([
           readsPlayerDetail ? fetch(`${LOCAL_API}/player-details`, {
             // Player detail requests are batched server-side because each member
             // can require an individual BitJita lookup for online/session state.
@@ -219,14 +218,7 @@ export function useGameData(
               return { status: "rejected", reason } as PromiseRejectedResult;
             }
           }) : Promise.resolve([]),
-          readsRegionDetail ? request("/regions/status").catch(() => ({ regions: [] })) : Promise.resolve({ regions: [] }),
-          readsRegionDetail ? request(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim?.regionId ?? ""))}`).catch(() => ({ buckets: [], items: [], regions: [] })) : Promise.resolve({ buckets: [], items: [], regions: [] }),
         ]);
-        raw.region = readsRegionDetail && claim?.regionId
-          ? await fetch(`${LOCAL_API}/region/claims?regionId=${encodeURIComponent(String(claim.regionId))}`, { headers: { ...manualHeaders }, signal: controller.signal })
-            .then((response) => response.ok ? response.json() : Promise.reject(new Error(`region claims HTTP ${response.status}`)))
-            .catch(() => ({ claims: [] }))
-          : { claims: [] };
         raw.players = playerResults
           .filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled")
           .map((result) => normalizePlayer(result.value));
@@ -238,8 +230,6 @@ export function useGameData(
         raw.contributions = Object.fromEntries(contributionResults
           .filter((result): result is PromiseFulfilledResult<{ craftId: string; payload: AnyRecord }> => result.status === "fulfilled")
           .map((result) => [result.value.craftId, result.value.payload.contributions ?? []]));
-        raw.regionStatus = regionPayload;
-        raw.tradeVolume = tradeVolumePayload;
         const freshness = freshnessFromPayload(raw);
         pageNavigationCache.set(cacheKey, { data: raw, cachedAt: Date.now(), ...freshness });
         if (!cancelled) React.startTransition(() => setState(loadedState(raw)));

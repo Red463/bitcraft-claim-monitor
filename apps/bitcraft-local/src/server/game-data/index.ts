@@ -21,6 +21,8 @@ export * from "./publicCraftProjection.ts";
 export * from "./publicCraftRuntime.ts";
 export * from "./regionalMarketRegionSession.ts";
 export * from "./regionalMarketRuntime.ts";
+export * from "./regionClaimsSession.ts";
+export * from "./regionClaimsRuntime.ts";
 export * from "./researchProjection.ts";
 export * from "./researchTierPresets.ts";
 export * from "./recruitmentProjection.ts";

@@ -26,13 +26,19 @@ test("server propagates a request-scoped bypass to live aggregate caches", () =>
   assert.match(server, /regionalEmpireDetails\(empireId,\s*regionId,\s*inactiveDays,\s*\{\s*forceRefresh\s*\}\)/);
   assert.match(server, /regionalEmpireClaimMembers\(claimId,\s*\{\s*forceRefresh\s*\}\)/);
   assert.match(server, /regionalEmpireWatchtowers\(regionId,\s*inactiveDays,\s*\{\s*forceRefresh\s*\}\)/);
+  assert.match(server, /domains\.includes\("region-claims"\)[\s\S]{0,500}relayRegionClaimsRuntime\.reconcile\(\{[\s\S]{0,100}force:\s*true/);
+  assert.match(
+    server,
+    /new RelayRegionClaimsRuntime\(\{[\s\S]{0,200}reconnectDelayMs:\s*relayReconnectDelayMs/,
+    "regional claims must use the shared jittered reconnect policy in production",
+  );
 });
 
 test("every live page aggregate admits the guarded manual refresh identifier", () => {
   for (const route of [
+    "/api/local/game-data",
     "/api/local/player-data",
     "/api/local/regions/active",
-    "/api/local/region/claims",
     "/api/local/empires",
     "/api/local/empires/details",
     "/api/local/empires/claim-members",

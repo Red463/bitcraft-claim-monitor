@@ -19,6 +19,7 @@ const {
   normalizeCitizensPayload,
   normalizeRegionalEquipment,
   normalizeRegionalConstruction,
+  normalizeRegionalClaims,
   normalizeRegionalPlayers,
   normalizeRegionalRecruitment,
   normalizeRegionalResearch,
@@ -26,6 +27,93 @@ const {
   normalizeStorageLogs,
   normalizeTimestamp,
 } = await import(new URL("../src/server/game-data/normalizers.ts", import.meta.url).href);
+
+test("regional claims join live claim state, local metrics, tier, owner, and coordinates exactly", () => {
+  assert.deepEqual(normalizeRegionalClaims({
+    regionId: "19",
+    claimRows: [{
+      entityId: 1369094286777412590n,
+      ownerPlayerEntityId: 1224979098736429551n,
+      ownerBuildingEntityId: 1369094286778488967n,
+      name: "Timbersteel Trade",
+      neutral: false,
+    }, {
+      entityId: 1369094286777412591n,
+      ownerPlayerEntityId: 1224979098736429552n,
+      ownerBuildingEntityId: 1369094286778488968n,
+      name: "Neighbour",
+      neutral: false,
+    }],
+    localRows: [{
+      entityId: 1369094286777412590n,
+      supplies: 12345,
+      numTiles: 49,
+      treasury: 987654,
+      buildingDescriptionId: 6020,
+      location: { x: -42, z: 77, dimension: 0n },
+    }],
+    claimTypeRows: [{ buildingId: 6020, tier: 6, radius: 7, claimType: { tag: "Settlement" } }],
+    usernameRows: [{
+      entityId: 1224979098736429551n,
+      username: "Red463",
+    }],
+  }), {
+    data: {
+      regionId: "19",
+      claims: [{
+        entityId: "1369094286777412590",
+        ownerPlayerEntityId: "1224979098736429551",
+        ownerBuildingEntityId: "1369094286778488967",
+        ownerPlayerUsername: "Red463",
+        name: "Timbersteel Trade",
+        neutral: false,
+        supplies: 12345,
+        treasury: "987654",
+        numTiles: 49,
+        tier: 6,
+        locationX: -42,
+        locationZ: 77,
+        locationDimension: "0",
+      }, {
+        entityId: "1369094286777412591",
+        ownerPlayerEntityId: "1224979098736429552",
+        ownerBuildingEntityId: "1369094286778488968",
+        ownerPlayerUsername: null,
+        name: "Neighbour",
+        neutral: false,
+        supplies: null,
+        treasury: null,
+        numTiles: null,
+        tier: null,
+        locationX: null,
+        locationZ: null,
+        locationDimension: null,
+      }],
+    },
+    warnings: [
+      "Regional claim 1369094286777412591 has no claim_local_state row.",
+      "Regional claim 1369094286777412591 owner 1224979098736429552 has no username row.",
+    ],
+  });
+});
+
+test("regional claims reject malformed required rows instead of replacing last-good data", () => {
+  assert.throws(() => normalizeRegionalClaims({
+    regionId: "19",
+    claimRows: [{ entityId: "not-an-id" }],
+    localRows: [],
+    claimTypeRows: [],
+    usernameRows: [],
+  }), /claim_state row 0 entity id must be a non-negative decimal integer string/);
+
+  assert.throws(() => normalizeRegionalClaims({
+    regionId: "19",
+    claimRows: [],
+    localRows: [{ entityId: "not-an-id" }],
+    claimTypeRows: [],
+    usernameRows: [],
+  }), /claim_local_state row 0 entity id must be a non-negative decimal integer string/);
+});
 
 test("normalizes Relay player housing without merging Item and Cargo identities", () => {
   assert.deepEqual(normalizePlayerHousing({

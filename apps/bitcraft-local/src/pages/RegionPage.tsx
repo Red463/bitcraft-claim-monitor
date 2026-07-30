@@ -11,7 +11,6 @@ import {
   Hammer,
   MapPin,
   Server,
-  ShoppingCart,
   Users,
 } from "lucide-react";
 import { TierBadge, TrackedOwnerName } from "../components/main/Badges";
@@ -23,9 +22,8 @@ import { getOwnerName } from "../utils/ownership";
 import { normalizeData } from "../utils/normalize";
 import { regionScoreMaxima, settlementRegionScore } from "../utils/regionScore";
 
-// Region compares the monitored settlement against other visible settlements in
-// the same active region. Rankings are derived from the current BitJita claim
-// list and should be treated as a snapshot, not a complete historical ranking.
+// Region compares the monitored settlement against the current complete
+// generation published by its continuously connected regional Relay session.
 export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [sortKey, setSortKey] = usePersistedState("region.sort.v2", "score");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("region.direction.v2", "desc");
@@ -67,7 +65,6 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   const avgTiles = allRows.length ? allRows.reduce((total, row) => total + toNumber(row.numTiles), 0) / allRows.length : 0;
   const totalTreasury = allRows.reduce((total, row) => total + toNumber(row.treasury), 0);
   const liveStatus = data.regionStatus.find((region) => String(region.regionId) === String(data.claim.regionId));
-  const tradeSummary = data.tradeVolume.overall ?? {};
   const myRankRow = allRows.find((row) => String(row.entityId) === String(data.claim.entityId));
   const nearbyRows = myRankRow ? [...allRows]
     .filter((row) => String(row.entityId) !== String(data.claim.entityId))
@@ -124,13 +121,12 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
         <MiniStat icon={<Globe2 />} label="Settlements" value={allRows.length} />
         <MiniStat icon={<Users />} label="Players Online" value={liveStatus ? formatNumber(liveStatus.signedInPlayers) : "-"} />
         <MiniStat icon={<Server />} label="Region Status" value={regionStatusLabel} />
-        <MiniStat icon={<ShoppingCart />} label="Regional Trades" value={formatNumber(tradeSummary.totalTrades)} />
         <MiniStat icon={<CircleDollarSign />} label="Region Treasury" value={formatCompactNumber(totalTreasury)} />
       </div>
       <div className="highlight-grid region-insights">
         <div><strong>Average Tier</strong><span>{avgTier.toFixed(1)} across known settlements</span></div>
         <div><strong>Average Tiles</strong><span>{formatNumber(avgTiles)} claimed tiles</span></div>
-        <div><strong>Regional Trade Value</strong><span>{formatCompactNumber(tradeSummary.totalValue)} in selected API window</span></div>
+        <div><strong>Live Claims</strong><span>{formatNumber(allRows.length)} in the current Relay generation</span></div>
       </div>
       <div className="region-context">
         <section className="bar-panel region-leaders-panel">

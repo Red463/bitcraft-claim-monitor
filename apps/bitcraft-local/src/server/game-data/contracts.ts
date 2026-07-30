@@ -21,6 +21,7 @@ export const DOMAIN_KEYS = [
   "market",
   "regional-market",
   "region",
+  "region-claims",
   "empires",
   "deposits",
   "catalogs",

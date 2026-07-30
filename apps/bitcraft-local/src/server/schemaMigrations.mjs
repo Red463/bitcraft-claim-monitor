@@ -125,5 +125,8 @@ export function applyLegacySchemaCleanup(db) {
     DELETE FROM scheduled_jobs WHERE job_key = 'global_market_insights';
     DELETE FROM app_settings WHERE key = 'global_market_overview_json';
     DELETE FROM domain_payload_current WHERE domain = 'layout';
+    DELETE FROM domain_payload_current
+      WHERE domain IN ('regionStatus', 'tradeVolume')
+         OR (domain = 'region' AND json_type(data_json, '$.claims') = 'array');
   `);
 }
