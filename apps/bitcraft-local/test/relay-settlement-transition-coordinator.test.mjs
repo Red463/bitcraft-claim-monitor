@@ -306,6 +306,44 @@ test("a configured claim switch cancels an older claim retry and releases idle p
   assert.deepEqual(applications, ["claim-1", "claim-2"]);
 });
 
+test("an in-flight old claim failure cannot schedule a retry after a lower-generation claim switch", async () => {
+  let configuredClaimId = "claim-1";
+  const snapshotsByClaim = {
+    "claim-1": settlementSnapshots("claim-1", 100),
+    "claim-2": settlementSnapshots("claim-2", 1),
+  };
+  let releaseOldClaim;
+  const holdOldClaim = new Promise((resolve) => { releaseOldClaim = resolve; });
+  const applications = [];
+  const coordinator = createRelaySettlementTransitionCoordinator({
+    configuredClaimId: () => configuredClaimId,
+    readDomainSnapshot: (claimId, domain) => snapshotsByClaim[claimId][domain],
+    applySettlementTransition: async (claimId) => {
+      applications.push(claimId);
+      if (claimId === "claim-1") {
+        await holdOldClaim;
+        throw new Error("claim-1 checkpoint failed after switch");
+      }
+    },
+    retryDelaysMs: [200],
+  });
+
+  coordinator.onCommit({ claimId: "claim-1", generation: 100, changedDomains: ["claim"] });
+  await flushAsyncWork();
+  configuredClaimId = "claim-2";
+  coordinator.onCommit({ claimId: "claim-2", generation: 1, changedDomains: ["claim"] });
+  releaseOldClaim();
+
+  const reachedIdlePromptly = await Promise.race([
+    coordinator.whenIdle().then(() => true),
+    delay(40).then(() => false),
+  ]);
+  await delay(220);
+
+  assert.equal(reachedIdlePromptly, true);
+  assert.deepEqual(applications, ["claim-1", "claim-2"]);
+});
+
 test("a corrected equivalent generation reports health recovery without duplicate transition work", async () => {
   const snapshots = settlementSnapshots();
   let applications = 0;
@@ -343,6 +381,52 @@ test("a corrected equivalent generation reports health recovery without duplicat
   assert.equal(applications, 1);
   assert.deepEqual(failures, ["Relay settlement members snapshot is incomplete"]);
   assert.deepEqual(recoveries, ["claim:1|members:3|inventories:1|market:1"]);
+});
+
+test("deduplicated autonomous recovery resets the retry budget for the next failure episode", async () => {
+  const snapshots = settlementSnapshots();
+  let failNextClaimRead = false;
+  let secondEpisodeAttempts = 0;
+  const recoveries = [];
+  const coordinator = createRelaySettlementTransitionCoordinator({
+    configuredClaimId: () => "claim-1",
+    readDomainSnapshot: (_claimId, domain) => {
+      if (domain === "claim" && failNextClaimRead) {
+        failNextClaimRead = false;
+        throw new Error("temporary checkpoint read failure");
+      }
+      return snapshots[domain];
+    },
+    applySettlementTransition: async (_claimId, summary) => {
+      if (summary.supplies === "9007199254740993126") {
+        secondEpisodeAttempts += 1;
+        throw new Error("independent checkpoint write failure");
+      }
+    },
+    retryDelaysMs: [0, 0],
+    onRecovery: () => recoveries.push("recovered"),
+  });
+
+  coordinator.onCommit({ claimId: "claim-1", generation: 1, changedDomains: ["claim"] });
+  await coordinator.whenIdle();
+
+  snapshots.claim = {
+    generation: 2,
+    data: { ...snapshots.claim.data },
+  };
+  failNextClaimRead = true;
+  coordinator.onCommit({ claimId: "claim-1", generation: 2, changedDomains: ["claim"] });
+  await coordinator.whenIdle();
+
+  snapshots.claim = {
+    generation: 3,
+    data: { ...snapshots.claim.data, supplies: "9007199254740993126" },
+  };
+  coordinator.onCommit({ claimId: "claim-1", generation: 3, changedDomains: ["claim"] });
+  await coordinator.whenIdle();
+
+  assert.deepEqual(recoveries, ["recovered"]);
+  assert.equal(secondEpisodeAttempts, 3);
 });
 
 test("equivalent committed settlement summaries do not duplicate transition evaluation", async () => {

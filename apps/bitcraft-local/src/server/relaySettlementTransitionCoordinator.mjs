@@ -145,6 +145,7 @@ export function createRelaySettlementTransitionCoordinator({
   let retryEvent = null;
   let retryTimer = null;
   let retryAttempt = 0;
+  let retryClaimId = null;
   const lastAppliedFingerprintByClaim = new Map();
   const failedClaimIds = new Set();
   const idleWaiters = new Set();
@@ -165,11 +166,18 @@ export function createRelaySettlementTransitionCoordinator({
     retryTimer = null;
     retryEvent = null;
     retryAttempt = 0;
+    retryClaimId = null;
   }
 
   function scheduleRetry(event) {
+    const eventClaimId = normalizedClaimId(event.claimId);
+    if (retryClaimId !== eventClaimId) {
+      retryAttempt = 0;
+      retryClaimId = eventClaimId;
+    }
     if (retryAttempt >= boundedRetryDelays.length) {
       retryAttempt = 0;
+      retryClaimId = null;
       retryEvent = null;
       return;
     }
@@ -191,6 +199,7 @@ export function createRelaySettlementTransitionCoordinator({
         schedule();
       } else {
         retryAttempt = 0;
+        retryClaimId = null;
         resolveIdle();
       }
     }, delay);
@@ -220,6 +229,8 @@ export function createRelaySettlementTransitionCoordinator({
           };
           if (lastAppliedFingerprintByClaim.get(claimId) === fingerprint) {
             if (failedClaimIds.delete(claimId)) {
+              retryAttempt = 0;
+              retryClaimId = null;
               safelyNotify(onRecovery, event, context);
             }
             continue;
@@ -229,18 +240,24 @@ export function createRelaySettlementTransitionCoordinator({
           lastAppliedFingerprintByClaim.set(claimId, fingerprint);
           failedClaimIds.delete(claimId);
           retryAttempt = 0;
+          retryClaimId = null;
           safelyNotify(onSuccess, event, context, attempt);
         } catch (error) {
           failedClaimIds.add(claimId);
           safelyNotify(onFailure, error, event, attempt);
           const pendingGeneration = validGeneration(pendingEvent?.generation);
+          const pendingClaimId = normalizedClaimId(pendingEvent?.claimId);
+          const configuredClaimIdAtFailure = normalizedClaimId(configuredClaimId());
           if (
             !(error instanceof SettlementSourceValidationError)
+            && configuredClaimIdAtFailure === claimId
+            && (!pendingEvent || pendingClaimId === claimId)
             && (pendingGeneration == null || pendingGeneration < event.generation)
           ) {
             scheduleRetry(event);
           } else {
             retryAttempt = 0;
+            retryClaimId = null;
           }
         }
       }
@@ -269,13 +286,17 @@ export function createRelaySettlementTransitionCoordinator({
       const generation = validGeneration(event.generation);
       if (generation == null) return false;
       const normalizedEvent = { ...event, claimId, generation, changedDomains };
-      const retryClaimId = normalizedClaimId(retryEvent?.claimId);
+      const waitingRetryClaimId = normalizedClaimId(retryEvent?.claimId);
       const retryGeneration = validGeneration(retryEvent?.generation);
       if (
-        retryEvent
+        retryClaimId
         && (
-          (retryClaimId && retryClaimId !== claimId)
-          || (retryGeneration != null && generation >= retryGeneration)
+          retryClaimId !== claimId
+          || (
+            waitingRetryClaimId === claimId
+            && retryGeneration != null
+            && generation >= retryGeneration
+          )
         )
       ) {
         cancelRetry();
