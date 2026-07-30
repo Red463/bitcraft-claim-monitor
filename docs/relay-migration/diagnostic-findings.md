@@ -631,13 +631,36 @@ configuration rather than trusting persisted `activeRegionIds`. Complete
 primary generations feed the existing membership-period repository
 immediately, so no scheduled Empire membership acquisition job remains.
 
+## Empire Hexite live-first ownership
+
+The legacy reserve implementation was a six-hour BitJita crawl backed by
+`empire_hexite_sweeps`, `empire_hexite_sweep_empires`,
+`empire_hexite_targets`, `empire_hexite_sources`, and
+`empire_hexite_snapshots`. Inspection proved that `targets` was sweep-owned
+work state rather than user configuration, while `snapshots` overwrote one
+current row per Empire rather than preserving append-only history. None of the
+five tables therefore has independent ownership after the crawl is removed.
+
+They are retired together with the scheduled job. Each complete typed Empire
+generation already contains the exact treasury amount, so the local Empire
+views now publish that value immediately as a known minimum. Missing player
+and claim inventories, ready Capsules, and completed Foundry output are
+reported as unavailable and are never coerced to zero.
+
+The regional `inventory_state` schema exposes owner fields and inventory
+pockets, but complete bounded joins across all Empire players and aligned
+claims are not yet proven. Full reserve parity therefore remains blocked on a
+filtered regional inventory diagnostic. The live treasury slice is useful
+immediately without hiding that limitation or recreating a scheduled crawl.
+
 ## Remaining diagnostic blockers
 
 - authoritative evidence distinguishing a completed sale from removal or
   cancellation;
 - craft contributor identity and amounts;
 - attacker/defender meaning and completion semantics for empire siege rows;
-- multi-region Hexite reserve aggregation.
+- bounded multi-region player/claim inventory and Foundry joins for complete
+  Hexite reserve aggregation.
 
 ## Deal Watch live-order baseline
 

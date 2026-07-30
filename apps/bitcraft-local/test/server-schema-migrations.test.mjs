@@ -257,8 +257,14 @@ test("applyLegacySchemaCleanup drops legacy server-owned cache tables", () => {
   assert.match(executed[0], /DROP TABLE IF EXISTS market_buy_orders_current/);
   assert.match(executed[0], /DROP TABLE IF EXISTS market_regional_sale_averages_current/);
   assert.match(executed[0], /DROP TABLE IF EXISTS global_market_price_snapshots/);
+  assert.match(executed[0], /DROP TABLE IF EXISTS empire_hexite_targets/);
+  assert.match(executed[0], /DROP TABLE IF EXISTS empire_hexite_sweep_empires/);
+  assert.match(executed[0], /DROP TABLE IF EXISTS empire_hexite_sources/);
+  assert.match(executed[0], /DROP TABLE IF EXISTS empire_hexite_snapshots/);
+  assert.match(executed[0], /DROP TABLE IF EXISTS empire_hexite_sweeps/);
   assert.match(executed[0], /DELETE FROM scheduled_jobs WHERE job_key = 'recipe_catalog_refresh'/);
   assert.match(executed[0], /DELETE FROM scheduled_jobs WHERE job_key = 'global_market_insights'/);
+  assert.match(executed[0], /DELETE FROM scheduled_jobs WHERE job_key = 'empire_hexite_reserves_refresh'/);
   assert.match(executed[0], /DELETE FROM app_settings WHERE key = 'global_market_overview_json'/);
   assert.match(executed[0], /DELETE FROM domain_payload_current WHERE domain = 'layout'/);
   assert.match(executed[0], /domain IN \('regionStatus', 'tradeVolume'\)/);

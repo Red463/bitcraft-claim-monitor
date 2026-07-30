@@ -8,6 +8,7 @@ import {
   presentHexiteReserveSummary,
   presentHexiteReserves,
 } from "../src/pages/empires/hexitePresentation.ts";
+import { liveEmpireHexiteProjection } from "../src/server/empireHexite.mjs";
 import { compareOptionalSortValues } from "../src/utils/tableSort.ts";
 
 const fullyCoveredLegacySnapshot = {
@@ -35,14 +36,51 @@ const fullyCoveredLegacySnapshot = {
 test("combined Hexite summary derives a compact known minimum from components", () => {
   const result = presentHexiteReserveSummary(fullyCoveredLegacySnapshot, Date.parse("2026-07-19T10:00:00.000Z"));
 
-  assert.equal(result.primary, "≥ 584.6K tower energy");
+  assert.equal(result.primary, "≈ 584.6K tower energy");
   assert.equal(result.secondary, "37.6K HE + 547 Capsules");
-  assert.equal(result.status, "Known inventories scanned · 4h ago");
+  assert.equal(result.status, "Known inventories included · 4h ago");
   assert.equal(result.sortValue, 584_561);
   assert.equal(result.tone, "muted");
   assert.match(result.details.join("\n"), /397 in Hexite Reserve buildings/);
   assert.match(result.details.join("\n"), /cost 100 HE to craft and provide 1,000 Watchtower energy/);
   assert.match(result.details.join("\n"), /Foundry.*unavailable/i);
+});
+
+test("live treasury-only Hexite projection stays useful without inventing inventory totals", () => {
+  const live = liveEmpireHexiteProjection({
+    treasury: "5000",
+    memberCount: 4,
+    claimCount: 1,
+    observedAt: "2026-07-19T09:59:30.000Z",
+  });
+  const result = presentHexiteReserveSummary(live, Date.parse("2026-07-19T10:00:00.000Z"));
+
+  assert.match(result.primary, /5\.0K/);
+  assert.match(result.secondary, /treasury/i);
+  assert.match(result.status, /inventory joins unavailable/i);
+  assert.equal(result.sortValue, "5000");
+  assert.equal(result.tone, "warn");
+  assert.match(result.details.join("\n"), /Treasury: 5,000 HE/);
+  assert.match(result.details.join("\n"), /Player wallets and storage: unavailable/);
+  assert.match(result.details.join("\n"), /Shared claim storage: unavailable/);
+  assert.match(result.details.join("\n"), /Ready Capsules: unavailable/);
+  assert.doesNotMatch(result.details.join("\n"), /Player wallets and storage: 0 HE/);
+  assert.doesNotMatch(`${result.primary} ${result.status}`, /â|Â/);
+});
+
+test("live treasury presentation keeps an exact large decimal in its detail and sorting", () => {
+  const exactTreasury = "90071992547409931234";
+  const result = presentHexiteReserveSummary(liveEmpireHexiteProjection({
+    treasury: exactTreasury,
+    memberCount: 1,
+    claimCount: 1,
+    observedAt: "2026-07-19T10:00:00.000Z",
+  }));
+
+  assert.equal(result.sortValue, exactTreasury);
+  assert.match(result.primary, /^≈ /);
+  assert.match(result.details.join("\n"), /90,071,992,547,409,931,234/);
+  assert.doesNotMatch(result.details.join("\n"), /90,071,992,547,409,940,000/);
 });
 
 test("combined Hexite summary distinguishes reused and missing inventory sources", () => {
@@ -53,13 +91,13 @@ test("combined Hexite summary distinguishes reused and missing inventory sources
 
   const missing = structuredClone(fullyCoveredLegacySnapshot);
   missing.coverage.claims = { fresh: 11, reused: 0, missing: 1, total: 12 };
-  assert.match(presentHexiteReserveSummary(missing).status, /Inventory scan incomplete/);
+  assert.match(presentHexiteReserveSummary(missing).status, /Inventory coverage incomplete/);
   assert.equal(presentHexiteReserveSummary(missing).tone, "warn");
 });
 
 test("combined Hexite summary keeps queued, scanning, and unavailable values out of numeric sorting", () => {
-  assert.equal(presentHexiteReserveSummary({ status: "pending", refreshing: false }).primary, "Queued");
-  assert.equal(presentHexiteReserveSummary({ status: "pending", refreshing: true }).primary, "Scanning");
+  assert.equal(presentHexiteReserveSummary({ status: "pending", refreshing: false }).primary, "Awaiting Relay");
+  assert.equal(presentHexiteReserveSummary({ status: "pending", refreshing: true }).primary, "Refreshing");
   assert.equal(presentHexiteReserveSummary({ status: "error" }).primary, "Unavailable");
   assert.equal(presentHexiteReserveSummary({ status: "error" }).sortValue, null);
 });
@@ -69,7 +107,7 @@ test("combined Hexite summary treats absent coverage as incomplete", () => {
   delete withoutCoverage.coverage;
 
   const result = presentHexiteReserveSummary(withoutCoverage);
-  assert.match(result.status, /Inventory scan incomplete/);
+  assert.match(result.status, /Inventory coverage incomplete/);
   assert.equal(result.tone, "warn");
   assert.match(result.details.join("\n"), /Player sources: coverage unavailable/);
   assert.match(result.details.join("\n"), /Claim sources: coverage unavailable/);
@@ -90,13 +128,13 @@ test("unavailable Hexite details retain Foundry exclusion and scan errors", () =
 test("Hexite metric presentations distinguish queued and scanning states from zero", () => {
   for (const metric of ["energy", "capsules", "watchtower"]) {
     assert.deepEqual(presentHexiteReserveMetric({ status: "pending", refreshing: false }, metric), {
-      primary: "Queued",
-      secondary: "Awaiting first sweep",
+      primary: "Awaiting Relay",
+      secondary: "Live Empire data is loading",
       detail: "Foundry Capsules unavailable",
       sortValue: null,
       tone: "muted",
     });
-    assert.equal(presentHexiteReserveMetric({ status: "pending", refreshing: true }, metric).primary, "Scanning");
+    assert.equal(presentHexiteReserveMetric({ status: "pending", refreshing: true }, metric).primary, "Refreshing");
     assert.equal(
       presentHexiteReserveMetric({ status: "error", estimatedEnergyEquivalent: null }, metric).primary,
       "Unavailable",
@@ -108,7 +146,7 @@ test("Hexite metric presentations distinguish queued and scanning states from ze
   }
 
   assert.doesNotMatch(describeHexiteReserves({ status: "pending" }), /0 HE/);
-  assert.match(describeHexiteReserves({ status: "pending" }), /not available until the scan completes/i);
+  assert.match(describeHexiteReserves({ status: "pending" }), /live Relay treasury amount is unavailable/i);
 });
 
 test("Hexite metric presentations separate stored energy, Capsules, and Watchtower value", () => {
@@ -147,7 +185,7 @@ test("Hexite metric presentations separate stored energy, Capsules, and Watchtow
   const watchtower = presentHexiteReserveMetric(calculated, "watchtower", now);
   assert.equal(watchtower.primary, "≈ 44,184 energy");
   assert.equal(watchtower.secondary, "43 capsules × 1,000");
-  assert.equal(watchtower.detail, "Partial · 75% scanned · 2h ago");
+  assert.equal(watchtower.detail, "Partial · 75% inventory coverage · 2h ago");
   assert.equal(watchtower.sortValue, 44_184);
   assert.equal(watchtower.tone, "warn");
   assert.deepEqual(presentHexiteReserves(calculated, now), watchtower);

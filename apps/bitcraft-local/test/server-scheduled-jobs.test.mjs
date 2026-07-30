@@ -244,11 +244,11 @@ test("server registers the YouTube channel monitor scheduled job", () => {
   assert.match(server, /interval@600/);
 });
 
-test("server registers the six-hour Empire Hexite reserves refresh", () => {
+test("Empire Hexite current data has no scheduled acquisition job", () => {
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
-  assert.match(server, /empire_hexite_reserves_refresh/);
-  assert.match(server, /schedule: "interval@21600"/);
-  assert.match(server, /requestsPerMinute: Math\.max\(1, Math\.min\([^\n]+150\)\)/);
+  assert.doesNotMatch(server, /empire_hexite_reserves_refresh/);
+  assert.doesNotMatch(server, /createEmpireHexiteRefreshJob/);
+  assert.doesNotMatch(server, /EMPIRE_HEXITE_REQUESTS_PER_MINUTE/);
 });
 
 test("scheduled ingestion no longer owns the planner catalog", () => {

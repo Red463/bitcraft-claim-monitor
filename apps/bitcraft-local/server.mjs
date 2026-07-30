@@ -138,7 +138,7 @@ import {
   recordedDiscordResponse,
   requireLiveDiscord,
 } from "./src/server/discordDeliveryMode.mjs";
-import { aggregateEmpireHexite, createEmpireHexiteRefreshJob, createEmpireHexiteRepository } from "./src/server/empireHexite.mjs";
+import { liveEmpireHexiteProjection } from "./src/server/empireHexite.mjs";
 import {
   createEmpireMembershipRepository,
   relayEmpireMembershipObservation,
@@ -664,14 +664,7 @@ const craftPlanProgressAudit = createCraftPlanProgressAuditRepository(db, {
 });
 let craftPlanProgressAuditWriteWarning = null;
 const gameCatalogRepository = createGameCatalogRepository(db);
-const empireHexiteRepository = createEmpireHexiteRepository(db);
 const empireMembershipRepository = createEmpireMembershipRepository(db);
-const runEmpireHexiteRefreshJob = createEmpireHexiteRefreshJob({
-  repository: empireHexiteRepository,
-  fetchJson: (pathname) => fetchBitjita(pathname, { cache: false }),
-  batchSize: Math.max(1, Math.min(Number(process.env.EMPIRE_HEXITE_BATCH_SIZE ?? 50), 100)),
-  requestsPerMinute: Math.max(1, Math.min(Number(process.env.EMPIRE_HEXITE_REQUESTS_PER_MINUTE ?? 150), 150)),
-});
 
 seedDefaultDiscordOwner({ db, statements, defaultOwnerDiscordId: defaultOwnerDiscordIdFromEnv(process.env), isTestRuntime });
 
@@ -816,13 +809,6 @@ const scheduledJobRegistry = {
     schedule: "interval@1800",
     enabled: true,
     run: queueMarketDealWatchEvaluation,
-  },
-  empire_hexite_reserves_refresh: {
-    label: "Empire Hexite reserves",
-    description: "Refreshes estimated empire Hexite Energy and ready Capsule holdings from BitJita wallets, player storage, and aligned-claim inventories.",
-    schedule: "interval@21600",
-    enabled: true,
-    run: runEmpireHexiteRefreshJob,
   },
   geoip_database_refresh: {
     label: "GeoIP database refresh",
@@ -5370,28 +5356,13 @@ function relayEmpireRegionalClaims(claimId, regionId) {
   return String(data?.regionId ?? "") === String(regionId) ? data : null;
 }
 
-function relayEmpireHexiteForView(empireId, empire) {
-  const activeSweep = empireHexiteRepository.activeSweep();
-  const snapshot = empireHexiteRepository.snapshotForEmpire(empireId);
-  if (snapshot) return { ...snapshot, refreshing: Boolean(activeSweep) };
-  const bootstrapFailure = activeSweep ? null : empireHexiteRepository.latestBootstrapFailure();
-  const fallback = aggregateEmpireHexite({
+function relayEmpireHexiteForView(_empireId, empire, observedAt) {
+  return liveEmpireHexiteProjection({
     treasury: empire?.empireCurrencyTreasury,
-    capsuleEnergyCost: activeSweep?.capsuleEnergyCost ?? null,
-    players: [],
-    claims: [],
-    sweepStartedAt: activeSweep?.startedAt ?? null,
-    calculatedAt: null,
-    refreshing: Boolean(activeSweep),
+    memberCount: empire?.memberCount,
+    claimCount: empire?.numClaims,
+    observedAt,
   });
-  return bootstrapFailure
-    ? {
-        ...fallback,
-        status: "error",
-        sweepStartedAt: bootstrapFailure.startedAt,
-        errors: [bootstrapFailure.lastError].filter(Boolean),
-      }
-    : fallback;
 }
 
 function relayEmpireViewOptions(claimId, regionId, extra = {}) {

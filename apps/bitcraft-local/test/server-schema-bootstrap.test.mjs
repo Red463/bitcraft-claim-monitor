@@ -23,11 +23,6 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE TABLE IF NOT EXISTS discord_youtube_channels",
     "discord_channel_id TEXT",
     "CREATE TABLE IF NOT EXISTS discord_youtube_videos",
-    "CREATE TABLE IF NOT EXISTS empire_hexite_sweeps",
-    "CREATE TABLE IF NOT EXISTS empire_hexite_sweep_empires",
-    "CREATE TABLE IF NOT EXISTS empire_hexite_targets",
-    "CREATE TABLE IF NOT EXISTS empire_hexite_sources",
-    "CREATE TABLE IF NOT EXISTS empire_hexite_snapshots",
     "CREATE TABLE IF NOT EXISTS empire_membership_tracking",
     "CREATE TABLE IF NOT EXISTS empire_membership_periods",
     "CREATE INDEX IF NOT EXISTS idx_market_events_claim_time",
@@ -52,6 +47,7 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_listings/);
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_buy_orders_current/);
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_regional_sale_averages_current/);
+  assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS empire_hexite_/);
 });
 
 test("applySchemaBootstrap executes the complete bootstrap SQL once", () => {

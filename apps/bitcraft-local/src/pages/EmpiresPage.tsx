@@ -456,7 +456,7 @@ export function Empires({
           {overview.data?.stale ? <AsyncState kind="stale" title="Showing last-good Empire data" detail={staleRelayDetail(overview.data)} compact /> : null}
           <section className="dashboard-card table-panel">
             <div className="panel-head"><strong><Landmark size={15} /> Regional empires</strong><span>{overview.loading ? "Refreshing..." : `${formatNumber(overviewRows.length)} shown`}</span></div>
-            <p className="hexite-reserve-note"><Zap size={14} /> Known minimum from treasury and inventories; completed Foundry output is unavailable.</p>
+            <p className="hexite-reserve-note"><Zap size={14} /> Live known minimum currently includes the Empire treasury; player and claim inventories plus completed Foundry output remain unavailable.</p>
             <DataTable rows={overviewRows} columns={overviewColumns} scrollLabel="Regional empires table" emptyState={<AsyncState kind="empty" title="No regional empires returned" detail="Try another active region." compact />} />
           </section>
         </>

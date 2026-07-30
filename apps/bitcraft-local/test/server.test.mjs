@@ -784,92 +784,21 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalEmpires.summary.empires, 1);
   assert.equal(regionalEmpires.empires[0].name, "Test Empire");
   assert.equal(regionalEmpires.empires[0].regionalClaims, 1);
-  assert.equal(regionalEmpires.empires[0].hexiteReserves.status, "pending");
-  assert.equal(regionalEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, null);
+  assert.equal(regionalEmpires.empires[0].hexiteReserves.status, "partial");
+  assert.equal(regionalEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, "5000");
+  assert.equal(regionalEmpires.empires[0].hexiteReserves.energy.total, "5000");
+  assert.equal(regionalEmpires.empires[0].hexiteReserves.energy.playerInventories, null);
+  assert.equal(regionalEmpires.empires[0].hexiteReserves.capsules.readyTotal, null);
   assert.equal(regionalEmpires.empires[0].hexiteReserves.capsuleWatchtowerEnergyValue, 1_000);
+  assert.equal(regionalEmpires.empires[0].hexiteReserves.coverage.players.missing, 4);
+  assert.equal(regionalEmpires.empires[0].hexiteReserves.coverage.claims.missing, 1);
   assert.equal(regionalEmpires.empires[0].hexiteReserves.coverage.foundry, "unavailable");
+  assert.equal(regionalEmpires.empires[0].hexiteReserves.refreshing, false);
+  assert.match(regionalEmpires.empires[0].hexiteReserves.errors.join("\n"), /inventory joins are not available/i);
   assert.equal(regionalEmpires.stale, false);
   assert.equal(regionalEmpires.partial, false);
   assert.equal(regionalEmpires.freshness, "live");
   assert.equal(regionalEmpires.serverFreshness.cacheState, "relay-live");
-  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (db) => {
-    db.prepare(`
-      INSERT INTO empire_hexite_sweeps (status, started_at, completed_at, last_error, updated_at)
-      VALUES ('error', ?, ?, ?, ?)
-    `).run("2026-07-18T09:00:00.000Z", "2026-07-18T09:01:00.000Z", "BitJita offline", "2026-07-18T09:01:00.000Z");
-  });
-  const bootstrapFailureEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
-  assert.equal(bootstrapFailureEmpires.empires[0].hexiteReserves.status, "error");
-  assert.equal(bootstrapFailureEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, null);
-  assert.deepEqual(bootstrapFailureEmpires.empires[0].hexiteReserves.errors, ["BitJita offline"]);
-  const calculatedHexitePayload = {
-    estimatedEnergyEquivalent: 8100,
-    capsuleEnergyCost: 100,
-    capsuleWatchtowerEnergyValue: 1_000,
-    energy: { treasury: 5000, playerInventories: 100, sharedClaimInventories: 0, total: 5100 },
-    capsules: { playerInventories: 1, sharedClaimInventories: 2, reserveBuildings: 2, foundry: null, readyTotal: 3 },
-    coverage: {
-      players: { fresh: 2, reused: 1, missing: 0, total: 3 },
-      claims: { fresh: 1, reused: 0, missing: 0, total: 1 },
-      foundry: "unavailable",
-    },
-    status: "partial",
-    sweepStartedAt: "2026-07-18T10:00:00.000Z",
-    calculatedAt: "2026-07-18T10:05:00.000Z",
-    refreshing: false,
-    errors: ["player-3 reused after HTTP 503"],
-  };
-  const calculatedSweepId = await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (db) => {
-    const inserted = db.prepare(`
-      INSERT INTO empire_hexite_sweeps (status, capsule_energy_cost, started_at, completed_at, updated_at)
-      VALUES ('complete', 100, ?, ?, ?)
-    `).run("2026-07-18T10:00:00.000Z", "2026-07-18T10:05:00.000Z", "2026-07-18T10:05:00.000Z");
-    db.prepare(`
-      INSERT INTO empire_hexite_snapshots (empire_id, sweep_id, payload_json, calculated_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run("10", inserted.lastInsertRowid, JSON.stringify(calculatedHexitePayload), "2026-07-18T10:05:00.000Z", "2026-07-18T10:05:00.000Z");
-    return Number(inserted.lastInsertRowid);
-  });
-  const calculatedRegionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
-  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.energy.total, 5100);
-  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.capsules.readyTotal, 3);
-  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.capsuleEnergyCost, 100);
-  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.capsuleWatchtowerEnergyValue, 1_000);
-  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, 8100);
-  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.status, "partial");
-  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.coverage.players.reused, 1);
-  assert.equal(calculatedRegionalEmpires.empires[0].hexiteReserves.refreshing, false);
-
-  const activeSweepId = await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (db) => Number(db.prepare(`
-    INSERT INTO empire_hexite_sweeps (status, capsule_energy_cost, started_at, updated_at)
-    VALUES ('running', 100, ?, ?)
-  `).run("2026-07-18T16:00:00.000Z", "2026-07-18T16:00:00.000Z").lastInsertRowid));
-  const refreshingRegionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
-  assert.equal(refreshingRegionalEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, 8100);
-  assert.equal(refreshingRegionalEmpires.empires[0].hexiteReserves.refreshing, true);
-
-  const unavailableHexitePayload = {
-    ...calculatedHexitePayload,
-    estimatedEnergyEquivalent: null,
-    status: "error",
-    calculatedAt: null,
-    errors: ["HTTP 503"],
-  };
-  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (db) => {
-    db.prepare("UPDATE empire_hexite_sweeps SET status = 'complete', completed_at = ?, updated_at = ? WHERE id = ?")
-      .run("2026-07-18T16:01:00.000Z", "2026-07-18T16:01:00.000Z", activeSweepId);
-    db.prepare(`
-      UPDATE empire_hexite_snapshots
-      SET sweep_id = ?, payload_json = ?, calculated_at = ?, updated_at = ?
-      WHERE empire_id = ?
-    `).run(activeSweepId, JSON.stringify(unavailableHexitePayload), "2026-07-18T16:01:00.000Z", "2026-07-18T16:01:00.000Z", "10");
-  });
-  const unavailableRegionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
-  assert.equal(unavailableRegionalEmpires.empires[0].hexiteReserves.status, "error");
-  assert.equal(unavailableRegionalEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, null);
-  assert.equal(unavailableRegionalEmpires.empires[0].hexiteReserves.refreshing, false);
-  assert.deepEqual(unavailableRegionalEmpires.empires[0].hexiteReserves.errors, ["HTTP 503"]);
-  assert.equal(calculatedSweepId > 0, true);
   failEmpireList = true;
   const unconfiguredRegionEmpires = await fetch(`${origin}/api/local/empires?regionId=99`);
   assert.equal(unconfiguredRegionEmpires.status, 403);

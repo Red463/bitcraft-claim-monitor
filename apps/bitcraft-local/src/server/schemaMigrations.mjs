@@ -121,8 +121,14 @@ export function applyLegacySchemaCleanup(db) {
     DROP TABLE IF EXISTS market_buy_orders_current;
     DROP TABLE IF EXISTS market_regional_sale_averages_current;
     DROP TABLE IF EXISTS global_market_price_snapshots;
+    DROP TABLE IF EXISTS empire_hexite_targets;
+    DROP TABLE IF EXISTS empire_hexite_snapshots;
+    DROP TABLE IF EXISTS empire_hexite_sweep_empires;
+    DROP TABLE IF EXISTS empire_hexite_sources;
+    DROP TABLE IF EXISTS empire_hexite_sweeps;
     DELETE FROM scheduled_jobs WHERE job_key = 'recipe_catalog_refresh';
     DELETE FROM scheduled_jobs WHERE job_key = 'global_market_insights';
+    DELETE FROM scheduled_jobs WHERE job_key = 'empire_hexite_reserves_refresh';
     DELETE FROM app_settings WHERE key = 'global_market_overview_json';
     DELETE FROM domain_payload_current WHERE domain = 'layout';
     DELETE FROM domain_payload_current

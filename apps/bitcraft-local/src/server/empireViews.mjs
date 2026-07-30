@@ -295,7 +295,7 @@ export function empireOverviewView(data, regionIdValue, options = {}) {
     .map(({ empire }) => ({
       ...empire,
       ...(options.hexiteForEmpire
-        ? { hexiteReserves: options.hexiteForEmpire(empire.entityId, empire) }
+        ? { hexiteReserves: options.hexiteForEmpire(empire.entityId, empire, metadata?.receivedAt ?? null) }
         : {}),
     }))
     .sort((left, right) => (
@@ -337,7 +337,7 @@ export function empireDetailsView(data, regionIdValue, empireIdValue, inactiveDa
     empire: {
       ...selected.empire,
       ...(options.hexiteForEmpire
-        ? { hexiteReserves: options.hexiteForEmpire(empireId, selected.empire) }
+        ? { hexiteReserves: options.hexiteForEmpire(empireId, selected.empire, metadata?.receivedAt ?? null) }
         : {}),
     },
     members: selected.members,

@@ -1,21 +1,28 @@
 import { formatCompactNumber } from "../../utils/format.ts";
 
 type Coverage = { fresh?: number; reused?: number; missing?: number; total?: number };
+type DecimalValue = number | string;
 
 type HexiteReserves = {
   status?: string;
   refreshing?: boolean;
-  estimatedEnergyEquivalent?: number | null;
+  estimatedEnergyEquivalent?: DecimalValue | null;
   calculatedAt?: string | null;
-  capsuleEnergyCost?: number | null;
-  capsuleWatchtowerEnergyValue?: number | null;
+  capsuleEnergyCost?: DecimalValue | null;
+  capsuleWatchtowerEnergyValue?: DecimalValue | null;
   energy?: {
-    treasury?: number;
-    playerInventories?: number;
-    sharedClaimInventories?: number;
-    total?: number;
+    treasury?: DecimalValue | null;
+    playerInventories?: DecimalValue | null;
+    sharedClaimInventories?: DecimalValue | null;
+    total?: DecimalValue | null;
   };
-  capsules?: { readyTotal?: number; reserveBuildings?: number };
+  capsules?: {
+    playerInventories?: DecimalValue | null;
+    sharedClaimInventories?: DecimalValue | null;
+    readyTotal?: DecimalValue | null;
+    reserveBuildings?: DecimalValue | null;
+    foundry?: DecimalValue | null;
+  };
   coverage?: { players?: Coverage; claims?: Coverage; foundry?: string };
   errors?: string[];
 };
@@ -26,7 +33,7 @@ export type HexiteReservePresentation = {
   primary: string;
   secondary: string;
   detail: string;
-  sortValue: number | null;
+  sortValue: DecimalValue | null;
   tone: "muted" | "warn" | "danger" | "good";
 };
 
@@ -34,7 +41,7 @@ export type HexiteReserveSummaryPresentation = {
   primary: string;
   secondary: string;
   status: string;
-  sortValue: number | null;
+  sortValue: DecimalValue | null;
   tone: "muted" | "warn" | "danger";
   details: string[];
 };
@@ -50,6 +57,12 @@ function optionalNumber(value: unknown): number | null {
   if (value == null) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function optionalDecimalValue(value: unknown): DecimalValue | null {
+  if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? value : null;
+  const text = String(value ?? "").trim();
+  return /^\d+$/.test(text) ? text : null;
 }
 
 function ageLabel(value: unknown, nowMs: number): string {
@@ -74,8 +87,8 @@ function coveragePercent(value: HexiteReserves): number {
 function unavailablePresentation(value: HexiteReserves | null | undefined): HexiteReservePresentation {
   if (!value || value.status === "pending") {
     return {
-      primary: value?.refreshing ? "Scanning" : "Queued",
-      secondary: value?.refreshing ? "First sweep in progress" : "Awaiting first sweep",
+      primary: value?.refreshing ? "Refreshing" : "Awaiting Relay",
+      secondary: "Live Empire data is loading",
       detail: "Foundry Capsules unavailable",
       sortValue: null,
       tone: "muted",
@@ -91,14 +104,29 @@ function unavailablePresentation(value: HexiteReserves | null | undefined): Hexi
   };
 }
 
-function metricValue(value: HexiteReserves, metric: HexiteReserveMetric): number | null {
-  if (metric === "energy") return optionalNumber(value.energy?.total);
-  if (metric === "capsules") return optionalNumber(value.capsules?.readyTotal);
-  return optionalNumber(value.estimatedEnergyEquivalent);
+function metricValue(value: HexiteReserves, metric: HexiteReserveMetric): DecimalValue | null {
+  if (metric === "energy") return optionalDecimalValue(value.energy?.total);
+  if (metric === "capsules") return optionalDecimalValue(value.capsules?.readyTotal);
+  return optionalDecimalValue(value.estimatedEnergyEquivalent);
 }
 
 function formatted(value: unknown): string {
+  const text = String(value ?? "").trim();
+  if (/^\d+$/.test(text)) return BigInt(text).toLocaleString();
   return number(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function formattedOptional(value: unknown, suffix = ""): string {
+  const parsed = optionalDecimalValue(value);
+  return parsed == null ? "unavailable" : `${formatted(parsed)}${suffix}`;
+}
+
+function watchtowerTotal(energy: DecimalValue, capsules: DecimalValue): DecimalValue {
+  const total = BigInt(String(energy)) + BigInt(String(capsules)) * BigInt(WATCHTOWER_ENERGY_PER_CAPSULE);
+  if (typeof energy === "number" && typeof capsules === "number" && total <= BigInt(Number.MAX_SAFE_INTEGER)) {
+    return Number(total);
+  }
+  return total.toString();
 }
 
 function normalizedCoverage(value: Coverage | null | undefined): Required<Coverage> | null {
@@ -127,8 +155,8 @@ export function presentHexiteReserveSummary(
 ): HexiteReserveSummaryPresentation {
   if (!value || value.status === "pending") {
     return {
-      primary: value?.refreshing ? "Scanning" : "Queued",
-      secondary: value?.refreshing ? "First sweep in progress" : "Awaiting first sweep",
+      primary: value?.refreshing ? "Refreshing" : "Awaiting Relay",
+      secondary: "Live Empire data is loading",
       status: "Foundry output unavailable",
       sortValue: null,
       tone: "muted",
@@ -136,15 +164,15 @@ export function presentHexiteReserveSummary(
     };
   }
 
-  const energy = optionalNumber(value.energy?.total);
-  const capsules = optionalNumber(value.capsules?.readyTotal);
-  if (value.status === "error" || energy == null || capsules == null) {
+  const energy = optionalDecimalValue(value.energy?.total);
+  const capsules = optionalDecimalValue(value.capsules?.readyTotal);
+  if (value.status === "error" || energy == null) {
     const details = [
-      "The Hexite breakdown is not available until the scan completes.",
+      "The live Relay treasury amount is unavailable.",
       "Completed Foundry Capsules are unavailable in the current Relay projection and are excluded.",
     ];
     if (Array.isArray(value.errors) && value.errors.length) {
-      details.push(`Scan errors: ${value.errors.slice(0, 3).join("; ")}`);
+      details.push(`Data limitations: ${value.errors.slice(0, 3).join("; ")}`);
     }
     return {
       primary: "Unavailable",
@@ -156,16 +184,40 @@ export function presentHexiteReserveSummary(
     };
   }
 
-  const knownTotal = energy + capsules * WATCHTOWER_ENERGY_PER_CAPSULE;
+  if (capsules == null) {
+    const details = [
+      `Known Watchtower energy: at least ${formatted(energy)} from the Empire treasury`,
+      `Treasury: ${formatted(value.energy?.treasury)} HE`,
+      `Player wallets and storage: ${formattedOptional(value.energy?.playerInventories, " HE")}`,
+      `Shared claim storage: ${formattedOptional(value.energy?.sharedClaimInventories, " HE")}`,
+      `Ready Capsules: ${formattedOptional(value.capsules?.readyTotal)}`,
+      coverageDetails("Player", value.coverage?.players),
+      coverageDetails("Claim", value.coverage?.claims),
+      "Completed Foundry Capsules are unavailable in the current Relay projection and are excluded.",
+    ];
+    if (Array.isArray(value.errors) && value.errors.length) {
+      details.push(`Data limitations: ${value.errors.slice(0, 3).join("; ")}`);
+    }
+    return {
+      primary: `≈ ${formatCompactNumber(energy)} HE known`,
+      secondary: "Empire treasury only",
+      status: `Inventory joins unavailable · ${ageLabel(value.calculatedAt, nowMs)}`,
+      sortValue: energy,
+      tone: "warn",
+      details,
+    };
+  }
+
+  const knownTotal = watchtowerTotal(energy, capsules);
   const groups = [normalizedCoverage(value.coverage?.players), normalizedCoverage(value.coverage?.claims)];
   const coverageUnavailable = groups.some((group) => group == null);
   const reused = groups.reduce((sum, group) => sum + number(group?.reused), 0);
   const missing = groups.reduce((sum, group) => sum + number(group?.missing), 0);
   const status = coverageUnavailable || missing > 0
-    ? `Inventory scan incomplete · ${ageLabel(value.calculatedAt, nowMs)}`
+    ? `Inventory coverage incomplete · ${ageLabel(value.calculatedAt, nowMs)}`
     : reused > 0
       ? `Some inventory data reused · ${ageLabel(value.calculatedAt, nowMs)}`
-      : `Known inventories scanned · ${ageLabel(value.calculatedAt, nowMs)}`;
+      : `Known inventories included · ${ageLabel(value.calculatedAt, nowMs)}`;
   const tone = coverageUnavailable || missing > 0 || reused > 0 ? "warn" : "muted";
   const cost = value.capsuleEnergyCost == null ? "unavailable" : formatted(value.capsuleEnergyCost);
   const details = [
@@ -181,11 +233,11 @@ export function presentHexiteReserveSummary(
     "Completed Foundry Capsules are unavailable in the current Relay projection and are excluded.",
   ];
   if (Array.isArray(value.errors) && value.errors.length) {
-    details.push(`Scan errors: ${value.errors.slice(0, 3).join("; ")}`);
+    details.push(`Data limitations: ${value.errors.slice(0, 3).join("; ")}`);
   }
 
   return {
-    primary: `≥ ${formatCompactNumber(knownTotal)} tower energy`,
+    primary: `≈ ${formatCompactNumber(knownTotal)} tower energy`,
     secondary: `${formatCompactNumber(energy)} HE + ${formatted(capsules)} Capsules`,
     status,
     sortValue: knownTotal,
@@ -208,16 +260,28 @@ export function presentHexiteReserveMetric(
   const reserveCapsules = number(value.capsules?.reserveBuildings);
   const watchtowerValue = number(value.capsuleWatchtowerEnergyValue);
   const status = value.status === "complete" ? "Complete" : "Partial";
-  const detail = `${status} · ${coveragePercent(value)}% scanned · ${ageLabel(value.calculatedAt, nowMs)}`;
+  const detail = `${status} · ${coveragePercent(value)}% inventory coverage · ${ageLabel(value.calculatedAt, nowMs)}`;
   const tone = value.status === "complete" ? "good" : "warn";
 
   if (metric === "energy") {
+    const treasuryOnly = optionalNumber(value.energy?.playerInventories) == null
+      && optionalNumber(value.energy?.sharedClaimInventories) == null;
     return {
       primary: `${formatted(metricTotal)} HE`,
-      secondary: "Loose energy stored",
-      detail,
+      secondary: treasuryOnly ? "Empire treasury only" : "Loose energy stored",
+      detail: treasuryOnly ? `Partial · inventory joins unavailable · ${ageLabel(value.calculatedAt, nowMs)}` : detail,
       sortValue: metricTotal,
       tone,
+    };
+  }
+
+  if (optionalNumber(value.capsules?.readyTotal) == null) {
+    return {
+      primary: `≥ ${formatted(metricTotal)} energy`,
+      secondary: "Empire treasury only",
+      detail: `Partial · inventory joins unavailable · ${ageLabel(value.calculatedAt, nowMs)}`,
+      sortValue: metricTotal,
+      tone: "warn",
     };
   }
 
@@ -253,37 +317,56 @@ export function describeHexiteReserveMetric(
 ): string {
   if (!value || metricValue(value, metric) == null) {
     return [
-      "The Hexite breakdown is not available until the scan completes.",
+      "The live Relay treasury amount is unavailable.",
       "Completed Foundry Capsules are unavailable in the current Relay projection and are excluded.",
     ].join("\n");
   }
 
   let lines: string[];
   if (metric === "energy") {
-    lines = [
-      `${formatted(value.energy?.total)} HE stored across treasury, member, and aligned-claim sources.`,
-      `Treasury: ${formatted(value.energy?.treasury)} HE`,
-      `Player wallets and storage: ${formatted(value.energy?.playerInventories)} HE`,
-      `Shared claim storage: ${formatted(value.energy?.sharedClaimInventories)} HE`,
-    ];
+    const inventoryUnavailable = optionalNumber(value.energy?.playerInventories) == null
+      && optionalNumber(value.energy?.sharedClaimInventories) == null;
+    lines = inventoryUnavailable
+      ? [
+          `${formatted(value.energy?.total)} HE currently proven from the Empire treasury.`,
+          `Treasury: ${formatted(value.energy?.treasury)} HE`,
+          "Player wallets and storage: unavailable",
+          "Shared claim storage: unavailable",
+        ]
+      : [
+          `${formatted(value.energy?.total)} HE stored across treasury, member, and aligned-claim sources.`,
+          `Treasury: ${formatted(value.energy?.treasury)} HE`,
+          `Player wallets and storage: ${formatted(value.energy?.playerInventories)} HE`,
+          `Shared claim storage: ${formatted(value.energy?.sharedClaimInventories)} HE`,
+        ];
   } else if (metric === "capsules") {
     lines = [
       `${formatted(value.capsules?.readyTotal)} ready Capsules; ${formatted(value.capsules?.reserveBuildings)} in Hexite Reserves.`,
       "Hexite Reserve Capsules are included in the ready total, not added again.",
     ];
   } else {
-    lines = [
-      `Watchtower Energy: approximately ${formatted(value.estimatedEnergyEquivalent)} energy`,
-      `Loose stored Hexite Energy: ${formatted(value.energy?.total)} HE`,
-      `Ready Capsules: ${formatted(value.capsules?.readyTotal)} (${formatted(value.capsules?.reserveBuildings)} in Hexite Reserves)`,
-      `Capsules cost ${value.capsuleEnergyCost == null ? "an unavailable amount of" : `${formatted(value.capsuleEnergyCost)}`} HE to craft and provide ${value.capsuleWatchtowerEnergyValue == null ? "an unavailable amount of" : formatted(value.capsuleWatchtowerEnergyValue)} Watchtower energy when deployed.`,
-      `Player sources: ${formatted(value.coverage?.players?.fresh)} fresh, ${formatted(value.coverage?.players?.reused)} reused, ${formatted(value.coverage?.players?.missing)} missing`,
-      `Claim sources: ${formatted(value.coverage?.claims?.fresh)} fresh, ${formatted(value.coverage?.claims?.reused)} reused, ${formatted(value.coverage?.claims?.missing)} missing`,
-    ];
+    lines = optionalNumber(value.capsules?.readyTotal) == null
+      ? [
+          `Watchtower Energy: at least ${formatted(value.estimatedEnergyEquivalent)} from the Empire treasury`,
+          `Treasury: ${formatted(value.energy?.treasury)} HE`,
+          "Player wallets and storage: unavailable",
+          "Shared claim storage: unavailable",
+          "Ready Capsules: unavailable",
+          `Player sources: ${formatted(value.coverage?.players?.fresh)} fresh, ${formatted(value.coverage?.players?.reused)} reused, ${formatted(value.coverage?.players?.missing)} missing`,
+          `Claim sources: ${formatted(value.coverage?.claims?.fresh)} fresh, ${formatted(value.coverage?.claims?.reused)} reused, ${formatted(value.coverage?.claims?.missing)} missing`,
+        ]
+      : [
+          `Watchtower Energy: approximately ${formatted(value.estimatedEnergyEquivalent)} energy`,
+          `Loose stored Hexite Energy: ${formatted(value.energy?.total)} HE`,
+          `Ready Capsules: ${formatted(value.capsules?.readyTotal)} (${formatted(value.capsules?.reserveBuildings)} in Hexite Reserves)`,
+          `Capsules cost ${value.capsuleEnergyCost == null ? "an unavailable amount of" : `${formatted(value.capsuleEnergyCost)}`} HE to craft and provide ${value.capsuleWatchtowerEnergyValue == null ? "an unavailable amount of" : formatted(value.capsuleWatchtowerEnergyValue)} Watchtower energy when deployed.`,
+          `Player sources: ${formatted(value.coverage?.players?.fresh)} fresh, ${formatted(value.coverage?.players?.reused)} reused, ${formatted(value.coverage?.players?.missing)} missing`,
+          `Claim sources: ${formatted(value.coverage?.claims?.fresh)} fresh, ${formatted(value.coverage?.claims?.reused)} reused, ${formatted(value.coverage?.claims?.missing)} missing`,
+        ];
   }
 
   lines.push("Completed Foundry Capsules are unavailable in the current Relay projection and are excluded.");
-  if (Array.isArray(value.errors) && value.errors.length) lines.push(`Scan errors: ${value.errors.slice(0, 3).join("; ")}`);
+  if (Array.isArray(value.errors) && value.errors.length) lines.push(`Data limitations: ${value.errors.slice(0, 3).join("; ")}`);
   return lines.join("\n");
 }
 
