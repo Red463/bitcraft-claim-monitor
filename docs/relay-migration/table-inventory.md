@@ -29,7 +29,7 @@ Disposition values:
 | `market_listings` | retire | None | Removed from bootstrap and existing clone databases. Current Local Market, Dashboard, and leaderboard listing state is projected directly from the latest complete generic `market` generation. Listing transitions are derived from consecutive Relay generations and appended independently to history; they do not justify a duplicate current-state table. |
 | `market_buy_orders_current`, `market_regional_sale_averages_current` | retire | None | Removed from bootstrap and existing clone databases. Configured regional sessions merge exact buy-order generations into the generic `regional-market` last-good domain, and the local view filters, sorts, pages, and enriches that committed generation without a second SQL mirror. Regional sale averages are not retained because Relay has not yet proved an authoritative sold-versus-cancelled signal; the app returns no premium opportunity instead of persisting an invented baseline. |
 | `market_events`, `market_trades` | keep-history | Normalized listing/trade transitions | Required for locally observed charts, sold-versus-removed evidence, deduplication, and notification history. They are not current order-book storage. |
-| `global_market_price_snapshots` | review | Legacy scheduled BitJita global-insight job | Market Browse no longer reads this table. Retain it only if the remaining Overview/history vertical can give it truthful locally observed semantics and an event-driven writer; otherwise retire it with the BitJita global-insight job. |
+| `global_market_price_snapshots` | retire | None | Removed with the legacy `global_market_insights` scheduled job and cached overview setting. Market Browse, Overview, and Deals compose current orders directly from the committed `regional-market` generation plus the live catalog. Future truthful price history belongs in durable observed trade/event history after an authoritative close signal is proven, not in a scheduled current-price mirror. |
 | `activity_events` | keep-history | Normalized domain transitions; Relay storage-log events arrive from the 15-second live loop and deduplicate by region plus upstream log ID | Required for the Activity page and notification/audit history. Relay storage logs expire upstream, so this is durable history rather than a current-data cache. |
 | `production_jobs`, `production_contributions` | keep-history | Craft lifecycle and proven contribution events | Required for lifecycle notifications and locally observed contribution history. Current craft state stays in normalized domains. |
 | `empire_hexite_sweeps`, `empire_hexite_sweep_empires`, `empire_hexite_sources` | review | Legacy multi-region sweep orchestration | Replace scheduled current-state acquisition with the adaptive region-session pool. Retain only rows that prove durable diagnostic or reconciliation value. |
@@ -133,6 +133,17 @@ be a committed domain event, not a scheduled ingestion sweep.
   limit is applied. `/api/local/market/price-history` returns an
   explicit unavailable coverage state until an authoritative Relay trade
   signal is proven; disappearing orders are not labelled as completed sales.
+- `/api/local/market/overview` and `/api/local/market/deals` derive current
+  liquidity, active-order hubs, open-order activity, and arbitrage directly
+  from the same committed generation. Their browser views invalidate on
+  `regional-market` and `catalogs` generation commits and preserve exact
+  decimal strings through sorting and display. Deal-region selection is
+  enforced before the bounded server projection, stale last-good responses
+  retain their age/cause, and summary potential reports the best individual
+  route rather than adding overlapping order capacity.
+- Movers, completed volume, trade activity, and distance/map actions remain
+  explicitly unavailable until authoritative trade and bounded location joins
+  are proven. Current order state is not relabelled as historical activity.
 - The provider-neutral generation event stream invalidates an open Market
   Browse view immediately after commit, with a 750-millisecond local poll only
   as its fallback. Live order reads and optional history reads are independent,
@@ -153,6 +164,10 @@ be a committed domain event, not a scheduled ingestion sweep.
 - `market_buy_orders_current` and `market_regional_sale_averages_current` have
   been removed from bootstrap, migrations, collectors, runtime reads/writes,
   and integration fixtures.
+- `global_market_price_snapshots`, the `global_market_insights` scheduler key,
+  and `global_market_overview_json` cache setting have been removed from fresh
+  schema/runtime ownership and are deleted idempotently from existing clone
+  databases.
 - Opportunity scoring remains empty until an authoritative same-region sale
   signal is proven. Locally observed but region-ambiguous trades are not used
   to label a removed order as sold.

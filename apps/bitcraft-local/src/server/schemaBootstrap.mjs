@@ -47,19 +47,6 @@ export const schemaBootstrapSql = `
     imported_at TEXT NOT NULL,
     raw_json TEXT NOT NULL
   );
-  CREATE TABLE IF NOT EXISTS global_market_price_snapshots (
-    captured_at TEXT NOT NULL,
-    item_type TEXT NOT NULL,
-    item_id INTEGER NOT NULL,
-    item_name TEXT NOT NULL,
-    icon_asset_name TEXT,
-    vwap24h REAL,
-    vwap7d REAL,
-    volume24h REAL NOT NULL DEFAULT 0,
-    lowest_sell_price REAL,
-    highest_buy_price REAL,
-    PRIMARY KEY (captured_at, item_type, item_id)
-  );
   CREATE TABLE IF NOT EXISTS activity_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     claim_id TEXT NOT NULL,
@@ -804,8 +791,6 @@ export const schemaBootstrapSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_market_events_claim_time ON market_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_trades_claim_time ON market_trades (claim_id, occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_global_market_price_item_time ON global_market_price_snapshots (item_type, item_id, captured_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_global_market_price_time ON global_market_price_snapshots (captured_at DESC);
   CREATE INDEX IF NOT EXISTS idx_craft_plan_settings_updated ON craft_plan_settings (updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_craft_plan_progress_snapshots_claim_time
     ON craft_plan_progress_audit_snapshots (claim_id, captured_at DESC);

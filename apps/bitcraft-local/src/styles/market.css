@@ -713,6 +713,7 @@
 }
 
 .market-ranking-list > button,
+.market-ranking-entry,
 .market-activity-list > button {
   min-width: 0;
   border-top: 1px solid rgba(108, 123, 145, .14);
@@ -725,6 +726,7 @@
 }
 
 .market-ranking-list > button:first-child,
+.market-ranking-entry:first-child,
 .market-activity-list > button:first-child {
   border-top: 0;
 }
@@ -735,13 +737,15 @@
 }
 
 .market-ranking-list > button > span,
+.market-ranking-entry > span,
 .market-activity-list > button > span,
 .market-activity-list > button > small {
   color: #93a0b1;
   font-size: 11px;
 }
 
-.market-ranking-list > button > span:first-child {
+.market-ranking-list > button > span:first-child,
+.market-ranking-entry > span:first-child {
   display: grid;
 }
 

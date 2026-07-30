@@ -29,6 +29,8 @@ import {
   combinedMarketStatus,
   regionalBuyOrdersView,
   regionalMarketCatalogView,
+  regionalMarketDealsView,
+  regionalMarketOverviewView,
   regionalMarketOrderBookView,
   regionalMarketStatus,
 } from "./src/server/regionalMarketViews.mjs";
@@ -70,7 +72,6 @@ import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editD
 import { buildWorkstationPresets, normalizeCatalogWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
 import { playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedRelayCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
-import { buildMarketOverview, collectMarketSnapshots, snapshotRetentionCutoff } from "./src/server/globalMarketInsights.mjs";
 import {
   MANUAL_REFRESH_HEADER,
   createManualRefreshGuard,
@@ -660,13 +661,6 @@ async function runPrivacyRetentionJob() {
 // background task. Jobs should report progress in metadata when they can run for
 // longer than a normal request.
 const scheduledJobRegistry = {
-  global_market_insights: {
-    label: "Global market insights",
-    description: "Refreshes all-region market snapshots and overview modules from live BitJita data.",
-    schedule: "interval@1800",
-    enabled: true,
-    run: runGlobalMarketInsightsJob,
-  },
   youtube_channel_monitor: {
     label: "YouTube channel monitor",
     description: "Checks monitored YouTube channels for new videos and posts announcements to Discord.",
@@ -1141,16 +1135,8 @@ function migrateMarketAccessSplit() {
   statements.upsertSetting.run(markerKey, now, now);
 }
 
-function scheduleInitialGlobalMarketInsights() {
-  if (statements.getSetting.get("global_market_overview_json")?.value) return;
-  const now = new Date().toISOString();
-  db.prepare("UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE job_key = ? AND last_success_at IS NULL")
-    .run(now, now, "global_market_insights");
-}
-
 migrateRetiredBuyOrderCollector();
 migrateMarketAccessSplit();
-scheduleInitialGlobalMarketInsights();
 
 function marketDealWatchSettings() {
   return normalizeMarketDealWatchSettings(safeJson(statements.getSetting.get("market_deal_watch_json")?.value, {}));
@@ -5188,279 +5174,6 @@ async function fetchBitjitaUncoordinated(pathname, options = {}) {
   } catch {
     throw new Error(`${pathname}: BitJita returned invalid JSON`);
   }
-}
-
-async function postBitjita(pathname, body, options = {}) {
-  const timeoutMs = Math.max(0, toNumber(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS));
-  const key = `post:${timeoutMs}:${pathname}:${JSON.stringify(body)}`;
-  const request = async () => {
-    const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api${pathname}`);
-    bitjitaTelemetry.requests += 1;
-    try {
-      const fetchOptions = {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "content-type": "application/json",
-          "x-app-identifier": appIdentifier,
-        },
-        body: JSON.stringify(body),
-      };
-      if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
-      const response = await fetch(url, fetchOptions);
-      if (!response.ok) {
-        const error = new Error(`${pathname}: HTTP ${response.status}`);
-        error.statusCode = response.status;
-        error.retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
-        throw error;
-      }
-      return response.json();
-    } catch (error) {
-      bitjitaTelemetry.failures += 1;
-      bitjitaTelemetry.lastFailureAt = new Date().toISOString();
-      if (Number(error?.statusCode) === 429) bitjitaTelemetry.rateLimits += 1;
-      if (timeoutMs > 0 && error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
-        bitjitaTelemetry.timeouts += 1;
-        throw new Error(`${pathname}: timed out after ${Math.round(timeoutMs / 1000)}s`);
-      }
-      throw error;
-    }
-  };
-  return workerRequestCoordinator ? workerRequestCoordinator.run(key, request) : request();
-}
-
-function globalMarketCatalog(payload) {
-  const rows = Array.isArray(payload?.data?.items) ? payload.data.items : [];
-  const catalog = new Map();
-  for (const row of rows) {
-    const itemId = Number(row?.itemId ?? row?.id);
-    if (!Number.isFinite(itemId) || itemId < 1) continue;
-    const itemType = row?.itemType === 1 || row?.itemType === "1" || row?.itemType === "cargo" ? "cargo" : "item";
-    catalog.set(`${itemType}:${itemId}`, {
-      itemType,
-      itemId,
-      name: String(row?.name ?? row?.itemName ?? `Unknown ${itemType}`),
-      iconAssetName: row?.iconAssetName ?? row?.itemIconAssetName ?? null,
-    });
-  }
-  return catalog;
-}
-
-function globalMarketRows(payload, keys) {
-  for (const key of keys) {
-    const rows = payload?.[key] ?? payload?.data?.[key];
-    if (Array.isArray(rows)) return rows;
-  }
-  return [];
-}
-
-async function globalMarketRecentActivity(mostTraded, regionId = "") {
-  const activity = [];
-  for (const row of mostTraded.slice(0, 8)) {
-    const itemId = Number(row?.itemId ?? row?.item_id ?? row?.id);
-    if (!Number.isFinite(itemId) || itemId < 1) continue;
-    const itemType = row?.itemType === 1 || row?.itemType === "1" || row?.itemType === "cargo" ? "cargo" : "item";
-    const historyType = itemType === "cargo" ? "cargo" : "items";
-    try {
-      const regionParam = regionId ? `&regionId=${encodeURIComponent(regionId)}` : "";
-      const history = await fetchBitjita(`/market/${historyType}/${itemId}/price-history?bucket=1%20hour&limit=2${regionParam}`, { cache: false });
-      const trades = globalMarketRows(history, ["recentTrades", "trades"]);
-      for (const trade of trades.slice(0, 4)) {
-        activity.push({
-          ...trade,
-          itemType,
-          itemId,
-          itemName: trade?.itemName ?? row?.itemName ?? row?.name ?? `Unknown ${itemType}`,
-          iconAssetName: trade?.iconAssetName ?? row?.iconAssetName ?? row?.itemIconAssetName ?? null,
-          regionId: regionId || (trade?.regionId ?? trade?.region_id ?? null),
-        });
-      }
-    } catch (error) {
-      console.warn(`Global market activity history unavailable for ${itemType}:${itemId}: ${errorMessage(error)}`);
-    }
-  }
-  return activity
-    .sort((left, right) => String(right?.createdAt ?? right?.timestamp ?? "").localeCompare(String(left?.createdAt ?? left?.timestamp ?? "")))
-    .slice(0, 50);
-}
-
-async function globalMarketHubLocations(hubs) {
-  const enriched = [];
-  for (const hub of hubs.slice(0, 20)) {
-    const claimId = String(hub?.claimId ?? hub?.claimEntityId ?? "");
-    if (!claimId) {
-      enriched.push(hub);
-      continue;
-    }
-    try {
-      const payload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}`, { cache: true });
-      const claim = payload?.claim ?? payload ?? {};
-      enriched.push({
-        ...hub,
-        locationX: claim?.locationX ?? claim?.location?.x ?? null,
-        locationZ: claim?.locationZ ?? claim?.location?.z ?? null,
-      });
-    } catch {
-      enriched.push(hub);
-    }
-  }
-  return enriched;
-}
-
-async function runGlobalMarketInsightsJob() {
-  const capturedAt = new Date().toISOString();
-  const catalogPayload = await fetchBitjita("/market?hasOrders=true", { cache: false });
-  const catalog = globalMarketCatalog(catalogPayload);
-  if (!catalog.size) throw new Error("BitJita returned no active global market items");
-
-  const { snapshots, failures: bulkFailures } = await collectMarketSnapshots({
-    keys: [...catalog.values()],
-    capturedAt,
-    catalog,
-    fetchBatch: (batch) => postBitjita("/market/prices/bulk", batch, { timeoutMs: 20000 }),
-  });
-  for (const failure of bulkFailures) console.warn(`Global market bulk-price batch skipped: ${failure}`);
-  if (!snapshots.length) throw new Error("BitJita returned no global market price summaries");
-
-  const previousOverview = safeJson(statements.getSetting.get("global_market_overview_json")?.value, {});
-  const staleModules = bulkFailures.length ? ["bulkPrices"] : [];
-  let topDeals = Array.isArray(previousOverview?.topDeals) ? previousOverview.topDeals : [];
-  let mostTraded = Array.isArray(previousOverview?.mostTraded) ? previousOverview.mostTraded : [];
-  let hubs = Array.isArray(previousOverview?.hubs) ? previousOverview.hubs : [];
-  let recentActivity = Array.isArray(previousOverview?.recentActivity) ? previousOverview.recentActivity : [];
-  try {
-    const dealsPayload = await fetchBitjita("/market/deals", { cache: false });
-    topDeals = globalMarketRows(dealsPayload, ["arbitrage", "deals"]);
-  } catch (error) {
-    staleModules.push("topDeals");
-    console.warn(`Global market deals aggregate retained from cache: ${errorMessage(error)}`);
-  }
-  try {
-    const tradeVolumePayload = await fetchBitjita("/stats/trade-volume?bucket=1%20day&limit=7", { cache: false });
-    mostTraded = globalMarketRows(tradeVolumePayload, ["items", "mostTraded"]);
-  } catch (error) {
-    staleModules.push("mostTraded");
-    console.warn(`Global market trade-volume aggregate retained from cache: ${errorMessage(error)}`);
-  }
-  try {
-    const hubsPayload = await fetchBitjita("/market/hubs", { cache: false });
-    hubs = await globalMarketHubLocations(globalMarketRows(hubsPayload, ["hubs", "markets"]));
-  } catch (error) {
-    staleModules.push("hubs");
-    console.warn(`Global market hubs aggregate retained from cache: ${errorMessage(error)}`);
-  }
-  try {
-    recentActivity = await globalMarketRecentActivity(mostTraded);
-  } catch (error) {
-    staleModules.push("recentActivity");
-    console.warn(`Global market recent activity retained from cache: ${errorMessage(error)}`);
-  }
-
-  const insertSnapshot = db.prepare(`
-    INSERT OR REPLACE INTO global_market_price_snapshots (
-      captured_at, item_type, item_id, item_name, icon_asset_name,
-      vwap24h, vwap7d, volume24h, lowest_sell_price, highest_buy_price
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const cutoff = snapshotRetentionCutoff(capturedAt);
-  db.exec("BEGIN");
-  try {
-    for (const row of snapshots) {
-      insertSnapshot.run(
-        row.capturedAt,
-        row.itemType,
-        row.itemId,
-        row.itemName,
-        row.iconAssetName,
-        row.vwap24h,
-        row.vwap7d,
-        row.volume24h,
-        row.lowestSellPrice,
-        row.highestBuyPrice,
-      );
-    }
-    db.prepare(`
-      DELETE FROM global_market_price_snapshots
-      WHERE rowid IN (
-        SELECT rowid FROM global_market_price_snapshots
-        WHERE captured_at < ?
-        ORDER BY captured_at ASC
-        LIMIT 5000
-      )
-    `).run(cutoff);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-
-  const overviewGeneratedAt = staleModules.length ? (previousOverview?.generatedAt ?? capturedAt) : capturedAt;
-  statements.upsertSetting.run("global_market_overview_json", JSON.stringify({
-    generatedAt: overviewGeneratedAt,
-    staleModules,
-    topDeals,
-    mostTraded,
-    hubs,
-    recentActivity,
-  }), capturedAt);
-  return {
-    generatedAt: overviewGeneratedAt,
-    staleModules,
-    catalogItems: catalog.size,
-    snapshotRows: snapshots.length,
-    deals: topDeals.length,
-    mostTraded: mostTraded.length,
-    hubs: hubs.length,
-    recentActivity: recentActivity.length,
-  };
-}
-
-async function globalMarketOverview(regionId = "") {
-  const cache = safeJson(statements.getSetting.get("global_market_overview_json")?.value, {});
-  const generatedAt = String(cache?.generatedAt ?? "");
-  const latestCapture = db.prepare("SELECT MAX(captured_at) AS captured_at FROM global_market_price_snapshots").get()?.captured_at ?? null;
-  const currentRows = latestCapture
-    ? db.prepare(`
-        SELECT captured_at AS capturedAt, item_type AS itemType, item_id AS itemId, item_name AS itemName,
-          icon_asset_name AS iconAssetName, vwap24h, vwap7d, volume24h,
-          lowest_sell_price AS lowestSellPrice, highest_buy_price AS highestBuyPrice
-        FROM global_market_price_snapshots
-        WHERE captured_at = ?
-      `).all(latestCapture)
-    : [];
-  const priorTarget = latestCapture ? new Date(Date.parse(latestCapture) - 24 * 60 * 60 * 1000).toISOString() : null;
-  const priorCapture = priorTarget
-    ? db.prepare("SELECT MAX(captured_at) AS captured_at FROM global_market_price_snapshots WHERE captured_at <= ?").get(priorTarget)?.captured_at ?? null
-    : null;
-  const priorRows = priorCapture
-    ? db.prepare(`
-        SELECT item_type AS itemType, item_id AS itemId, vwap24h
-        FROM global_market_price_snapshots
-        WHERE captured_at = ?
-      `).all(priorCapture)
-    : [];
-  let mostTraded = Array.isArray(cache?.mostTraded) ? cache.mostTraded : [];
-  let recentActivity = Array.isArray(cache?.recentActivity) ? cache.recentActivity : [];
-  if (regionId) {
-    try {
-      const regionalTradeVolume = await fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=7&regionId=${encodeURIComponent(regionId)}`, { cache: true });
-      mostTraded = globalMarketRows(regionalTradeVolume, ["items", "mostTraded"]).map((row) => ({ ...row, regionId }));
-      recentActivity = await globalMarketRecentActivity(mostTraded, regionId);
-    } catch (error) {
-      console.warn(`Regional global-market overview data unavailable for R${regionId}: ${errorMessage(error)}`);
-    }
-  }
-  return buildMarketOverview({
-    generatedAt: generatedAt || latestCapture,
-    regionId,
-    currentRows,
-    priorRows,
-    topDeals: Array.isArray(cache?.topDeals) ? cache.topDeals : [],
-    mostTraded,
-    hubs: Array.isArray(cache?.hubs) ? cache.hubs : [],
-    recentActivity,
-    staleModules: Array.isArray(cache?.staleModules) ? cache.staleModules : [],
-  });
 }
 
 async function fetchAllClaimListings(claimId, options = {}) {
@@ -10340,13 +10053,60 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/overview") {
       if (!rateLimit(req, res, "global-market-overview", RATE_LIMITS.expensiveLocal)) return;
-      const regionId = String(url.searchParams.get("regionId") ?? "").trim();
-      if (regionId && !/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id must be numeric" });
-      const overview = await globalMarketOverview(regionId);
-      if (!overview.generatedAt && processRole === "worker") {
-        void runGlobalMarketInsightsJob().catch((error) => console.warn(`Initial global market insight refresh failed: ${errorMessage(error)}`));
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
       }
-      return send(res, 200, overview);
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      return send(res, 200, {
+        ...regionalMarketOverviewView(current?.data, {
+          regionId,
+          allowedRegionIds,
+          getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+        }),
+        ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      });
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/deals") {
+      if (!rateLimit(req, res, "global-market-deals", RATE_LIMITS.expensiveLocal)) return;
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      const requestedRegionIds = [...new Set(
+        String(url.searchParams.get("regions") ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+      )];
+      if (requestedRegionIds.some((regionId) => !/^\d+$/.test(regionId))) {
+        return send(res, 400, { error: "Region ids must be comma-separated decimal integers" });
+      }
+      if (requestedRegionIds.some((regionId) => !allowedRegionIds.includes(regionId))) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const scopedRegionIds = requestedRegionIds.length ? requestedRegionIds : allowedRegionIds;
+      return send(res, 200, {
+        ...regionalMarketDealsView(current?.data, {
+          regionId: "all",
+          allowedRegionIds: scopedRegionIds,
+          getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+          limit: 500,
+        }),
+        ...regionalMarketResponseStatus(current, "all", scopedRegionIds),
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      });
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       const refresh = manualRefreshAccess(req, res);

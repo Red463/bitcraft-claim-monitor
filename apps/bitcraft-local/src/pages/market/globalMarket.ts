@@ -138,6 +138,14 @@ export function filterMarketDeals<T extends AnyRecord>(deals: T[], regionIds: st
   return deals.filter((deal) => selected.has(String(deal.buyRegionId ?? deal.buy_region_id ?? "")) && selected.has(String(deal.sellRegionId ?? deal.sell_region_id ?? "")));
 }
 
+export function bestMarketDealPotential(deals: AnyRecord[]): string {
+  return deals.reduce((best, deal) => {
+    const normalized = decimalInteger(deal.totalPotential);
+    const value = BigInt(normalized);
+    return value > best ? value : best;
+  }, 0n).toString();
+}
+
 function normalizeTradeItem(raw: AnyRecord, itemType: MarketItemType) {
   return {
     itemType,

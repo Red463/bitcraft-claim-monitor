@@ -40,31 +40,31 @@ test("global market money and locations use the shared legible presentation", ()
 
   assert.match(overview, /formatGoldAmount\(deal\.buyPrice\)/);
   assert.match(overview, /className="market-price-location"/);
-  assert.match(deals, /formatGoldAmount\(totalPotential\)/);
+  assert.match(deals, /formatGoldAmount\(bestRoutePotential\)/);
   assert.match(deals, /className="market-price-location"/);
   assert.match(browse, /formatGoldAmount\(multiplyDecimal\(order\.unitPrice, order\.quantity\)\)/);
   assert.doesNotMatch(overview, /formatCompactNumber\(row\.totalValue\)\}g/);
-  assert.doesNotMatch(deals, /formatCompactNumber\(totalPotential\)\}g/);
+  assert.doesNotMatch(deals, /formatCompactNumber\(bestRoutePotential\)\}g/);
 });
 
-test("Overview top deals uses explicit sortable values and a static Map column", () => {
+test("Overview top deals uses exact sortable values and omits unproven map data", () => {
   const overview = source("../src/pages/market/MarketOverview.tsx");
 
   assert.match(overview, /<DataTable[\s\S]*scrollLabel="Top global market deals"/);
   assert.match(overview, /\["Item",[\s\S]*deal\.itemName/);
-  assert.match(overview, /\["Buy at",[\s\S]*toNumber\(deal\.buyPrice\)/);
-  assert.match(overview, /\["Profit",[\s\S]*toNumber\(deal\.profit \?\? deal\.profitPerUnit\)/);
-  assert.match(overview, /\["Map",[\s\S]*undefined,\s*false\]/);
+  assert.match(overview, /\["Buy at",[\s\S]*\(deal\) => deal\.buyPrice/);
+  assert.match(overview, /\["Profit",[\s\S]*\(deal\) => deal\.profit/);
+  assert.doesNotMatch(overview, /\["Map"/);
 });
 
-test("Deals sorts every data column from raw values and keeps Map static", () => {
+test("Deals sorts exact current-order values and omits unproven map data", () => {
   const deals = source("../src/pages/market/MarketDeals.tsx");
 
   assert.match(deals, /<DataTable[\s\S]*rows=\{rows\}[\s\S]*rowLimit=\{250\}/);
-  assert.match(deals, /\["Available",[\s\S]*toNumber\(deal\.buyQuantity\)/);
-  assert.match(deals, /\["Wanted",[\s\S]*toNumber\(deal\.sellQuantity\)/);
-  assert.match(deals, /\["Gain",[\s\S]*percent/);
-  assert.match(deals, /\["Map",[\s\S]*undefined,\s*false\]/);
+  assert.match(deals, /\["Available",[\s\S]*\(deal\) => deal\.buyQuantity/);
+  assert.match(deals, /\["Wanted",[\s\S]*\(deal\) => deal\.sellQuantity/);
+  assert.match(deals, /\["Gain",[\s\S]*profitPercent/);
+  assert.doesNotMatch(deals, /\["Map"/);
   assert.doesNotMatch(deals, /<span>Sort<\/span>/);
 });
 
@@ -87,6 +87,27 @@ test("Browse groups availability controls and separates item identity metadata",
   assert.match(browse, /className="market-toggle-group"/);
   assert.match(browse, /className="market-item-identity"/);
   assert.match(browse, /className="market-item-meta"/);
+});
+
+test("Overview and Deals use generation-invalidated local Relay projections", () => {
+  const overview = source("../src/pages/market/MarketOverview.tsx");
+  const deals = source("../src/pages/market/MarketDeals.tsx");
+
+  for (const page of [overview, deals]) {
+    assert.match(page, /useGameDataGeneration/);
+    assert.match(page, /"catalogs", "regional-market"/);
+    assert.doesNotMatch(page, /\/api\/bitjita/);
+  }
+  assert.match(overview, /\/api\/local\/market\/overview/);
+  assert.match(overview, /Current liquidity/);
+  assert.match(overview, /Recent open orders/);
+  assert.match(deals, /\/api\/local\/market\/deals/);
+  assert.match(deals, /search\.set\("regions", regions\.join\(","\)\)/);
+  assert.match(deals, /marketFreshnessNotice/);
+  assert.match(deals, /Best Route Potential/);
+  assert.doesNotMatch(deals, /Visible Potential/);
+  assert.doesNotMatch(deals, /Live order generation updated/);
+  assert.doesNotMatch(deals, /Maximum distance/);
 });
 
 test("Browse invalidates on regional-market generation events and keeps history non-blocking", () => {

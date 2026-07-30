@@ -139,9 +139,9 @@ export function Market({
         </div>
         <label className="field global-market-region"><span>Market region</span><select value={regionId || "All"} onChange={(event) => setRegionChoice(event.target.value)}><option value="All">All active regions</option>{activeRegions.map((region) => <option value={region.regionId} key={region.regionId}>{activeRegionLabel(region, fallbackRegionId)}</option>)}</select></label>
       </section>
-      {currentView === "overview" ? <MarketOverview {...marketRefresh} regionId={regionId} favorites={favorites} onOpenItem={openItem} onShowMap={onShowMap} /> : null}
+      {currentView === "overview" ? <MarketOverview {...marketRefresh} claimId={claimId} regionId={regionId} favorites={favorites} onOpenItem={openItem} /> : null}
       {currentView === "browse" ? <MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
-      {currentView === "deals" ? <MarketDeals {...marketRefresh} sharedRegionId={regionId} activeRegions={activeRegions} onShowMap={onShowMap} /> : null}
+      {currentView === "deals" ? <MarketDeals {...marketRefresh} claimId={claimId} sharedRegionId={regionId} activeRegions={activeRegions} /> : null}
       {currentView === "buy-orders" ? <MarketBrowse {...marketRefresh} claimId={claimId} mode="buy" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
       {currentView === "deal-watch" ? <DealWatchlist {...marketRefresh} monitoredRegionId={regionId || fallbackRegionId} onDiscordLogin={onDiscordLogin} /> : null}
       {currentView === "stalls" ? <MarketStalls {...marketRefresh} regionId={regionId} onShowMap={onShowMap} /> : null}

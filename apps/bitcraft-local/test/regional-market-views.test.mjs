@@ -407,3 +407,128 @@ test("regional market order-book view preserves exact prices and scopes regions"
     iconAssetName: "timber.png",
   });
 });
+
+test("regional market deals derive truthful live arbitrage without trade history", () => {
+  const result = views.regionalMarketDealsView({
+    activeRegionIds: ["7", "19"],
+    orders: [{
+      entityId: "801",
+      side: "sell",
+      claimEntityId: "100",
+      claimName: "Low Market",
+      regionId: "19",
+      ownerEntityId: "701",
+      itemId: "43",
+      itemType: "cargo",
+      price: "9007199254740993",
+      quantity: "5",
+      timestamp: "2026-07-30T12:00:00.000Z",
+    }, {
+      entityId: "802",
+      side: "buy",
+      claimEntityId: "101",
+      claimName: "High Market",
+      regionId: "7",
+      ownerEntityId: "702",
+      itemId: "43",
+      itemType: "cargo",
+      price: "9007199254741003",
+      quantity: "3",
+      timestamp: "2026-07-30T12:01:00.000Z",
+    }],
+  }, {
+    allowedRegionIds: ["7", "19"],
+    getEntity: (key) => key === "cargo:43"
+      ? { name: "Timber Package", iconAssetName: "timber.png" }
+      : null,
+    limit: 50,
+  });
+
+  assert.deepEqual(result.deals, [{
+    routeKey: "801:802",
+    itemId: "43",
+    itemType: "cargo",
+    itemName: "Timber Package",
+    itemIconAssetName: "timber.png",
+    buyOrderId: "801",
+    sellOrderId: "802",
+    buyPrice: "9007199254740993",
+    sellPrice: "9007199254741003",
+    buyQuantity: "5",
+    sellQuantity: "3",
+    maxQuantity: "3",
+    profit: "10",
+    totalPotential: "30",
+    profitPercent: 0,
+    buyClaimId: "100",
+    buyLocation: "Low Market",
+    buyRegionId: "19",
+    sellClaimId: "101",
+    sellLocation: "High Market",
+    sellRegionId: "7",
+    distance: null,
+  }]);
+  assert.equal(result.coverage, "current-orders");
+  assert.deepEqual(result.historyUnavailable, ["movers", "trade-volume", "completed-sales"]);
+});
+
+test("regional market overview derives liquidity, hubs, and open-order activity", () => {
+  const result = views.regionalMarketOverviewView({
+    activeRegionIds: ["19"],
+    orders: [{
+      entityId: "801",
+      side: "sell",
+      claimEntityId: "100",
+      claimName: "Timbersteel Trade",
+      regionId: "19",
+      ownerEntityId: "701",
+      ownerUsername: "Seller",
+      itemId: "44",
+      itemType: "item",
+      price: "12",
+      quantity: "4",
+      timestamp: "2026-07-30T12:00:00.000Z",
+    }, {
+      entityId: "802",
+      side: "buy",
+      claimEntityId: "100",
+      claimName: "Timbersteel Trade",
+      regionId: "19",
+      ownerEntityId: "702",
+      ownerUsername: "Buyer",
+      itemId: "44",
+      itemType: "item",
+      price: "15",
+      quantity: "2",
+      timestamp: "2026-07-30T12:01:00.000Z",
+    }],
+  }, {
+    regionId: "19",
+    allowedRegionIds: ["19"],
+    getEntity: () => ({ name: "Leather Strap", iconAssetName: "leather.png" }),
+  });
+
+  assert.equal(result.topDeals.length, 1);
+  assert.deepEqual(result.mostLiquid, [{
+    itemId: "44",
+    itemType: "item",
+    itemName: "Leather Strap",
+    iconAssetName: "leather.png",
+    orderCount: 2,
+    offeredQuantity: "4",
+    wantedQuantity: "2",
+    currentNotional: "78",
+  }]);
+  assert.deepEqual(result.hubs, [{
+    claimId: "100",
+    claimName: "Timbersteel Trade",
+    regionId: "19",
+    regionName: "R19",
+    orderCount: 2,
+    sellerCount: 1,
+    buyerCount: 1,
+  }]);
+  assert.deepEqual(result.recentActivity.map((row) => row.id), ["802", "801"]);
+  assert.deepEqual(result.movers, []);
+  assert.equal(result.moverBaseline, "unavailable");
+});

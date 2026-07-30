@@ -419,3 +419,166 @@ export function regionalMarketOrderBookView(snapshot, catalogRow, options = {}) 
     buyOrders: orders.filter((order) => String(order.side).toLowerCase() !== "sell"),
   };
 }
+
+function minimumDecimal(left, right) {
+  return compareBigInt(left, right) <= 0 ? decimal(left) : decimal(right);
+}
+
+function marketItemForOrder(order, getEntity) {
+  const type = itemType(order.itemType);
+  const id = decimal(order.itemId);
+  const entity = record(getEntity?.(`${type === "cargo" ? "cargo" : "items"}:${id}`));
+  return {
+    itemId: id,
+    itemType: type,
+    itemName: String(entity.name ?? `${type === "cargo" ? "Cargo" : "Item"} #${id}`),
+    itemIconAssetName: entity.iconAssetName ?? null,
+  };
+}
+
+export function regionalMarketDealsView(snapshot, options = {}) {
+  const getEntity = typeof options.getEntity === "function" ? options.getEntity : () => null;
+  const limit = Math.max(1, Math.min(500, Math.floor(Number(options.limit) || 250)));
+  const byItem = new Map();
+  for (const order of scopedOrders(snapshot, options)) {
+    const key = `${itemType(order.itemType)}:${decimal(order.itemId)}`;
+    const current = byItem.get(key) ?? { sells: [], buys: [] };
+    current[String(order.side).toLowerCase() === "sell" ? "sells" : "buys"].push(order);
+    byItem.set(key, current);
+  }
+  const deals = [];
+  for (const { sells, buys } of byItem.values()) {
+    sells.sort((left, right) => compareBigInt(left.price, right.price));
+    buys.sort((left, right) => compareBigInt(right.price, left.price));
+    for (const sell of sells.slice(0, 25)) {
+      for (const buy of buys.slice(0, 25)) {
+        const buyPrice = BigInt(decimal(sell.price));
+        const sellPrice = BigInt(decimal(buy.price));
+        if (sellPrice <= buyPrice) break;
+        const profit = sellPrice - buyPrice;
+        const maxQuantity = minimumDecimal(sell.quantity, buy.quantity);
+        const item = marketItemForOrder(sell, getEntity);
+        const basisPoints = buyPrice > 0n ? (profit * 10_000n) / buyPrice : 0n;
+        deals.push({
+          routeKey: `${decimal(sell.entityId)}:${decimal(buy.entityId)}`,
+          ...item,
+          buyOrderId: decimal(sell.entityId),
+          sellOrderId: decimal(buy.entityId),
+          buyPrice: buyPrice.toString(),
+          sellPrice: sellPrice.toString(),
+          buyQuantity: decimal(sell.quantity),
+          sellQuantity: decimal(buy.quantity),
+          maxQuantity,
+          profit: profit.toString(),
+          totalPotential: (profit * BigInt(maxQuantity)).toString(),
+          profitPercent: Number(basisPoints) / 100,
+          buyClaimId: decimal(sell.claimEntityId),
+          buyLocation: String(sell.claimName ?? ""),
+          buyRegionId: decimal(sell.regionId),
+          sellClaimId: decimal(buy.claimEntityId),
+          sellLocation: String(buy.claimName ?? ""),
+          sellRegionId: decimal(buy.regionId),
+          distance: null,
+        });
+      }
+    }
+  }
+  deals.sort((left, right) => (
+    compareBigInt(right.profit, left.profit)
+    || compareBigInt(right.totalPotential, left.totalPotential)
+    || compareText(left.itemName, right.itemName)
+  ));
+  return {
+    deals: deals.slice(0, limit),
+    coverage: "current-orders",
+    historyUnavailable: ["movers", "trade-volume", "completed-sales"],
+  };
+}
+
+export function regionalMarketOverviewView(snapshot, options = {}) {
+  const getEntity = typeof options.getEntity === "function" ? options.getEntity : () => null;
+  const orders = scopedOrders(snapshot, options);
+  const liquidity = new Map();
+  const hubs = new Map();
+  for (const order of orders) {
+    const item = marketItemForOrder(order, getEntity);
+    const itemKey = `${item.itemType}:${item.itemId}`;
+    const currentItem = liquidity.get(itemKey) ?? {
+      ...item,
+      iconAssetName: item.itemIconAssetName,
+      orderCount: 0,
+      offeredQuantity: 0n,
+      wantedQuantity: 0n,
+      currentNotional: 0n,
+    };
+    const quantity = BigInt(decimal(order.quantity));
+    const price = BigInt(decimal(order.price));
+    currentItem.orderCount += 1;
+    currentItem[String(order.side).toLowerCase() === "sell" ? "offeredQuantity" : "wantedQuantity"] += quantity;
+    currentItem.currentNotional += price * quantity;
+    liquidity.set(itemKey, currentItem);
+
+    const claimId = decimal(order.claimEntityId);
+    const currentHub = hubs.get(claimId) ?? {
+      claimId,
+      claimName: String(order.claimName ?? ""),
+      regionId: decimal(order.regionId),
+      regionName: `R${decimal(order.regionId)}`,
+      orderCount: 0,
+      sellers: new Set(),
+      buyers: new Set(),
+    };
+    currentHub.orderCount += 1;
+    currentHub[String(order.side).toLowerCase() === "sell" ? "sellers" : "buyers"]
+      .add(decimal(order.ownerEntityId));
+    hubs.set(claimId, currentHub);
+  }
+  const deals = regionalMarketDealsView(snapshot, {
+    ...options,
+    getEntity,
+    limit: 50,
+  });
+  return {
+    topDeals: deals.deals,
+    movers: [],
+    moverBaseline: "unavailable",
+    mostLiquid: [...liquidity.values()]
+      .sort((left, right) => (
+        right.orderCount - left.orderCount
+        || compareBigInt(right.currentNotional, left.currentNotional)
+      ))
+      .slice(0, 20)
+      .map(({ itemIconAssetName, ...row }) => ({
+        ...row,
+        offeredQuantity: row.offeredQuantity.toString(),
+        wantedQuantity: row.wantedQuantity.toString(),
+        currentNotional: row.currentNotional.toString(),
+      })),
+    hubs: [...hubs.values()]
+      .sort((left, right) => right.orderCount - left.orderCount || compareText(left.claimName, right.claimName))
+      .slice(0, 20)
+      .map(({ sellers, buyers, ...hub }) => ({
+        ...hub,
+        sellerCount: sellers.size,
+        buyerCount: buyers.size,
+      })),
+    recentActivity: orders
+      .map((order) => ({
+        id: decimal(order.entityId),
+        ...marketItemForOrder(order, getEntity),
+        side: String(order.side).toLowerCase() === "sell" ? "sell" : "buy",
+        quantity: decimal(order.quantity),
+        unitPrice: decimal(order.price),
+        claimId: decimal(order.claimEntityId),
+        claimName: String(order.claimName ?? ""),
+        regionId: decimal(order.regionId),
+        regionName: `R${decimal(order.regionId)}`,
+        ownerName: String(order.ownerUsername ?? ""),
+        createdAt: String(order.timestamp ?? ""),
+      }))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, 20),
+    coverage: deals.coverage,
+    historyUnavailable: deals.historyUnavailable,
+  };
+}

@@ -894,16 +894,16 @@ test("server collection paginates listings and protects production mutations", a
       {
         entityId: "3001",
         claimEntityId: "4001",
-        claimName: "Test Market",
+        claimName: "High Market",
         regionId: "19",
         ownerEntityId: "5001",
         ownerUsername: "Buyer",
         itemId: "30",
         itemType: "item",
-        price: "12",
-        priceThreshold: "12",
+        price: "20",
+        priceThreshold: "20",
         quantity: "10",
-        storedCoins: "120",
+        storedCoins: "200",
         timestamp: legacyBuyOrderNow,
         side: "buy",
       },
@@ -999,8 +999,8 @@ test("server collection paginates listings and protects production mutations", a
   const buyOrdersBeforeSales = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=unitPrice&direction=desc`).then((response) => response.json());
   assert.equal(buyOrdersBeforeSales.total, 1);
   assert.equal(buyOrdersBeforeSales.rows[0].itemName, "Leather");
-  assert.equal(buyOrdersBeforeSales.rows[0].unitPrice, "12");
-  assert.equal(buyOrdersBeforeSales.rows[0].totalValue, "120");
+  assert.equal(buyOrdersBeforeSales.rows[0].unitPrice, "20");
+  assert.equal(buyOrdersBeforeSales.rows[0].totalValue, "200");
   assert.equal(buyOrdersBeforeSales.freshness, "fresh");
   assert.equal(buyOrdersBeforeSales.opportunities.length, 0);
   assert.equal(priceHistoryRequests, 0);
@@ -1030,6 +1030,20 @@ test("server collection paginates listings and protects production mutations", a
   assert.deepEqual(marketPriceHistory.priceData, []);
   assert.deepEqual(marketPriceHistory.recentTrades, []);
   assert.equal(priceHistoryRequests, 0);
+  const marketOverview = await fetch(`${origin}/api/local/market/overview?claimId=${claimId}&regionId=19`).then((response) => response.json());
+  assert.equal(marketOverview.topDeals[0].profit, "5");
+  assert.equal(marketOverview.mostLiquid[0].itemName, "Leather");
+  assert.equal(marketOverview.movers.length, 0);
+  assert.equal(marketOverview.moverBaseline, "unavailable");
+  const liveDeals = await fetch(`${origin}/api/local/market/deals?claimId=${claimId}`).then((response) => response.json());
+  assert.equal(liveDeals.deals[0].buyPrice, "15");
+  assert.equal(liveDeals.deals[0].sellPrice, "20");
+  assert.equal(liveDeals.deals[0].profit, "5");
+  assert.equal(liveDeals.coverage, "current-orders");
+  const scopedLiveDeals = await fetch(`${origin}/api/local/market/deals?claimId=${claimId}&regions=19`).then((response) => response.json());
+  assert.deepEqual(scopedLiveDeals.deals.map((deal) => deal.buyRegionId), ["19"]);
+  const foreignRegionDeals = await fetch(`${origin}/api/local/market/deals?claimId=${claimId}&regions=9`);
+  assert.equal(foreignRegionDeals.status, 403);
   const allRegionalBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=all&pageSize=25`).then((response) => response.json());
   assert.deepEqual(allRegionalBuyOrders.rows.map((row) => row.regionId), ["19"]);
   const regionalBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=9&search=Leather&pageSize=25&sort=unitPrice&direction=desc`);

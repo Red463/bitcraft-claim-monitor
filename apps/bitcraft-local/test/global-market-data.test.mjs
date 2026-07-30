@@ -4,11 +4,21 @@ import { test } from "node:test";
 import * as globalMarket from "../src/pages/market/globalMarket.ts";
 
 const {
+  bestMarketDealPotential,
   filterMarketDeals,
   marketFavoriteKeys,
   normalizeMarketOrders,
   normalizeStallsPayload,
 } = globalMarket;
+
+test("bestMarketDealPotential does not add overlapping route capacity", () => {
+  assert.equal(typeof bestMarketDealPotential, "function");
+  assert.equal(bestMarketDealPotential([
+    { routeKey: "sell-1:buy-1", totalPotential: "9007199254740993" },
+    { routeKey: "sell-1:buy-2", totalPotential: "8000000000000000" },
+    { routeKey: "sell-2:buy-2", totalPotential: "7" },
+  ]), "9007199254740993");
+});
 
 test("global market orders keep item and cargo identity and normalize nullable fields", () => {
   const rows = normalizeMarketOrders({

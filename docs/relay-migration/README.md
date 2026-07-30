@@ -76,11 +76,14 @@ Cross-region market orders use the adaptive regional-session pattern rather
 than the legacy scheduled crawl. Each configured region publishes a bounded
 typed buy/sell-order snapshot, and the runtime combines those snapshots into
 the generic `regional-market` last-good domain. Market Browse search and order
-books join that generation to the continuously maintained local catalog on
-request; they do not wait for the legacy global-market insight job. Local
+books, Overview liquidity/hubs/open-order activity, and Deals arbitrage join
+that generation to the continuously maintained local catalog on request; they
+do not wait for a scheduled insight job. Local
 filtering and catalog enrichment are fast enough without
 `market_buy_orders_current`; the table and the unproven
-`market_regional_sale_averages_current` projection are retired. Completed
+`market_regional_sale_averages_current` projection are retired. The obsolete
+`global_market_price_snapshots` table, cached overview setting, and
+`global_market_insights` job are also retired. Completed
 trade charts remain explicitly unavailable until Relay proves an authoritative
 close/trade signal, rather than deriving sales from disappearing orders. Premium
 opportunities remain unavailable until Relay exposes or proves an
@@ -93,7 +96,8 @@ before useful rows arrive. Per-region receive ages and connection state prevent
 a disconnected or delayed region from being reported as fresh. Browse
 freshness also includes the global catalog subscription, so current orders
 cannot hide a stale or disconnected enrichment source. Order books publish
-independently of trade-history reads.
+independently of trade-history reads. Location distance/map actions remain
+unavailable until the bounded location join is proven.
 
 Implementation is dependency-ordered:
 

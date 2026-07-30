@@ -120,6 +120,9 @@ export function applyLegacySchemaCleanup(db) {
     DROP TABLE IF EXISTS market_listings;
     DROP TABLE IF EXISTS market_buy_orders_current;
     DROP TABLE IF EXISTS market_regional_sale_averages_current;
+    DROP TABLE IF EXISTS global_market_price_snapshots;
     DELETE FROM scheduled_jobs WHERE job_key = 'recipe_catalog_refresh';
+    DELETE FROM scheduled_jobs WHERE job_key = 'global_market_insights';
+    DELETE FROM app_settings WHERE key = 'global_market_overview_json';
   `);
 }
