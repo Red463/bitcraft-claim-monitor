@@ -12,7 +12,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Active/passive crafts | Provider-neutral current page; Relay incomplete/completed claim rows split by typed recipe metadata | Relay HTTP plus global recipe catalog | ready for soak |
 | Craft contributions | BitJita craft contribution route | Proven regional mapping | blocked on evidence |
 | Construction | Provider-neutral page over claim-filtered regional project state, global recipe/building/material catalogs, and the live inventory snapshot; legacy collector/notification reads remain to be migrated | Regional state plus global catalogs | in progress |
-| Research | BitJita research route | Regional tech state plus global catalogs | baseline |
+| Research | Provider-neutral page and Craft Planner tier presets over claim-filtered regional technology state and the global technology catalog; scheduled collector retired | Regional tech state plus global catalogs | ready for soak |
 | Recruitment | BitJita recruitment route | Regional recruitment state | baseline |
 | Storage activity | BitJita storage logs | Relay storage-log durable copy | baseline |
 | Settlement market | BitJita listings | Proven regional buy/sell order state | baseline |

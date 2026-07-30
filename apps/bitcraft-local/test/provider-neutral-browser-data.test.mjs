@@ -95,6 +95,16 @@ test("Construction uses the provider-neutral live regional snapshot and local ca
   assert.match(server, /providerCatalogRepository\.getDescription\(kind, id\)/);
 });
 
+test("Research uses the provider-neutral live regional state and global technology catalog", () => {
+  assert.equal(usesProviderNeutralGameData("research"), true);
+  assert.deepEqual(marketEndpointMap("1369094286777412590", "research"), {});
+  assert.deepEqual(pageDomains("research"), [
+    "claim",
+    "members",
+    "research",
+  ]);
+});
+
 test("Members uses Relay equipment, passive crafts, and bounded player inventory", async () => {
   const source = await readFile(new URL("../src/pages/MembersPage.tsx", import.meta.url), "utf8");
   assert.match(source, /data\.raw\?\.equipment\?\.members/);

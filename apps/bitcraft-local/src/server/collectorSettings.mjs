@@ -11,7 +11,6 @@ export const domainCollectorDefaults = {
   production: { label: "Production", intervalSeconds: 30 },
   inventory: { label: "Inventory and storage", intervalSeconds: 60 },
   construction: { label: "Construction", intervalSeconds: 60 },
-  research: { label: "Research", intervalSeconds: 600 },
   market: { label: "Market", intervalSeconds: 60 },
   region: { label: "Region", intervalSeconds: 300 },
   mapCatalog: { label: "Map/catalog", intervalSeconds: 600 },
@@ -22,7 +21,7 @@ export const domainCollectorDefaults = {
   marketTrades: { label: "Member market trades", intervalSeconds: 60 },
 };
 
-export const domainPayloadKeys = ["claim", "members", "citizens", "buildings", "construction", "research", "market", "regionalBuyOrders", "crafts", "players", "playerDetailDiagnostics", "contributions", "region", "regionStatus", "tradeVolume", "inventories", "recruitment", "layout", "skills"];
+export const domainPayloadKeys = ["claim", "members", "citizens", "buildings", "construction", "market", "regionalBuyOrders", "crafts", "players", "playerDetailDiagnostics", "contributions", "region", "regionStatus", "tradeVolume", "inventories", "recruitment", "layout", "skills"];
 export const collectorPrimaryPayloadDomain = {
   claim: "claim",
   members: "members",
@@ -31,7 +30,6 @@ export const collectorPrimaryPayloadDomain = {
   production: "crafts",
   inventory: "inventories",
   construction: "construction",
-  research: "research",
   market: "market",
   region: "region",
   mapCatalog: "skills",
@@ -51,7 +49,6 @@ export const payloadDomainCollector = {
   layout: "inventory",
   buildings: "construction",
   construction: "construction",
-  research: "research",
   market: "market",
   tradeVolume: "market",
   region: "region",

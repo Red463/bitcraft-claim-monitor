@@ -9,7 +9,6 @@ export function marketEndpointMap(claimId: string, activePanel?: ActivePanel): R
     citizens: `/claims/${claimId}/citizens`,
     buildings: `/claims/${claimId}/buildings`,
     inventories: `/claims/${claimId}/inventories`,
-    research: `/claims/${claimId}/research`,
     recruitment: `/claims/${claimId}/recruitment`,
     market: `/claims/${claimId}/market/listings?limit=200`,
     crafts: `/crafts?claimEntityId=${claimId}&completed=false`,
@@ -24,7 +23,7 @@ export function marketEndpointMap(claimId: string, activePanel?: ActivePanel): R
 
   switch (activePanel) {
     case "dashboard":
-      add("citizens", "buildings", "research", "market");
+      add("citizens", "buildings", "market");
       break;
     case "members":
       add("citizens");
@@ -40,9 +39,6 @@ export function marketEndpointMap(claimId: string, activePanel?: ActivePanel): R
       break;
     case "inventory":
       add("inventories");
-      break;
-    case "research":
-      add("research");
       break;
     case "settlement-market":
       add("market");

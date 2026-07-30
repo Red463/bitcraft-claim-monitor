@@ -1,5 +1,33 @@
 # Relay diagnostic findings
 
+## Research state and availability semantics — 2026-07-30
+
+The generated regional binding was exercised against the topology-discovered
+region 19 source using a subscription filtered to the configured claim:
+
+```sql
+SELECT * FROM claim_tech_state
+WHERE entity_id = 1369094286777412590
+```
+
+- `claim_tech_state.entity_id` is the claim entity ID.
+- Timbersteel had exactly one state row, 53 distinct learned technology IDs,
+  `researching = 0`, and no scheduled research ID at observation time.
+- `researching = 0` is the no-current-research sentinel. A non-zero value is a
+  `claim_tech_desc.id`; `start_timestamp` and `scheduled_id` belong to that
+  current research.
+- The global catalog contained 146 `claim_tech_desc` rows.
+- A technology is completed when its ID is in `learned`, current when its ID
+  equals the non-zero `researching` value, immediately available when every
+  `requirements` ID is learned, and otherwise locked.
+- The catalog fields `members`, `area`, `supplies`, `xp_to_mint_hex_coin`, and
+  `unlocks_techs` are progression data and must survive normalization.
+
+Runtime consequence: subscribe only to the configured claim's regional state,
+join all technology descriptions from the continuously maintained global
+catalog at the local route, and derive completed/current/available/locked
+states without a Relay research poller or dedicated research table.
+
 ## Construction ownership and material semantics — 2026-07-30
 
 The generated regional binding was exercised against the topology-discovered

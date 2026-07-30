@@ -9,6 +9,7 @@ const PROVIDER_NEUTRAL_PANELS = new Set<ActivePanel>([
   "inventory",
   "craft-monitor",
   "construction",
+  "research",
 ]);
 
 export function usesProviderNeutralGameData(activePanel: ActivePanel): boolean {

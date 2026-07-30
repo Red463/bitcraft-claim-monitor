@@ -66,7 +66,7 @@ import {
 import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
 import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
 import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
-import { craftPlanCatalogLookup, playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
+import { playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
 import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import { buildMarketOverview, collectMarketSnapshots, snapshotRetentionCutoff } from "./src/server/globalMarketInsights.mjs";
 import {
@@ -90,10 +90,12 @@ import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import {
   createCurrentStateRepository,
   buildCatalogItemDetail,
+  buildResearchTierPresets,
   enrichConstructionWithCatalog,
   enrichCraftsWithCatalog,
   enrichEquipmentWithCatalog,
   enrichInventoryWithCatalog,
+  enrichResearchWithCatalog,
   gameDataResponse,
   parseDomainKeys,
   RelayHttpClient,
@@ -2108,54 +2110,6 @@ function saveCraftPlanConfig(config, timestamp = new Date().toISOString()) {
   return normalized;
 }
 
-function craftPlanRequirementFromRaw(raw = {}, lookup = new Map()) {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const itemId = String(raw.itemId ?? raw.itemEntityId ?? raw.item_id ?? raw.entityId ?? raw.id ?? raw.item?.id ?? "").trim();
-  const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.count ?? raw.amount ?? raw.requiredQuantity ?? raw.required ?? raw.value);
-  if (!/^\d+$/.test(itemId) || quantity <= 0) return null;
-  const rawType = raw.itemType ?? raw.item_type ?? raw.kind ?? raw.item?.itemType;
-  const kind = rawType === "cargo" || rawType === 1 || rawType === "1" ? "cargo" : "items";
-  const item = lookup.get(itemId) ?? raw.item ?? {};
-  return {
-    id: itemId,
-    kind,
-    itemType: kind === "cargo" ? 1 : 0,
-    quantity: Math.ceil(quantity),
-    name: item.name ?? raw.itemName ?? raw.name ?? item.displayName ?? `Item #${itemId}`,
-    tier: item.tier ?? raw.tier ?? null,
-    rarityStr: item.rarityStr ?? item.rarity ?? raw.rarityStr ?? raw.rarity ?? null,
-    tag: item.tag ?? raw.tag ?? null,
-    iconAssetName: item.iconAssetName ?? raw.iconAssetName ?? null,
-  };
-}
-
-function collectCraftPlanRequirements(value, lookup = new Map(), depth = 0) {
-  if (!value || depth > 5) return [];
-  if (Array.isArray(value)) return value.flatMap((entry) => collectCraftPlanRequirements(entry, lookup, depth + 1));
-  if (typeof value !== "object") return [];
-  const direct = craftPlanRequirementFromRaw(value, lookup);
-  const nestedKeys = ["input", "inputs", "requirements", "requiredItems", "itemRequirements", "materials", "materialRequirements", "costs", "items", "resources"];
-  const nested = nestedKeys.flatMap((key) => collectCraftPlanRequirements(value[key], lookup, depth + 1));
-  return direct ? [direct, ...nested] : nested;
-}
-
-function tierFromResearchRow(row = {}) {
-  const text = `${row.name ?? row.techName ?? row.title ?? ""} ${row.description ?? ""}`;
-  const match = text.match(/(?:tier|t)\s*(\d{1,2})/i);
-  return match ? Number(match[1]) : toNumber(row.tier);
-}
-
-function mergePresetRequirements(requirements = []) {
-  const merged = new Map();
-  for (const item of requirements) {
-    const key = `${item.kind === "cargo" ? "cargo" : "items"}:${item.id}`;
-    const current = merged.get(key);
-    if (current) current.quantity += Math.ceil(item.quantity || 0);
-    else merged.set(key, { ...item, quantity: Math.ceil(item.quantity || 0) });
-  }
-  return [...merged.values()].filter((item) => item.quantity > 0);
-}
-
 async function fetchCraftPlanItemDetail(item) {
   const id = String(item.id ?? item.itemId ?? "").trim();
   if (!/^\d+$/.test(id)) return item;
@@ -2173,9 +2127,6 @@ async function enrichCraftPlanRequirement(item) {
   return { ...item, ...targetFromRecipeCatalogItem({ ...detail, id: item.id, itemType: item.itemType }), quantity: item.quantity };
 }
 
-async function enrichCraftPlanRequirements(items = []) {
-  return Promise.all(items.map((item) => enrichCraftPlanRequirement(item)));
-}
 async function enrichCraftPlanSourceItems(sources = []) {
   const cache = new Map();
   async function enrichItem(item) {
@@ -2242,28 +2193,21 @@ function targetFromRecipeCatalogItem(item = {}) {
   };
 }
 
+function currentResearchProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "research");
+  if (!current) return { technologies: [] };
+  return enrichResearchWithCatalog(
+    current.data,
+    providerCatalogRepository.listDescriptions("claim_tech"),
+  ).data;
+}
+
 async function craftPlanTierPresets(claimId) {
-  const payload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}/research`).catch(() => ({}));
-  const rows = unwrap(payload, "technologies", unwrap(payload, "research", []));
-  const lookup = craftPlanCatalogLookup(payload);
-  const grouped = new Map();
-  for (const row of rows) {
-    const tier = tierFromResearchRow(row);
-    const name = String(row.name ?? row.techName ?? row.title ?? "").trim();
-    const techType = String(row.techType ?? row.type ?? "").toLowerCase();
-    const isClaimTierRow = tier >= 2 && (techType === "tier_upgrade" || techType === "settlement" || /^tier\s*\d+$/i.test(name));
-    if (!isClaimTierRow) continue;
-    const current = grouped.get(tier) ?? [];
-    current.push(...collectCraftPlanRequirements(row, lookup));
-    grouped.set(tier, current);
-  }
-  const presets = [];
-  for (const [tier, requirements] of grouped.entries()) {
-    const items = await enrichCraftPlanRequirements(mergePresetRequirements(requirements));
-    if (!items.length) continue;
-    presets.push({ key: `tier-${tier}`, label: `T${tier}`, tier, source: "bitjita-research", items });
-  }
-  return presets.sort((a, b) => a.tier - b.tier);
+  const projection = currentResearchProjection(claimId);
+  return buildResearchTierPresets(
+    projection,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+  ).presets;
 }
 
 async function craftPlanWorkstationPresets() {
@@ -8203,18 +8147,18 @@ async function dashboardDataFresh(claimId, options = {}) {
     throw error;
   }
   const forceRefresh = options.forceRefresh === true;
-  const [claimPayload, membersPayload, citizensPayload, buildingsPayload, constructionPayload, researchPayload, marketPayload, craftsPayload, regionStatus] = await Promise.all([
+  const [claimPayload, membersPayload, citizensPayload, buildingsPayload, constructionPayload, marketPayload, craftsPayload, regionStatus] = await Promise.all([
     fetchBitjita(`/claims/${id}`, { forceRefresh }),
     fetchBitjita(`/claims/${id}/members`, { forceRefresh }),
     fetchBitjita(`/claims/${id}/citizens`, { forceRefresh }).catch(() => ({ citizens: [] })),
     fetchBitjita(`/claims/${id}/buildings`, { forceRefresh }),
     fetchBitjita(`/claims/${id}/construction`, { forceRefresh }).catch(() => ({ projects: [] })),
-    fetchBitjita(`/claims/${id}/research`, { forceRefresh }).catch(() => ({ research: [] })),
     fetchAllClaimListings(id, { cache: !forceRefresh }).catch(() => ({ listings: [] })),
     fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(id)}&completed=false`, { forceRefresh }).catch(() => ({ craftResults: [] })),
     fetchBitjita("/regions/status", { forceRefresh }).catch(() => ({ regions: [] })),
   ]);
   const claim = claimPayload.claim ?? claimPayload;
+  const researchPayload = currentResearchProjection(id);
   const members = unwrap(membersPayload, "members", []);
   const crafts = unwrap(craftsPayload, "craftResults", []);
   const [playerPayload, contributionEntries, region, tradeVolume] = await Promise.all([
@@ -8319,7 +8263,7 @@ function domainRowsToAppData(claimId, rowsByDomain) {
     citizens: payload("citizens", { citizens: [] }),
     buildings: payload("buildings", { buildings: [] }),
     construction: payload("construction", { projects: [] }),
-    research: payload("research", { research: [] }),
+    research: currentResearchProjection(claimId),
     market: payload("market", { listings: [] }),
     crafts: payload("crafts", { craftResults: [] }),
     players: unwrap(payload("players", { players: [] }), "players", []),
@@ -8585,7 +8529,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
     citizensPayload,
     buildingsPayload,
     constructionPayload,
-    researchPayload,
     marketPayload,
     productionPayload,
     playerPayload,
@@ -8598,7 +8541,6 @@ async function buildCurrentClaimData(claimId, options = {}) {
     collectorDue(id, "professions", "citizens", options) ? fetchDomainPayload(previous, "citizens", { citizens: [] }, "Citizens", () => timedCollectorFetch(metrics, "professions", "citizens", () => fetchBitjita(`/claims/${id}/citizens`))) : Promise.resolve(previousPayload(previous, "citizens", { citizens: [] })),
     collectorDue(id, "construction", "buildings", options) || collectorDue(id, "claim", "buildings", options) ? fetchDomainPayload(previous, "buildings", { buildings: [] }, "Buildings", () => timedCollectorFetch(metrics, "construction", "buildings", () => fetchBitjita(`/claims/${id}/buildings`))) : Promise.resolve(previousPayload(previous, "buildings", { buildings: [] })),
     collectorDue(id, "construction", "construction", options) ? fetchDomainPayload(previous, "construction", { projects: [] }, "Construction", () => timedCollectorFetch(metrics, "construction", "construction", () => fetchBitjita(`/claims/${id}/construction`))) : Promise.resolve(previousPayload(previous, "construction", { projects: [] })),
-    collectorDue(id, "research", "research", options) ? fetchDomainPayload(previous, "research", { research: [] }, "Research", () => timedCollectorFetch(metrics, "research", "research", () => fetchBitjita(`/claims/${id}/research`))) : Promise.resolve(previousPayload(previous, "research", { research: [] })),
     collectorDue(id, "market", "market", options) ? fetchDomainPayload(previous, "market", { listings: [] }, "Market", () => timedCollectorFetch(metrics, "market", "market listings", () => fetchAllClaimListings(id, { cache: options.force !== true }))) : Promise.resolve(previousPayload(previous, "market", { listings: [] })),
     collectorDue(id, "production", "crafts", options)
       ? timedCollectorFetch(metrics, "production", "production crafts", () => settlementProductionCrafts({ claimId: id, members, forceRefresh: true })).catch((error) => {
@@ -8614,6 +8556,7 @@ async function buildCurrentClaimData(claimId, options = {}) {
     collectorDue(id, "region", "regionStatus", options) ? fetchDomainPayload(previous, "regionStatus", { regions: [] }, "Region status", () => timedCollectorFetch(metrics, "region", "region status", () => fetchBitjita("/regions/status"))) : Promise.resolve(previousPayload(previous, "regionStatus", { regions: [] })),
   ]);
   const productionCrafts = unwrap(productionPayload, "craftResults", []);
+  const researchPayload = currentResearchProjection(id);
   const contributionEntries = collectorDue(id, "production", "contributions", options)
     ? Object.entries(await timedCollectorFetch(metrics, "production", "craft contributions", () => craftContributionMap(productionCrafts)))
     : Object.entries(previousPayload(previous, "contributions", {}));
@@ -10344,6 +10287,16 @@ const server = createServer(async (req, res) => {
               data,
               (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
               (kind, id) => providerCatalogRepository.getDescription(kind, id),
+            );
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
+            };
+          }
+          if (domain === "research") {
+            const projected = enrichResearchWithCatalog(
+              data,
+              providerCatalogRepository.listDescriptions("claim_tech"),
             );
             return {
               ...projected,

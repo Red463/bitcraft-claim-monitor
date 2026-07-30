@@ -30,7 +30,6 @@ function dataAreaLabel(path: string) {
   if (path.includes("/citizens")) return "member profession data";
   if (path.includes("/inventories")) return "inventory data";
   if (path.includes("/construction")) return "construction data";
-  if (path.includes("/research")) return "research data";
   if (path.includes("/regions")) return "region data";
   if (path.includes("/skills")) return "profession reference data";
   if (path.includes("/claims/")) return "settlement data";

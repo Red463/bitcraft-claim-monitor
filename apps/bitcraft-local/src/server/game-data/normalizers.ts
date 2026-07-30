@@ -245,6 +245,7 @@ export function normalizeCatalogDescription(value: unknown, kind: CatalogDescrip
       stats: normalizeStats(row.stats),
     };
   }
+  const unlocksTechs = row.unlocksTechs ?? row.unlocks_techs;
   return {
     ...base,
     name: String(row.name ?? "").trim(),
@@ -256,6 +257,15 @@ export function normalizeCatalogDescription(value: unknown, kind: CatalogDescrip
     requirements: (Array.isArray(row.requirements) ? row.requirements : [])
       .map((entry) => decimalString(entry, "claim technology requirement id")),
     inputs: records(row.input).map(normalizeDescriptionStack),
+    members: decimalString(row.members ?? 0, "claim technology member cap"),
+    area: decimalString(row.area ?? 0, "claim technology area cap"),
+    supplies: decimalString(row.supplies ?? 0, "claim technology supply cap"),
+    xpToMintHexCoin: decimalString(
+      row.xpToMintHexCoin ?? row.xp_to_mint_hex_coin ?? 0,
+      "claim technology Hex Coin XP",
+    ),
+    unlocksTechs: (Array.isArray(unlocksTechs) ? unlocksTechs : [])
+      .map((entry) => decimalString(entry, "claim technology unlocked id")),
   };
 }
 
@@ -489,6 +499,82 @@ function normalizeRegionalProjectStack(
     itemId: decimalString(stack.itemId ?? stack.item_id, `${label} item id`),
     itemType,
     quantity: decimalString(stack.quantity, `${label} quantity`),
+  };
+}
+
+export function normalizeRegionalResearch(options: {
+  claimId: string;
+  stateRows: unknown[];
+}) {
+  const claimId = decimalString(options.claimId, "regional research claim id");
+  const warnings: string[] = [];
+  let matched: Record<string, unknown> | null = null;
+  for (const [index, value] of options.stateRows.entries()) {
+    try {
+      const row = record(value, `regional claim_tech_state row ${index}`);
+      const entityId = decimalString(
+        row.entityId ?? row.entity_id,
+        `regional claim_tech_state row ${index} entity id`,
+      );
+      if (entityId !== claimId) {
+        warnings.push(`Regional claim_tech_state omitted cross-claim row ${entityId}.`);
+        continue;
+      }
+      if (matched) {
+        warnings.push(`Regional claim_tech_state omitted duplicate row for configured claim ${claimId}.`);
+        continue;
+      }
+      matched = row;
+    } catch (error) {
+      warnings.push(
+        `Regional claim_tech_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  if (!matched) {
+    warnings.push(`Regional claim_tech_state has no row for configured claim ${claimId}.`);
+    return {
+      data: {
+        claimId,
+        learnedTechIds: [],
+        researchingTechId: null,
+        researchStartedAt: null,
+        scheduledId: null,
+      },
+      warnings,
+    };
+  }
+  const researchingValue = integer(
+    matched.researching ?? 0,
+    "regional claim_tech_state researching technology id",
+  );
+  const researchingTechId = researchingValue === 0 ? null : String(researchingValue);
+  const startTimestamp = matched.startTimestamp ?? matched.start_timestamp;
+  const researchStartedAt = researchingTechId == null
+    ? null
+    : normalizeTimestamp(
+        decimalString(
+          record(startTimestamp, "regional claim_tech_state start timestamp")
+            .__timestamp_micros_since_unix_epoch__
+            ?? record(startTimestamp, "regional claim_tech_state start timestamp").microsSinceUnixEpoch
+            ?? record(startTimestamp, "regional claim_tech_state start timestamp").micros_since_unix_epoch,
+          "regional claim_tech_state start timestamp",
+        ),
+        "microseconds",
+      );
+  const scheduledId = matched.scheduledId ?? matched.scheduled_id;
+  return {
+    data: {
+      claimId,
+      learnedTechIds: (Array.isArray(matched.learned) ? matched.learned : [])
+        .map((id) => decimalString(id, "regional claim_tech_state learned technology id")),
+      researchingTechId,
+      researchStartedAt,
+      scheduledId: scheduledId == null
+        ? null
+        : decimalString(scheduledId, "regional claim_tech_state scheduled id"),
+    },
+    warnings,
   };
 }
 

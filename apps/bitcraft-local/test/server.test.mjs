@@ -198,7 +198,6 @@ test("server collection paginates listings and protects production mutations", a
   let craftBuildingName = "Public Station";
   let craftProgressOverride = null;
   let failClaimRefresh = false;
-  let failResearchRefresh = false;
   let failEmpireList = false;
   let failEmpireTowers = false;
   const discordDirectMessages = [];
@@ -299,10 +298,6 @@ test("server collection paginates listings and protects production mutations", a
       }],
     });
     if (url.pathname === `/api/claims/${claimId}/construction`) return json(res, { projects: [] });
-    if (url.pathname === `/api/claims/${claimId}/research`) {
-      if (failResearchRefresh) return json(res, { error: "research unavailable" }, 500);
-      return json(res, { technologies: [{ entityId: "research-1", name: "Claim Upgrades", tier: 1, unlocked: true }] });
-    }
     if (url.pathname === "/api/players/player-1") {
       playerDetailRequests += 1;
       return json(res, { player: { playerEntityId: "player-1", username: "Tester", signedIn: true } });

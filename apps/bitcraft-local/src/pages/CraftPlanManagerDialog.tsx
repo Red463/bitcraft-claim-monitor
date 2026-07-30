@@ -598,12 +598,12 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             <div className="split-header"><div><h3>Target items</h3><p className="legend">Preset buttons add normal target rows. You can change quantities or remove them at any time.</p></div></div>
             <section className="craft-plan-tier-presets" aria-label="Tier upgrade presets">
               <div className="craft-plan-tier-presets-header">
-                <div><h4><Zap size={16} /> Tier upgrade presets</h4><p>Loaded from BitJita claim research. Click a tier to add its upgrade materials to the plan.</p></div>
+                <div><h4><Zap size={16} /> Tier upgrade presets</h4><p>Loaded from live settlement research. Click a tier to add its upgrade materials to the plan.</p></div>
                 <small>{tierPresets.length ? `${tierPresets.length} presets loaded` : "No presets loaded"}</small>
               </div>
               {tierPresets.length ? <div className="craft-plan-preset-grid">
                 {tierPresets.map((preset: AnyRecord) => <button className="craft-plan-preset-tier" type="button" aria-label={`Add upgrade materials for ${preset.label}`} key={preset.key} onClick={() => addTargets((preset.items ?? []).map((item: AnyRecord) => withQuantity(item, Number(item.quantity) || 1)), `Added ${preset.label} requirements.`)}>{preset.label}</button>)}
-              </div> : <div className="craft-plan-preset-empty"><strong>No tier presets loaded</strong><span>BitJita did not return tier upgrade research materials for this settlement.</span></div>}
+              </div> : <div className="craft-plan-preset-empty"><strong>No tier presets loaded</strong><span>Live settlement research has no tier upgrade materials available yet.</span></div>}
             </section>
             <section className="craft-plan-tier-presets craft-plan-workstation-presets" aria-label="Workstation tier presets">
               <div className="craft-plan-tier-presets-header">

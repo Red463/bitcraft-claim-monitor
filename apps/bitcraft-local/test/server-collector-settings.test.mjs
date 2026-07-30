@@ -23,7 +23,7 @@ test("collector settings normalize saved dashboard configuration safely", () => 
   assert.equal(Object.keys(settings).length, Object.keys(domainCollectorDefaults).length);
   assert.deepEqual(settings.claim, { label: "Current settlement", enabled: false, intervalSeconds: 15 });
   assert.deepEqual(settings.members, { label: "Members", enabled: true, intervalSeconds: 45 });
-  assert.deepEqual(settings.research, { label: "Research", enabled: true, intervalSeconds: 3600 });
+  assert.equal(Object.hasOwn(settings, "research"), false);
   assert.deepEqual(settings.market, { label: "Market", enabled: true, intervalSeconds: 60 });
   assert.equal(Object.hasOwn(settings, "unknown"), false);
 });
@@ -39,6 +39,9 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.equal(collectorPrimaryPayloadDomain.production, "crafts");
   assert.equal(collectorPrimaryPayloadDomain.mapCatalog, "skills");
   assert.equal(payloadDomainCollector.tradeVolume, "market");
+  assert.equal(payloadDomainCollector.research, undefined);
+  assert.equal(collectorPrimaryPayloadDomain.research, undefined);
+  assert.equal(Object.hasOwn(domainCollectorDefaults, "research"), false);
   assert.equal(payloadDomainCollector.regionalBuyOrders, undefined);
   assert.deepEqual(collectorCurrentTables.market, ["market_listings", "market_trades"]);
   assert.deepEqual(collectorCurrentTables.marketListings, ["market_listings", "market_events", "market_trades"]);

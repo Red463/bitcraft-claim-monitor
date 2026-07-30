@@ -60,6 +60,15 @@ function fakeBindings() {
       __timestamp_micros_since_unix_epoch__: 1785096910248578n,
     },
   }]);
+  const claimTechState = cachedTable("research", [{
+    entityId: 1369094286777412590n,
+    learned: [1, 200, 748616905],
+    researching: 0,
+    startTimestamp: {
+      __timestamp_micros_since_unix_epoch__: 0n,
+    },
+    scheduledId: null,
+  }]);
   const connection = {
     db: {
       playerState,
@@ -67,6 +76,7 @@ function fakeBindings() {
       equipmentPresetState,
       activeBuffState,
       projectSiteState,
+      claimTechState,
     },
     subscriptionBuilder() {
       const builder = {
@@ -129,7 +139,7 @@ const members = [
   { playerEntityId: "202", userName: "Grace" },
 ];
 
-test("primary-region player session subscribes only to member IDs and emits normalized snapshots", async () => {
+test("primary-region session filters member and settlement state and emits normalized snapshots", async () => {
   assert.ok(sessionModule, "primary-region player session module must exist");
   const fake = fakeBindings();
   const snapshots = [];
@@ -156,6 +166,7 @@ test("primary-region player session subscribes only to member IDs and emits norm
     "SELECT * FROM equipment_preset_state WHERE player_entity_id = 101 OR player_entity_id = 202",
     "SELECT * FROM active_buff_state WHERE entity_id = 101 OR entity_id = 202",
     "SELECT * FROM project_site_state WHERE owner_id = 1369094286777412590",
+    "SELECT * FROM claim_tech_state WHERE entity_id = 1369094286777412590",
   ]);
 
   fake.state.onApplied({});
@@ -217,6 +228,14 @@ test("primary-region player session subscribes only to member IDs and emits norm
       }],
     },
     constructionWarnings: [],
+    research: {
+      claimId: "1369094286777412590",
+      learnedTechIds: ["1", "200", "748616905"],
+      researchingTechId: null,
+      researchStartedAt: null,
+      scheduledId: null,
+    },
+    researchWarnings: [],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",
@@ -287,6 +306,7 @@ test("primary-region player session coalesces rapid changes while a snapshot app
   fake.state.callbacks.get("player:update")({}, {}, {});
   fake.state.callbacks.get("buff:insert")({}, {});
   fake.state.callbacks.get("project:update")({}, {}, {});
+  fake.state.callbacks.get("research:update")({}, {}, {});
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(snapshots.length, 1);

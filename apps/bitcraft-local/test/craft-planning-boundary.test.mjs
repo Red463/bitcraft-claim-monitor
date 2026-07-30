@@ -226,10 +226,9 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /workstationPresets/);
   assert.match(manager, /addWorkstationPreset/);
   assert.match(manager, /\/admin\/craft-plan\/workstation-preset\?tier=/);
-  assert.match(manager, /Loaded from BitJita claim research/);
+  assert.match(manager, /Loaded from live settlement research/);
+  assert.match(manager, /Live settlement research has no tier upgrade materials available yet/);
   assert.match(manager, /tierPresets/);
-  assert.match(server, /nestedKeys = \["input", "inputs"/);
-  assert.match(server, /techType === "settlement"/);
   assert.match(manager, /Target items/);
   assert.doesNotMatch(manager, /craft-plan-item-icon"><ItemIcon item=\{target\} \/><\/span><ItemLabel item=\{target\} \/>/);
   assert.match(manager, /Settlement storage/);

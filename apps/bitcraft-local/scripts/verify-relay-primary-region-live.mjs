@@ -92,6 +92,16 @@ try {
       + ` with ${snapshot.constructionWarnings.length} warnings`,
     );
   }
+  if (
+    snapshot.research.claimId !== claimId
+    || snapshot.research.learnedTechIds.length === 0
+    || snapshot.researchWarnings.length
+  ) {
+    throw new Error(
+      `Regional research verification found ${snapshot.research.learnedTechIds.length} learned technologies`
+      + ` for claim ${snapshot.research.claimId} with ${snapshot.researchWarnings.length} warnings`,
+    );
+  }
   console.log(JSON.stringify({
     ok: true,
     sourceKey: source.sourceKey,
@@ -116,10 +126,13 @@ try {
       (total, project) => total + project.items.length + project.cargos.length,
       0,
     ),
+    learnedResearchCount: snapshot.research.learnedTechIds.length,
+    researchingTechId: snapshot.research.researchingTechId,
     regionalRowsFound,
     warningCount: snapshot.warnings.length
       + snapshot.equipmentWarnings.length
-      + snapshot.constructionWarnings.length,
+      + snapshot.constructionWarnings.length
+      + snapshot.researchWarnings.length,
   }, null, 2));
 } finally {
   clearTimeout(timeout);

@@ -127,3 +127,18 @@ be a committed domain event, not a scheduled ingestion sweep.
   construction table, refresh ledger, pagination state, or scheduled ingestion
   job was added. The legacy collector/notification paths still need to be
   switched from BitJita in Milestone 6 before this domain is soak-ready.
+
+## Research vertical evidence
+
+- `claim_tech_state.entity_id` was proven live to be the claim entity ID; the
+  regional subscription is filtered to the configured monitored claim.
+- Learned, current, available, and locked states are derived immediately from
+  the claim state and global `claim_tech_desc.requirements`.
+- The browser Research page reads only `/api/local/game-data`; the route joins
+  the live regional generation to the continuously maintained global catalog.
+- `domain_payload_current` remains the durable last-good boundary. No Relay
+  research table, refresh ledger, or scheduled research ingestion job was
+  added.
+- The legacy scheduled Research collector was removed so it cannot overwrite a
+  newer Relay generation. Dashboard aggregates and Craft Planner tier presets
+  now compose from the same committed Relay state and local global catalog.

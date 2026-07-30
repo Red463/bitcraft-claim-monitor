@@ -19,8 +19,83 @@ const {
   normalizeRegionalEquipment,
   normalizeRegionalConstruction,
   normalizeRegionalPlayers,
+  normalizeRegionalResearch,
   normalizeTimestamp,
 } = await import(new URL("../src/server/game-data/normalizers.ts", import.meta.url).href);
+
+test("regional research state preserves exact claim ownership and learned technology IDs", () => {
+  const result = normalizeRegionalResearch({
+    claimId: "1369094286777412590",
+    stateRows: [{
+      entityId: 1369094286777412590n,
+      learned: [1, 200, 748616905],
+      researching: 300,
+      startTimestamp: {
+        __timestamp_micros_since_unix_epoch__: 1785448800123456n,
+      },
+      scheduledId: 18446744073709551615n,
+    }, {
+      entityId: 999n,
+      learned: [1],
+      researching: 0,
+      startTimestamp: {
+        __timestamp_micros_since_unix_epoch__: 0n,
+      },
+      scheduledId: null,
+    }],
+  });
+
+  assert.deepEqual(result, {
+    data: {
+      claimId: "1369094286777412590",
+      learnedTechIds: ["1", "200", "748616905"],
+      researchingTechId: "300",
+      researchStartedAt: "2026-07-30T22:00:00.123Z",
+      scheduledId: "18446744073709551615",
+    },
+    warnings: [
+      "Regional claim_tech_state omitted cross-claim row 999.",
+    ],
+  });
+});
+
+test("regional research state treats zero as no current research and reports a missing claim row", () => {
+  assert.deepEqual(normalizeRegionalResearch({
+    claimId: "42",
+    stateRows: [{
+      entityId: 42n,
+      learned: [],
+      researching: 0,
+      startTimestamp: {
+        __timestamp_micros_since_unix_epoch__: 0n,
+      },
+      scheduledId: null,
+    }],
+  }), {
+    data: {
+      claimId: "42",
+      learnedTechIds: [],
+      researchingTechId: null,
+      researchStartedAt: null,
+      scheduledId: null,
+    },
+    warnings: [],
+  });
+
+  assert.deepEqual(normalizeRegionalResearch({
+    claimId: "42",
+    stateRows: [],
+  }), {
+    data: {
+      claimId: "42",
+      learnedTechIds: [],
+      researchingTechId: null,
+      researchStartedAt: null,
+      scheduledId: null,
+    },
+    warnings: ["Regional claim_tech_state has no row for configured claim 42."],
+  });
+});
 
 test("regional construction rows preserve exact claim ownership and contributed stacks", () => {
   const result = normalizeRegionalConstruction({
@@ -433,6 +508,41 @@ test("typed recipe and skill descriptions are projected without wire DTOs", () =
     title: "Forester",
     category: "Profession",
     maxLevel: 100,
+  });
+});
+
+test("claim technology descriptions retain progression caps and automatic unlocks", () => {
+  assert.deepEqual(normalizeCatalogDescription({
+    id: 1826500486,
+    name: "Unlock 30000 Max Supplies",
+    description: "Increases the settlement supply cap.",
+    tier: 2,
+    techType: { tag: "MaxSupplies", value: {} },
+    suppliesCost: 4000,
+    researchTime: 0,
+    requirements: [200],
+    input: [],
+    members: 75,
+    area: 2000,
+    supplies: 30000,
+    xpToMintHexCoin: 500,
+    unlocksTechs: [479987213, 1926459936],
+  }, "claim_tech"), {
+    kind: "claim_tech",
+    id: "1826500486",
+    name: "Unlock 30000 Max Supplies",
+    description: "Increases the settlement supply cap.",
+    tier: 2,
+    techType: "MaxSupplies",
+    suppliesCost: "4000",
+    researchTime: "0",
+    requirements: ["200"],
+    inputs: [],
+    members: "75",
+    area: "2000",
+    supplies: "30000",
+    xpToMintHexCoin: "500",
+    unlocksTechs: ["479987213", "1926459936"],
   });
 });
 
