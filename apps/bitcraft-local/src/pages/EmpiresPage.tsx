@@ -56,6 +56,12 @@ function compactDate(value: unknown): string {
   return `${timeAgo(value)} (${dateLabel(value)})`;
 }
 
+function staleRelayDetail(data: AnyRecord | null): string {
+  const errors = Array.isArray(data?.errors) ? data.errors.map(String).filter(Boolean) : [];
+  if (errors.length) return errors.slice(0, 3).join("; ");
+  return data?.updatedAt ? `Last live update: ${compactDate(data.updatedAt)}` : "The last complete Relay generation remains visible.";
+}
+
 function HexiteReserveCell({ value }: { value: AnyRecord }) {
   const presentation = presentHexiteReserveSummary(value);
   return (
@@ -113,7 +119,7 @@ function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () =>
     <div className="claim-member-dialog">
       <button type="button" className="toolbar-button compact-map-action" onClick={onBack}>Back to aligned claims</button>
       <div className="tower-access-note">
-        Showing members BitJita reports for {state.data?.claim?.name ?? claim.name ?? "this claim"}, with empire rank, claim role, and last login where available.
+        Showing current Relay members for {state.data?.claim?.name ?? claim.name ?? "this claim"}, with empire rank, claim role, and sign-in activity where available.
       </div>
       {rankOptions.length ? (
         <div className="tower-rank-filter" aria-label="Filter claim members by claim role">
@@ -125,6 +131,7 @@ function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () =>
       {state.loading && !state.data ? <AppSkeleton /> : null}
       {state.loading && state.data ? <AsyncState kind="loading" title="Refreshing claim members" detail="Current members remain visible." compact /> : null}
       {state.error ? <AsyncState kind="error" title="Unable to refresh claim members" detail={state.error} compact /> : null}
+      {state.data?.stale ? <AsyncState kind="stale" title="Showing last-good claim members" detail={staleRelayDetail(state.data)} compact /> : null}
       {state.data ? (
         <div className="tower-access-list">
           {visibleMembers.length ? visibleMembers.map((member) => (
@@ -137,7 +144,7 @@ function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () =>
               <div className="tower-access-flags" />
               <span className={member.signedIn ? "status-pill good" : "status-pill muted"}>{member.signedIn ? "Online now" : compactDate(member.lastLoginTimestamp)}</span>
             </article>
-          )) : <AsyncState kind={members.length ? "no-match" : "empty"} title={members.length ? "No members match the selected roles" : "No claim members returned"} detail={members.length ? "Clear the claim-role filters to see all members." : "BitJita did not return members for this claim."} compact />}
+          )) : <AsyncState kind={members.length ? "no-match" : "empty"} title={members.length ? "No members match the selected roles" : "No claim members returned"} detail={members.length ? "Clear the claim-role filters to see all members." : "The current Relay generation contains no members for this claim."} compact />}
         </div>
       ) : null}
     </div>
@@ -179,7 +186,7 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
             </div>
             {towerDialogTab === "members" ? (
               <>
-                <div className="tower-access-note">Showing all empire members BitJita reports for this empire, with last login and relevant watchtower access flags.</div>
+                <div className="tower-access-note">Showing current Relay empire members, sign-in activity, and proven watchtower access flags.</div>
                 {rankOptions.length ? (
                   <div className="tower-rank-filter" aria-label="Filter members by rank">
                     <span>Ranks</span>
@@ -446,6 +453,7 @@ export function Empires({
           </div>
           {overview.loading && overview.data ? <AsyncState kind="loading" title="Refreshing regional empires" detail="Current empire rows remain visible." compact /> : null}
           {overview.error ? <AsyncState kind="error" title="Unable to refresh regional empires" detail={overview.error} compact /> : null}
+          {overview.data?.stale ? <AsyncState kind="stale" title="Showing last-good Empire data" detail={staleRelayDetail(overview.data)} compact /> : null}
           <section className="dashboard-card table-panel">
             <div className="panel-head"><strong><Landmark size={15} /> Regional empires</strong><span>{overview.loading ? "Refreshing..." : `${formatNumber(overviewRows.length)} shown`}</span></div>
             <p className="hexite-reserve-note"><Zap size={14} /> Known minimum from treasury and inventories; completed Foundry output is unavailable.</p>
@@ -475,6 +483,7 @@ export function Empires({
           </section>
           {watchtowers.loading && watchtowers.data ? <AsyncState kind="loading" title="Refreshing claimed watchtowers" detail="Current tower rows remain visible." compact /> : null}
           {watchtowers.error ? <AsyncState kind="error" title="Unable to refresh claimed watchtowers" detail={watchtowers.error} compact /> : null}
+          {watchtowers.data?.stale ? <AsyncState kind="stale" title="Showing last-good watchtower data" detail={staleRelayDetail(watchtowers.data)} compact /> : null}
           {Array.isArray(watchtowers.data?.errors) && watchtowers.data.errors.length ? <div className="warning-card">Some empire tower scans failed: {watchtowers.data.errors.slice(0, 3).join("; ")}</div> : null}
           <section className="dashboard-card table-panel" data-tour="watchtower-card">
             <div className="panel-head watchtower-panel-head"><strong><RadioTower size={15} /> Claimed watchtowers</strong><span>{watchtowers.loading ? "Refreshing..." : visibleTowerRows.length === towerRows.length ? `${formatNumber(towerRows.length)} shown` : `${formatNumber(visibleTowerRows.length)} of ${formatNumber(towerRows.length)} shown`}</span></div>

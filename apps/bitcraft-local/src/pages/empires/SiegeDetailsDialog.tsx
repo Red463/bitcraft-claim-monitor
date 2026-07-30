@@ -18,15 +18,19 @@ function ParticipantCard({
   onViewEmpire,
 }: {
   participant: AnyRecord;
-  role: "attacker" | "defender";
+  role: "attacker" | "defender" | "unknown";
   onViewEmpire: (empireId: string) => void;
 }) {
   const empireId = String(participant.empireEntityId ?? participant.empireId ?? "").trim();
-  const label = role === "attacker" ? "Attacking Empire" : "Defending Empire";
+  const label = role === "attacker"
+    ? "Attacking Empire"
+    : role === "defender"
+      ? "Defending Empire"
+      : "Siege Role Unavailable";
   return (
     <article className={`siege-participant-card ${role}`}>
       <div className="siege-participant-head">
-        <span className={`status-pill ${role === "attacker" ? "danger" : "good"}`}>
+        <span className={`status-pill ${role === "attacker" ? "danger" : role === "defender" ? "good" : "muted"}`}>
           {role === "attacker" ? <AlertTriangle size={13} /> : <Shield size={13} />}
           {label}
         </span>
@@ -45,7 +49,7 @@ function ParticipantCard({
           <dd>{participant.empireName ?? "Unknown empire"}</dd>
         </div>
         <div>
-          <dt><Zap size={13} /> {role === "attacker" ? "Attacker" : "Defender"} Energy</dt>
+          <dt><Zap size={13} /> {role === "unknown" ? "Siege" : role === "attacker" ? "Attacker" : "Defender"} Energy</dt>
           <dd>{participant.energy == null ? "Unavailable" : formatNumber(participant.energy)}</dd>
         </div>
       </dl>
@@ -60,7 +64,7 @@ export function SiegeDetailsDialog({ tower, onClose, onViewEmpire }: SiegeDetail
     return () => window.clearInterval(timer);
   }, []);
 
-  const { attackers, defenders, startedAt } = groupSiegeParticipants(tower);
+  const { attackers, defenders, unknown, startedAt } = groupSiegeParticipants(tower);
   const towerName = String(tower.displayName ?? tower.nickname ?? "Watchtower");
 
   return (
@@ -109,7 +113,15 @@ export function SiegeDetailsDialog({ tower, onClose, onViewEmpire }: SiegeDetail
             onViewEmpire={onViewEmpire}
           />
         ))}
-        {!attackers.length && !defenders.length ? (
+        {unknown.map((participant, index) => (
+          <ParticipantCard
+            key={`unknown:${String(participant.empireEntityId ?? participant.empireId ?? index)}`}
+            role="unknown"
+            participant={participant}
+            onViewEmpire={onViewEmpire}
+          />
+        ))}
+        {!attackers.length && !defenders.length && !unknown.length ? (
           <div className="empty-state compact">Active siege participant details are unavailable.</div>
         ) : null}
       </div>

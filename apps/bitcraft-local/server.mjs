@@ -29,6 +29,13 @@ import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { createRelayClaimScopeFence } from "./src/server/relayClaimScopeFence.mjs";
 import { relayReconnectDelayMs } from "./src/server/relayRuntimeBackoff.mjs";
 import {
+  empireClaimMembersView,
+  empireDetailsView,
+  empireOverviewView,
+  empireSnapshotStatus,
+  empireWatchtowersView,
+} from "./src/server/empireViews.mjs";
+import {
   combinedMarketStatus,
   globalCatalogStatus,
   regionalBuyOrdersView,
@@ -116,6 +123,7 @@ import {
   RelayHttpClient,
   RelayBitCraftProvider,
   RelayClaimMarketRuntime,
+  RelayEmpireRuntime,
   RelayGlobalCatalogRuntime,
   RelayPlayerDataService,
   RelayPrimaryRegionRuntime,
@@ -133,7 +141,7 @@ import {
 import { aggregateEmpireHexite, createEmpireHexiteRefreshJob, createEmpireHexiteRepository } from "./src/server/empireHexite.mjs";
 import {
   createEmpireMembershipRepository,
-  normalizeEmpireMembershipRoster,
+  relayEmpireMembershipObservation,
 } from "./src/server/empireMembership.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
 import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
@@ -492,6 +500,17 @@ const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime({
     staggerMs: Math.max(0, Number(process.env.RELAY_MARKET_REGION_STAGGER_MS ?? 250)),
   },
 });
+const relayEmpireRuntime = new RelayEmpireRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+  onSnapshotCommitted: syncEmpireMembershipFromRelaySnapshot,
+  rotationMs: Math.max(1_000, Number(process.env.RELAY_EMPIRE_REGION_ROTATION_MS ?? 15_000)),
+  poolOptions: {
+    maxSessions: Math.max(1, Number(process.env.RELAY_EMPIRE_REGION_MAX_SESSIONS ?? 4)),
+    idleCloseMs: Math.max(10_000, Number(process.env.RELAY_EMPIRE_REGION_IDLE_CLOSE_MS ?? 60_000)),
+    staggerMs: Math.max(0, Number(process.env.RELAY_EMPIRE_REGION_STAGGER_MS ?? 250)),
+  },
+});
 const relayRegionalMarketStaleMs = Math.max(
   5_000,
   Number(process.env.RELAY_MARKET_REGION_STALE_MS) || 60_000,
@@ -499,6 +518,10 @@ const relayRegionalMarketStaleMs = Math.max(
 const relayGlobalCatalogStaleMs = Math.max(
   5_000,
   Number(process.env.RELAY_GLOBAL_CATALOG_STALE_MS) || 60_000,
+);
+const relayEmpireRegionStaleMs = Math.max(
+  5_000,
+  Number(process.env.RELAY_EMPIRE_REGION_STALE_MS) || 60_000,
 );
 let relayProviderRefreshTimer = null;
 let relayProviderStarted = false;
@@ -513,6 +536,7 @@ let relayPrimaryRegionStarted = false;
 let relayClaimMarketStarted = false;
 let relayPublicCraftStarted = false;
 let relayRegionalMarketStarted = false;
+let relayEmpireStarted = false;
 let relayRegionClaimsStarted = false;
 const relayClaimScopeFence = createRelayClaimScopeFence([
   {
@@ -523,6 +547,11 @@ const relayClaimScopeFence = createRelayClaimScopeFence([
   {
     stop: async () => {
       try { await relayRegionalMarketRuntime.stop(); } finally { relayRegionalMarketStarted = false; }
+    },
+  },
+  {
+    stop: async () => {
+      try { await relayEmpireRuntime.stop(); } finally { relayEmpireStarted = false; }
     },
   },
   {
@@ -574,6 +603,11 @@ function gameDataProviderHealth() {
     snapshot: currentStateRepository.read(currentClaimId(), "region-claims"),
     providerHealth: health,
   });
+  const empires = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayEmpireRuntime.health(),
+    snapshot: currentStateRepository.read(currentClaimId(), "empires"),
+    providerHealth: health,
+  });
   return {
     ...health,
     globalCatalog,
@@ -582,6 +616,7 @@ function gameDataProviderHealth() {
     claimMarket,
     regionalMarket,
     regionClaims,
+    empires,
   };
 }
 function globalRegionSubscriptionHealth() {
@@ -1485,9 +1520,6 @@ function audit(user, action, details = {}) {
 }
 
 const adminLoginAttempts = createAdminLoginAttemptStore();
-const empireScoutInflight = new Map();
-const regionClaimListCache = new Map();
-const empireScoutCache = new Map();
 const claimDetailCache = new Map();
 const playerDetailCache = new Map();
 const craftContributionCache = new Map();
@@ -1504,7 +1536,6 @@ const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CA
 const UPSTREAM_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.BITJITA_PROXY_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 const UPSTREAM_CACHE_MAX_ENTRIES = Math.max(25, Number(process.env.BITJITA_PROXY_CACHE_MAX_ENTRIES ?? 300));
 const BITJITA_FETCH_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_FETCH_TIMEOUT_MS ?? 15000));
-const EMPIRE_SCOUT_CACHE_TTL_MS = Math.max(30_000, Number(process.env.EMPIRE_SCOUT_CACHE_TTL_MS ?? 2 * 60 * 1000));
 const BITJITA_PROXY_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_TIMEOUT_MS ?? 12000));
 const SLOW_REQUEST_LOG_MS = Math.max(1000, Number(process.env.SLOW_REQUEST_LOG_MS ?? 8000));
 const PRODUCTION_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_CRAFT_TIMEOUT_MS ?? 10000));
@@ -5297,485 +5328,80 @@ async function fetchAllClaimListings(claimId, options = {}) {
   return { ...first, listings: [first, ...pages].flatMap((page) => unwrap(page, "listings", [])), page: 1, totalPages };
 }
 
-async function fetchRegionClaimList(regionId, options = {}) {
-  const key = String(regionId);
-  const cached = regionClaimListCache.get(key);
-  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
-  const base = `/claims?regionId=${encodeURIComponent(key)}&limit=100&sort=supplies&order=desc`;
-  const first = await fetchBitjita(`${base}&page=1`, { forceRefresh: options.forceRefresh === true });
-  const totalPages = Math.max(Math.ceil(toNumber(first.count) / 100), 1);
-  const pages = totalPages > 1
-    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`, { forceRefresh: options.forceRefresh === true }))
-    : [];
-  const value = { ...first, claims: [first, ...pages].flatMap((page) => unwrap(page, "claims", [])), page: 1, totalPages };
-  regionClaimListCache.set(key, { expiresAt: Date.now() + 5 * 60 * 1000, value });
-  return value;
+function relayEmpireCurrentData(claimId = currentClaimId()) {
+  return currentStateRepository.read(claimId, "empires")?.data ?? null;
 }
 
-function empireCacheGet(key) {
-  const cached = empireScoutCache.get(key);
-  return cached && cached.expiresAt > Date.now() ? cached.value : null;
-}
-
-function empireCacheGetAny(key) {
-  return empireScoutCache.get(key)?.value ?? null;
-}
-
-async function empireCacheLoad(key, loader, options = {}) {
-  const cached = empireCacheGet(key);
-  if (!options.forceRefresh && cached) return cached;
-  const inflight = empireScoutInflight.get(key);
-  if (inflight) return inflight;
-  const stale = empireCacheGetAny(key);
-  const request = (async () => {
-    try {
-      const value = await loader();
-      empireScoutCache.set(key, { value, expiresAt: Date.now() + EMPIRE_SCOUT_CACHE_TTL_MS });
-      return value;
-    } catch (error) {
-      if (stale) {
-        return { ...stale, stale: true, partial: true, errors: [...(stale.errors ?? []), errorMessage(error)] };
-      }
-      throw error;
-    } finally {
-      empireScoutInflight.delete(key);
-    }
-  })();
-  empireScoutInflight.set(key, request);
-  return request;
-}
-
-function empireIdFromClaim(claim) {
-  return String(claim?.empireEntityId ?? claim?.empireId ?? claim?.empire?.entityId ?? "").trim();
-}
-
-function normalizeEmpireClaim(claim) {
-  const claimId = String(claim?.entityId ?? claim?.id ?? claim?.claimId ?? "").trim();
+function relayEmpireReadScope(claimId) {
+  const current = currentStateRepository.read(claimId, "empires");
+  const configuredRegionIds = configuredRegionalMarketRegionIds(claimId);
+  const activeRegionIds = relayEmpireRuntime.health().activeRegionIds;
+  const runtimeRegionIds = Array.isArray(activeRegionIds) ? activeRegionIds.map(String) : [];
   return {
-    claimId,
-    name: String(claim?.name ?? claim?.claimName ?? `Claim ${claimId}`),
-    ownerName: String(claim?.ownerPlayerUsername ?? claim?.ownerUsername ?? claim?.ownerName ?? claim?.owner ?? "Unknown"),
-    ownerEntityId: String(claim?.ownerEntityId ?? claim?.ownerPlayerEntityId ?? claim?.ownerId ?? ""),
-    regionId: String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? ""),
-    locationX: nestedCoordinate(claim, "x"),
-    locationZ: nestedCoordinate(claim, "z"),
-    tier: claim?.tier ?? claim?.claimTier ?? null,
-    supplies: toNumber(claim?.supplies),
-    treasury: toNumber(claim?.treasury),
-    numTiles: toNumber(claim?.numTiles ?? claim?.tiles ?? claim?.territoryChunks),
-    updatedAt: claim?.updatedAt ?? claim?.lastUpdatedAt ?? claim?.timestamp ?? null,
+    current,
+    allowedRegionIds: configuredRegionIds.length ? configuredRegionIds : runtimeRegionIds,
   };
 }
 
-function knownClaimOwnerName(claim) {
-  const ownerName = String(claim?.ownerPlayerUsername ?? claim?.ownerUsername ?? claim?.ownerName ?? claim?.owner ?? "").trim();
-  return ownerName && ownerName.toLowerCase() !== "unknown" ? ownerName : "";
-}
-
-function claimEntityId(claim) {
-  return String(claim?.entityId ?? claim?.id ?? claim?.claimId ?? "").trim();
-}
-
-function mergeDefinedClaimFields(base, detail) {
-  return Object.fromEntries(Object.entries({ ...base, ...detail }).filter(([, value]) => value !== undefined && value !== null && value !== ""));
-}
-
-function memberDisplayName(member) {
-  return String(member?.username ?? member?.userName ?? member?.playerName ?? member?.name ?? "").trim();
-}
-
-async function enrichRegionalClaimOwners(claims) {
-  return mapWithConcurrency(claims, 4, async (claim) => {
-    if (!empireIdFromClaim(claim) || knownClaimOwnerName(claim)) return claim;
-    const id = claimEntityId(claim);
-    if (!id) return claim;
-    try {
-      const detailPayload = await fetchCachedClaimDetail(id);
-      const detail = detailPayload?.claim ?? detailPayload ?? {};
-      const enriched = mergeDefinedClaimFields(claim, detail);
-      if (knownClaimOwnerName(enriched)) return enriched;
-      const ownerEntityId = String(enriched?.ownerEntityId ?? enriched?.ownerPlayerEntityId ?? enriched?.ownerId ?? "").trim().toLowerCase();
-      if (!ownerEntityId) return enriched;
-      const membersPayload = await fetchBitjita(`/claims/${encodeURIComponent(id)}/members`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }).catch(() => ({ members: [] }));
-      const ownerMember = unwrap(membersPayload, "members", []).find((member) => memberLookupKeys(member).includes(ownerEntityId));
-      const ownerName = memberDisplayName(ownerMember);
-      return ownerName ? { ...enriched, ownerName } : enriched;
-    } catch {
-      return claim;
-    }
+function relayEmpireResponse(view, current, regionId) {
+  const status = empireSnapshotStatus(current, regionId, {
+    staleAfterMs: relayEmpireRegionStaleMs,
   });
-}
-
-function normalizeEmpireOverviewRow(empire, regionalClaims) {
-  const entityId = String(empire?.entityId ?? empire?.id ?? "").trim();
-  const claims = regionalClaims.filter((claim) => empireIdFromClaim(claim) === entityId);
+  const viewErrors = Array.isArray(view?.errors) ? view.errors.map(String) : [];
+  const errors = [...new Set([...viewErrors, ...status.errors])];
   return {
-    entityId,
-    name: String(empire?.name ?? `Empire ${entityId}`),
-    leader: String(empire?.leader ?? empire?.leaderName ?? "Unknown"),
-    leaderEntityId: String(empire?.leaderEntityId ?? ""),
-    memberCount: toNumber(empire?.memberCount ?? empire?.membersCount),
-    territoryChunks: toNumber(empire?.territoryChunks),
-    numClaims: toNumber(empire?.numClaims),
-    regionalClaims: claims.length,
-    empireCurrencyTreasury: toNumber(empire?.empireCurrencyTreasury),
-    shardTreasury: toNumber(empire?.shardTreasury),
-    capitalBuildingEntityId: empire?.capitalBuildingEntityId ?? null,
-    locationX: empire?.locationX ?? null,
-    locationZ: empire?.locationZ ?? null,
-    locationDimension: empire?.locationDimension ?? null,
-    createdAt: empire?.createdAt ?? null,
-    updatedAt: empire?.updatedAt ?? null,
-    regionalClaimNames: claims.map((claim) => claim?.name).filter(Boolean).slice(0, 8),
-    claims: claims.map(normalizeEmpireClaim).filter((claim) => claim.claimId),
+    ...view,
+    stale: status.stale,
+    partial: Boolean(view?.partial) || status.partial,
+    ageMs: status.ageMs,
+    updatedAt: status.updatedAt,
+    freshness: status.stale ? "stale" : "live",
+    errors,
+    serverFreshness: {
+      cacheState: status.stale ? "stored-stale-if-error" : "relay-live",
+      cachedAt: status.updatedAt,
+      stale: status.stale,
+    },
   };
 }
 
-async function regionalEmpireOverview(regionId, options = {}) {
-  const key = `overview:${regionId}`;
-  const overview = await empireCacheLoad(key, async () => {
-    const [claimPayload, empirePayload] = await Promise.all([
-      fetchRegionClaimList(regionId, options),
-      fetchBitjita("/empires", { forceRefresh: options.forceRefresh === true }),
-    ]);
-    const claims = await enrichRegionalClaimOwners(unwrap(claimPayload, "claims", []));
-    const regionalEmpireIds = new Set(claims.map(empireIdFromClaim).filter(Boolean));
-    const allEmpires = Array.isArray(empirePayload) ? empirePayload : unwrap(empirePayload, "empires", []);
-    const empires = allEmpires
-      .filter((empire) => regionalEmpireIds.has(String(empire?.entityId ?? empire?.id ?? "")))
-      .map((empire) => normalizeEmpireOverviewRow(empire, claims))
-      .filter((empire) => empire.entityId)
-      .sort((a, b) => b.regionalClaims - a.regionalClaims || b.memberCount - a.memberCount || a.name.localeCompare(b.name));
-    const largestEmpire = [...empires].sort((a, b) => b.memberCount - a.memberCount || b.regionalClaims - a.regionalClaims)[0] ?? null;
-    return {
-      regionId: String(regionId),
-      fetchedAt: new Date().toISOString(),
-      totalRegionalClaims: claims.length,
-      empireClaimCount: claims.filter((claim) => empireIdFromClaim(claim)).length,
-      empires,
-      summary: {
-        empires: empires.length,
-        regionalClaims: claims.filter((claim) => empireIdFromClaim(claim)).length,
-        totalMembers: empires.reduce((sum, empire) => sum + toNumber(empire.memberCount), 0),
-        largestEmpireName: largestEmpire?.name ?? null,
-      },
-    };
-  }, options);
+function relayEmpireRegionalClaims(claimId, regionId) {
+  const data = currentStateRepository.read(claimId, "region-claims")?.data ?? null;
+  return String(data?.regionId ?? "") === String(regionId) ? data : null;
+}
+
+function relayEmpireHexiteForView(empireId, empire) {
   const activeSweep = empireHexiteRepository.activeSweep();
+  const snapshot = empireHexiteRepository.snapshotForEmpire(empireId);
+  if (snapshot) return { ...snapshot, refreshing: Boolean(activeSweep) };
   const bootstrapFailure = activeSweep ? null : empireHexiteRepository.latestBootstrapFailure();
-  return {
-    ...overview,
-    empires: overview.empires.map((empire) => {
-      const snapshot = empireHexiteRepository.snapshotForEmpire(empire.entityId);
-      let hexiteReserves = snapshot
-        ? { ...snapshot, refreshing: Boolean(activeSweep) }
-        : aggregateEmpireHexite({
-          treasury: empire.empireCurrencyTreasury,
-          capsuleEnergyCost: activeSweep?.capsuleEnergyCost ?? null,
-          players: [],
-          claims: [],
-          sweepStartedAt: activeSweep?.startedAt ?? null,
-          calculatedAt: null,
-          refreshing: Boolean(activeSweep),
-        });
-      if (!snapshot && bootstrapFailure) {
-        hexiteReserves = {
-          ...hexiteReserves,
-          status: "error",
-          sweepStartedAt: bootstrapFailure.startedAt,
-          errors: [bootstrapFailure.lastError].filter(Boolean),
-        };
-      }
-      return { ...empire, hexiteReserves };
-    }),
-  };
-}
-
-function lastLoginMs(value) {
-  const parsed = Date.parse(String(value ?? ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function leaderCandidates(empire, members) {
-  const leaderId = String(empire?.leaderEntityId ?? "");
-  const candidates = members.filter((member) => {
-    const memberId = String(member?.entityId ?? member?.playerEntityId ?? "");
-    const rankTitle = String(member?.rankTitle ?? member?.rank ?? "").trim().toLowerCase();
-    return memberId === leaderId || (rankTitle && rankTitle !== "citizen");
+  const fallback = aggregateEmpireHexite({
+    treasury: empire?.empireCurrencyTreasury,
+    capsuleEnergyCost: activeSweep?.capsuleEnergyCost ?? null,
+    players: [],
+    claims: [],
+    sweepStartedAt: activeSweep?.startedAt ?? null,
+    calculatedAt: null,
+    refreshing: Boolean(activeSweep),
   });
-  if (candidates.length) return candidates;
-  return members.filter((member) => String(member?.entityId ?? member?.playerEntityId ?? "") === leaderId).slice(0, 1);
-}
-
-function empireInactivity(empire, members, inactiveDays) {
-  const candidates = leaderCandidates(empire, members);
-  const thresholdMs = Date.now() - Math.max(1, toNumber(inactiveDays)) * 24 * 60 * 60 * 1000;
-  const latest = candidates.reduce((best, member) => Math.max(best, lastLoginMs(member?.lastLoginTimestamp)), 0);
-  const activeLeaderCount = candidates.filter((member) => lastLoginMs(member?.lastLoginTimestamp) >= thresholdMs).length;
-  return {
-    inactiveRisk: candidates.length > 0 && activeLeaderCount === 0,
-    leaderCount: candidates.length,
-    activeLeaderCount,
-    lastLeaderLogin: latest ? new Date(latest).toISOString() : null,
-    inactivityReason: candidates.length ? (activeLeaderCount ? "Leader/noble activity found" : `No leader or noble login within ${inactiveDays} days`) : "No leader/noble data returned by BitJita",
-  };
-}
-
-function empireActivity(members) {
-  const now = Date.now();
-  const dayAgo = now - 24 * 60 * 60 * 1000;
-  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-  return {
-    onlineNow: members.filter((member) => member.signedIn).length,
-    activeToday: members.filter((member) => member.signedIn || lastLoginMs(member.lastLoginTimestamp) >= dayAgo).length,
-    activeThisWeek: members.filter((member) => member.signedIn || lastLoginMs(member.lastLoginTimestamp) >= weekAgo).length,
-  };
-}
-
-function nestedCoordinate(source, axis) {
-  const directKeys = axis === "x" ? ["locationX", "x", "coordX", "coordinateX", "worldX"] : ["locationZ", "z", "coordZ", "coordinateZ", "worldZ"];
-  for (const key of directKeys) {
-    if (source?.[key] != null) return source[key];
-  }
-  const nested = source?.location ?? source?.position ?? source?.coordinates ?? source?.coord ?? source?.coords;
-  if (Array.isArray(nested)) return axis === "x" ? nested[0] : nested[1];
-  if (nested && typeof nested === "object") {
-    for (const key of directKeys) {
-      if (nested[key] != null) return nested[key];
-    }
-  }
-  return null;
-}
-
-function normalizeEmpireMember(member) {
-  const permissions = parseMemberPermissions(member);
-  const rawHexiteAccess = member?.canAddHexite ?? member?.addHexitePermission ?? member?.hexitePermission ?? member?.canContributeHexite ?? member?.claimHexitePermission;
-  const canAddHexite = rawHexiteAccess != null ? Boolean(rawHexiteAccess === true || rawHexiteAccess === 1 || String(rawHexiteAccess).toLowerCase() === "true") : Boolean(permissions.coOwnerPermission || permissions.officerPermission || permissions.buildPermission);
-  const hasStorage = Boolean(permissions.inventoryPermission);
-  return {
-    entityId: String(member?.entityId ?? member?.playerEntityId ?? member?.id ?? ""),
-    username: String(member?.username ?? member?.userName ?? member?.playerName ?? "Unknown"),
-    rankTitle: String(member?.rankTitle ?? member?.rank ?? "Citizen"),
-    lastLoginTimestamp: member?.lastLoginTimestamp ?? member?.lastSeenAt ?? member?.lastSeen ?? null,
-    signedIn: member?.signedIn === true || member?.online === true,
-    hasStorage,
-    canAddHexite,
-    permissions,
-  };
-}
-
-function memberLookupKeys(member) {
-  return [member?.entityId, member?.playerEntityId, member?.id, member?.username, member?.userName, member?.playerName]
-    .map((value) => String(value ?? "").trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function memberMatchesClaimOwner(member, claim) {
-  const ownerEntityId = String(claim?.ownerEntityId ?? "").trim().toLowerCase();
-  const ownerName = String(claim?.ownerName ?? "").trim().toLowerCase();
-  const keys = memberLookupKeys(member);
-  return Boolean((ownerEntityId && keys.includes(ownerEntityId)) || (ownerName && keys.includes(ownerName)));
-}
-
-function normalizeClaimMember(member, claim, empireMemberLookup) {
-  const base = normalizeEmpireMember({ ...member, rankTitle: member?.rankTitle ?? member?.rank ?? null });
-  const empireMember = memberLookupKeys({ ...member, ...base }).map((key) => empireMemberLookup.get(key)).find(Boolean) ?? null;
-  const isOwner = memberMatchesClaimOwner({ ...member, ...base }, claim);
-  const claimRole = isOwner ? "Owner" : base.permissions.coOwnerPermission ? "Co-owner" : "Member";
-  return {
-    ...base,
-    rankTitle: null,
-    claimMemberTitle: member?.rankTitle ?? member?.rank ?? null,
-    empireRankTitle: empireMember?.rankTitle ?? null,
-    claimRole,
-    isClaimOwner: isOwner,
-    isClaimCoOwner: base.permissions.coOwnerPermission,
-  };
-}
-
-function compareEmpireMembers(a, b) {
-  if (Boolean(a.signedIn) !== Boolean(b.signedIn)) return a.signedIn ? -1 : 1;
-  return lastLoginMs(b.lastLoginTimestamp) - lastLoginMs(a.lastLoginTimestamp) || String(a.username).localeCompare(String(b.username));
-}
-
-function normalizeEmpireTower(tower, empire, inactivity) {
-  const siege = Array.isArray(tower?.siege) ? tower.siege : [];
-  const activeSiegeParticipants = siege.filter((entry) => entry?.active === true);
-  const locationX = nestedCoordinate(tower, "x");
-  const locationZ = nestedCoordinate(tower, "z");
-  return {
-    id: String(tower?.entityId ?? tower?.id ?? ""),
-    towerId: String(tower?.entityId ?? tower?.id ?? ""),
-    empireId: empire.entityId,
-    empireName: empire.name,
-    nickname: String(tower?.nickname ?? tower?.name ?? "Watchtower"),
-    locationX,
-    locationZ,
-    locationDimension: tower?.locationDimension ?? tower?.dimension ?? tower?.location?.dimension ?? null,
-    energy: toNumber(tower?.energy),
-    upkeep: toNumber(tower?.upkeep),
-    active: tower?.active === true,
-    underSiege: activeSiegeParticipants.length > 0,
-    siegeCount: activeSiegeParticipants.length,
-    activeSiegeParticipants,
-    inactiveRisk: inactivity.inactiveRisk,
-    lastLeaderLogin: inactivity.lastLeaderLogin,
-    inactivityReason: inactivity.inactivityReason,
-  };
-}
-
-async function regionalEmpireDetails(empireId, regionId, inactiveDays = 14, options = {}) {
-  const days = Math.max(1, Math.min(365, toNumber(inactiveDays) || 14));
-  const key = `details:${regionId}:${empireId}:${days}`;
-  return empireCacheLoad(key, async () => {
-    const overview = await regionalEmpireOverview(regionId, options);
-    const regionalEmpire = overview.empires.find((entry) => String(entry.entityId) === String(empireId));
-
-    const [detailResult, towerResult] = await Promise.allSettled([
-      fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
-      fetchBitjita(`/empires/${encodeURIComponent(empireId)}/towers`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
-    ]);
-    if (!regionalEmpire && detailResult.status === "rejected") return null;
-
-    const errors = [];
-    const detailPayload = detailResult.status === "fulfilled" ? detailResult.value : null;
-    const towerPayload = towerResult.status === "fulfilled" ? towerResult.value : null;
-    if (detailResult.status === "rejected") errors.push(`Empire members unavailable: ${errorMessage(detailResult.reason)}`);
-    if (towerResult.status === "rejected") errors.push(`Watchtowers unavailable: ${errorMessage(towerResult.reason)}`);
-
-    const rawDetailEmpire = detailPayload?.empire ?? (detailPayload?.entityId ? detailPayload : null);
-    const baseEmpire = regionalEmpire ?? normalizeEmpireOverviewRow(rawDetailEmpire, []);
-    if (!baseEmpire.entityId) return null;
-    const detailEmpire = rawDetailEmpire ?? baseEmpire;
-    const rawMembers = detailPayload ? unwrap(detailPayload, "members", []) : [];
-    const members = rawMembers.map(normalizeEmpireMember).sort(compareEmpireMembers);
-    const inferredLeader = rawMembers.find((member) => toNumber(member?.rank) === 0);
-    const inferredLeaderName = memberDisplayName(inferredLeader);
-    const knownLeader = String(detailEmpire?.leader ?? baseEmpire.leader ?? "").trim();
-    const claims = baseEmpire.claims?.length
-      ? baseEmpire.claims
-      : detailEmpire?.capitalClaimId
-        ? [normalizeEmpireClaim({
-            entityId: detailEmpire.capitalClaimId,
-            name: detailEmpire.capitalClaimName,
-            regionId: detailEmpire.capitalRegionId,
-            locationX: detailEmpire.locationX,
-            locationZ: detailEmpire.locationZ,
-            empireEntityId: baseEmpire.entityId,
-          })]
-        : [];
-    const empire = {
-      ...baseEmpire,
-      leader: knownLeader && knownLeader.toLowerCase() !== "unknown" ? knownLeader : inferredLeaderName || "Unknown",
-      leaderEntityId: String(detailEmpire?.leaderEntityId ?? baseEmpire.leaderEntityId ?? "").trim() || String(inferredLeader?.entityId ?? ""),
-      memberCount: Math.max(toNumber(baseEmpire.memberCount), toNumber(detailPayload?.count), members.length),
-      claims,
-    };
-    const inactivity = empireInactivity(empire, members, days);
-    const rawTowers = Array.isArray(towerPayload) ? towerPayload : unwrap(towerPayload, "towers", []);
-    const towers = rawTowers.map((tower) => normalizeEmpireTower(tower, empire, inactivity)).filter((tower) => tower.towerId);
-    return {
-      empire: { ...empire, ...inactivity },
-      members,
-      claims: empire.claims ?? [],
-      towers,
-      activity: empireActivity(members),
-      errors,
-      partial: errors.length > 0,
-      fetchedAt: new Date().toISOString(),
-    };
-  }, options);
-}
-
-async function regionalEmpireClaimMembers(claimId, options = {}) {
-  const key = `claim-members:${claimId}`;
-  return empireCacheLoad(key, async () => {
-    const [claimPayload, membersPayload] = await Promise.all([
-      fetchBitjita(`/claims/${encodeURIComponent(claimId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
-      fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }).catch((error) => ({ members: [], errors: [errorMessage(error)] })),
-    ]);
-    const rawClaim = claimPayload?.claim ?? claimPayload ?? { entityId: claimId };
-    const claim = normalizeEmpireClaim(rawClaim);
-    const errors = Array.isArray(membersPayload?.errors) ? [...membersPayload.errors] : [];
-    const empireId = String(rawClaim?.empireEntityId ?? rawClaim?.empireId ?? "").trim();
-    const empireMembersPayload = empireId ? await fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }).catch((error) => {
-      errors.push(`Empire ranks unavailable: ${errorMessage(error)}`);
-      return null;
-    }) : null;
-    const empireMemberLookup = new Map();
-    for (const member of unwrap(empireMembersPayload, "members", [])) {
-      const normalized = normalizeEmpireMember(member);
-      for (const key of memberLookupKeys({ ...member, ...normalized })) empireMemberLookup.set(key, normalized);
-    }
-    const members = unwrap(membersPayload, "members", []).map((member) => normalizeClaimMember(member, claim, empireMemberLookup)).sort(compareEmpireMembers);
-    return {
-      claim,
-      members,
-      errors,
-      fetchedAt: new Date().toISOString(),
-    };
-  }, options);
-}
-
-async function regionalEmpireWatchtowers(regionId, inactiveDays = 14, options = {}) {
-  const days = Math.max(1, Math.min(365, toNumber(inactiveDays) || 14));
-  const key = `watchtowers:${regionId}:${days}`;
-  return empireCacheLoad(key, async () => {
-    const overview = await regionalEmpireOverview(regionId, options);
-    const errors = [];
-    const startedAt = Date.now();
-    const deadlineMs = Math.max(5000, Math.min(BITJITA_FETCH_TIMEOUT_MS - 1500, 14_000));
-    let deadlineHit = false;
-    const empireRows = await mapWithConcurrency(overview.empires, 2, async (empire) => {
-      if (Date.now() - startedAt > deadlineMs) {
-        deadlineHit = true;
-        return { ...empire, inactiveRisk: false, leaderCount: 0, activeLeaderCount: 0, lastLeaderLogin: null, inactivityReason: "Skipped because the watchtower scan deadline was reached", members: [], accessMembers: [], towerCount: 0, towers: [] };
+  return bootstrapFailure
+    ? {
+        ...fallback,
+        status: "error",
+        sweepStartedAt: bootstrapFailure.startedAt,
+        errors: [bootstrapFailure.lastError].filter(Boolean),
       }
-      try {
-        const [detailPayload, towerPayload] = await Promise.all([
-          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
-          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}/towers`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
-        ]);
-        const detailEmpire = detailPayload?.empire ?? empire;
-        const members = unwrap(detailPayload, "members", []);
-        const towers = Array.isArray(towerPayload) ? towerPayload : unwrap(towerPayload, "towers", []);
-        const inactivity = empireInactivity({ ...empire, ...detailEmpire }, members, days);
-        const normalizedMembers = members.map(normalizeEmpireMember).sort(compareEmpireMembers);
-        const accessMembers = normalizedMembers.filter((member) => member.hasStorage || member.canAddHexite);
-        return {
-          ...empire,
-          ...inactivity,
-          members: normalizedMembers,
-          accessMembers,
-          towerCount: towers.length,
-          towers: towers.map((tower) => normalizeEmpireTower(tower, empire, inactivity)).filter((tower) => tower.towerId),
-        };
-      } catch (error) {
-        errors.push(`${empire.name}: ${error instanceof Error ? error.message : String(error)}`);
-        return { ...empire, inactiveRisk: false, leaderCount: 0, activeLeaderCount: 0, lastLeaderLogin: null, inactivityReason: "Empire detail unavailable", members: [], accessMembers: [], towerCount: 0, towers: [] };
-      }
-    });
-    if (deadlineHit) errors.push("Watchtower scan stopped early to avoid timing out. Showing partial results; retry after the cache refreshes.");
-    const towers = empireRows.flatMap((empire) => empire.towers);
-    return {
-      regionId: String(regionId),
-      inactiveDays: days,
-      fetchedAt: new Date().toISOString(),
-      partial: deadlineHit,
-      unclaimedAvailable: false,
-      unclaimedMessage: "Unclaimed watchtowers are not exposed by the current BitJita public API.",
-      empires: empireRows,
-      towers,
-      errors,
-      summary: {
-        towerCount: towers.length,
-        inactiveRiskEmpires: empireRows.filter((empire) => empire.inactiveRisk).length,
-        underSiege: towers.filter((tower) => tower.underSiege).length,
-        activeTowers: towers.filter((tower) => tower.active).length,
-      },
-    };
-  }, options);
+    : fallback;
 }
+
+function relayEmpireViewOptions(claimId, regionId, extra = {}) {
+  return {
+    regionalClaims: relayEmpireRegionalClaims(claimId, regionId),
+    hexiteForEmpire: relayEmpireHexiteForView,
+    ...extra,
+  };
+}
+
 function dealWatchRow(row) {
   if (!row) return null;
   return {
@@ -6938,30 +6564,36 @@ function empireMembershipAdminPayload() {
   };
 }
 
-function claimEmpireId(claim) {
-  return String(claim?.empireEntityId ?? claim?.empireId ?? "").trim();
-}
-
-async function runEmpireMembershipCollector(claim, force = false) {
+async function syncEmpireMembershipFromRelaySnapshot({ claimId, currentData, observedAt }) {
   const key = "empireMembership";
-  if (!sideEffectCollectorDue(key, force)) return;
-  const startedAt = collectorAttempt(key, "Fetching current empire roster");
-  const observedAt = new Date().toISOString();
+  const startedAt = collectorAttempt(key, "Applying current Relay empire roster");
   try {
-    const empireId = claimEmpireId(claim);
-    if (!empireId) {
+    const observation = relayEmpireMembershipObservation(currentData, claimId);
+    if (observation.state === "waiting") {
+      setCollectorStatus(key, {
+        enabled: true,
+        running: false,
+        source: "relay-subscription",
+        currentStep: "Waiting for the primary Empire generation",
+      });
+      return;
+    }
+    if (observation.state === "none") {
       const stopped = empireMembershipRepository.stopTracking({ observedAt });
-      setCollectorStatus(key, { rowCount: 0, trackingStopped: stopped.stopped });
+      setCollectorStatus(key, {
+        enabled: true,
+        rowCount: 0,
+        trackingStopped: stopped.stopped,
+        source: "relay-subscription",
+      });
       collectorSuccess(key, startedAt);
       return;
     }
-    const payload = await fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, {
-      timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS),
-      forceRefresh: true,
-    });
-    const roster = normalizeEmpireMembershipRoster(payload, empireId);
+    const roster = observation.roster;
     const result = empireMembershipRepository.syncRoster({ ...roster, observedAt });
     setCollectorStatus(key, {
+      enabled: true,
+      source: "relay-subscription",
       rowCount: result.currentMembers,
       currentEmpireId: roster.empireId,
       currentEmpireName: roster.empireName,
@@ -6974,9 +6606,7 @@ async function runEmpireMembershipCollector(claim, force = false) {
     collectorSuccess(key, startedAt);
   } catch (error) {
     collectorFailure(key, startedAt, error);
-    console.warn(
-      `Empire membership collection failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw error;
   }
 }
 
@@ -7021,7 +6651,6 @@ async function collectServerSnapshot(force = false) {
       buildingsCount: buildings.length,
       market: currentData.market ?? { listings: [] },
     });
-    await runEmpireMembershipCollector(claim, force);
     await runProductionActivityCollector(claimId, currentData);
     await runProductionContributionCollector(claimId, currentData, force);
     const marketStartedAt = collectorAttempt("marketTrades");
@@ -8596,6 +8225,13 @@ const server = createServer(async (req, res) => {
           // The route below deliberately serves last-good envelopes when present.
         }
       }
+      if (refresh.forceRefresh && domains.includes("empires") && relayEmpireStarted) {
+        try {
+          await relayEmpireRuntime.warmActiveRegions();
+        } catch {
+          // The route below deliberately serves last-good envelopes when present.
+        }
+      }
       const result = gameDataResponse({
         configuredClaimId: currentClaimId(),
         claimId,
@@ -10095,85 +9731,106 @@ const server = createServer(async (req, res) => {
       if (!rateLimit(req, res, "empires", RATE_LIMITS.expensiveLocal)) return;
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
-      const { forceRefresh } = refresh;
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
-      try {
-        return send(res, 200, await regionalEmpireOverview(regionId, { forceRefresh }));
-      } catch (error) {
-        const cached = empireCacheGetAny(`overview:${regionId}`);
-        if (cached) return send(res, 200, { ...cached, stale: true, partial: true, errors: [...(cached.errors ?? []), errorMessage(error)] });
-        return send(res, 200, {
-          regionId,
-          fetchedAt: new Date().toISOString(),
-          stale: true,
-          partial: true,
-          totalRegionalClaims: 0,
-          empireClaimCount: 0,
-          empires: [],
-          errors: [errorMessage(error)],
-          summary: { empires: 0, regionalClaims: 0, totalMembers: 0, largestEmpireName: null },
-        });
+      if (refresh.forceRefresh && relayEmpireStarted) {
+        await relayEmpireRuntime.warmActiveRegions().catch(() => {});
       }
+      const claimId = currentClaimId();
+      const { current, allowedRegionIds } = relayEmpireReadScope(claimId);
+      if (!current?.data) return send(res, 503, { error: "Relay Empire data has not loaded yet." });
+      if (!allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      return send(res, 200, relayEmpireResponse(
+        empireOverviewView(
+          current.data,
+          regionId,
+          relayEmpireViewOptions(claimId, regionId),
+        ),
+        current,
+        regionId,
+      ));
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/details") {
       if (!rateLimit(req, res, "empire-details", RATE_LIMITS.expensiveLocal)) return;
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
-      const { forceRefresh } = refresh;
       const empireId = String(url.searchParams.get("empireId") ?? "").trim();
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!empireId) return send(res, 400, { error: "Empire id is required" });
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
       const inactiveDays = url.searchParams.get("inactiveDays") ?? 14;
-      try {
-        const details = await regionalEmpireDetails(empireId, regionId, inactiveDays, { forceRefresh });
-        return details ? send(res, 200, details) : send(res, 404, { error: "Empire not found in region" });
-      } catch (error) {
-        return send(res, 502, { error: "Empire details unavailable", errors: [errorMessage(error)] });
+      if (refresh.forceRefresh && relayEmpireStarted) {
+        await relayEmpireRuntime.warmActiveRegions().catch(() => {});
       }
+      const claimId = currentClaimId();
+      const { current, allowedRegionIds } = relayEmpireReadScope(claimId);
+      if (!current?.data) return send(res, 503, { error: "Relay Empire data has not loaded yet." });
+      if (!allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const details = empireDetailsView(
+        current.data,
+        regionId,
+        empireId,
+        inactiveDays,
+        relayEmpireViewOptions(claimId, regionId),
+      );
+      return details
+        ? send(res, 200, relayEmpireResponse(details, current, regionId))
+        : send(res, 404, { error: "Empire not found in region" });
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/claim-members") {
       if (!rateLimit(req, res, "empire-claim-members", RATE_LIMITS.expensiveLocal)) return;
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
-      const { forceRefresh } = refresh;
       const claimId = String(url.searchParams.get("claimId") ?? "").trim();
       if (!claimId) return send(res, 400, { error: "Claim id is required" });
-      try {
-        return send(res, 200, await regionalEmpireClaimMembers(claimId, { forceRefresh }));
-      } catch (error) {
-        return send(res, 502, { claim: { claimId, name: `Claim ${claimId}` }, members: [], errors: [errorMessage(error)], fetchedAt: new Date().toISOString() });
+      if (refresh.forceRefresh && relayEmpireStarted) {
+        await relayEmpireRuntime.warmActiveRegions().catch(() => {});
       }
+      const monitoredClaimId = currentClaimId();
+      const { current, allowedRegionIds } = relayEmpireReadScope(monitoredClaimId);
+      if (!current?.data) return send(res, 503, { error: "Relay Empire data has not loaded yet." });
+      const settlement = current.data.settlements?.find((row) => String(row?.claimEntityId) === claimId);
+      const regionId = String(settlement?.regionId ?? "");
+      if (!allowedRegionIds.includes(regionId)) {
+        return send(res, 404, { error: "Claim not found in configured active regions" });
+      }
+      const view = empireClaimMembersView(current.data, claimId, {
+        regionalClaims: relayEmpireRegionalClaims(monitoredClaimId, regionId),
+      });
+      return view
+        ? send(res, 200, relayEmpireResponse(view, current, regionId))
+        : send(res, 404, { error: "Claim not found in configured active regions" });
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/watchtowers") {
       if (!rateLimit(req, res, "empire-watchtowers", RATE_LIMITS.expensiveLocal)) return;
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
-      const { forceRefresh } = refresh;
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
       const inactiveDays = url.searchParams.get("inactiveDays") ?? 14;
-      try {
-        return send(res, 200, await regionalEmpireWatchtowers(regionId, inactiveDays, { forceRefresh }));
-      } catch (error) {
-        const days = Math.max(1, Math.min(365, toNumber(inactiveDays) || 14));
-        const cached = empireCacheGetAny(`watchtowers:${regionId}:${days}`);
-        if (cached) return send(res, 200, { ...cached, stale: true, errors: [...(cached.errors ?? []), errorMessage(error)] });
-        return send(res, 200, {
-          regionId,
-          inactiveDays: days,
-          fetchedAt: new Date().toISOString(),
-          stale: true,
-          partial: true,
-          unclaimedAvailable: false,
-          unclaimedMessage: "Unclaimed watchtowers are not exposed by the current BitJita public API.",
-          empires: [],
-          towers: [],
-          errors: [errorMessage(error)],
-          summary: { towerCount: 0, inactiveRiskEmpires: 0, underSiege: 0, activeTowers: 0 },
-        });
+      if (refresh.forceRefresh && relayEmpireStarted) {
+        await relayEmpireRuntime.warmActiveRegions().catch(() => {});
       }
+      const claimId = currentClaimId();
+      const { current, allowedRegionIds } = relayEmpireReadScope(claimId);
+      if (!current?.data) return send(res, 503, { error: "Relay Empire data has not loaded yet." });
+      if (!allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      return send(res, 200, relayEmpireResponse(
+        empireWatchtowersView(
+          current.data,
+          regionId,
+          inactiveDays,
+          relayEmpireViewOptions(claimId, regionId),
+        ),
+        current,
+        regionId,
+      ));
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/overview") {
       if (!rateLimit(req, res, "global-market-overview", RATE_LIMITS.expensiveLocal)) return;
@@ -10680,6 +10337,37 @@ function startBackgroundTasks() {
           if (!isTestRuntime) console.warn(`Relay regional-market reconcile failed: ${errorMessage(error)}`);
         }
       }
+      if (!relayEmpireStarted) {
+        try {
+          const settings = getSettings();
+          const activeRegionIds = parseRegionIds(
+            `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+          );
+          await relayEmpireRuntime.start({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds,
+          });
+          relayEmpireStarted = true;
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay Empire startup failed: ${errorMessage(error)}`);
+        }
+      } else {
+        try {
+          const settings = getSettings();
+          await relayEmpireRuntime.reconcile({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds: parseRegionIds(
+              `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+            ),
+          });
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay Empire reconcile failed: ${errorMessage(error)}`);
+        }
+      }
       try {
         if (!relayClaimMarketStarted) {
           await relayClaimMarketRuntime.start({
@@ -10739,6 +10427,9 @@ function startBackgroundTasks() {
           await reconcilePrimaryRegion(claimId);
           if (relayPublicCraftStarted) {
             await relayPublicCraftRuntime.warmActiveRegions();
+          }
+          if (relayEmpireStarted) {
+            await relayEmpireRuntime.warmActiveRegions();
           }
         });
         if (!reconciledCurrentClaim || currentClaimId() !== claimId) return;

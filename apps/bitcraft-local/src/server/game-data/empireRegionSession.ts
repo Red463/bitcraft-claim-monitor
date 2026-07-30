@@ -1,4 +1,7 @@
-import { normalizeRegionalEmpires } from "./normalizers.ts";
+import {
+  normalizeRegionalEmpires,
+  regionalEmpireDetailIds,
+} from "./normalizers.ts";
 import { equalitySubscriptionQueries } from "./publicCraftRegionSession.ts";
 import {
   assertSchemaFingerprint,
@@ -23,6 +26,7 @@ type SubscriptionBuilder = {
 };
 type BindingConnection = {
   db: {
+    worldRegionState: CachedTable;
     empireState: CachedTable;
     empirePlayerDataState: CachedTable;
     empireRankState: CachedTable;
@@ -31,7 +35,9 @@ type BindingConnection = {
     empireNodeSiegeState: CachedTable;
     empireChunkState: CachedTable;
     claimState: CachedTable;
+    claimMemberState: CachedTable;
     playerUsernameState: CachedTable;
+    playerState: CachedTable;
     buildingNicknameState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
@@ -56,12 +62,17 @@ type SessionConfig = {
   maxBaseRows?: number;
   maxApplyRows?: number;
   maxIdsPerQuery?: number;
+  includeIdentities?: boolean;
 };
+type SessionSource = Pick<SessionConfig, "uri" | "database" | "schemaFingerprint">;
 type SessionDependencies = {
   loadBindings?: () => Promise<RegionalBindingModule>;
   onSnapshot(snapshot: RegionalEmpireSnapshot): void | Promise<void>;
   onFailure?(error: string): void;
+  refreshSource?: () => Promise<SessionSource>;
   now?: () => Date;
+  random?: () => number;
+  scheduleRetry?: (callback: () => void, delayMs: number) => () => void;
 };
 export type RegionalEmpireSnapshot = {
   data: ReturnType<typeof normalizeRegionalEmpires>["data"];
@@ -112,12 +123,20 @@ export class RelayEmpireRegionSession {
   readonly #loadBindings: () => Promise<RegionalBindingModule>;
   readonly #onSnapshot: SessionDependencies["onSnapshot"];
   readonly #onFailure: NonNullable<SessionDependencies["onFailure"]>;
+  readonly #refreshSource: SessionDependencies["refreshSource"];
   readonly #now: () => Date;
+  readonly #random: () => number;
+  readonly #scheduleRetry: NonNullable<SessionDependencies["scheduleRetry"]>;
+  #bindings: RegionalBindingModule | null = null;
   #connection: BindingConnection | null = null;
   #baseSubscription: SubscriptionHandle | null = null;
   #detailSubscription: SubscriptionHandle | null = null;
-  #config: Required<Pick<SessionConfig, "maxBaseRows" | "maxApplyRows" | "maxIdsPerQuery">>
-    & Omit<SessionConfig, "maxBaseRows" | "maxApplyRows" | "maxIdsPerQuery"> | null = null;
+  #config: Required<
+    Pick<SessionConfig, "maxBaseRows" | "maxApplyRows" | "maxIdsPerQuery" | "includeIdentities">
+  > & Omit<
+    SessionConfig,
+    "maxBaseRows" | "maxApplyRows" | "maxIdsPerQuery" | "includeIdentities"
+  > | null = null;
   #nextGeneration = 0;
   #detailEpoch = 0;
   #refreshingDetails = false;
@@ -127,6 +146,10 @@ export class RelayEmpireRegionSession {
   #applyPending = false;
   #listenersAttached = false;
   #stopping = false;
+  #connectionEpoch = 0;
+  #reconnectAttempt = 0;
+  #reconnects = 0;
+  #cancelReconnect: (() => void) | null = null;
   readonly #identityChanged = () => this.#queueDetailRefresh();
   readonly #baseChanged = () => this.#queueSnapshot();
   readonly #detailChanged = () => this.#queueSnapshot();
@@ -137,6 +160,7 @@ export class RelayEmpireRegionSession {
     lastAppliedAt: null as string | null,
     lastApplyDurationMs: null as number | null,
     rowCount: 0,
+    reconnects: 0,
     lastError: null as string | null,
   };
 
@@ -144,7 +168,14 @@ export class RelayEmpireRegionSession {
     this.#loadBindings = dependencies.loadBindings ?? loadBundledRegionalBindings;
     this.#onSnapshot = dependencies.onSnapshot;
     this.#onFailure = dependencies.onFailure ?? (() => {});
+    this.#refreshSource = dependencies.refreshSource;
     this.#now = dependencies.now ?? (() => new Date());
+    this.#random = dependencies.random ?? Math.random;
+    this.#scheduleRetry = dependencies.scheduleRetry ?? ((callback, delayMs) => {
+      const timer = setTimeout(callback, delayMs);
+      timer.unref?.();
+      return () => clearTimeout(timer);
+    });
   }
 
   async start(config: SessionConfig): Promise<void> {
@@ -169,28 +200,54 @@ export class RelayEmpireRegionSession {
         config.maxIdsPerQuery ?? DEFAULT_MAX_IDS_PER_QUERY,
         "Relay empire query-size budget",
       ),
+      includeIdentities: config.includeIdentities !== false,
     };
     this.#nextGeneration = this.#config.generation;
     this.#stopping = false;
-    const bindings = await this.#loadBindings();
+    this.#bindings = await this.#loadBindings();
     this.#health.stage = "connecting";
-    this.#connection = bindings.DbConnection.builder()
+    this.#openConnection();
+  }
+
+  #openConnection(): void {
+    const config = this.#requiredConfig();
+    const bindings = this.#bindings;
+    if (!bindings) throw new Error("Relay empire regional bindings are not loaded");
+    const connectionEpoch = this.#connectionEpoch + 1;
+    this.#connectionEpoch = connectionEpoch;
+    const connection = bindings.DbConnection.builder()
       .withUri(config.uri)
       .withDatabaseName(config.database)
       .onConnect((connection) => {
+        if (this.#stopping || connectionEpoch !== this.#connectionEpoch) {
+          connection.disconnect();
+          return;
+        }
+        this.#connection = connection;
+        this.#cancelReconnect?.();
+        this.#cancelReconnect = null;
+        this.#reconnectAttempt = 0;
         this.#health.connected = true;
         this.#health.lastError = null;
         this.#health.stage = "base";
+        const identityQueries = config.includeIdentities
+          ? [
+              "SELECT * FROM empire_state",
+              "SELECT * FROM empire_player_data_state",
+              "SELECT * FROM empire_rank_state",
+            ]
+          : [];
         this.#baseSubscription = connection.subscriptionBuilder()
           .onApplied(() => this.#guard(() => {
             this.#attachListeners(connection);
             this.#refreshDetails(connection);
           }))
-          .onError((_context, error) => this.#recordError(error))
+          .onError((_context, error) => (
+            this.#handleSubscriptionError(connection, connectionEpoch, error)
+          ))
           .subscribe([
-            "SELECT * FROM empire_state",
-            "SELECT * FROM empire_player_data_state",
-            "SELECT * FROM empire_rank_state",
+            "SELECT * FROM world_region_state",
+            ...identityQueries,
             "SELECT * FROM empire_settlement_state",
             "SELECT * FROM empire_node_state",
             "SELECT * FROM empire_node_siege_state",
@@ -198,14 +255,66 @@ export class RelayEmpireRegionSession {
           ]);
       })
       .onConnectError((_context, error) => {
-        if (!this.#stopping) this.#recordError(error);
+        if (this.#stopping || connectionEpoch !== this.#connectionEpoch) return;
+        this.#health.connected = false;
+        this.#recordError(error);
+        if (this.#connection === connection) this.#connection = null;
+        this.#scheduleReconnect();
       })
       .onDisconnect((_context, error) => {
+        if (connectionEpoch !== this.#connectionEpoch) return;
         this.#health.connected = false;
         if (this.#stopping) return;
+        this.#clearConnectionState(connection);
+        if (this.#connection === connection) this.#connection = null;
         this.#recordError(error ?? new Error("Relay empire region subscription disconnected."));
+        this.#scheduleReconnect();
       })
       .build();
+    if (!this.#stopping && connectionEpoch === this.#connectionEpoch) {
+      this.#connection = connection;
+    }
+  }
+
+  #retryDelay(attempt: number): number {
+    const delays = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000] as const;
+    const base = delays[Math.min(Math.max(0, attempt), delays.length - 1)];
+    return Math.max(1, Math.round(base * (0.8 + (this.#random() * 0.4))));
+  }
+
+  #scheduleReconnect(): void {
+    if (this.#cancelReconnect || this.#stopping || !this.#config || !this.#bindings) return;
+    const delayMs = this.#retryDelay(this.#reconnectAttempt);
+    this.#reconnectAttempt += 1;
+    const reconnectAttempt = this.#reconnectAttempt;
+    this.#cancelReconnect = this.#scheduleRetry(() => {
+      this.#cancelReconnect = null;
+      if (this.#stopping || !this.#config || !this.#bindings) return;
+      void this.#reconnect(reconnectAttempt);
+    }, delayMs);
+  }
+
+  async #reconnect(reconnectAttempt: number): Promise<void> {
+    try {
+      if (reconnectAttempt >= 3 && this.#refreshSource) {
+        const source = await this.#refreshSource();
+        const config = this.#requiredConfig();
+        assertSchemaFingerprint(config.manifest, "regional", source.schemaFingerprint);
+        if (!schemaBindingsReady(config.manifest, "regional")) {
+          throw new Error("Relay regional schema bindings are not generated");
+        }
+        this.#config = { ...config, ...source };
+      }
+      if (this.#stopping || !this.#config || !this.#bindings) return;
+      this.#health.stage = "reconnecting";
+      this.#reconnects += 1;
+      this.#health.reconnects = this.#reconnects;
+      this.#openConnection();
+    } catch (error) {
+      if (this.#stopping) return;
+      this.#recordError(error);
+      this.#scheduleReconnect();
+    }
   }
 
   #requiredConfig() {
@@ -214,10 +323,12 @@ export class RelayEmpireRegionSession {
   }
 
   #baseRows(connection: BindingConnection) {
+    const includeIdentities = this.#requiredConfig().includeIdentities;
     return {
-      empireRows: rows(connection.db.empireState),
-      playerRows: rows(connection.db.empirePlayerDataState),
-      rankRows: rows(connection.db.empireRankState),
+      worldRegionRows: rows(connection.db.worldRegionState),
+      empireRows: includeIdentities ? rows(connection.db.empireState) : [],
+      playerRows: includeIdentities ? rows(connection.db.empirePlayerDataState) : [],
+      rankRows: includeIdentities ? rows(connection.db.empireRankState) : [],
       settlementRows: rows(connection.db.empireSettlementState),
       nodeRows: rows(connection.db.empireNodeState),
       siegeRows: rows(connection.db.empireNodeSiegeState),
@@ -241,29 +352,12 @@ export class RelayEmpireRegionSession {
         `Relay empire player ${index} entity id`,
       );
     });
-    const claimIds = base.settlementRows.map((value, index) => {
-      const settlement = row(value, `Relay empire settlement ${index}`);
-      return decimalInteger(
-        settlement.claimEntityId ?? settlement.claim_entity_id,
-        `Relay empire settlement ${index} claim id`,
-      );
+    const { claimIds, buildingIds } = regionalEmpireDetailIds({
+      regionId: config.regionId,
+      worldRegionRows: base.worldRegionRows,
+      settlementRows: base.settlementRows,
+      nodeRows: base.nodeRows,
     });
-    const buildingIds = [
-      ...base.settlementRows.map((value, index) => {
-        const settlement = row(value, `Relay empire settlement ${index}`);
-        return decimalInteger(
-          settlement.buildingEntityId ?? settlement.building_entity_id,
-          `Relay empire settlement ${index} building id`,
-        );
-      }),
-      ...base.nodeRows.map((value, index) => {
-        const node = row(value, `Relay empire node ${index}`);
-        return decimalInteger(
-          node.entityId ?? node.entity_id,
-          `Relay empire node ${index} entity id`,
-        );
-      }),
-    ];
     const queries = [
       ...equalitySubscriptionQueries(
         "player_username_state",
@@ -275,6 +369,18 @@ export class RelayEmpireRegionSession {
         "claim_state",
         "entity_id",
         claimIds,
+        config.maxIdsPerQuery,
+      ),
+      ...equalitySubscriptionQueries(
+        "claim_member_state",
+        "claim_entity_id",
+        claimIds,
+        config.maxIdsPerQuery,
+      ),
+      ...equalitySubscriptionQueries(
+        "player_state",
+        "entity_id",
+        memberIds,
         config.maxIdsPerQuery,
       ),
       ...equalitySubscriptionQueries(
@@ -295,14 +401,36 @@ export class RelayEmpireRegionSession {
       return;
     }
     this.#health.stage = "details";
+    const connectionEpoch = this.#connectionEpoch;
     this.#detailSubscription = connection.subscriptionBuilder()
       .onApplied(() => this.#guard(() => {
         if (epoch !== this.#detailEpoch) return;
         this.#refreshingDetails = false;
         this.#applySnapshot(connection);
       }))
-      .onError((_context, error) => this.#recordError(error))
+      .onError((_context, error) => (
+        this.#handleSubscriptionError(connection, connectionEpoch, error)
+      ))
       .subscribe(queries);
+  }
+
+  #handleSubscriptionError(
+    connection: BindingConnection,
+    connectionEpoch: number,
+    error: unknown,
+  ): void {
+    if (
+      this.#stopping
+      || connectionEpoch !== this.#connectionEpoch
+      || connection !== this.#connection
+    ) return;
+    this.#health.connected = false;
+    this.#recordError(error);
+    this.#connectionEpoch += 1;
+    this.#clearConnectionState(connection);
+    this.#connection = null;
+    connection.disconnect();
+    this.#scheduleReconnect();
   }
 
   #applySnapshot(connection: BindingConnection): void {
@@ -316,10 +444,17 @@ export class RelayEmpireRegionSession {
     try {
       const base = this.#baseRows(connection);
       const claimRows = rows(connection.db.claimState);
-      const usernameRows = rows(connection.db.playerUsernameState);
+      const claimMemberRows = rows(connection.db.claimMemberState);
+      const usernameRows = config.includeIdentities
+        ? rows(connection.db.playerUsernameState)
+        : [];
+      const playerStateRows = config.includeIdentities
+        ? rows(connection.db.playerState)
+        : [];
       const nicknameRows = rows(connection.db.buildingNicknameState);
       const rowCount = Object.values(base).reduce((total, values) => total + values.length, 0)
-        + claimRows.length + usernameRows.length + nicknameRows.length;
+        + claimRows.length + claimMemberRows.length + usernameRows.length
+        + playerStateRows.length + nicknameRows.length;
       if (rowCount > config.maxApplyRows) {
         throw new Error(
           `Relay empire apply-row budget ${config.maxApplyRows} exceeded by ${rowCount} rows`,
@@ -329,7 +464,9 @@ export class RelayEmpireRegionSession {
         regionId: config.regionId,
         ...base,
         claimRows,
+        claimMemberRows,
         usernameRows,
+        playerStateRows,
         nicknameRows,
       });
       const receivedAt = this.#now().toISOString();
@@ -402,6 +539,7 @@ export class RelayEmpireRegionSession {
     connection.db.empireSettlementState.onUpdate?.(this.#identityChanged);
     connection.db.empireSettlementState.onDelete?.(this.#identityChanged);
     for (const table of [
+      connection.db.worldRegionState,
       connection.db.empireState,
       connection.db.empireRankState,
       connection.db.empireNodeSiegeState,
@@ -413,7 +551,9 @@ export class RelayEmpireRegionSession {
     }
     for (const table of [
       connection.db.claimState,
+      connection.db.claimMemberState,
       connection.db.playerUsernameState,
+      connection.db.playerState,
       connection.db.buildingNicknameState,
     ]) {
       table.onInsert?.(this.#detailChanged);
@@ -438,6 +578,7 @@ export class RelayEmpireRegionSession {
     connection.db.empireSettlementState.removeOnUpdate?.(this.#identityChanged);
     connection.db.empireSettlementState.removeOnDelete?.(this.#identityChanged);
     for (const table of [
+      connection.db.worldRegionState,
       connection.db.empireState,
       connection.db.empireRankState,
       connection.db.empireNodeSiegeState,
@@ -449,7 +590,9 @@ export class RelayEmpireRegionSession {
     }
     for (const table of [
       connection.db.claimState,
+      connection.db.claimMemberState,
       connection.db.playerUsernameState,
+      connection.db.playerState,
       connection.db.buildingNicknameState,
     ]) {
       table.removeOnInsert?.(this.#detailChanged);
@@ -457,6 +600,18 @@ export class RelayEmpireRegionSession {
       table.removeOnDelete?.(this.#detailChanged);
     }
     this.#listenersAttached = false;
+  }
+
+  #clearConnectionState(connection: BindingConnection): void {
+    if (this.#connection === connection) this.#removeListeners();
+    this.#detailEpoch += 1;
+    this.#detailSubscription?.unsubscribe();
+    this.#detailSubscription = null;
+    this.#baseSubscription?.unsubscribe();
+    this.#baseSubscription = null;
+    this.#refreshingDetails = false;
+    this.#detailRefreshQueued = false;
+    this.#snapshotQueued = false;
   }
 
   #guard(action: () => void): void {
@@ -479,6 +634,9 @@ export class RelayEmpireRegionSession {
 
   async stop(): Promise<void> {
     this.#stopping = true;
+    this.#cancelReconnect?.();
+    this.#cancelReconnect = null;
+    this.#connectionEpoch += 1;
     this.#detailEpoch += 1;
     this.#removeListeners();
     this.#detailSubscription?.unsubscribe();
@@ -487,6 +645,7 @@ export class RelayEmpireRegionSession {
     this.#baseSubscription = null;
     this.#connection?.disconnect();
     this.#connection = null;
+    this.#bindings = null;
     this.#config = null;
     this.#refreshingDetails = false;
     this.#health.connected = false;

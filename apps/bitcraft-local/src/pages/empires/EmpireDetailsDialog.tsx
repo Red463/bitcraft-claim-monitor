@@ -126,7 +126,14 @@ export function EmpireDetailsDialog({
               <span><Crown size={14} /> Leader: {empire.leader ?? "Unknown"}</span>
               <span><Clock size={14} /> Updated: {compactDate(data.fetchedAt ?? empire.updatedAt)}</span>
             </div>
-            {data.partial || errors.length ? (
+            {data.stale ? (
+              <AsyncState
+                kind="stale"
+                title="Showing last-good Empire details"
+                detail={errors.slice(0, 3).join("; ") || "The last complete Relay generation remains visible."}
+                compact
+              />
+            ) : data.partial || errors.length ? (
               <div className="warning-card">Some empire sources are unavailable: {errors.join("; ")}</div>
             ) : null}
             <div className="empire-detail-summary">
@@ -193,7 +200,7 @@ export function EmpireDetailsDialog({
                       </article>
                     ))}
                   </div>
-                ) : <AsyncState kind="empty" title="No current member data available" detail="BitJita did not return members for this empire." compact />
+                ) : <AsyncState kind="empty" title="No current member data available" detail="The current Relay generation contains no members for this empire." compact />
               ) : null}
               {tab === "claims" ? (
                 claims.length ? (
@@ -227,7 +234,7 @@ export function EmpireDetailsDialog({
                       </article>
                     ))}
                   </div>
-                ) : <AsyncState kind="empty" title="No current tower data available" detail="BitJita did not return claimed Watchtowers for this empire." compact />
+                ) : <AsyncState kind="empty" title="No current tower data available" detail="The current Relay generation contains no claimed Watchtowers for this empire." compact />
               ) : null}
             </section>
           </>

@@ -32,6 +32,16 @@ const {
 test("regional empires retain exact identities and join members, settlements, nodes, chunks, and unresolved siege roles", () => {
   assert.deepEqual(normalizeRegionalEmpires({
     regionId: "19",
+    worldRegionRows: [{
+      id: 0,
+      regionIndex: 19,
+      regionMinChunkX: 240,
+      regionMinChunkZ: 240,
+      regionWidthChunks: 80,
+      regionHeightChunks: 80,
+      regionCount: 25,
+      regionCountSqrt: 5,
+    }],
     empireRows: [{
       entityId: 9007199254740993n,
       capitalBuildingEntityId: 1369094286778488967n,
@@ -50,6 +60,12 @@ test("regional empires retain exact identities and join members, settlements, no
       donatedShards: 987,
       donatedEmpireCurrency: 654,
     }],
+    playerStateRows: [{
+      entityId: 1224979098736429551n,
+      signedIn: true,
+      signInTimestamp: 1785430800,
+      timePlayed: 86400,
+    }],
     rankRows: [{
       entityId: 9007199254741000n,
       empireEntityId: 9007199254740993n,
@@ -61,7 +77,7 @@ test("regional empires retain exact identities and join members, settlements, no
       buildingEntityId: 1369094286778488967n,
       claimEntityId: 1369094286777412590n,
       empireEntityId: 9007199254740993n,
-      chunkIndex: 113241n,
+      chunkIndex: 241241n,
       canHouseEmpireStorehouse: true,
       membersDonations: 1234,
       location: { x: -41, z: 76, dimension: 1n },
@@ -69,7 +85,7 @@ test("regional empires retain exact identities and join members, settlements, no
     nodeRows: [{
       entityId: 1369094286736703520n,
       empireEntityId: 9007199254740993n,
-      chunkIndex: 113242n,
+      chunkIndex: 242242n,
       energy: 9428,
       active: true,
       upkeep: 2,
@@ -84,8 +100,8 @@ test("regional empires retain exact identities and join members, settlements, no
       startTimestamp: { __timestamp_micros_since_unix_epoch__: 1785430800000000n },
     }],
     chunkRows: [
-      { chunkIndex: 113242n, empireEntityId: 9007199254740993n, watchtowerEntityId: 1369094286736703520n },
-      { chunkIndex: 113243n, empireEntityId: 9007199254740993n, watchtowerEntityId: 1369094286736703520n },
+      { chunkIndex: 242242n, empireEntityId: 9007199254740993n, watchtowerEntityId: 1369094286736703520n },
+      { chunkIndex: 243242n, empireEntityId: 9007199254740993n, watchtowerEntityId: 1369094286736703520n },
     ],
     claimRows: [{
       entityId: 1369094286777412590n,
@@ -93,6 +109,16 @@ test("regional empires retain exact identities and join members, settlements, no
       ownerBuildingEntityId: 1369094286778488967n,
       name: "Timbersteel Trade",
       neutral: false,
+    }],
+    claimMemberRows: [{
+      entityId: 5000001n,
+      claimEntityId: 1369094286777412590n,
+      playerEntityId: 1224979098736429551n,
+      userName: "Red463",
+      inventoryPermission: true,
+      buildPermission: true,
+      officerPermission: true,
+      coOwnerPermission: false,
     }],
     usernameRows: [{ entityId: 1224979098736429551n, username: "Red463" }],
     nicknameRows: [{ entityId: 1369094286736703520n, nickname: "North Watch" }],
@@ -124,12 +150,15 @@ test("regional empires retain exact identities and join members, settlements, no
         permissions: [true, false, true],
         donatedShards: "987",
         donatedEmpireCurrency: "654",
+        signedIn: true,
+        lastLoginTimestamp: "2026-07-30T17:00:00.000Z",
+        timePlayedSeconds: 86400,
       }],
       settlements: [{
         buildingEntityId: "1369094286778488967",
         claimEntityId: "1369094286777412590",
         empireEntityId: "9007199254740993",
-        chunkIndex: "113241",
+        chunkIndex: "241241",
         canHouseEmpireStorehouse: true,
         membersDonations: "1234",
         locationX: -41,
@@ -139,10 +168,20 @@ test("regional empires retain exact identities and join members, settlements, no
         claimOwnerEntityId: "1224979098736429551",
         claimOwnerName: "Red463",
       }],
+      claimMembers: [{
+        entityId: "5000001",
+        claimEntityId: "1369094286777412590",
+        playerEntityId: "1224979098736429551",
+        username: "Red463",
+        inventoryPermission: true,
+        buildPermission: true,
+        officerPermission: true,
+        coOwnerPermission: false,
+      }],
       nodes: [{
         entityId: "1369094286736703520",
         empireEntityId: "9007199254740993",
-        chunkIndex: "113242",
+        chunkIndex: "242242",
         energy: "9428",
         active: true,
         upkeep: "2",
@@ -166,6 +205,119 @@ test("regional empires retain exact identities and join members, settlements, no
       "Regional siege 7000001 empire role is unresolved; attacker/defender is not inferred.",
     ],
   });
+});
+
+test("regional empires scope settlement and watchtower rows with authoritative region geometry", () => {
+  const normalized = normalizeRegionalEmpires({
+    regionId: "19",
+    worldRegionRows: [{
+      id: 0,
+      regionIndex: 19,
+      regionMinChunkX: 240,
+      regionMinChunkZ: 240,
+      regionWidthChunks: 80,
+      regionHeightChunks: 80,
+      regionCount: 25,
+      regionCountSqrt: 5,
+    }],
+    empireRows: [{
+      entityId: 10n,
+      capitalBuildingEntityId: 100n,
+      name: "Local Empire",
+      shardTreasury: 0,
+      nobilityThreshold: 0,
+      numClaims: 2,
+      location: { x: 0, z: 0, dimension: 1n },
+      empireCurrencyTreasury: 0,
+      ownerType: { tag: "Player" },
+    }],
+    playerRows: [],
+    playerStateRows: [],
+    rankRows: [],
+    settlementRows: [{
+      buildingEntityId: 100n,
+      claimEntityId: 101n,
+      empireEntityId: 10n,
+      chunkIndex: 241241n,
+      canHouseEmpireStorehouse: false,
+      membersDonations: 0,
+      location: { x: 23136, z: 23136, dimension: 1n },
+    }, {
+      buildingEntityId: 200n,
+      claimEntityId: 201n,
+      empireEntityId: 10n,
+      chunkIndex: 113241n,
+      canHouseEmpireStorehouse: false,
+      membersDonations: 0,
+      location: { x: 23136, z: 10848, dimension: 1n },
+    }],
+    nodeRows: [{
+      entityId: 300n,
+      empireEntityId: 10n,
+      chunkIndex: 242242n,
+      energy: 10,
+      active: true,
+      upkeep: 1,
+      location: { x: 23232, z: 23232, dimension: 1n },
+    }, {
+      entityId: 400n,
+      empireEntityId: 10n,
+      chunkIndex: 112242n,
+      energy: 20,
+      active: true,
+      upkeep: 1,
+      location: { x: 23232, z: 10752, dimension: 1n },
+    }],
+    siegeRows: [{
+      entityId: 500n,
+      buildingEntityId: 300n,
+      empireEntityId: 11n,
+      energy: 1,
+      active: true,
+    }, {
+      entityId: 600n,
+      buildingEntityId: 400n,
+      empireEntityId: 12n,
+      energy: 1,
+      active: true,
+    }],
+    chunkRows: [{
+      chunkIndex: 243242n,
+      empireEntityId: 10n,
+      watchtowerEntityId: 300n,
+    }, {
+      chunkIndex: 113242n,
+      empireEntityId: 10n,
+      watchtowerEntityId: 400n,
+    }],
+    claimRows: [{
+      entityId: 101n,
+      ownerPlayerEntityId: 1n,
+      ownerBuildingEntityId: 100n,
+      name: "Local Claim",
+      neutral: false,
+    }],
+    claimMemberRows: [{
+      entityId: 700n,
+      claimEntityId: 101n,
+      playerEntityId: 1n,
+      userName: "Local Owner",
+      inventoryPermission: true,
+      buildPermission: true,
+      officerPermission: true,
+      coOwnerPermission: false,
+    }],
+    usernameRows: [],
+    nicknameRows: [],
+  });
+
+  assert.deepEqual(normalized.data.settlements.map((row) => row.buildingEntityId), ["100"]);
+  assert.equal(normalized.data.settlements[0].claimOwnerName, "Local Owner");
+  assert.deepEqual(normalized.data.nodes.map((row) => row.entityId), ["300"]);
+  assert.equal(normalized.data.nodes[0].coveredChunks, 1);
+  assert.deepEqual(normalized.data.nodes[0].sieges.map((row) => row.entityId), ["500"]);
+  assert.equal(normalized.data.empires[0].settlementCount, 1);
+  assert.equal(normalized.data.empires[0].territoryChunks, 1);
 });
 
 test("regional claims join live claim state, local metrics, tier, owner, and coordinates exactly", () => {

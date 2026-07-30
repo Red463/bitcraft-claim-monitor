@@ -22,10 +22,12 @@ test("server propagates a request-scoped bypass to live aggregate caches", () =>
   assert.match(server, /passiveCraftSummaries\(\{\s*\.\.\.body,\s*forceRefresh\s*\}\)/);
   assert.match(server, /playerDetailSummaries\(\{\s*\.\.\.body,\s*forceRefresh\s*\}\)/);
   assert.match(server, /relayActiveRegions\(\{/);
-  assert.match(server, /regionalEmpireOverview\(regionId,\s*\{\s*forceRefresh\s*\}\)/);
-  assert.match(server, /regionalEmpireDetails\(empireId,\s*regionId,\s*inactiveDays,\s*\{\s*forceRefresh\s*\}\)/);
-  assert.match(server, /regionalEmpireClaimMembers\(claimId,\s*\{\s*forceRefresh\s*\}\)/);
-  assert.match(server, /regionalEmpireWatchtowers\(regionId,\s*inactiveDays,\s*\{\s*forceRefresh\s*\}\)/);
+  assert.match(server, /refresh\.forceRefresh && relayEmpireStarted/);
+  assert.match(server, /relayEmpireRuntime\.warmActiveRegions\(\)/);
+  assert.match(server, /empireOverviewView\(/);
+  assert.match(server, /empireDetailsView\(/);
+  assert.match(server, /empireClaimMembersView\(/);
+  assert.match(server, /empireWatchtowersView\(/);
   assert.match(server, /domains\.includes\("region-claims"\)[\s\S]{0,500}relayRegionClaimsRuntime\.reconcile\(\{[\s\S]{0,100}force:\s*true/);
   assert.match(
     server,

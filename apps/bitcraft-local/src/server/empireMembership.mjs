@@ -54,6 +54,36 @@ export function normalizeEmpireMembershipRoster(payload, expectedEmpireId) {
   };
 }
 
+export function relayEmpireMembershipObservation(currentData, claimId) {
+  const data = currentData && typeof currentData === "object" && !Array.isArray(currentData)
+    ? currentData
+    : {};
+  const primaryRegionId = text(data.primaryRegionId);
+  const regions = Array.isArray(data.regions) ? data.regions : [];
+  const primaryLoaded = primaryRegionId
+    && regions.some((region) => text(region?.regionId) === primaryRegionId);
+  if (!primaryLoaded) return { state: "waiting", primaryRegionId };
+  const settlements = Array.isArray(data.settlements) ? data.settlements : [];
+  const settlement = settlements.find((row) => text(row?.claimEntityId) === text(claimId));
+  const empireId = text(settlement?.empireEntityId);
+  if (!settlement || !empireId) return { state: "none", primaryRegionId };
+  const regionId = text(settlement.regionId);
+  const empires = Array.isArray(data.empires) ? data.empires : [];
+  const empire = empires.find((row) => (
+    text(row?.regionId) === regionId && text(row?.entityId) === empireId
+  ));
+  if (!empire) throw new Error("Relay Empire generation is missing the monitored claim's empire row");
+  const members = (Array.isArray(data.members) ? data.members : []).filter((row) => (
+    text(row?.regionId) === regionId && text(row?.empireEntityId) === empireId
+  ));
+  return {
+    state: "roster",
+    primaryRegionId,
+    regionId,
+    roster: normalizeEmpireMembershipRoster({ empire, members }, empireId),
+  };
+}
+
 export function createEmpireMembershipRepository(db) {
   const statements = {
     activeSession: db.prepare(`

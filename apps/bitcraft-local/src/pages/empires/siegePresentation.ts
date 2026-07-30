@@ -20,7 +20,8 @@ export function groupSiegeParticipants(tower: AnyRecord) {
     .sort((a, b) => a.time - b.time);
   return {
     attackers: participants.filter((entry) => entry.attacker === true),
-    defenders: participants.filter((entry) => entry.attacker !== true),
+    defenders: participants.filter((entry) => entry.attacker === false),
+    unknown: participants.filter((entry) => entry.attacker !== true && entry.attacker !== false),
     startedAt: starts[0]?.raw ?? null,
   };
 }

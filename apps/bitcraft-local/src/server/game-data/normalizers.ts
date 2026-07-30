@@ -246,21 +246,192 @@ export function normalizeRegionalClaims(options: {
   return { data: { regionId, claims }, warnings };
 }
 
+function regionalEmpireSpatialRows(options: {
+  regionId: string;
+  worldRegionRows: unknown[];
+  settlementRows: unknown[];
+  nodeRows: unknown[];
+}) {
+  const regionId = decimalString(options.regionId, "regional empires region id");
+  if (options.worldRegionRows.length !== 1) {
+    throw new TypeError(
+      `Regional empires require exactly one world_region_state row; received ${options.worldRegionRows.length}`,
+    );
+  }
+  const worldRegion = record(options.worldRegionRows[0], "Regional world_region_state");
+  const regionIndex = integer(
+    worldRegion.regionIndex ?? worldRegion.region_index,
+    "Regional world_region_state region index",
+  );
+  if (String(regionIndex) !== regionId) {
+    throw new TypeError(
+      `Regional world_region_state index ${regionIndex} does not match configured region ${regionId}`,
+    );
+  }
+  const regionMinChunkX = integer(
+    worldRegion.regionMinChunkX ?? worldRegion.region_min_chunk_x,
+    "Regional world_region_state minimum chunk x",
+  );
+  const regionMinChunkZ = integer(
+    worldRegion.regionMinChunkZ ?? worldRegion.region_min_chunk_z,
+    "Regional world_region_state minimum chunk z",
+  );
+  const regionWidthChunks = integer(
+    worldRegion.regionWidthChunks ?? worldRegion.region_width_chunks,
+    "Regional world_region_state width",
+  );
+  const regionHeightChunks = integer(
+    worldRegion.regionHeightChunks ?? worldRegion.region_height_chunks,
+    "Regional world_region_state height",
+  );
+  if (
+    regionMinChunkX < 0
+    || regionMinChunkZ < 0
+    || regionWidthChunks <= 0
+    || regionHeightChunks <= 0
+  ) {
+    throw new TypeError("Regional world_region_state bounds must be non-negative and non-empty");
+  }
+  const chunkInRegion = (value: unknown, label: string) => {
+    const chunkIndex = BigInt(decimalString(value, label));
+    const chunkX = Number(chunkIndex % 1_000n);
+    const chunkZ = Number(chunkIndex / 1_000n);
+    return (
+      chunkX >= regionMinChunkX
+      && chunkX < regionMinChunkX + regionWidthChunks
+      && chunkZ >= regionMinChunkZ
+      && chunkZ < regionMinChunkZ + regionHeightChunks
+    );
+  };
+  const localSettlementRows = options.settlementRows.filter((value, index) => {
+    const row = record(value, `Regional empire_settlement_state row ${index}`);
+    return chunkInRegion(
+      row.chunkIndex ?? row.chunk_index,
+      `Regional empire settlement row ${index} chunk index`,
+    );
+  });
+  const localNodeRows = options.nodeRows.filter((value, index) => {
+    const row = record(value, `Regional empire_node_state row ${index}`);
+    return chunkInRegion(
+      row.chunkIndex ?? row.chunk_index,
+      `Regional empire node row ${index} chunk index`,
+    );
+  });
+  return { regionId, chunkInRegion, localSettlementRows, localNodeRows };
+}
+
+export function regionalEmpireDetailIds(options: {
+  regionId: string;
+  worldRegionRows: unknown[];
+  settlementRows: unknown[];
+  nodeRows: unknown[];
+}) {
+  const { localSettlementRows, localNodeRows } = regionalEmpireSpatialRows(options);
+  const claimIds = localSettlementRows.map((value, index) => {
+    const row = record(value, `Regional local empire_settlement_state row ${index}`);
+    return decimalString(
+      row.claimEntityId ?? row.claim_entity_id,
+      `Regional local empire settlement row ${index} claim id`,
+    );
+  });
+  const buildingIds = [
+    ...localSettlementRows.map((value, index) => {
+      const row = record(value, `Regional local empire_settlement_state row ${index}`);
+      return decimalString(
+        row.buildingEntityId ?? row.building_entity_id,
+        `Regional local empire settlement row ${index} building id`,
+      );
+    }),
+    ...localNodeRows.map((value, index) => {
+      const row = record(value, `Regional local empire_node_state row ${index}`);
+      return decimalString(
+        row.entityId ?? row.entity_id,
+        `Regional local empire node row ${index} entity id`,
+      );
+    }),
+  ];
+  return {
+    claimIds: [...new Set(claimIds)],
+    buildingIds: [...new Set(buildingIds)],
+  };
+}
+
 export function normalizeRegionalEmpires(options: {
   regionId: string;
+  worldRegionRows: unknown[];
   empireRows: unknown[];
   playerRows: unknown[];
+  playerStateRows: unknown[];
   rankRows: unknown[];
   settlementRows: unknown[];
   nodeRows: unknown[];
   siegeRows: unknown[];
   chunkRows: unknown[];
   claimRows: unknown[];
+  claimMemberRows: unknown[];
   usernameRows: unknown[];
   nicknameRows: unknown[];
 }) {
-  const regionId = decimalString(options.regionId, "regional empires region id");
+  const {
+    regionId,
+    chunkInRegion,
+    localSettlementRows,
+    localNodeRows,
+  } = regionalEmpireSpatialRows(options);
   const warnings: string[] = [];
+  const localNodeIds = new Set(localNodeRows.map((value, index) => {
+    const row = record(value, `Regional local empire_node_state row ${index}`);
+    return decimalString(
+      row.entityId ?? row.entity_id,
+      `Regional local empire node row ${index} entity id`,
+    );
+  }));
+  const localClaimIds = new Set(localSettlementRows.map((value, index) => {
+    const row = record(value, `Regional local empire_settlement_state row ${index}`);
+    return decimalString(
+      row.claimEntityId ?? row.claim_entity_id,
+      `Regional local empire settlement row ${index} claim id`,
+    );
+  }));
+  const localSiegeRows = options.siegeRows.filter((value, index) => {
+    const row = record(value, `Regional empire_node_siege_state row ${index}`);
+    return localNodeIds.has(decimalString(
+      row.buildingEntityId ?? row.building_entity_id,
+      `Regional empire siege row ${index} building id`,
+    ));
+  });
+  const localChunkRows = options.chunkRows.filter((value, index) => {
+    const row = record(value, `Regional empire_chunk_state row ${index}`);
+    return (
+      chunkInRegion(
+        row.chunkIndex ?? row.chunk_index,
+        `Regional empire chunk row ${index} chunk index`,
+      )
+      && localNodeIds.has(decimalString(
+        row.watchtowerEntityId ?? row.watchtower_entity_id,
+        `Regional empire chunk row ${index} watchtower id`,
+      ))
+    );
+  });
+  const localClaimMemberRows = options.claimMemberRows.filter((value, index) => {
+    const row = record(value, `Regional claim_member_state row ${index}`);
+    return localClaimIds.has(decimalString(
+      row.claimEntityId ?? row.claim_entity_id,
+      `Regional claim member row ${index} claim id`,
+    ));
+  });
+  const claimMemberNames = new Map<string, string>();
+  for (const [index, value] of localClaimMemberRows.entries()) {
+    const row = record(value, `Regional local claim_member_state row ${index}`);
+    const playerEntityId = decimalString(
+      row.playerEntityId ?? row.player_entity_id,
+      `Regional local claim member row ${index} player id`,
+    );
+    const username = String(row.userName ?? row.user_name ?? "").trim();
+    if (username && !claimMemberNames.has(playerEntityId)) {
+      claimMemberNames.set(playerEntityId, username);
+    }
+  }
   const byId = (values: unknown[], label: string) => {
     const result = new Map<string, WireRecord>();
     for (const [index, value] of values.entries()) {
@@ -295,6 +466,7 @@ export function normalizeRegionalEmpires(options: {
     ),
   );
   const claims = byId(options.claimRows, "Regional claim_state");
+  const playerStates = byId(options.playerStateRows, "Regional player_state");
   const ranks = new Map<string, WireRecord>();
   for (const [index, value] of options.rankRows.entries()) {
     const row = record(value, `Regional empire_rank_state row ${index}`);
@@ -318,6 +490,13 @@ export function normalizeRegionalEmpires(options: {
     );
     const rank = integer(row.rank, `Regional empire player ${entityId} rank`);
     const rankRow = ranks.get(`${empireEntityId}:${rank}`);
+    const playerState = playerStates.get(entityId);
+    const signInTimestamp = playerState
+      ? integer(
+          playerState.signInTimestamp ?? playerState.sign_in_timestamp ?? 0,
+          `Regional empire player ${entityId} sign-in timestamp`,
+        )
+      : 0;
     return {
       entityId,
       empireEntityId,
@@ -335,13 +514,23 @@ export function normalizeRegionalEmpires(options: {
         row.donatedEmpireCurrency ?? row.donated_empire_currency ?? 0,
         `Regional empire player ${entityId} donated empire currency`,
       ),
+      signedIn: playerState?.signedIn === true || playerState?.signed_in === true,
+      lastLoginTimestamp: signInTimestamp > 0
+        ? normalizeTimestamp(signInTimestamp, "seconds")
+        : null,
+      timePlayedSeconds: playerState
+        ? integer(
+            playerState.timePlayed ?? playerState.time_played ?? 0,
+            `Regional empire player ${entityId} time played`,
+          )
+        : null,
     };
   });
   members.sort((left, right) => (
     BigInt(left.entityId) < BigInt(right.entityId) ? -1 : 1
   ));
 
-  const settlements = options.settlementRows.map((value, index) => {
+  const settlements = localSettlementRows.map((value, index) => {
     const row = record(value, `Regional empire_settlement_state row ${index}`);
     const buildingEntityId = decimalString(
       row.buildingEntityId ?? row.building_entity_id,
@@ -384,16 +573,44 @@ export function normalizeRegionalEmpires(options: {
       ...locationFields(row.location, `Regional empire settlement ${buildingEntityId}`),
       claimName: claim ? String(claim.name ?? "").trim() : null,
       claimOwnerEntityId,
-      claimOwnerName: claimOwnerEntityId ? usernames.get(claimOwnerEntityId) || null : null,
+      claimOwnerName: claimOwnerEntityId
+        ? usernames.get(claimOwnerEntityId) || claimMemberNames.get(claimOwnerEntityId) || null
+        : null,
     };
   });
   settlements.sort((left, right) => (
     BigInt(left.buildingEntityId) < BigInt(right.buildingEntityId) ? -1 : 1
   ));
+  const claimMembers = localClaimMemberRows.map((value, index) => {
+    const row = record(value, `Regional claim_member_state row ${index}`);
+    const entityId = decimalString(
+      row.entityId ?? row.entity_id,
+      `Regional claim member row ${index} entity id`,
+    );
+    return {
+      entityId,
+      claimEntityId: decimalString(
+        row.claimEntityId ?? row.claim_entity_id,
+        `Regional claim member ${entityId} claim id`,
+      ),
+      playerEntityId: decimalString(
+        row.playerEntityId ?? row.player_entity_id,
+        `Regional claim member ${entityId} player id`,
+      ),
+      username: String(row.userName ?? row.user_name ?? "").trim(),
+      inventoryPermission: row.inventoryPermission === true || row.inventory_permission === true,
+      buildPermission: row.buildPermission === true || row.build_permission === true,
+      officerPermission: row.officerPermission === true || row.officer_permission === true,
+      coOwnerPermission: row.coOwnerPermission === true || row.co_owner_permission === true,
+    };
+  });
+  claimMembers.sort((left, right) => (
+    BigInt(left.entityId) < BigInt(right.entityId) ? -1 : 1
+  ));
 
   const chunkCountByNode = new Map<string, number>();
   const chunkCountByEmpire = new Map<string, number>();
-  for (const [index, value] of options.chunkRows.entries()) {
+  for (const [index, value] of localChunkRows.entries()) {
     const row = record(value, `Regional empire_chunk_state row ${index}`);
     const watchtowerEntityId = decimalString(
       row.watchtowerEntityId ?? row.watchtower_entity_id,
@@ -408,7 +625,7 @@ export function normalizeRegionalEmpires(options: {
   }
 
   const siegesByBuilding = new Map<string, Array<Record<string, unknown>>>();
-  for (const [index, value] of options.siegeRows.entries()) {
+  for (const [index, value] of localSiegeRows.entries()) {
     const row = record(value, `Regional empire_node_siege_state row ${index}`);
     const entityId = decimalString(
       row.entityId ?? row.entity_id,
@@ -449,7 +666,7 @@ export function normalizeRegionalEmpires(options: {
     );
   }
 
-  const nodes = options.nodeRows.map((value, index) => {
+  const nodes = localNodeRows.map((value, index) => {
     const row = record(value, `Regional empire_node_state row ${index}`);
     const entityId = decimalString(
       row.entityId ?? row.entity_id,
@@ -529,7 +746,7 @@ export function normalizeRegionalEmpires(options: {
     BigInt(left.entityId) < BigInt(right.entityId) ? -1 : 1
   ));
   return {
-    data: { regionId, empires, members, settlements, nodes },
+    data: { regionId, empires, members, settlements, claimMembers, nodes },
     warnings,
   };
 }

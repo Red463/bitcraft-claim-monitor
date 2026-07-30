@@ -12,7 +12,6 @@ export const domainCollectorDefaults = {
   inventory: { label: "Inventory and storage", intervalSeconds: 60 },
   market: { label: "Market", intervalSeconds: 60 },
   mapCatalog: { label: "Map/catalog", intervalSeconds: 600 },
-  empireMembership: { label: "Empire membership history", intervalSeconds: 60 },
   productionContributions: { label: "Production contribution sync", intervalSeconds: 300 },
   marketTrades: { label: "Member market trades", intervalSeconds: 60 },
 };

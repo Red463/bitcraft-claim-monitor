@@ -63,6 +63,21 @@ Live-first data policy:
   its current data stop updating, even when a scheduled fallback could mask
   the problem in production.
 
+SQL decisions are therefore locked as follows:
+
+| Data responsibility | Plan decision |
+|---|---|
+| Current Relay state | Serve the committed in-memory generation and retain only the generic `domain_payload_current` last-good copy by default; do not add a domain-specific current table. |
+| Heavy interactive joins, including Craft Planner | Keep a compact subscription-fed normalized index only when representative benchmarks prove it is required to meet the local API latency budget. It must update immediately from the committed generation, never from a scheduled crawl. |
+| BitJita rate-limit caches, bulk-fetch staging, crawl cursors, and refresh ledgers | Remove them with the domain that replaces their final reader and writer. |
+| History, observed events, notification deduplication/outbox, user configuration, audit, and provider health | Keep them because they provide durable local behavior that Relay current state does not replace. |
+| Scheduled jobs | Limit them to maintenance, retention, reports, delivery retries, integrity checks, and reconciliation. Disabling scheduled ingestion must not make any current user-facing feature stale. |
+
+Every vertical milestone must update the SQL table inventory, remove obsolete
+schema and job definitions in the same delivery, and prove both that the
+feature updates without a scheduler tick and that its local read path meets
+the recorded latency budget.
+
 The first cross-region implementation of this policy is Public Craft Finder:
 configured regional sessions follow public markers through bounded typed
 joins, merge complete generations into the generic current-state repository,
@@ -158,6 +173,19 @@ claim cannot leave the old claim live. Claim and configured-region changes
 otherwise reconcile immediately without a process restart, while browser
 last-good rows are retained only for the exact same claim and configured
 scope.
+
+Empire overview, details, claim members, watchtowers, and current siege rows
+now follow the same live-first rule. A continuously connected primary regional
+session owns the replicated Empire/member identity graph, while bounded
+secondary sessions use validated `world_region_state` geometry for local
+settlements, nodes, chunks, claim members, and sieges. A complete regional
+generation publishes immediately to the generic current-state repository;
+membership-period history is updated from the committed primary generation
+without waiting for a scheduled collector. Configuration changes prune retired
+regions before reconnecting, and route freshness is calculated from exactly
+the primary identity source plus the region being viewed. No Empire-specific
+current SQL table exists. Unproven siege participant roles remain explicitly
+unknown, and multi-region Hexite acquisition remains the next vertical.
 
 Implementation is dependency-ordered:
 

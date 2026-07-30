@@ -613,6 +613,24 @@ not feature-specific SQL cache tables. Durable membership periods,
 notifications, and future locally observed siege transitions remain valid
 history/event data.
 
+The implemented runtime uses `world_region_state` as the spatial authority for
+each session and validates that its region index matches the configured region
+before accepting rows. Settlement and node IDs derived inside those bounds
+drive bounded exact subscriptions for related claim members, chunks, and
+sieges. Because the Empire, player-data, and rank rows observed above are
+replicated, only the continuously connected primary region subscribes to and
+publishes that identity graph. Secondary sessions publish local operational
+rows and join them to the primary identities in the combined generation.
+
+Each region keeps its own receive time, warnings, and last error. A route is
+fresh only when both the requested region and the primary identity source are
+fresh; failure in an unrelated configured region does not stale a healthy
+view. Configuration reconciliation commits a scope fence that removes retired
+regions before opening new sessions, and browser routes authorize from current
+configuration rather than trusting persisted `activeRegionIds`. Complete
+primary generations feed the existing membership-period repository
+immediately, so no scheduled Empire membership acquisition job remains.
+
 ## Remaining diagnostic blockers
 
 - authoritative evidence distinguishing a completed sale from removal or

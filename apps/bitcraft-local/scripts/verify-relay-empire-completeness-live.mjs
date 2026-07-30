@@ -20,6 +20,7 @@ const manifest = JSON.parse(await readFile(
 ));
 
 const tableSpecs = [
+  { sql: "world_region_state", accessor: "worldRegionState", key: "id" },
   { sql: "empire_state", accessor: "empireState", key: "entityId" },
   { sql: "empire_player_data_state", accessor: "empirePlayerDataState", key: "entityId" },
   { sql: "empire_rank_state", accessor: "empireRankState", key: "entityId" },

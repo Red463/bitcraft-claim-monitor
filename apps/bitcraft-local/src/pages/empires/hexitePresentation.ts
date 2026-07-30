@@ -132,7 +132,7 @@ export function presentHexiteReserveSummary(
       status: "Foundry output unavailable",
       sortValue: null,
       tone: "muted",
-      details: ["Completed Foundry Capsules are unavailable from BitJita and excluded."],
+      details: ["Completed Foundry Capsules are unavailable in the current Relay projection and are excluded."],
     };
   }
 
@@ -141,7 +141,7 @@ export function presentHexiteReserveSummary(
   if (value.status === "error" || energy == null || capsules == null) {
     const details = [
       "The Hexite breakdown is not available until the scan completes.",
-      "Completed Foundry Capsules are unavailable from BitJita and excluded.",
+      "Completed Foundry Capsules are unavailable in the current Relay projection and are excluded.",
     ];
     if (Array.isArray(value.errors) && value.errors.length) {
       details.push(`Scan errors: ${value.errors.slice(0, 3).join("; ")}`);
@@ -178,7 +178,7 @@ export function presentHexiteReserveSummary(
     `Capsules cost ${cost} HE to craft and provide ${formatted(WATCHTOWER_ENERGY_PER_CAPSULE)} Watchtower energy when deployed.`,
     coverageDetails("Player", value.coverage?.players),
     coverageDetails("Claim", value.coverage?.claims),
-    "Completed Foundry Capsules are unavailable from BitJita and excluded.",
+    "Completed Foundry Capsules are unavailable in the current Relay projection and are excluded.",
   ];
   if (Array.isArray(value.errors) && value.errors.length) {
     details.push(`Scan errors: ${value.errors.slice(0, 3).join("; ")}`);
@@ -254,7 +254,7 @@ export function describeHexiteReserveMetric(
   if (!value || metricValue(value, metric) == null) {
     return [
       "The Hexite breakdown is not available until the scan completes.",
-      "Completed Foundry Capsules are unavailable from BitJita and are excluded.",
+      "Completed Foundry Capsules are unavailable in the current Relay projection and are excluded.",
     ].join("\n");
   }
 
@@ -282,7 +282,7 @@ export function describeHexiteReserveMetric(
     ];
   }
 
-  lines.push("Completed Foundry Capsules are unavailable from BitJita and are excluded.");
+  lines.push("Completed Foundry Capsules are unavailable in the current Relay projection and are excluded.");
   if (Array.isArray(value.errors) && value.errors.length) lines.push(`Scan errors: ${value.errors.slice(0, 3).join("; ")}`);
   return lines.join("\n");
 }

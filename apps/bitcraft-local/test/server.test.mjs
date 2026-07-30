@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { legalPolicyForEnvironment } from "../src/legal/legalPolicy.mjs";
+import { createEmpireMembershipRepository } from "../src/server/empireMembership.mjs";
 import { legalPolicyDigests } from "../src/server/legalPolicyDigest.mjs";
 
 const appDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -597,6 +598,188 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionStatusRequests, 0);
   assert.equal(regionListRequests, 0);
 
+  const empireObservedAt = new Date().toISOString();
+  const empireCurrentData = {
+    primaryRegionId: "19",
+    activeRegionIds: ["19", "99"],
+    empires: [{
+      regionId: "19",
+      entityId: "10",
+      capitalBuildingEntityId: "100",
+      name: "Test Empire",
+      shardTreasury: "0",
+      nobilityThreshold: 1000,
+      numClaims: 1,
+      empireCurrencyTreasury: "5000",
+      territoryChunks: 2,
+    }, {
+      regionId: "19",
+      entityId: "11",
+      capitalBuildingEntityId: "110",
+      name: "Verdant",
+      shardTreasury: "0",
+      nobilityThreshold: 1000,
+      numClaims: 0,
+      empireCurrencyTreasury: "0",
+      territoryChunks: 0,
+    }, {
+      regionId: "19",
+      entityId: "12",
+      capitalBuildingEntityId: "120",
+      name: "Foreign Empire",
+      shardTreasury: "0",
+      nobilityThreshold: 1000,
+      numClaims: 1,
+      empireCurrencyTreasury: "9000",
+      territoryChunks: 99,
+    }],
+    members: [{
+      regionId: "19",
+      entityId: "20",
+      empireEntityId: "10",
+      username: "Leader One",
+      rank: 0,
+      rankTitle: "The Earth King",
+      permissions: [true, false, false, false, false, false, false, false, false, false],
+      lastLoginTimestamp: "2026-05-01T12:00:00.000Z",
+      signedIn: false,
+    }, {
+      regionId: "19",
+      entityId: "21",
+      empireEntityId: "10",
+      username: "Tester",
+      rank: 1,
+      rankTitle: "Emperor",
+      permissions: [],
+      lastLoginTimestamp: "2026-05-21T12:00:00.000Z",
+      signedIn: false,
+    }, {
+      regionId: "19",
+      entityId: "22",
+      empireEntityId: "10",
+      username: "Citizen One",
+      rank: 2,
+      rankTitle: "Citizen",
+      permissions: [],
+      lastLoginTimestamp: "2026-05-20T12:00:00.000Z",
+      signedIn: false,
+    }, {
+      regionId: "19",
+      entityId: "23",
+      empireEntityId: "10",
+      username: "Citizen Two",
+      rank: 3,
+      rankTitle: "Citizen",
+      permissions: [],
+      lastLoginTimestamp: "2026-05-21T12:00:00.000Z",
+      signedIn: false,
+    }, {
+      regionId: "19",
+      entityId: "24",
+      empireEntityId: "12",
+      username: "Other",
+      rank: 0,
+      rankTitle: "Emperor",
+      permissions: [],
+      lastLoginTimestamp: "2026-07-18T12:00:00.000Z",
+      signedIn: false,
+    }],
+    settlements: [{
+      regionId: "19",
+      buildingEntityId: "100",
+      claimEntityId: claimId,
+      empireEntityId: "10",
+      claimName: "Timbersteel Trade",
+      claimOwnerEntityId: "21",
+      claimOwnerName: "Tester",
+      locationX: 100,
+      locationZ: 210,
+      locationDimension: "1",
+    }],
+    claimMembers: [{
+      regionId: "19",
+      entityId: "501",
+      claimEntityId: claimId,
+      playerEntityId: "21",
+      username: "Tester",
+      inventoryPermission: false,
+      buildPermission: true,
+      officerPermission: true,
+      coOwnerPermission: false,
+    }, {
+      regionId: "19",
+      entityId: "502",
+      claimEntityId: claimId,
+      playerEntityId: "22",
+      username: "Citizen One",
+      inventoryPermission: true,
+      buildPermission: false,
+      officerPermission: false,
+      coOwnerPermission: true,
+    }],
+    nodes: [{
+      regionId: "19",
+      entityId: "60",
+      empireEntityId: "10",
+      nickname: "North Tower",
+      locationX: 111,
+      locationZ: 222,
+      locationDimension: "1",
+      energy: "75",
+      upkeep: "10",
+      active: true,
+      coveredChunks: 2,
+      sieges: [{
+        entityId: "601",
+        buildingEntityId: "60",
+        empireEntityId: "10",
+        role: "unknown",
+        energy: "281",
+        active: true,
+        startTimestamp: "2026-07-18T23:55:20.000Z",
+      }, {
+        entityId: "602",
+        buildingEntityId: "60",
+        empireEntityId: "11",
+        role: "unknown",
+        energy: "6710",
+        active: true,
+        startTimestamp: "2026-07-18T23:55:20.000Z",
+      }],
+    }],
+    regions: [{
+      regionId: "19",
+      empireCount: 1,
+      memberCount: 4,
+      settlementCount: 1,
+      claimMemberCount: 2,
+      nodeCount: 1,
+      database: "relay-region-19",
+      schemaFingerprint: "regional-v1",
+      receivedAt: empireObservedAt,
+      lastError: null,
+      warnings: [],
+    }],
+  };
+  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (empireDb) => {
+    empireDb.prepare(`
+      INSERT OR REPLACE INTO domain_payload_current (
+        claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at,
+        last_error, updated_at, provider, source_key, region_id, database_name,
+        schema_fingerprint, source_observed_at, received_at, freshness, confidence,
+        generation, warnings_json
+      ) VALUES (?, 'empires', ?, ?, ?, ?, NULL, ?, 'relay', 'region:19', '19',
+        'relay-region-19', 'regional-v1', NULL, ?, 'fresh', 'authoritative', 1, '[]')
+    `).run(
+      claimId,
+      JSON.stringify(empireCurrentData),
+      empireObservedAt,
+      empireObservedAt,
+      empireObservedAt,
+      empireObservedAt,
+      empireObservedAt,
+    );
+  });
   const regionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
   assert.equal(regionalEmpires.summary.empires, 1);
   assert.equal(regionalEmpires.empires[0].name, "Test Empire");
@@ -605,6 +788,10 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalEmpires.empires[0].hexiteReserves.estimatedEnergyEquivalent, null);
   assert.equal(regionalEmpires.empires[0].hexiteReserves.capsuleWatchtowerEnergyValue, 1_000);
   assert.equal(regionalEmpires.empires[0].hexiteReserves.coverage.foundry, "unavailable");
+  assert.equal(regionalEmpires.stale, false);
+  assert.equal(regionalEmpires.partial, false);
+  assert.equal(regionalEmpires.freshness, "live");
+  assert.equal(regionalEmpires.serverFreshness.cacheState, "relay-live");
   await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (db) => {
     db.prepare(`
       INSERT INTO empire_hexite_sweeps (status, started_at, completed_at, last_error, updated_at)
@@ -640,7 +827,7 @@ test("server collection paginates listings and protects production mutations", a
     db.prepare(`
       INSERT INTO empire_hexite_snapshots (empire_id, sweep_id, payload_json, calculated_at, updated_at)
       VALUES (?, ?, ?, ?, ?)
-    `).run("empire-1", inserted.lastInsertRowid, JSON.stringify(calculatedHexitePayload), "2026-07-18T10:05:00.000Z", "2026-07-18T10:05:00.000Z");
+    `).run("10", inserted.lastInsertRowid, JSON.stringify(calculatedHexitePayload), "2026-07-18T10:05:00.000Z", "2026-07-18T10:05:00.000Z");
     return Number(inserted.lastInsertRowid);
   });
   const calculatedRegionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
@@ -675,7 +862,7 @@ test("server collection paginates listings and protects production mutations", a
       UPDATE empire_hexite_snapshots
       SET sweep_id = ?, payload_json = ?, calculated_at = ?, updated_at = ?
       WHERE empire_id = ?
-    `).run(activeSweepId, JSON.stringify(unavailableHexitePayload), "2026-07-18T16:01:00.000Z", "2026-07-18T16:01:00.000Z", "empire-1");
+    `).run(activeSweepId, JSON.stringify(unavailableHexitePayload), "2026-07-18T16:01:00.000Z", "2026-07-18T16:01:00.000Z", "10");
   });
   const unavailableRegionalEmpires = await fetch(`${origin}/api/local/empires?regionId=19`).then((response) => response.json());
   assert.equal(unavailableRegionalEmpires.empires[0].hexiteReserves.status, "error");
@@ -684,19 +871,17 @@ test("server collection paginates listings and protects production mutations", a
   assert.deepEqual(unavailableRegionalEmpires.empires[0].hexiteReserves.errors, ["HTTP 503"]);
   assert.equal(calculatedSweepId > 0, true);
   failEmpireList = true;
-  const cachedRegionalEmpires = await fetch(`${origin}/api/local/empires?regionId=99`).then((response) => response.json());
-  assert.equal(cachedRegionalEmpires.summary.empires, 0);
-  assert.deepEqual(cachedRegionalEmpires.empires, []);
+  const unconfiguredRegionEmpires = await fetch(`${origin}/api/local/empires?regionId=99`);
+  assert.equal(unconfiguredRegionEmpires.status, 403);
   failEmpireList = false;
   const missingEmpireDetails = await fetch(`${origin}/api/local/empires/details?regionId=19`);
   assert.equal(missingEmpireDetails.status, 400);
   failEmpireTowers = true;
-  const partialEmpireDetails = await fetch(`${origin}/api/local/empires/details?empireId=empire-1&regionId=19&inactiveDays=15`).then((response) => response.json());
-  assert.equal(partialEmpireDetails.partial, true);
-  assert.deepEqual(partialEmpireDetails.towers, []);
-  assert.match(partialEmpireDetails.errors[0], /Watchtowers unavailable/);
+  const relayBackedEmpireDetails = await fetch(`${origin}/api/local/empires/details?empireId=10&regionId=19&inactiveDays=15`).then((response) => response.json());
+  assert.equal(relayBackedEmpireDetails.partial, false);
+  assert.equal(relayBackedEmpireDetails.towers.length, 1);
   failEmpireTowers = false;
-  const empireDetailsResponse = await fetch(`${origin}/api/local/empires/details?empireId=empire-1&regionId=19&inactiveDays=14`);
+  const empireDetailsResponse = await fetch(`${origin}/api/local/empires/details?empireId=10&regionId=19&inactiveDays=14`);
   assert.equal(empireDetailsResponse.status, 200);
   const empireDetails = await empireDetailsResponse.json();
   assert.equal(empireDetails.empire.name, "Test Empire");
@@ -707,15 +892,8 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(empireDetails.activity.activeToday, 0);
   assert.equal(empireDetails.activity.activeThisWeek, 0);
   assert.equal(empireDetails.partial, false);
-  const crossRegionEmpireDetailsResponse = await fetch(`${origin}/api/local/empires/details?empireId=empire-foreign&regionId=19`);
-  assert.equal(crossRegionEmpireDetailsResponse.status, 200);
-  const crossRegionEmpireDetails = await crossRegionEmpireDetailsResponse.json();
-  assert.equal(crossRegionEmpireDetails.empire.name, "Foreign Empire");
-  assert.equal(crossRegionEmpireDetails.empire.leader, "Other");
-  assert.equal(crossRegionEmpireDetails.empire.memberCount, 1);
-  assert.equal(crossRegionEmpireDetails.members[0].username, "Other");
-  assert.equal(crossRegionEmpireDetails.claims[0].name, "Foreign Capital");
-  assert.equal(crossRegionEmpireDetails.claims[0].regionId, "9");
+  const crossRegionEmpireDetailsResponse = await fetch(`${origin}/api/local/empires/details?empireId=12&regionId=19`);
+  assert.equal(crossRegionEmpireDetailsResponse.status, 404);
   const unknownEmpireDetails = await fetch(`${origin}/api/local/empires/details?empireId=missing&regionId=19`);
   assert.equal(unknownEmpireDetails.status, 404);
   const regionalWatchtowers = await fetch(`${origin}/api/local/empires/watchtowers?regionId=19&inactiveDays=14`).then((response) => response.json());
@@ -885,8 +1063,20 @@ test("server collection paginates listings and protects production mutations", a
     body: "{}",
   });
   assert.equal(initialCollect.status, 200);
-  const trackedMembership = await waitForCondition("empire membership baseline", () =>
-    writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (database) => {
+  const trackedMembership = await writeDatabaseWithRetry(
+    path.join(dataDir, "bitcraft-local.sqlite"),
+    (database) => {
+      createEmpireMembershipRepository(database).syncRoster({
+        empireId: "10",
+        empireName: "Test Empire",
+        observedAt: "2026-07-30T12:00:00.000Z",
+        members: [
+          { playerEntityId: "20", playerName: "Leader One" },
+          { playerEntityId: "21", playerName: "Member Two" },
+          { playerEntityId: "22", playerName: "Member Three" },
+          { playerEntityId: "23", playerName: "Member Four" },
+        ],
+      });
       const tracking = database
         .prepare(
           "SELECT empire_id, empire_name, initial_roster_complete FROM empire_membership_tracking WHERE tracking_ended_at IS NULL",
@@ -907,11 +1097,11 @@ test("server collection paginates listings and protects production mutations", a
             count: Number(periods.count),
           }
         : null;
-    }),
+    },
   );
   assert.deepEqual(trackedMembership, {
     tracking: {
-      empire_id: "empire-1",
+      empire_id: "10",
       empire_name: "Test Empire",
       initial_roster_complete: 1,
     },
@@ -1900,7 +2090,7 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(viewerMembership.status, 200);
   const viewerMembershipBody = await viewerMembership.json();
-  assert.equal(viewerMembershipBody.tracking.empireId, "empire-1");
+  assert.equal(viewerMembershipBody.tracking.empireId, "10");
   assert.equal(Object.hasOwn(viewerMembershipBody, "adminUsers"), false);
   assert.equal(Object.hasOwn(viewerMembershipBody, "settings"), false);
   const viewerSettingsMutation = await fetch(`${origin}/api/local/admin/settings`, {

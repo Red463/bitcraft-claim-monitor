@@ -116,20 +116,26 @@ test("regional rankings run on a live typed session rather than BitJita paginati
   assert.doesNotMatch(source, /url\.pathname === "\/api\/local\/region\/claims"/);
 });
 
-test("empire membership tracking has an independent bounded cadence", () => {
-  assert.deepEqual(domainCollectorDefaults.empireMembership, {
-    label: "Empire membership history",
-    intervalSeconds: 60,
-  });
-  const normalized = normalizeCollectorSettings({
-    empireMembership: { enabled: true, intervalSeconds: 5 },
-  });
-  assert.deepEqual(normalized.empireMembership, {
-    label: "Empire membership history",
-    enabled: true,
-    intervalSeconds: 15,
-  });
+test("Empire current state runs on the adaptive regional Relay runtime", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /RelayEmpireRuntime/);
+  assert.match(source, /relayEmpireRuntime\.reconcile/);
+  assert.match(source, /relayEmpireRuntime\.warmActiveRegions/);
+  assert.match(source, /currentStateRepository\.read\(currentClaimId\(\), "empires"\)/);
+  assert.match(source, /domains\.includes\("empires"\)/);
+  assert.doesNotMatch(source, /function regionalEmpire(?:Overview|Details|ClaimMembers|Watchtowers)/);
+  assert.doesNotMatch(source, /empireScout(?:Cache|Inflight)/);
+});
+
+test("empire membership history is subscription-driven without a scheduled collector", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.equal(Object.hasOwn(domainCollectorDefaults, "empireMembership"), false);
   assert.equal(Object.hasOwn(collectorCurrentTables, "empireMembership"), false);
+  assert.match(source, /onSnapshotCommitted:\s*syncEmpireMembershipFromRelaySnapshot/);
+  assert.match(source, /source:\s*"relay-subscription"/);
+  assert.doesNotMatch(source, /runEmpireMembershipCollector/);
+  assert.doesNotMatch(source, /fetchBitjita\([^\n]*\/empires/);
 });
 
 test("collector settings still clamp submitted intervals to the existing bounds", () => {
@@ -192,7 +198,7 @@ test("regional buy orders are subscription-driven with no SQL current cache", ()
 test("collector status resolves the claim once without rebuilding all public settings per collector", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const start = source.indexOf("function collectorStatusPayload");
-  const end = source.indexOf("function claimEmpireId", start);
+  const end = source.indexOf("async function syncEmpireMembershipFromRelaySnapshot", start);
   const implementation = source.slice(start, end);
 
   assert.ok(start > -1);
