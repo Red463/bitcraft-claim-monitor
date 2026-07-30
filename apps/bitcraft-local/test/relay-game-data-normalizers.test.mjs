@@ -653,7 +653,7 @@ test("claim technology descriptions retain progression caps and automatic unlock
   });
 });
 
-test("typed tool descriptions are keyed by item identity for live Toolbelt enrichment", () => {
+test("typed tool descriptions preserve row and item identity for live Toolbelt enrichment", () => {
   assert.deepEqual(normalizeCatalogDescription({
     id: 9,
     itemId: 42,
@@ -662,7 +662,8 @@ test("typed tool descriptions are keyed by item identity for live Toolbelt enric
     power: 25,
   }, "tool"), {
     kind: "tool",
-    id: "42",
+    id: "9",
+    itemId: "42",
     toolType: 4,
     level: 3,
     power: 25,

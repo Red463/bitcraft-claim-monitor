@@ -4,8 +4,11 @@ type WireRecord = Record<string, unknown>;
 type TimestampUnit = "seconds" | "milliseconds" | "microseconds";
 export type CatalogDescriptionKind =
   | "crafting_recipe"
+  | "extraction_recipe"
+  | "item_list"
   | "construction_recipe"
   | "building"
+  | "building_type"
   | "skill"
   | "resource"
   | "equipment"
@@ -129,12 +132,51 @@ function normalizeStats(value: unknown) {
 
 export function normalizeCatalogDescription(value: unknown, kind: CatalogDescriptionKind) {
   const row = record(value, `Relay ${kind} description`);
-  const idValue = kind === "equipment" || kind === "tool"
+  const idValue = kind === "equipment"
     ? row.itemId ?? row.item_id
     : row.id;
   const id = decimalString(idValue, `${kind}.id`);
   const base = { kind, id };
 
+  if (kind === "item_list") {
+    return {
+      ...base,
+      name: String(row.name ?? "").trim(),
+      possibilities: records(row.possibilities).map((possibility) => ({
+        probability: finiteNumber(possibility.probability, "item-list possibility probability"),
+        items: records(possibility.items).map(normalizeDescriptionStack),
+      })),
+    };
+  }
+  if (kind === "extraction_recipe") {
+    const resourceId = decimalString(row.resourceId ?? row.resource_id ?? 0, "extraction recipe resource id");
+    const cargoId = decimalString(row.cargoId ?? row.cargo_id ?? 0, "extraction recipe cargo id");
+    const outputs = records(row.extractedItemStacks ?? row.extracted_item_stacks).flatMap((entry) => {
+      const itemStack = entry.itemStack ?? entry.item_stack;
+      if (itemStack == null) return [];
+      return [{
+        ...normalizeDescriptionStack(itemStack),
+        probability: finiteNumber(entry.probability, "extraction recipe output probability"),
+      }];
+    });
+    return {
+      ...base,
+      resourceId: resourceId === "0" ? null : resourceId,
+      cargoId: cargoId === "0" ? null : cargoId,
+      name: String(row.verbPhrase ?? row.verb_phrase ?? "").trim(),
+      timeRequirement: finiteNumber(row.timeRequirement ?? row.time_requirement ?? 0, "extraction recipe time"),
+      staminaRequirement: finiteNumber(
+        row.staminaRequirement ?? row.stamina_requirement ?? 0,
+        "extraction recipe stamina",
+      ),
+      allowUseHands: row.allowUseHands === true || row.allow_use_hands === true,
+      levelRequirements: records(row.levelRequirements).map(normalizeLevelRequirement),
+      toolRequirements: records(row.toolRequirements).map(normalizeToolRequirement),
+      experiencePerProgress: records(row.experiencePerProgress).map(normalizeExperienceStack),
+      inputs: records(row.consumedItemStacks).map(normalizeDescriptionStack),
+      outputs,
+    };
+  }
   if (kind === "crafting_recipe") {
     const building = row.buildingRequirement == null
       ? null
@@ -188,6 +230,14 @@ export function normalizeCatalogDescription(value: unknown, kind: CatalogDescrip
       })),
     };
   }
+  if (kind === "building_type") {
+    return {
+      ...base,
+      name: String(row.name ?? "").trim(),
+      category: enumLabel(row.category) ?? "Unknown",
+      actions: (Array.isArray(row.actions) ? row.actions : []).map((entry) => String(entry)),
+    };
+  }
   if (kind === "skill") {
     return {
       ...base,
@@ -231,6 +281,7 @@ export function normalizeCatalogDescription(value: unknown, kind: CatalogDescrip
   if (kind === "tool") {
     return {
       ...base,
+      itemId: decimalString(row.itemId ?? row.item_id, "tool item id"),
       toolType: integer(row.toolType ?? row.tool_type, "tool type"),
       level: integer(row.level, "tool level"),
       power: integer(row.power, "tool power"),

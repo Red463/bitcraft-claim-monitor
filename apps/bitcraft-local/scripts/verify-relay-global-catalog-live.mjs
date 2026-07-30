@@ -1,10 +1,14 @@
 import { readFile } from "node:fs/promises";
+import { performance } from "node:perf_hooks";
+import { DatabaseSync } from "node:sqlite";
 
 import {
   discoverRelayTopology,
   RelayGlobalCatalogSession,
 } from "../dist-server/game-data/index.js";
 import { buildWorkstationPresets } from "../src/server/craftPlanWorkstationPresets.mjs";
+import { createProviderCatalogRepository } from "../src/server/catalogRepository.mjs";
+import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 
 const relayBaseUrl = String(
   process.env.BITCRAFT_RELAY_ORIGIN ?? "https://relay.bitcraftsync.app",
@@ -97,6 +101,42 @@ try {
         : ""),
     );
   }
+  const verificationDb = new DatabaseSync(":memory:");
+  applySchemaBootstrap(verificationDb);
+  verificationDb.exec("PRAGMA foreign_keys = ON;");
+  const repository = createProviderCatalogRepository(verificationDb);
+  const applyStartedAt = performance.now();
+  repository.replaceCatalogSnapshot({
+    entities: snapshot.entities,
+    descriptions: snapshot.descriptions,
+  }, {
+    provider: "relay",
+    database: snapshot.database,
+    schemaFingerprint: snapshot.schemaFingerprint,
+    generation: snapshot.generation,
+    receivedAt: snapshot.receivedAt,
+  });
+  const applyDurationMs = Math.round((performance.now() - applyStartedAt) * 100) / 100;
+  const projectionCounts = Object.fromEntries([
+    "game_catalog_recipes",
+    "game_catalog_item_lists",
+    "game_catalog_resources",
+    "game_catalog_effort_weights",
+  ].map((table) => [
+    table,
+    Number(verificationDb.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count),
+  ]));
+  if (
+    projectionCounts.game_catalog_recipes === 0
+    || projectionCounts.game_catalog_item_lists !== descriptionCounts.item_list
+    || projectionCounts.game_catalog_resources !== descriptionCounts.resource
+    || projectionCounts.game_catalog_effort_weights === 0
+  ) {
+    throw new Error(`Relay live catalog projection was incomplete: ${JSON.stringify(projectionCounts)}`);
+  }
+  const integrity = verificationDb.prepare("PRAGMA quick_check").get().quick_check;
+  if (integrity !== "ok") throw new Error(`Relay live catalog projection failed quick_check: ${integrity}`);
+  verificationDb.close();
   console.log(JSON.stringify({
     ok: true,
     uri: relayUrl.origin,
@@ -108,6 +148,8 @@ try {
     descriptionCounts,
     workstationPresetCount: workstationPresets.length,
     workstationCount,
+    projectionCounts,
+    applyDurationMs,
   }, null, 2));
 } finally {
   clearTimeout(timeout);

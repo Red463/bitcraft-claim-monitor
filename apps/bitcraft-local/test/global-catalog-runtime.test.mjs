@@ -68,8 +68,11 @@ test("global catalog runtime discovers topology and atomically publishes reposit
     ],
     descriptions: {
       crafting_recipe: [{ kind: "crafting_recipe", id: "77", name: "Saw Timber" }],
+      extraction_recipe: [],
+      item_list: [],
       construction_recipe: [],
       building: [],
+      building_type: [],
       skill: [{ kind: "skill", id: "5", name: "Forestry", category: "Profession" }],
       resource: [],
       equipment: [],
@@ -101,8 +104,11 @@ test("global catalog runtime discovers topology and atomically publishes reposit
           cargoCount: 1,
           descriptionCounts: {
             crafting_recipe: 1,
+            extraction_recipe: 0,
+            item_list: 0,
             construction_recipe: 0,
             building: 0,
+            building_type: 0,
             skill: 1,
             resource: 0,
             equipment: 0,

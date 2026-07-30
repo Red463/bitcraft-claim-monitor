@@ -361,6 +361,36 @@ the same single-flight provider coordination. Current rows live only in
 `domain_payload_current`; there is no deposit-specific SQL table or scheduled
 ingestion job.
 
+## Global recipe and probability projection
+
+The global schema exposes all inputs previously downloaded or crawled on a
+schedule:
+
+- `crafting_recipe_desc`;
+- `extraction_recipe_desc`;
+- `item_list_desc`;
+- `resource_desc`;
+- `building_type_desc`, `skill_desc`, `item_desc`, and `cargo_desc` for joins.
+
+A live verification on 2026-07-30 loaded 7,747 crafting recipes, 552
+extraction recipes, 2,428 item lists, 616 resources, and 72 building types.
+The complete provider generation projected into disposable SQLite as 8,170
+usable recipe rows, 2,428 item lists, 616 resources, and 4,161 lowest-effort
+planner weights in 474.08 ms. `PRAGMA quick_check` returned `ok`.
+
+Catalog identities, descriptions, normalized recipes, probability rows,
+effort weights, and source generation now commit in one SQLite transaction.
+A malformed generation rolls all of those writes back and preserves the last
+good generation. Relay extraction `probability` values are non-negative
+occurrence rates and live rows include values greater than one; they must not
+be clamped to a percentage.
+
+`tool_desc.id` and `tool_desc.item_id` have different roles. Live data contains
+multiple tool rows for one item, so the description table retains the tool-row
+ID and records `itemId` separately. Toolbelt enrichment resolves the strongest
+matching row by item ID. Keying tool descriptions directly by item ID would
+silently collapse valid rows.
+
 ## Remaining diagnostic blockers
 
 - authoritative evidence distinguishing a completed sale from removal or

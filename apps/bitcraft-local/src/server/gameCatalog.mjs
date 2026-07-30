@@ -485,6 +485,8 @@ export function createGameCatalogRepository(db) {
     `),
     getEntity: db.prepare("SELECT * FROM game_catalog_entities WHERE catalog_key = ?"),
     listRecipeKeysBySource: db.prepare("SELECT recipe_key FROM game_catalog_recipe_sources WHERE catalog_key = ?"),
+    deleteAllRecipeSources: db.prepare("DELETE FROM game_catalog_recipe_sources"),
+    deleteAllRecipes: db.prepare("DELETE FROM game_catalog_recipes"),
     deleteRecipeSourcesForEntity: db.prepare("DELETE FROM game_catalog_recipe_sources WHERE catalog_key = ?"),
     insertRecipeSource: db.prepare("INSERT OR IGNORE INTO game_catalog_recipe_sources (catalog_key, recipe_key) VALUES (?, ?)"),
     countRecipeSources: db.prepare("SELECT COUNT(*) AS count FROM game_catalog_recipe_sources WHERE recipe_key = ?"),
@@ -871,6 +873,19 @@ export function createGameCatalogRepository(db) {
     );
   }
 
+  function runMutation(manageTransaction, mutation) {
+    if (!manageTransaction) return mutation();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = mutation();
+      db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   return {
     upsertEntityIdentity(source, { updatedAt = new Date().toISOString(), kind = null } = {}) {
       const entity = entityFromSource(source, {}, kind);
@@ -1138,6 +1153,147 @@ export function createGameCatalogRepository(db) {
         recipes: normalized.recipes.map((recipe) => ({ ...recipe, updatedAt })),
       };
     },
+    replaceRecipeSnapshot(
+      recipes = [],
+      updatedAt = new Date().toISOString(),
+      publish = null,
+      { manageTransaction = true } = {},
+    ) {
+      if (!Array.isArray(recipes)) throw new TypeError("Recipe snapshot must be an array.");
+      const seen = new Set();
+      const normalized = recipes.map((recipe, recipeIndex) => {
+        const label = `Recipe snapshot row ${recipeIndex}`;
+        const recipeKey = String(recipe?.recipeKey ?? "").trim();
+        if (!recipeKey) throw new Error(`${label} recipe key is required.`);
+        if (seen.has(recipeKey)) throw new Error(`Duplicate recipe snapshot key: ${recipeKey}`);
+        seen.add(recipeKey);
+        const sourceKind = gameCatalogKindFromItemType(recipe?.sourceKind);
+        const sourceId = String(recipe?.sourceId ?? "").trim();
+        if (!/^\d+$/.test(sourceId)) throw new Error(`${label} source id must be a decimal string.`);
+        const actionCount = Number(recipe?.actionCount ?? 0);
+        if (!Number.isFinite(actionCount) || actionCount < 0) {
+          throw new Error(`${label} action count must be a non-negative finite number.`);
+        }
+        const normalizeLinks = (rows, linkKind) => {
+          if (!Array.isArray(rows)) throw new TypeError(`${label} ${linkKind}s must be an array.`);
+          return rows.map((link, linkIndex) => {
+            const kind = gameCatalogKindFromItemType(link?.kind);
+            const targetId = String(link?.targetId ?? "").trim();
+            if (!/^\d+$/.test(targetId)) {
+              throw new Error(`${label} ${linkKind} ${linkIndex} id must be a decimal string.`);
+            }
+            const quantity = Number(link?.quantity);
+            if (!Number.isFinite(quantity) || quantity <= 0) {
+              throw new Error(`${label} ${linkKind} ${linkIndex} quantity must be positive.`);
+            }
+            const occurrenceRate = Number(link?.occurrenceRate ?? 1);
+            if (!Number.isFinite(occurrenceRate) || occurrenceRate < 0) {
+              throw new Error(`${label} ${linkKind} ${linkIndex} occurrence rate must be non-negative.`);
+            }
+            return {
+              ...link,
+              kind,
+              targetId,
+              [`${linkKind}Key`]: gameCatalogKey(kind, targetId),
+              quantity,
+              occurrenceRate,
+            };
+          });
+        };
+        const inputs = normalizeLinks(recipe?.inputs ?? [], "input");
+        const outputs = normalizeLinks(recipe?.outputs ?? [], "output");
+        if (outputs.length === 0) throw new Error(`${label} must have at least one output.`);
+        const outputComponents = normalizeLinks(recipe?.outputComponents ?? outputs, "output")
+          .map((component, componentIndex) => ({
+            ...component,
+            componentIndex: Math.max(0, Math.trunc(toNumber(component?.componentIndex, componentIndex))),
+          }));
+        const sourceCatalogKeys = [...new Set(
+          (Array.isArray(recipe?.sourceCatalogKeys) && recipe.sourceCatalogKeys.length
+            ? recipe.sourceCatalogKeys
+            : outputs.map((output) => output.outputKey))
+            .map((value) => String(value ?? "").trim())
+            .filter(Boolean),
+        )];
+        return {
+          ...recipe,
+          recipeKey,
+          sourceKind,
+          sourceId,
+          actionCount,
+          activityKind: recipe?.activityKind === "gathering" ? "gathering" : "craft",
+          gatheringMode: recipe?.gatheringMode === "prospecting" ? "prospecting" : "ordinary",
+          resourceId: recipe?.resourceId == null ? null : String(recipe.resourceId),
+          inputs,
+          outputs,
+          outputComponents,
+          sourceCatalogKeys,
+        };
+      });
+
+      return runMutation(manageTransaction, () => {
+        statements.deleteAllRecipeSources.run();
+        statements.deleteAllRecipes.run();
+        for (const recipe of normalized) {
+          statements.insertRecipe.run(
+            recipe.recipeKey,
+            recipe.sourceKind,
+            recipe.sourceId,
+            recipe.actionCount,
+            recipe.activityKind,
+            recipe.gatheringMode,
+            recipe.name == null ? null : String(recipe.name),
+            recipe.stationName == null ? null : String(recipe.stationName),
+            recipe.skillName == null ? null : String(recipe.skillName),
+            recipe.isPassive ? 1 : 0,
+            recipe.isTransportRoute ? 1 : 0,
+            recipe.resourceId,
+            updatedAt,
+          );
+          for (const input of recipe.inputs) {
+            statements.insertRecipeInput.run(
+              recipe.recipeKey,
+              input.inputKey,
+              input.kind,
+              input.targetId,
+              input.quantity,
+            );
+          }
+          for (const output of recipe.outputs) {
+            statements.insertRecipeOutput.run(
+              recipe.recipeKey,
+              output.outputKey,
+              output.kind,
+              output.targetId,
+              output.quantity,
+              output.occurrenceRate,
+              output.yieldBasis === "per_progress" ? "per_progress" : "per_craft",
+              output.guaranteedQuantity == null ? null : Math.max(0, toNumber(output.guaranteedQuantity)),
+              output.isPrimaryOutput ? 1 : 0,
+            );
+          }
+          for (const component of recipe.outputComponents) {
+            statements.insertRecipeOutputComponent.run(
+              recipe.recipeKey,
+              component.componentIndex,
+              component.outputKey,
+              component.kind,
+              component.targetId,
+              component.quantity,
+              component.occurrenceRate,
+              component.yieldBasis === "per_progress" ? "per_progress" : "per_craft",
+              component.isPrimaryOutput ? 1 : 0,
+            );
+          }
+          for (const catalogKey of recipe.sourceCatalogKeys) {
+            statements.insertRecipeSource.run(catalogKey, recipe.recipeKey);
+          }
+        }
+        const result = { recipeCount: normalized.length, updatedAt };
+        if (typeof publish === "function") publish(result);
+        return result;
+      });
+    },
     deleteOrphanRecipes() {
       return statements.deleteOrphanRecipes.run().changes;
     },
@@ -1169,7 +1325,7 @@ export function createGameCatalogRepository(db) {
       sourceRevision = null,
       sources = [],
       updatedAt = new Date().toISOString(),
-    } = {}, publish = null) {
+    } = {}, publish = null, { manageTransaction = true } = {}) {
       const normalizedSourceUrl = String(sourceUrl ?? "").trim();
       if (!normalizedSourceUrl) throw new Error("Probability snapshot source URL is required.");
       const itemListIdByOutputKey = new Map(
@@ -1178,8 +1334,7 @@ export function createGameCatalogRepository(db) {
       const resolved = resolveItemListProbabilities(itemLists, itemListIdByOutputKey);
       const warningSet = new Set(resolved.warnings);
 
-      db.exec("BEGIN IMMEDIATE");
-      try {
+      return runMutation(manageTransaction, () => {
         statements.deleteProbabilitySnapshot.run();
         statements.deleteProbabilitySources.run();
         statements.deleteAllItemListOutputs.run();
@@ -1325,12 +1480,8 @@ export function createGameCatalogRepository(db) {
           updatedAt,
         };
         if (typeof publish === "function") publish(result);
-        db.exec("COMMIT");
         return result;
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
+      });
     },
     getProbabilitySnapshot() {
       const row = statements.getProbabilitySnapshot.get();
@@ -1648,13 +1799,18 @@ export function createGameCatalogRepository(db) {
         probability: 1,
       }));
     },
-    replaceEffortWeights(candidates, modelVersion, updatedAt = new Date().toISOString(), publish = null) {
+    replaceEffortWeights(
+      candidates,
+      modelVersion,
+      updatedAt = new Date().toISOString(),
+      publish = null,
+      { manageTransaction = true } = {},
+    ) {
       const normalizedVersion = Math.max(1, Math.floor(toNumber(modelVersion)));
       const weights = selectLowestEffortWeights((candidates ?? []).filter((row) => (
         row?.method === "crafting" || row?.method === "gathering"
       )));
-      db.exec("BEGIN IMMEDIATE");
-      try {
+      return runMutation(manageTransaction, () => {
         statements.deleteEffortWeights.run();
         for (const row of weights.values()) {
           statements.insertEffortWeight.run(
@@ -1667,12 +1823,8 @@ export function createGameCatalogRepository(db) {
           );
         }
         if (typeof publish === "function") publish({ count: weights.size, updatedAt });
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-      return weights.size;
+        return weights.size;
+      });
     },
     getEffortWeights(modelVersion) {
       return new Map(statements.listEffortWeights.all(modelVersion).map((row) => [row.catalog_key, {

@@ -12,8 +12,11 @@ export const GLOBAL_CATALOG_QUERIES = [
   "SELECT * FROM item_desc",
   "SELECT * FROM cargo_desc",
   "SELECT * FROM crafting_recipe_desc",
+  "SELECT * FROM extraction_recipe_desc",
+  "SELECT * FROM item_list_desc",
   "SELECT * FROM construction_recipe_desc",
   "SELECT * FROM building_desc",
+  "SELECT * FROM building_type_desc",
   "SELECT * FROM skill_desc",
   "SELECT * FROM resource_desc",
   "SELECT * FROM equipment_desc",
@@ -82,8 +85,11 @@ const DESCRIPTION_TABLES: ReadonlyArray<{
   kind: CatalogDescriptionKind;
 }> = [
   { accessor: "craftingRecipeDesc", kind: "crafting_recipe" },
+  { accessor: "extractionRecipeDesc", kind: "extraction_recipe" },
+  { accessor: "itemListDesc", kind: "item_list" },
   { accessor: "constructionRecipeDesc", kind: "construction_recipe" },
   { accessor: "buildingDesc", kind: "building" },
+  { accessor: "buildingTypeDesc", kind: "building_type" },
   { accessor: "skillDesc", kind: "skill" },
   { accessor: "resourceDesc", kind: "resource" },
   { accessor: "equipmentDesc", kind: "equipment" },

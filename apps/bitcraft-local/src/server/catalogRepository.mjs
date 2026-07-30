@@ -2,6 +2,11 @@ import {
   createGameCatalogRepository,
   gameCatalogKey,
 } from "./gameCatalog.mjs";
+import { CRAFT_PLAN_EFFORT_MODEL_VERSION } from "./craftPlanEffortProgress.mjs";
+import {
+  normalizeGameDataItemLists,
+  normalizeGameDataResources,
+} from "./itemProbability.mjs";
 
 const SOURCE_KEY = "global";
 
@@ -97,6 +102,167 @@ function normalizedDescriptions(descriptions) {
   return normalized;
 }
 
+function positiveQuantity(value, label) {
+  const quantity = Number(value);
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw new Error(`Provider catalog ${label} quantity must be positive`);
+  }
+  return quantity;
+}
+
+function normalizedRecipeStack(value, label) {
+  const kind = catalogKind(value?.kind ?? value?.itemType ?? value?.item_type);
+  const targetId = text(value?.id ?? value?.targetId ?? value?.target_id, `${label} id`);
+  if (!/^\d+$/.test(targetId)) throw new Error(`Provider catalog ${label} id must be a decimal string`);
+  return {
+    kind,
+    targetId,
+    [`${label.includes("input") ? "input" : "output"}Key`]: gameCatalogKey(kind, targetId),
+    quantity: positiveQuantity(value?.quantity, label),
+  };
+}
+
+function coalescedRecipeOutputs(components) {
+  const byKey = new Map();
+  for (const component of components) {
+    const current = byKey.get(component.outputKey) ?? {
+      outputKey: component.outputKey,
+      kind: component.kind,
+      targetId: component.targetId,
+      quantity: 0,
+      guaranteedQuantity: 0,
+      isPrimaryOutput: false,
+    };
+    current.quantity += component.quantity * component.occurrenceRate;
+    if (component.occurrenceRate === 1) current.guaranteedQuantity += component.quantity;
+    current.isPrimaryOutput ||= component.isPrimaryOutput;
+    byKey.set(component.outputKey, current);
+  }
+  return [...byKey.values()].map((output) => ({
+    ...output,
+    occurrenceRate: 1,
+    yieldBasis: "per_progress",
+  }));
+}
+
+function providerRecipeProjection(descriptions) {
+  const skills = new Map((descriptions.skill ?? []).map((row) => [String(row.id), row.name]));
+  const buildingTypes = new Map(
+    (descriptions.building_type ?? []).map((row) => [String(row.id), row.name]),
+  );
+  const resources = new Map((descriptions.resource ?? []).map((row) => [String(row.id), row.name]));
+  const skillName = (row) => {
+    const id = row?.levelRequirements?.[0]?.skillId;
+    return id == null ? null : skills.get(String(id)) ?? `Skill #${String(id)}`;
+  };
+  const transportRoute = (name, stationName, inputs, outputs) => (
+    [...inputs, ...outputs].some((entry) => entry.kind === "cargo")
+    && /\b(pack|package|unpack|packed|transport|bundle|crate)\b/i.test(`${name ?? ""} ${stationName ?? ""}`)
+  );
+  const recipes = [];
+
+  for (const row of descriptions.crafting_recipe ?? []) {
+    const inputs = (row.inputs ?? []).map((stack, index) => (
+      normalizedRecipeStack(stack, `crafting recipe ${row.id} input ${index}`)
+    ));
+    const rawOutputs = (row.outputs ?? []).map((stack, index) => (
+      normalizedRecipeStack(stack, `crafting recipe ${row.id} output ${index}`)
+    ));
+    if (!rawOutputs.length) continue;
+    const outputs = rawOutputs.map((output, index) => ({
+      ...output,
+      occurrenceRate: 1,
+      yieldBasis: "per_craft",
+      guaranteedQuantity: output.quantity,
+      isPrimaryOutput: index === 0,
+    }));
+    const buildingType = row?.buildingRequirement?.buildingType == null
+      ? null
+      : String(row.buildingRequirement.buildingType);
+    const tier = Number(row?.buildingRequirement?.tier ?? 0);
+    const stationBase = buildingType == null
+      ? null
+      : buildingTypes.get(buildingType) ?? `Building type #${buildingType}`;
+    const stationName = stationBase == null
+      ? null
+      : `${stationBase}${Number.isSafeInteger(tier) && tier > 0 ? ` (Tier ${tier})` : ""}`;
+    const primary = outputs[0];
+    recipes.push({
+      recipeKey: `recipe:${row.id}`,
+      sourceKind: primary.kind,
+      sourceId: primary.targetId,
+      actionCount: Number(row.actionsRequired ?? 0),
+      activityKind: "craft",
+      gatheringMode: "ordinary",
+      resourceId: null,
+      name: row.name || `Recipe #${row.id}`,
+      stationName,
+      skillName: skillName(row),
+      isPassive: row.isPassive === true,
+      isTransportRoute: transportRoute(row.name, stationName, inputs, outputs),
+      inputs,
+      outputs,
+      outputComponents: outputs.map((output, componentIndex) => ({ ...output, componentIndex })),
+      sourceCatalogKeys: [...new Set(outputs.map((output) => output.outputKey))],
+    });
+  }
+
+  for (const row of descriptions.extraction_recipe ?? []) {
+    const inputs = (row.inputs ?? []).map((stack, index) => (
+      normalizedRecipeStack(stack, `extraction recipe ${row.id} input ${index}`)
+    ));
+    const components = (row.outputs ?? []).map((stack, componentIndex) => {
+      const output = normalizedRecipeStack(stack, `extraction recipe ${row.id} output ${componentIndex}`);
+      const probability = Number(stack.probability ?? 1);
+      if (!Number.isFinite(probability) || probability < 0) {
+        throw new Error(
+          `Provider catalog extraction recipe ${row.id} output probability is invalid: ${String(stack.probability)}`,
+        );
+      }
+      return {
+        ...output,
+        componentIndex,
+        occurrenceRate: probability,
+        yieldBasis: "per_progress",
+        isPrimaryOutput: componentIndex === 0,
+      };
+    });
+    if (!components.length) continue;
+    const outputs = coalescedRecipeOutputs(components);
+    const primary = components[0];
+    const resourceId = row.resourceId == null ? null : String(row.resourceId);
+    const cargoId = row.cargoId == null ? null : String(row.cargoId);
+    recipes.push({
+      recipeKey: `extraction:${row.id}`,
+      sourceKind: primary.kind,
+      sourceId: primary.targetId,
+      actionCount: 0,
+      activityKind: "gathering",
+      gatheringMode: resourceId == null && cargoId != null ? "prospecting" : "ordinary",
+      resourceId,
+      name: row.name || (resourceId == null
+        ? `Extraction #${row.id}`
+        : `Extract ${resources.get(resourceId) ?? `Resource #${resourceId}`}`),
+      stationName: null,
+      skillName: skillName(row),
+      isPassive: false,
+      isTransportRoute: false,
+      inputs,
+      outputs,
+      outputComponents: components,
+      sourceCatalogKeys: [...new Set(outputs.map((output) => output.outputKey))],
+    });
+  }
+
+  return recipes;
+}
+
+function hasLiveProjection(descriptions) {
+  return ["item_list", "extraction_recipe", "building_type"].every((kind) => (
+    Object.prototype.hasOwnProperty.call(descriptions ?? {}, kind)
+  ));
+}
+
 export function createProviderCatalogRepository(db) {
   const catalog = createGameCatalogRepository(db);
   const statements = {
@@ -130,6 +296,16 @@ export function createProviderCatalogRepository(db) {
       SELECT data_json FROM game_catalog_descriptions
       WHERE description_kind = ? AND description_id = ?
     `),
+    getToolDescriptionByItem: db.prepare(`
+      SELECT data_json FROM game_catalog_descriptions
+      WHERE description_kind = 'tool'
+        AND json_extract(data_json, '$.itemId') = ?
+      ORDER BY
+        CAST(json_extract(data_json, '$.level') AS INTEGER) DESC,
+        CAST(json_extract(data_json, '$.power') AS INTEGER) DESC,
+        CAST(description_id AS INTEGER) ASC
+      LIMIT 1
+    `),
   };
 
   function replaceSnapshot(entities, descriptions, metadata) {
@@ -138,6 +314,13 @@ export function createProviderCatalogRepository(db) {
       }
       const normalized = entities.map(normalizedEntity);
       const normalizedDescriptionRows = descriptions == null ? null : normalizedDescriptions(descriptions);
+      const liveProjection = normalizedDescriptionRows && hasLiveProjection(descriptions)
+        ? {
+          recipes: providerRecipeProjection(descriptions),
+          itemLists: normalizeGameDataItemLists(descriptions.item_list),
+          resources: normalizeGameDataResources(descriptions.resource),
+        }
+        : null;
       const keys = new Set();
       for (const entity of normalized) {
         if (keys.has(entity.catalogKey)) {
@@ -171,6 +354,34 @@ export function createProviderCatalogRepository(db) {
               source.receivedAt,
             );
           }
+        }
+        if (liveProjection) {
+          catalog.replaceRecipeSnapshot(
+            liveProjection.recipes,
+            source.receivedAt,
+            null,
+            { manageTransaction: false },
+          );
+          const sourceUrl = `spacetimedb://${source.database}`;
+          catalog.replaceProbabilitySnapshot({
+            itemLists: liveProjection.itemLists,
+            resources: liveProjection.resources,
+            sourceUrl,
+            sourceRevision: source.schemaFingerprint,
+            sources: [{
+              sourceKind: "relay_global",
+              sourceUrl,
+              sourceRevision: source.schemaFingerprint,
+            }],
+            updatedAt: source.receivedAt,
+          }, null, { manageTransaction: false });
+          catalog.replaceEffortWeights(
+            catalog.listProbabilityEffortCandidates(),
+            CRAFT_PLAN_EFFORT_MODEL_VERSION,
+            source.receivedAt,
+            null,
+            { manageTransaction: false },
+          );
         }
         const rowCount = normalized.length + (normalizedDescriptionRows?.length ?? 0);
         statements.upsertSourceState.run(
@@ -213,8 +424,15 @@ export function createProviderCatalogRepository(db) {
         .map((row) => JSON.parse(String(row.data_json)));
     },
     getDescription(kind, id) {
-      const row = statements.getDescription.get(String(kind ?? ""), String(id ?? ""));
+      const normalizedKind = String(kind ?? "");
+      const normalizedId = String(id ?? "");
+      const row = normalizedKind === "tool"
+        ? statements.getToolDescriptionByItem.get(normalizedId)
+        : statements.getDescription.get(normalizedKind, normalizedId);
       return row ? JSON.parse(String(row.data_json)) : null;
+    },
+    getProbabilitySnapshot() {
+      return catalog.getProbabilitySnapshot();
     },
   };
 }
