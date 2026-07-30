@@ -18,5 +18,6 @@ export * from "./researchTierPresets.ts";
 export * from "./recruitmentProjection.ts";
 export * from "./relayProvider.ts";
 export * from "./schemaManifest.ts";
+export * from "./storageActivity.ts";
 export * from "./topology.ts";
 export * from "./toolchainManifest.ts";

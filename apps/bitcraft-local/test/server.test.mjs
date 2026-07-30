@@ -357,10 +357,6 @@ test("server collection paginates listings and protects production mutations", a
     }
     if (url.pathname === "/api/empires/empire-foreign/towers") return json(res, []);
     if (url.pathname === "/api/stats/trade-volume") return json(res, { buckets: [], items: [], regions: [] });
-    if (url.pathname === "/api/logs/storage") return json(res, {
-      items: [{ id: "item-1", name: "Bronze Ingot" }],
-      logs: [{ id: "log-1", timestamp: "2026-05-20T12:05:00.000Z", subjectName: "Tester", data: { type: "deposit", item_id: "item-1", quantity: 12 } }],
-    });
     if (url.pathname === `/api/claims/${claimId}/market/listings`) {
       if (url.searchParams.get("side") === "buy") {
         return json(res, { listings: buyListings, totalPages: 1, page: Number(url.searchParams.get("page") || 1) });
@@ -1683,6 +1679,31 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(baselineHistory.totals.confirmedSales, 1);
   assert.equal(baselineHistory.totals.confirmedUnits, 5);
   assert.equal(baselineHistory.totals.trackedValue, 50);
+  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (db) => {
+    db.prepare(`
+      INSERT INTO activity_events (
+        claim_id, event_type, summary, occurred_at, metadata_json, source_key
+      ) VALUES (?, 'storage', ?, ?, ?, ?)
+    `).run(
+      claimId,
+      "Tester deposited 12 Bronze Ingot to Ingots",
+      "2026-05-20T12:05:00.000Z",
+      JSON.stringify({
+        action: "deposit",
+        actorEntityId: "player-1",
+        actorName: "Tester",
+        buildingId: "building-1",
+        containerName: "Ingots",
+        itemId: "item-1",
+        itemName: "Bronze Ingot",
+        itemType: "item",
+        quantity: "12",
+        regionId: "19",
+        relayLogId: "log-1",
+      }),
+      "relay-storage:19:log-1",
+    );
+  });
   const baselineActivity = await fetch(`${origin}/api/local/activity?claimId=${claimId}&limit=20`).then((response) => response.json());
   const storageEvent = baselineActivity.events.find((event) => event.event_type === "storage");
   assert.equal(storageEvent.summary, "Tester deposited 12 Bronze Ingot to Ingots");

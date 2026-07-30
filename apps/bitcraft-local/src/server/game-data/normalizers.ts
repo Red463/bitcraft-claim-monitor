@@ -904,6 +904,79 @@ export function normalizeClaimInventory(value: unknown) {
   };
 }
 
+export function normalizeStorageLogs(value: unknown, options: {
+  claimId: string;
+  regionId: string;
+}) {
+  const payload = record(value, "Relay storage-log payload");
+  const claimId = decimalString(options.claimId, "storage-log configured claim id");
+  const regionId = decimalString(options.regionId, "storage-log configured region id");
+  const warnings: string[] = [];
+  const data = [];
+  const seen = new Set<string>();
+  for (const [index, value] of records(payload.logs).entries()) {
+    try {
+      const row = record(value, `Relay storage-log row ${index}`);
+      const id = decimalString(row.id, `storage-log row ${index} id`);
+      const rowClaimId = decimalString(
+        row.claim_entity_id ?? row.claimEntityId,
+        `storage-log row ${index} claim id`,
+      );
+      if (rowClaimId !== claimId) {
+        warnings.push(`Relay storage-log omitted cross-claim row ${id} for claim ${rowClaimId}.`);
+        continue;
+      }
+      const rowRegionId = decimalString(row.region, `storage-log row ${index} region`);
+      if (rowRegionId !== regionId) {
+        warnings.push(`Relay storage-log omitted cross-region row ${id} for region ${rowRegionId}.`);
+        continue;
+      }
+      if (seen.has(id)) {
+        warnings.push(`Relay storage-log omitted duplicate row ${id}.`);
+        continue;
+      }
+      const action = String(row.action ?? "").trim().toLowerCase();
+      if (action !== "deposit" && action !== "withdraw") {
+        throw new TypeError(`storage-log row ${index} action must be deposit or withdraw`);
+      }
+      const building = record(row.building, `storage-log row ${index} building`);
+      const occurredAtValue = String(row.timestamp ?? "").trim();
+      const occurredAtDate = new Date(occurredAtValue);
+      if (!occurredAtValue || Number.isNaN(occurredAtDate.getTime())) {
+        throw new TypeError(`storage-log row ${index} timestamp must be an ISO date`);
+      }
+      seen.add(id);
+      data.push({
+        id,
+        claimId: rowClaimId,
+        claimName: String(row.claim_name ?? row.claimName ?? ""),
+        regionId: rowRegionId,
+        buildingId: decimalString(
+          building.entity_id ?? building.entityId,
+          `storage-log row ${index} building id`,
+        ),
+        buildingName: String(building.name ?? ""),
+        buildingNickname: String(building.nickname ?? ""),
+        playerId: decimalString(
+          row.player_entity_id ?? row.playerEntityId,
+          `storage-log row ${index} player id`,
+        ),
+        playerName: String(row.player_username ?? row.playerUsername ?? ""),
+        action,
+        itemId: decimalString(row.item_id ?? row.itemId, `storage-log row ${index} item id`),
+        itemType: normalizeItemKind(row.item_type ?? row.itemType),
+        quantity: decimalString(row.quantity, `storage-log row ${index} quantity`),
+        occurredAt: occurredAtDate.toISOString(),
+      });
+    } catch (error) {
+      warnings.push(
+        `Relay storage-log omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return { data, warnings };
+}
+
 export function normalizePlayerInventory(value: unknown) {
   const payload = record(value, "Relay player inventory payload");
   const player = record(payload.player, "Relay player inventory player");

@@ -72,6 +72,11 @@ export function createCurrentStateRepository(db: SqliteDatabase): ProviderSink &
       updated_at = excluded.updated_at
   `);
   const readHealth = db.prepare("SELECT * FROM provider_source_health WHERE provider = ? ORDER BY source_key");
+  const insertSourcedActivity = db.prepare(`
+    INSERT OR IGNORE INTO activity_events (
+      claim_id, event_type, summary, occurred_at, metadata_json, source_key
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
 
   return {
     async commitGeneration(batch: DomainSnapshotBatch) {
@@ -107,8 +112,40 @@ export function createCurrentStateRepository(db: SqliteDatabase): ProviderSink &
         throw error;
       }
     },
-    async appendEvents(_events: DomainEvent[]) {
-      // Domain-specific durable event repositories are connected vertically.
+    async appendEvents(events: DomainEvent[]) {
+      if (!events.length) return;
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        for (const event of events) {
+          const data = event.data;
+          if (!data || typeof data !== "object" || Array.isArray(data)) {
+            throw new TypeError("Domain event data must be an object");
+          }
+          const payload = data as Record<string, unknown>;
+          if (event.domain !== "inventories" || payload.eventType !== "storage") {
+            throw new TypeError(`Unsupported durable domain event: ${event.domain}`);
+          }
+          if (typeof payload.summary !== "string" || !payload.summary.trim()) {
+            throw new TypeError("Durable storage event summary is required");
+          }
+          const metadata = payload.metadata;
+          if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+            throw new TypeError("Durable storage event metadata must be an object");
+          }
+          insertSourcedActivity.run(
+            event.claimId,
+            "storage",
+            payload.summary,
+            event.occurredAt,
+            JSON.stringify(metadata),
+            event.sourceKey,
+          );
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
     async markError(claimId, domain, error, attemptedAt) {
       markError.run(attemptedAt, error, attemptedAt, claimId, domain);

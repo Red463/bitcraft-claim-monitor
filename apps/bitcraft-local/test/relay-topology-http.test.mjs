@@ -114,6 +114,27 @@ test("Relay HTTP requests one bounded player inventory by encoded player ID", as
   assert.deepEqual(requested, ["https://relay.example/player/101%2Fwith%20separator/inventory"]);
 });
 
+test("Relay HTTP requests bounded storage history for one regional container", async () => {
+  const requested = [];
+  const client = new RelayHttpClient({
+    baseUrl: "https://relay.example",
+    fetcher: async (input) => {
+      requested.push(String(input));
+      return new Response(JSON.stringify({ count: 0, logs: [] }), { status: 200 });
+    },
+    retryDelayMs: 0,
+  });
+
+  await client.storageLogs({
+    storageId: "1369094286778488967",
+    regionId: "19",
+    limit: 5000,
+  });
+  assert.deepEqual(requested, [
+    "https://relay.example/storage-logs?storageId=1369094286778488967&region=19&limit=5000",
+  ]);
+});
+
 test("Relay HTTP opens its circuit after five failures in one minute", async () => {
   let calls = 0;
   const client = new RelayHttpClient({

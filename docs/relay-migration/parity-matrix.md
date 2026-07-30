@@ -14,7 +14,7 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 | Construction | Provider-neutral page over claim-filtered regional project state, global recipe/building/material catalogs, and the live inventory snapshot; legacy collector/notification reads remain to be migrated | Regional state plus global catalogs | in progress |
 | Research | Provider-neutral page and Craft Planner tier presets over claim-filtered regional technology state and the global technology catalog; scheduled collector retired | Regional tech state plus global catalogs | ready for soak |
 | Recruitment | Members reads claim-filtered live regional posting state enriched from the global skill catalog; legacy endpoint and collector ownership retired | Regional recruitment state plus global skill catalog | ready for soak |
-| Storage activity | BitJita storage logs | Relay storage-log durable copy | baseline |
+| Storage activity | Relay live HTTP tail on the 15-second provider loop, with bounded container rotation, exact item/cargo catalog enrichment, and idempotent durable copy into `activity_events`; legacy scheduled collector retired | Relay storage-log durable copy | ready for soak |
 | Settlement market | BitJita listings | Proven regional buy/sell order state | baseline |
 | Global market tools | BitJita search/history/trades | Local aggregation and region pool | baseline |
 | Market sale notifications | BitJita trade corroboration | Authoritative close/trade evidence | blocked on evidence |
@@ -32,10 +32,16 @@ Status values: `baseline`, `in progress`, `blocked on evidence`, `blocked on ass
 ## Scheduled/background inventory
 
 The worker currently owns settlement snapshots, market listings/history,
-production lifecycle/contributions, storage activity, trade backfill, regional
+production lifecycle/contributions, trade backfill, regional
 buy-order averages, catalog refreshes, empire Hexite refreshes, Discord outbox,
 scheduled reports, health evaluation, and notification generation. Each job
 must be reconnected to normalized domains before its BitJita path is removed.
+
+Storage activity is no longer a scheduled ingestion job. The Relay live loop
+backfills each newly observed storage container from the retained upstream
+window and then reads a small tail, rotating bounded batches without delaying
+the current inventory snapshot. SQLite remains only as durable event history
+because Relay expires storage logs after roughly 15-16 days.
 
 Current-state ingestion must become subscription-driven or use a bounded
 single-flight Relay HTTP refresh loop. Scheduled jobs may reconcile, repair,

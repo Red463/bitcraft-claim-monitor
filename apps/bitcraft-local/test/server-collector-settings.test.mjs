@@ -43,6 +43,13 @@ test("collector domain maps preserve current refresh and cache ownership", () =>
   assert.equal(payloadDomainCollector.recruitment, undefined);
   assert.equal(collectorPrimaryPayloadDomain.research, undefined);
   assert.equal(Object.hasOwn(domainCollectorDefaults, "research"), false);
+  assert.equal(Object.hasOwn(domainCollectorDefaults, "storageActivity"), false);
+  assert.equal(collectorCurrentTables.storageActivity, undefined);
+  const browserDefaults = readFileSync(
+    new URL("../src/settingsDefaults.ts", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(browserDefaults, /storageActivity/);
   assert.equal(payloadDomainCollector.regionalBuyOrders, undefined);
   assert.deepEqual(collectorCurrentTables.market, ["market_listings", "market_trades"]);
   assert.deepEqual(collectorCurrentTables.marketListings, ["market_listings", "market_events", "market_trades"]);
@@ -56,6 +63,17 @@ test("side-effect collector intervals do not monopolize production", () => {
   assert.equal(domainCollectorDefaults.marketListings.intervalSeconds, 60);
   assert.equal(domainCollectorDefaults.productionContributions.intervalSeconds, 300);
   assert.equal(Object.hasOwn(domainCollectorDefaults, "snapshotHistory"), false);
+});
+
+test("storage activity runs on the Relay live loop rather than a scheduled collector", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /relayStorageActivityService\.sync\(\{/);
+  assert.doesNotMatch(source, /collectStorageActivity/);
+  assert.doesNotMatch(source, /storageActivityJobBudget/);
+  assert.doesNotMatch(source, /collector(?:Attempt|Success|Failure)\("storageActivity"/);
+  assert.doesNotMatch(source, /\/logs\/storage/);
+  assert.match(source, /relayHttp\.storageLogs\(\{/);
 });
 
 test("empire membership tracking has an independent bounded cadence", () => {

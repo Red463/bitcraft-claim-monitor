@@ -98,12 +98,14 @@ import {
   enrichRecruitmentWithCatalog,
   enrichResearchWithCatalog,
   gameDataResponse,
+  normalizeClaimInventory,
   parseDomainKeys,
   RelayHttpClient,
   RelayBitCraftProvider,
   RelayGlobalCatalogRuntime,
   RelayPlayerDataService,
   RelayPrimaryRegionRuntime,
+  RelayStorageActivityService,
   runtimeHealthWithPersistedSnapshot,
 } from "./dist-server/game-data/index.js";
 import {
@@ -301,10 +303,6 @@ const scheduledJobsEnabled = processRoleConfig.runBackgroundJobs && process.env.
 const discordNotificationOutboxIntervalMs = Math.max(Number(process.env.DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS ?? 5000), 1000);
 const discordNotificationMaxAttempts = Math.max(Number(process.env.DISCORD_NOTIFICATION_MAX_ATTEMPTS ?? 8), 1);
 let discordNotificationOutboxRunning = false;
-const storageActivityJobBudget = normalizeJobBudget({
-  maxRuntimeMs: process.env.STORAGE_ACTIVITY_MAX_RUNTIME_MS ?? 15000,
-  batchSize: process.env.STORAGE_ACTIVITY_BATCH_SIZE ?? 25,
-});
 const marketTradeJobBudget = normalizeJobBudget({
   maxRuntimeMs: process.env.MARKET_TRADES_MAX_RUNTIME_MS ?? 15000,
   batchSize: process.env.MARKET_TRADES_BATCH_SIZE ?? 20,
@@ -400,6 +398,13 @@ const statements = createPreparedStatements(db);
 const currentStateRepository = createCurrentStateRepository(db);
 const relayProvider = new RelayBitCraftProvider();
 const providerCatalogRepository = createProviderCatalogRepository(db);
+const relayStorageActivityService = new RelayStorageActivityService({
+  http: new RelayHttpClient({ baseUrl: relayBaseUrl }),
+  appendEvents: (events) => currentStateRepository.appendEvents(events),
+  getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+  batchSize: 25,
+  concurrency: 5,
+});
 const relayPlayerDataService = new RelayPlayerDataService({
   http: new RelayHttpClient({ baseUrl: relayBaseUrl }),
   readMembers: (claimId) => {
@@ -7566,90 +7571,6 @@ async function mapWithConcurrency(values, concurrency, mapper) {
   return results;
 }
 
-function storageActivityBuildingKey(building) {
-  return String(building.entityId ?? "").trim();
-}
-
-async function collectStorageActivity(claimId, inventories, options = {}) {
-  const budget = normalizeJobBudget(options.budget ?? {}, storageActivityJobBudget);
-  const buildings = unwrap(inventories, "buildings", [])
-    .filter((building) => building.entityId && !isDeployableStorage(building))
-    .sort((a, b) => storageActivityBuildingKey(a).localeCompare(storageActivityBuildingKey(b)));
-  const resume = readCollectorResume("storageActivity", claimId);
-  const batch = selectResumeBatch(buildings, {
-    cursor: resume.nextCursor,
-    batchSize: budget.batchSize,
-    getKey: storageActivityBuildingKey,
-  });
-  const startedAtMs = Date.now();
-  const failures = [];
-  const responses = [];
-  const processedBuildings = [];
-  for (const building of batch.items) {
-    if (!jobBudgetAllowsMore(startedAtMs, budget, processedBuildings.length)) break;
-    processedBuildings.push(building);
-    try {
-      responses.push({ building, payload: await fetchBitjita(`/logs/storage?buildingEntityId=${building.entityId}&limit=40`) });
-    } catch (error) {
-      failures.push(`${storageContainerName(building)}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  let inserted = 0;
-  db.exec("BEGIN");
-  try {
-    for (const result of responses) {
-      const items = [...(result.payload.items ?? []), ...(result.payload.cargos ?? [])];
-      const catalog = new Map(items.map((item) => [String(item.id), item]));
-      const containerName = storageContainerName(result.building);
-      for (const log of result.payload.logs ?? []) {
-        const event = log.data ?? {};
-        const eventAction = String(event.type ?? "storage").replaceAll("_", " ").toLowerCase();
-        const action = eventAction.includes("withdraw") ? "withdrew" : eventAction.includes("deposit") ? "deposited" : eventAction;
-        const item = catalog.get(String(event.item_id));
-        const actorName = String(log.subjectName ?? "Member");
-        const summary = `${actorName} ${action} ${toNumber(event.quantity).toLocaleString()} ${item?.name ?? `item #${event.item_id ?? "?"}`} ${action === "withdrew" ? "from" : "to"} ${containerName}`;
-        const metadata = {
-          actorName,
-          containerName,
-          buildingId: String(result.building.entityId),
-          itemName: item?.name ?? null,
-          quantity: toNumber(event.quantity),
-        };
-        inserted += Number(statements.insertSourcedActivity.run(
-          claimId,
-          "storage",
-          summary,
-          log.timestamp ?? new Date().toISOString(),
-          JSON.stringify(metadata),
-          `storage:${result.building.entityId}:${log.id ?? `${log.timestamp}:${event.type}:${event.item_id}:${event.quantity}:${actorName}`}`,
-        ).changes);
-      }
-    }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-  const complete = batch.complete && processedBuildings.length === batch.items.length;
-  const nextCursor = complete ? null : (processedBuildings.length ? storageActivityBuildingKey(processedBuildings[processedBuildings.length - 1]) : (resume.nextCursor ?? null));
-  writeCollectorResume("storageActivity", claimId, {
-    nextCursor,
-    complete,
-    processed: processedBuildings.length,
-    total: buildings.length,
-    inserted,
-    failures: failures.slice(0, 20),
-    budget,
-  });
-  return {
-    requested: buildings.length,
-    processed: processedBuildings.length,
-    inserted,
-    complete,
-    nextCursor,
-    failures,
-  };
-}
 async function fetchCachedClaimDetail(claimId) {
   const cached = claimDetailCache.get(String(claimId));
   if (cached && cached.expiresAt > Date.now()) return cached.value;
@@ -8789,17 +8710,6 @@ async function collectServerSnapshot(force = false) {
     await runMarketListingsCollector(claimId, currentData, force);
     await runProductionActivityCollector(claimId, currentData);
     await runProductionContributionCollector(claimId, currentData, force);
-    const storageStartedAt = collectorAttempt("storageActivity");
-    pollStatus.storageLastAttemptAt = new Date().toISOString();
-    const storageResult = await collectStorageActivity(claimId, currentData.inventories ?? { buildings: [] }, { budget: storageActivityJobBudget });
-    pollStatus.storageRequests = storageResult.requested;
-    pollStatus.storageInserted = storageResult.inserted;
-    pollStatus.storageProcessed = storageResult.processed;
-    pollStatus.storageComplete = storageResult.complete;
-    pollStatus.storageLastError = storageResult.failures.length ? storageResult.failures.join("; ") : null;
-    pollStatus.storageLastSuccessAt = new Date().toISOString();
-    if (storageResult.failures.length) collectorFailure("storageActivity", storageStartedAt, new Error(storageResult.failures.join("; ")));
-    else collectorSuccess("storageActivity", storageStartedAt);
     const marketStartedAt = collectorAttempt("marketTrades");
     const marketTradeResult = await importMemberSellTrades(claimId, members, { budget: marketTradeJobBudget });
     pollStatus.marketTradesProcessed = marketTradeResult.processed;
@@ -9399,27 +9309,54 @@ function databaseStatus() {
 
 async function apiDiagnostics() {
   const { claimId } = getSettings();
+  const relayHttp = new RelayHttpClient({ baseUrl: relayBaseUrl });
   const checks = [
-    ["Settlement", `/claims/${claimId}`],
-    ["Members", `/claims/${claimId}/members`],
-    ["Structures", `/claims/${claimId}/buildings`],
-    ["Inventory", `/claims/${claimId}/inventories`],
-    ["Market", `/claims/${claimId}/market/listings?limit=5`],
-    ["Production", `/crafts?claimEntityId=${claimId}&completed=false`],
+    ["Relay health", "/health", () => relayHttp.health()],
+    ["Relay cache", "/cache-health", () => relayHttp.cacheHealth()],
+    ["Settlement", `/claim/${claimId}`, () => relayHttp.claim(claimId)],
+    ["Members", `/claim/${claimId}/members`, () => relayHttp.members(claimId)],
+    ["Inventory", `/claim/${claimId}/inventory`, () => relayHttp.inventory(claimId)],
+    ["Active production", `/claim/${claimId}/crafts?completed=false`, () => relayHttp.crafts(claimId, false)],
+    ["Completed production", `/claim/${claimId}/crafts?completed=true`, () => relayHttp.crafts(claimId, true)],
   ];
-  const timedCheck = async (label, endpoint) => {
+  const timedCheck = async (label, endpoint, load) => {
     const started = Date.now();
     try {
-      const value = await fetchBitjita(endpoint);
+      const value = await load();
       return { result: { label, endpoint, ok: true, durationMs: Date.now() - started, checkedAt: new Date().toISOString() }, value };
     } catch (error) {
       return { result: { label, endpoint, ok: false, durationMs: Date.now() - started, checkedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) }, value: null };
     }
   };
-  const core = await Promise.all(checks.map(([label, endpoint]) => timedCheck(label, endpoint)));
+  const core = await Promise.all(checks.map(([label, endpoint, load]) => timedCheck(label, endpoint, load)));
   const inventories = core.find((check) => check.result.label === "Inventory")?.value;
-  const storageBuildings = unwrap(inventories, "buildings", []).filter((building) => building.entityId && !isDeployableStorage(building));
-  const storage = await mapWithConcurrency(storageBuildings, 4, (building) => timedCheck(`Storage: ${storageContainerName(building)}`, `/logs/storage?buildingEntityId=${building.entityId}&limit=40`));
+  let storageBuildings = [];
+  let storageRegionId = String(
+    currentStateRepository.read(claimId, "claim")?.data?.regionId
+      ?? getSettings().defaultRegion
+      ?? "",
+  );
+  try {
+    const normalizedInventory = normalizeClaimInventory(inventories);
+    storageRegionId = normalizedInventory.claim.regionId;
+    storageBuildings = normalizedInventory.buildings
+      .filter((building) => building.entityId && !isDeployableStorage(building))
+      .slice(0, 25);
+  } catch {
+    // The failed inventory check already contains the actionable error.
+  }
+  const storage = await mapWithConcurrency(storageBuildings, 4, (building) => {
+    const endpoint = `/storage-logs?storageId=${building.entityId}&region=${storageRegionId}&limit=100`;
+    return timedCheck(
+      `Storage: ${storageContainerName(building)}`,
+      endpoint,
+      () => relayHttp.storageLogs({
+        storageId: building.entityId,
+        regionId: storageRegionId,
+        limit: 100,
+      }),
+    );
+  });
   return [...core, ...storage].map((check) => check.result);
 }
 
@@ -11940,6 +11877,25 @@ function startBackgroundTasks() {
           reason,
         });
         await reconcilePrimaryRegion();
+        const claimId = currentClaimId();
+        const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+        const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();
+        const inventories = currentStateRepository.read(claimId, "inventories")?.data ?? { buildings: [] };
+        pollStatus.storageLastAttemptAt = new Date().toISOString();
+        void relayStorageActivityService.sync({
+          claimId,
+          regionId,
+          inventories,
+        }).then((result) => {
+          pollStatus.storageRequests = result.requested;
+          pollStatus.storageProcessed = result.processed;
+          pollStatus.storageInserted = result.insertedCandidates;
+          pollStatus.storageComplete = result.complete;
+          pollStatus.storageLastError = [...result.failures, ...result.warnings].join("; ") || null;
+          pollStatus.storageLastSuccessAt = new Date().toISOString();
+        }).catch((error) => {
+          pollStatus.storageLastError = errorMessage(error);
+        });
       } catch (error) {
         if (!isTestRuntime) console.warn(`Relay provider refresh failed: ${errorMessage(error)}`);
       }

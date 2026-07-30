@@ -8,6 +8,9 @@ const { applySchemaBootstrap } = await import(
 const { applyAdditiveColumnMigrations } = await import(
   new URL("../src/server/schemaMigrations.mjs", import.meta.url).href,
 );
+const { applySchemaIndexStatements } = await import(
+  new URL("../src/server/schemaMigrations.mjs", import.meta.url).href,
+);
 const { createCurrentStateRepository } = await import(
   new URL("../src/server/game-data/currentStateRepository.ts", import.meta.url).href,
 );
@@ -143,6 +146,47 @@ test("repository persists provider health for the separate web process", async (
       },
     },
   });
+  db.close();
+});
+
+test("repository durably deduplicates normalized Relay storage events", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  applySchemaIndexStatements(db);
+  const repository = createCurrentStateRepository(db);
+  const event = {
+    claimId: "1369094286777412590",
+    domain: "inventories",
+    sourceKey: "relay-storage:19:4070526",
+    occurredAt: "2026-07-30T09:00:00.000Z",
+    data: {
+      eventType: "storage",
+      summary: "Ada deposited 12 Bronze Ingot to Ingots",
+      metadata: {
+        action: "deposit",
+        actorEntityId: "200",
+        actorName: "Ada",
+        buildingId: "100",
+        containerName: "Ingots",
+        itemId: "42",
+        itemName: "Bronze Ingot",
+        itemType: "item",
+        quantity: "12",
+        regionId: "19",
+        relayLogId: "4070526",
+      },
+    },
+  };
+
+  await repository.appendEvents([event, event]);
+  await repository.appendEvents([event]);
+
+  const rows = db.prepare("SELECT * FROM activity_events").all();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].source_key, "relay-storage:19:4070526");
+  assert.equal(rows[0].summary, "Ada deposited 12 Bronze Ingot to Ingots");
+  assert.equal(JSON.parse(rows[0].metadata_json).quantity, "12");
   db.close();
 });
 

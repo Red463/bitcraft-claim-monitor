@@ -57,6 +57,19 @@ export class RelayHttpClient {
     return this.#request(`/deposits?region=${encodeURIComponent(regionId)}`);
   }
 
+  storageLogs(options: {
+    storageId: string;
+    regionId: string;
+    limit: number;
+  }) {
+    const parameters = new URLSearchParams({
+      storageId: String(options.storageId),
+      region: String(options.regionId),
+      limit: String(options.limit),
+    });
+    return this.#request(`/storage-logs?${parameters}`);
+  }
+
   async #request(pathname: string): Promise<unknown> {
     const now = this.#now();
     if (now < this.#circuitOpenUntil) {

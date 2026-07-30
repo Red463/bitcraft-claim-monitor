@@ -1,5 +1,33 @@
 # Relay diagnostic findings
 
+## Storage activity semantics and retention — 2026-07-30
+
+The public Relay storage endpoint was exercised against a monitored claim
+container using:
+
+```text
+/storage-logs?storageId=1369094286778488967&region=19&limit=5000
+```
+
+- Rows carry stable decimal log, claim, building, player, item, and region IDs.
+- `action` is `deposit` or `withdraw`; `item_type` is independently `Item` or
+  `Cargo`, so catalog identity remains typed.
+- Building, claim, and player names are joined by Relay. Item display metadata
+  is joined locally from the continuously maintained global catalog.
+- The observed container returned 344 rows from 2026-07-18 through
+  2026-07-29, confirming the documented expiring history window and that a
+  large initial limit is accepted.
+- The durable source key is `relay-storage:<region>:<upstream log id>`.
+  Re-reading the live tail is therefore idempotent across retries and restarts.
+
+Runtime consequence: a bounded service rotates through current claim storage
+containers on the 15-second Relay loop. A newly seen container receives a
+retained-window backfill and subsequent passes request only the newest 100
+rows. This work is independent of current inventory rendering and no longer
+waits for the settlement collector. `activity_events` remains necessary as
+durable local history; no storage-specific current-state or refresh table is
+created.
+
 ## Recruitment state semantics — 2026-07-30
 
 The generated regional binding was exercised against the topology-discovered

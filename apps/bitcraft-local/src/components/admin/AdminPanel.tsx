@@ -1419,7 +1419,7 @@ export function AdminPanel({
                 <h3><Activity size={17} /> BitJita Endpoint Check</h3>
                 <p className="legend">Runs live timing checks for public data sources and settlement storage containers.</p>
               </div>
-              <button className={busyButtonClass("endpoint-checks")} title="Run live timing checks against public BitJita endpoints and storage containers." disabled={isBusyAction("endpoint-checks")} onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics", { method: "POST", body: "{}" })).checks ?? []), "Endpoint check completed.", "endpoint-checks")}><RefreshCw size={15} /> {isBusyAction("endpoint-checks") ? "Checking..." : "Run Checks"}</button>
+              <button className={busyButtonClass("endpoint-checks")} title="Run bounded live timing checks against Relay endpoints and settlement storage containers." disabled={isBusyAction("endpoint-checks")} onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics", { method: "POST", body: "{}" })).checks ?? []), "Endpoint check completed.", "endpoint-checks")}><RefreshCw size={15} /> {isBusyAction("endpoint-checks") ? "Checking..." : "Run Checks"}</button>
             </div>
             {diagnostics.length ? (
               <div className="endpoint-check-panel">

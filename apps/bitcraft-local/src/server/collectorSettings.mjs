@@ -17,7 +17,6 @@ export const domainCollectorDefaults = {
   marketListings: { label: "Market listing sync", intervalSeconds: 60 },
   empireMembership: { label: "Empire membership history", intervalSeconds: 60 },
   productionContributions: { label: "Production contribution sync", intervalSeconds: 300 },
-  storageActivity: { label: "Storage activity", intervalSeconds: 60 },
   marketTrades: { label: "Member market trades", intervalSeconds: 60 },
 };
 
@@ -65,7 +64,6 @@ export const collectorCurrentTables = {
   mapCatalog: ["domain_payload_current"],
   marketListings: ["market_listings", "market_events", "market_trades"],
   productionContributions: ["production_jobs", "production_contributions"],
-  storageActivity: ["activity_events"],
   marketTrades: ["market_trades"],
 };
 

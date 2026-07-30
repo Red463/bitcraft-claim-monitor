@@ -21,6 +21,7 @@ const {
   normalizeRegionalPlayers,
   normalizeRegionalRecruitment,
   normalizeRegionalResearch,
+  normalizeStorageLogs,
   normalizeTimestamp,
 } = await import(new URL("../src/server/game-data/normalizers.ts", import.meta.url).href);
 
@@ -678,6 +679,87 @@ test("claim inventory normalization preserves item/cargo collisions and exact qu
     { itemId: "42", itemType: "cargo", quantity: "2" },
   ]);
   assert.equal(inventory.buildings[0].entityId, "1369094286778488967");
+});
+
+test("storage-log normalization preserves exact identities and rejects cross-scope rows", () => {
+  const result = normalizeStorageLogs({
+    count: 4,
+    logs: [{
+      action: "withdraw",
+      building: {
+        entity_id: "1369094286778488967",
+        name: "Simple Large Chest",
+        nickname: "Needs Processing",
+      },
+      claim_entity_id: "1369094286777412590",
+      claim_name: "Timbersteel Trade",
+      id: "4070526",
+      item_id: 3110017,
+      item_type: "Item",
+      player_entity_id: "1369094286756659093",
+      player_username: "Modular",
+      quantity: "9007199254740993",
+      region: 19,
+      timestamp: "2026-07-29T22:34:48.266Z",
+    }, {
+      action: "deposit",
+      building: { entity_id: "2", name: "Foreign chest" },
+      claim_entity_id: "999",
+      id: "2",
+      item_id: 42,
+      item_type: "Cargo",
+      player_entity_id: "3",
+      quantity: 1,
+      region: 19,
+      timestamp: "2026-07-29T22:34:48.266Z",
+    }, {
+      action: "deposit",
+      building: { entity_id: "3", name: "Other region chest" },
+      claim_entity_id: "1369094286777412590",
+      id: "3",
+      item_id: 42,
+      item_type: "Cargo",
+      player_entity_id: "4",
+      quantity: 1,
+      region: 20,
+      timestamp: "2026-07-29T22:34:48.266Z",
+    }, {
+      action: "move",
+      building: { entity_id: "4", name: "Malformed" },
+      claim_entity_id: "1369094286777412590",
+      id: "4",
+      item_id: 42,
+      item_type: "Cargo",
+      player_entity_id: "5",
+      quantity: 1,
+      region: 19,
+      timestamp: "not-a-date",
+    }],
+  }, {
+    claimId: "1369094286777412590",
+    regionId: "19",
+  });
+
+  assert.deepEqual(result.data, [{
+    id: "4070526",
+    claimId: "1369094286777412590",
+    claimName: "Timbersteel Trade",
+    regionId: "19",
+    buildingId: "1369094286778488967",
+    buildingName: "Simple Large Chest",
+    buildingNickname: "Needs Processing",
+    playerId: "1369094286756659093",
+    playerName: "Modular",
+    action: "withdraw",
+    itemId: "3110017",
+    itemType: "item",
+    quantity: "9007199254740993",
+    occurredAt: "2026-07-29T22:34:48.266Z",
+  }]);
+  assert.equal(result.warnings.length, 3);
+  assert.match(result.warnings[0], /cross-claim row 2/i);
+  assert.match(result.warnings[1], /cross-region row 3/i);
+  assert.match(result.warnings[2], /omitted row 3/i);
 });
 
 test("player inventory normalization preserves bounded categories and exact item identities", () => {
