@@ -290,29 +290,6 @@ export function createPreparedStatements(db) {
   markScheduledJobFailure: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
   updateScheduledJobMetadata: db.prepare("UPDATE scheduled_jobs SET metadata_json = ?, updated_at = ? WHERE job_key = ?"),
   resetStaleScheduledJobs: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE running = 1 AND (last_run_at IS NULL OR last_run_at < ?)"),
-  resetStaleRecipeCatalogJob: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = 'recipe_catalog_refresh' AND running = 1 AND (updated_at IS NULL OR updated_at < ?)"),
-  getRecipeCatalogEntry: db.prepare("SELECT * FROM recipe_catalog_entries WHERE catalog_key = ?"),
-  listRecipeCatalogEntries: db.prepare("SELECT * FROM recipe_catalog_entries ORDER BY last_synced_at ASC, catalog_key ASC LIMIT ?"),
-  recipeCatalogCount: db.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries"),
-  upsertRecipeCatalogEntry: db.prepare(`
-    INSERT INTO recipe_catalog_entries (
-      catalog_key, kind, target_id, item_type, name, tier, rarity, tag, icon_asset_name,
-      detail_json, source, last_synced_at, last_error, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
-    ON CONFLICT(catalog_key) DO UPDATE SET
-      item_type = excluded.item_type,
-      name = COALESCE(excluded.name, recipe_catalog_entries.name),
-      tier = COALESCE(excluded.tier, recipe_catalog_entries.tier),
-      rarity = COALESCE(excluded.rarity, recipe_catalog_entries.rarity),
-      tag = COALESCE(excluded.tag, recipe_catalog_entries.tag),
-      icon_asset_name = COALESCE(excluded.icon_asset_name, recipe_catalog_entries.icon_asset_name),
-      detail_json = excluded.detail_json,
-      source = excluded.source,
-      last_synced_at = excluded.last_synced_at,
-      last_error = NULL,
-      updated_at = excluded.updated_at
-  `),
-  updateRecipeCatalogError: db.prepare("UPDATE recipe_catalog_entries SET last_error = ?, updated_at = ? WHERE catalog_key = ?"),
   adminCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users"),
   adminByUsername: db.prepare("SELECT * FROM admin_users WHERE username = ? AND active = 1"),
   adminByDiscordId: db.prepare("SELECT * FROM admin_users WHERE discord_id = ? AND active = 1"),

@@ -699,13 +699,33 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(claimMembers.members[0].isClaimOwner, true);
   assert.equal(claimMembers.members.some((member) => member.username === "Citizen One" && member.claimRole === "Co-owner"), true);
   assert.equal(claimMembers.members[0].lastLoginTimestamp, "2026-05-21T12:00:00.000Z");
+  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (catalogDb) => {
+    catalogDb.prepare(`
+      INSERT INTO game_catalog_entities (
+        catalog_key, kind, target_id, item_type, name, tag, tier, rarity,
+        icon_asset_name, item_list_id, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+    `).run(
+      "items:2020003",
+      "items",
+      "2020003",
+      0,
+      "Simple Plank",
+      "Plank",
+      2,
+      "Common",
+      null,
+      "2026-07-30T12:00:00.000Z",
+    );
+  });
   const recipeDetailOne = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
   const recipeDetailTwo = await fetch(`${origin}/api/local/recipe-detail?kind=items&id=2020003&name=Simple%20Plank`).then((response) => response.json());
   assert.equal(recipeDetailOne.detail.item.name, "Simple Plank");
-  assert.equal(recipeDetailOne.cached, false);
+  assert.equal(recipeDetailOne.cached, true);
+  assert.equal(recipeDetailOne.provider, "relay");
   assert.equal(recipeDetailTwo.detail.item.name, "Simple Plank");
   assert.equal(recipeDetailTwo.cached, true);
-  assert.equal(recipeDetailRequests, 1);
+  assert.equal(recipeDetailRequests, 0);
   const playerDetailPayload = { members: [{ playerEntityId: "player-1", userName: "Tester" }] };
   const playerDetailsOne = await fetch(`${origin}/api/local/player-details`, {
     method: "POST",
@@ -1051,24 +1071,24 @@ test("server collection paginates listings and protects production mutations", a
   const adminJobs = await fetch(`${origin}/api/local/admin/jobs`, {
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
   }).then((response) => response.json());
-  assert.equal(adminJobs.recipeCatalogCount, 1);
-  assert.equal(adminJobs.jobs.some((job) => job.key === "recipe_catalog_refresh" && job.enabled === true), true);
+  assert.equal("recipeCatalogCount" in adminJobs, false);
+  assert.equal(adminJobs.jobs.some((job) => job.key === "recipe_catalog_refresh"), false);
   const disabledJobs = await fetch(`${origin}/api/local/admin/jobs`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
-    body: JSON.stringify({ key: "recipe_catalog_refresh", enabled: false }),
+    body: JSON.stringify({ key: "geoip_database_refresh", enabled: false }),
   }).then((response) => response.json());
-  assert.equal(disabledJobs.jobs.find((job) => job.key === "recipe_catalog_refresh").enabled, false);
+  assert.equal(disabledJobs.jobs.find((job) => job.key === "geoip_database_refresh").enabled, false);
   const scheduledJobsUpdate = await fetch(`${origin}/api/local/admin/jobs`, {
     method: "PUT",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
-    body: JSON.stringify({ key: "recipe_catalog_refresh", enabled: true, scheduleConfig: { frequency: "weekly", dayOfWeek: 2, time: "03:30" } }),
+    body: JSON.stringify({ key: "geoip_database_refresh", enabled: true, scheduleConfig: { frequency: "weekly", dayOfWeek: 2, time: "03:30" } }),
   }).then((response) => response.json());
-  const recipeJob = scheduledJobsUpdate.jobs.find((job) => job.key === "recipe_catalog_refresh");
-  assert.equal(recipeJob.enabled, true);
-  assert.deepEqual(recipeJob.scheduleConfig, { frequency: "weekly", dayOfWeek: 2, time: "03:30", dayOfMonth: 1 });
-  assert.equal(recipeJob.scheduleLabel, "Weekly on Tuesday at 03:30");
-  assert.match(recipeJob.nextRunAt, /^\d{4}-\d{2}-\d{2}T/);
+  const geoipScheduledJob = scheduledJobsUpdate.jobs.find((job) => job.key === "geoip_database_refresh");
+  assert.equal(geoipScheduledJob.enabled, true);
+  assert.deepEqual(geoipScheduledJob.scheduleConfig, { frequency: "weekly", dayOfWeek: 2, time: "03:30", dayOfMonth: 1 });
+  assert.equal(geoipScheduledJob.scheduleLabel, "Weekly on Tuesday at 03:30");
+  assert.match(geoipScheduledJob.nextRunAt, /^\d{4}-\d{2}-\d{2}T/);
   const geoipJobRun = await fetch(`${origin}/api/local/admin/jobs/run`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -2031,119 +2051,7 @@ test("background polling failures keep the server online", async (t) => {
 });
 
 
-test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache warm, persists resumable 429 state, and writes normalized catalog rows", async (t) => {
-  let itemsPageRequests = 0;
-  let cargoPageRequests = 0;
-  const detailRequests = [];
-  let firstDetailRelease = null;
-  const firstDetailGate = new Promise((resolve) => { firstDetailRelease = resolve; });
-  let item200Attempts = 0;
-  const upstream = createServer(async (req, res) => {
-    const url = new URL(req.url, "http://127.0.0.1");
-    if (gameDataProbabilityFixture(url, res)) return;
-    if (url.pathname === "/api/items") {
-      itemsPageRequests += 1;
-      const page = Number(url.searchParams.get("page") || 1);
-      if (page === 1) {
-        return json(res, {
-          data: {
-            items: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "resin.png", itemListId: "55" }],
-            metrics: { total: 2, totalPages: 2, page },
-          },
-        });
-      }
-      if (page === 2) {
-        return json(res, {
-          items: [{ id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2, rarityStr: "Common", iconAssetName: "timber.png", itemListId: "0" }],
-          pagination: { page, totalPages: 2, total: 2 },
-        });
-      }
-      return json(res, { items: [], pagination: { page, totalPages: 2, total: 2 } });
-    }
-    if (url.pathname === "/api/cargo") {
-      cargoPageRequests += 1;
-      return json(res, {
-        results: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1, rarityStr: "Common", iconAssetName: "bundle.png" }],
-        count: 1,
-      });
-    }
-    if (url.pathname === "/api/resources") {
-      return json(res, { resources: [] });
-    }
-    if (url.pathname === "/api/items/100") {
-      detailRequests.push("items:100");
-      await firstDetailGate;
-      return json(res, {
-        detail: {
-          item: { id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "resin.png" },
-          craftingRecipes: [{
-            id: "resin-pack",
-            name: "Pack Resin",
-            stationName: "Packing Station",
-            craftedItemStacks: [{ item_id: "300", item_type: "cargo", quantity: 1 }],
-            craftedItems: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1 }],
-            consumedItemStacks: [{ item_id: "100", item_type: "item", quantity: 5 }],
-            consumedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
-          }],
-          itemListPossibilities: [{
-            targetId: "400",
-            targetItem: { id: "400", itemType: 0, name: "Sticky Residue", tag: "Residue", tier: 1 },
-            quantity: 1,
-            chance: 0.2,
-            isCargo: false,
-          }],
-        },
-      });
-    }
-    if (url.pathname === "/api/items/200") {
-      detailRequests.push("items:200");
-      item200Attempts += 1;
-      if (item200Attempts === 1) {
-        res.writeHead(429, { "content-type": "application/json", "retry-after": "1" });
-        return res.end(JSON.stringify({ error: "rate limited" }));
-      }
-      return json(res, {
-        item: { id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2, rarityStr: "Common", iconAssetName: "timber.png" },
-        craftingRecipes: [{
-          id: "timber-finish",
-          name: "Finish Timber",
-          stationName: "Workbench",
-          craftedItemStacks: [{ item_id: "200", item_type: "item", quantity: 2 }],
-          craftedItems: [{ id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2 }],
-          consumedItemStacks: [{ item_id: "100", item_type: "item", quantity: 1 }],
-          consumedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
-        }],
-      });
-    }
-    if (url.pathname === "/api/items/999") {
-      detailRequests.push("items:999");
-      return json(res, {
-        item: { id: "999", itemType: 0, name: "Legacy Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "legacy.png" },
-        craftingRecipes: [],
-        extractionRecipes: [],
-        itemListPossibilities: [],
-      });
-    }
-    if (url.pathname === "/api/cargo/300") {
-      detailRequests.push("cargo:300");
-      return json(res, {
-        cargo: { id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1, rarityStr: "Common", iconAssetName: "bundle.png" },
-        recipesUsingItem: [{
-          id: "bundle-unpack",
-          name: "Unpack Resin",
-          stationName: "Unpacking Station",
-          craftedItemStacks: [{ item_id: "100", item_type: "item", quantity: 5 }],
-          craftedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
-          consumedItemStacks: [{ item_id: "300", item_type: "cargo", quantity: 1 }],
-          consumedItems: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1 }],
-        }],
-      });
-    }
-    return json(res, { error: "not found" }, 404);
-  });
-  const upstreamPort = await listen(upstream);
-  t.after(() => new Promise((resolve) => upstream.close(resolve)));
-
+test("retired recipe catalog refresh route, scheduler key, and tables are absent", async (t) => {
   const appPort = await availablePort();
   const dataDir = path.join(appDir, `.test-data-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   await mkdir(dataDir, { recursive: true });
@@ -2162,12 +2070,6 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
       APP_HOST: "127.0.0.1",
       APP_PORT: String(appPort),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
-      BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
-      GAME_DATA_ITEM_LISTS_URL: `http://127.0.0.1:${upstreamPort}/game-data/item-lists`,
-      GAME_DATA_RESOURCES_URL: `http://127.0.0.1:${upstreamPort}/game-data/resources`,
-      GAME_DATA_SOURCE_URL: `http://127.0.0.1:${upstreamPort}/game-data`,
-      GAME_CATALOG_REFRESH_DETAIL_DELAY_MS: "0",
-      GAME_CATALOG_REFRESH_RETRY_DELAYS_MS: "1000,1000,1000",
     },
     stdio: "ignore",
   });
@@ -2178,31 +2080,6 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
 
   const origin = `http://127.0.0.1:${appPort}`;
   await waitForHealth(origin, child);
-
-  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (seededDb) => {
-    seededDb.prepare(`
-      INSERT INTO recipe_catalog_entries (
-        catalog_key, kind, target_id, item_type, name, tier, rarity, tag, icon_asset_name,
-        detail_json, source, last_synced_at, last_error, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      "items:999",
-      "items",
-      "999",
-      0,
-      "Legacy Resin",
-      1,
-      "Common",
-      "Material",
-      "legacy.png",
-      JSON.stringify({ item: { id: "999", itemType: 0, name: "Legacy Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "legacy.png" }, craftingRecipes: [], extractionRecipes: [] }),
-      "seeded",
-      "2026-06-01T00:00:00.000Z",
-      "stale legacy row",
-      "2026-06-01T00:00:00.000Z",
-    );
-  });
-
   const setup = await fetch(`${origin}/api/local/admin/setup`, {
     method: "POST",
     headers: { "content-type": "application/json", origin },
@@ -2211,368 +2088,17 @@ test("craft plan catalog refresh admin endpoint keeps the legacy recipe cache wa
   assert.equal(setup.status, 200);
   const auth = await setup.json();
   const cookie = setup.headers.get("set-cookie").split(";")[0];
+  const headers = { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken };
 
-  const initialStatus = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
-    headers: { cookie, origin, "x-csrf-token": auth.csrfToken },
-  }).then((response) => response.json());
-  assert.equal(initialStatus.scheduledJob.key, "recipe_catalog_refresh");
-  assert.equal(initialStatus.scheduledJob.schedule, "weekly@1@00:00");
-  const unavailableWorkbook = await fetch(`${origin}/api/local/catalog/probabilities.xlsx`);
-  assert.equal(unavailableWorkbook.status, 503);
-  assert.match((await unavailableWorkbook.json()).error, /Probability catalogue is not ready/);
+  assert.equal((await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, { headers })).status, 404);
+  assert.equal((await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, { method: "POST", headers, body: "{}" })).status, 404);
+  const jobs = await fetch(`${origin}/api/local/admin/jobs`, { headers }).then((response) => response.json());
+  assert.equal(jobs.jobs.some((job) => job.key === "recipe_catalog_refresh"), false);
 
-  const firstRun = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
-    method: "POST",
-    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
-    body: "{}",
-  });
-  assert.equal(firstRun.status, 202);
-
-  const duplicateRun = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
-    method: "POST",
-    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
-    body: "{}",
-  });
-  assert.equal(duplicateRun.status, 409);
-  firstDetailRelease();
-
-  const retryStatus = await waitForCondition("paused rate-limited craft plan catalog refresh", async () => {
-    const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
-      headers: { cookie, origin, "x-csrf-token": auth.csrfToken },
-    }).then((response) => response.json());
-    return payload.latestRun?.status === "paused" && payload.latestRun?.phase === "waiting_retry" ? payload : null;
-  });
-  assert.equal(retryStatus.latestRun.cursorKind, "items");
-  assert.equal(retryStatus.latestRun.cursorId, "100");
-  assert.equal(retryStatus.latestRun.itemCount, 2);
-  assert.equal(retryStatus.latestRun.cargoCount, 1);
-  assert.equal(retryStatus.latestRun.failureCount, 1);
-  assert.match(retryStatus.latestRun.lastError ?? "", /HTTP 429/);
-  assert.equal(retryStatus.scheduledJob.metadata.complete, false);
-  assert.equal(retryStatus.scheduledJob.metadata.retryReason, "rate_limit");
-  assert.deepEqual(detailRequests, ["items:100", "items:200"]);
-  assert.equal(item200Attempts, 1);
-
-  const failedDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
-  assert.equal(failedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_entities").get().count, 3);
-  assert.equal(failedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_recipes").get().count, 1);
-  assert.equal(failedDb.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries").get().count, 2);
-  failedDb.close();
-
-  const completedStatus = await waitForCondition("completed craft plan catalog refresh", async () => {
-    const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
-      headers: { cookie, origin, "x-csrf-token": auth.csrfToken },
-    }).then((response) => response.json());
-    return payload.latestRun?.status === "completed" ? payload : null;
-  }, 10000);
-  assert.equal(completedStatus.latestRun.processedCount, 3);
-  assert.equal(completedStatus.latestRun.failureCount, 1);
-  assert.equal(completedStatus.latestRun.recipeCount, 3);
-  assert.equal(completedStatus.latestRun.byproductCount, 1);
-  assert.equal(completedStatus.scheduledJob.running, false);
-  assert.ok(completedStatus.scheduledJob.lastSuccessAt);
-
-  const workbookResponse = await fetch(`${origin}/api/local/catalog/probabilities.xlsx`);
-  assert.equal(workbookResponse.status, 200);
-  assert.equal(workbookResponse.headers.get("content-type"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  assert.equal(workbookResponse.headers.get("content-disposition"), 'attachment; filename="bitcraft-item-probabilities.xlsx"');
-  assert.ok((await workbookResponse.arrayBuffer()).byteLength > 1000);
-
-  const completedDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
-  assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_entities").get().count, 3);
-  assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_recipes").get().count, 3);
-  assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_item_list_outputs").get().count, 1);
-  assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM game_catalog_probability_snapshot").get().count, 1);
-  assert.equal(completedDb.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries").get().count, 4);
-  const legacyRow = completedDb.prepare("SELECT source, last_error FROM recipe_catalog_entries WHERE catalog_key = ?").get("items:999");
-  const latestRunRow = completedDb.prepare("SELECT status, cursor_kind, cursor_id, processed_count, total_count, item_count, cargo_count, recipe_count, byproduct_count, failure_count FROM game_catalog_refresh_runs ORDER BY id DESC LIMIT 1").get();
-  completedDb.close();
-  assert.deepEqual({ ...legacyRow }, {
-    source: "scheduled_job",
-    last_error: null,
-  });
-  assert.deepEqual({ ...latestRunRow }, {
-    status: "completed",
-    cursor_kind: "cargo",
-    cursor_id: "300",
-    processed_count: 3,
-    total_count: 3,
-    item_count: 2,
-    cargo_count: 1,
-    recipe_count: 3,
-    byproduct_count: 1,
-    failure_count: 1,
-  });
-
-  assert.deepEqual(detailRequests, ["items:100", "items:200", "items:200", "cargo:300", "items:999"]);
-  assert.equal(item200Attempts, 2);
-  assert.equal(itemsPageRequests, 2);
-  assert.equal(cargoPageRequests, 1);
-});
-
-test("craft plan catalog refresh pauses cleanly and schedules an automatic continuation when a batch remains", async (t) => {
-  let itemListRequests = 0;
-  let cargoListRequests = 0;
-  const upstream = createServer((req, res) => {
-    const url = new URL(req.url, "http://127.0.0.1");
-    if (gameDataProbabilityFixture(url, res)) return;
-    if (url.pathname === "/api/items") {
-      itemListRequests += 1;
-      return json(res, { items: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }, { id: "200", itemType: 0, name: "Timber", tag: "Plank", tier: 1 }], pagination: { page: 1, totalPages: 1, total: 2 } });
-    }
-    if (url.pathname === "/api/cargo") {
-      cargoListRequests += 1;
-      return json(res, { cargos: [], metrics: { total: 0, totalPages: 1, page: 1 } });
-    }
-    if (url.pathname === "/api/resources") return json(res, { resources: [] });
-    if (url.pathname === "/api/items/100" || url.pathname === "/api/items/200") return json(res, { item: { id: url.pathname.endsWith("100") ? "100" : "200", itemType: 0, name: "Catalog item", tag: "Material", tier: 1 }, craftingRecipes: [] });
-    return json(res, { error: "not found" }, 404);
-  });
-  const upstreamPort = await listen(upstream);
-  t.after(() => new Promise((resolve) => upstream.close(resolve)));
-
-  const appPort = await availablePort();
-  const dataDir = path.join(appDir, `.test-data-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-  await mkdir(dataDir, { recursive: true });
-  const child = spawn(process.execPath, ["server.mjs"], {
-    cwd: appDir,
-    env: {
-      ...process.env,
-      NODE_ENV: "production",
-      LEGAL_CONFIGURATION_CONFIRMED: "true",
-      BITCRAFT_TEST: "true",
-      ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
-      ENABLE_SERVER_POLLING: "false",
-      ENABLE_SCHEDULED_JOBS: "false",
-      BITCRAFT_PROCESS_ROLE: "all",
-      ADMIN_SETUP_KEY: "test-setup-key",
-      APP_HOST: "127.0.0.1",
-      APP_PORT: String(appPort),
-      BITCRAFT_LOCAL_DATA_DIR: dataDir,
-      BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
-      GAME_DATA_ITEM_LISTS_URL: `http://127.0.0.1:${upstreamPort}/game-data/item-lists`,
-      GAME_DATA_RESOURCES_URL: `http://127.0.0.1:${upstreamPort}/game-data/resources`,
-      GAME_DATA_SOURCE_URL: `http://127.0.0.1:${upstreamPort}/game-data`,
-      GAME_CATALOG_REFRESH_BATCH_SIZE: "1",
-      GAME_CATALOG_REFRESH_DETAIL_DELAY_MS: "0",
-      GAME_CATALOG_REFRESH_CONTINUE_DELAY_MS: "1000",
-    },
-    stdio: "ignore",
-  });
-  t.after(async () => {
-    await stop(child);
-    await rm(dataDir, { recursive: true, force: true });
-  });
-
-  const origin = `http://127.0.0.1:${appPort}`;
-  await waitForHealth(origin, child);
-  const setup = await fetch(`${origin}/api/local/admin/setup`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify({ username: "admin", password: "correct horse battery", setupKey: "test-setup-key" }),
-  });
-  const auth = await setup.json();
-  const cookie = setup.headers.get("set-cookie").split(";")[0];
-  assert.equal((await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
-    method: "POST",
-    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
-    body: "{}",
-  })).status, 202);
-
-  const paused = await waitForCondition("paused catalog continuation", async () => {
-    const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, { headers: { cookie, origin, "x-csrf-token": auth.csrfToken } }).then((response) => response.json());
-    return payload.latestRun?.status === "paused" ? payload : null;
-  });
-  assert.equal(paused.latestRun.processedCount, 1);
-  assert.equal(paused.latestRun.lastError, null);
-  assert.equal(paused.scheduledJob.lastError, null);
-  assert.equal(paused.scheduledJob.metadata.complete, false);
-  assert.equal(paused.scheduledJob.metadata.continueAfterMs, 1000);
-  assert.ok(new Date(paused.scheduledJob.nextRunAt).getTime() < Date.now() + 5000);
-
-  const completed = await waitForCondition("self-continued catalog refresh", async () => {
-    const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, { headers: { cookie, origin, "x-csrf-token": auth.csrfToken } }).then((response) => response.json());
-    return payload.latestRun?.status === "completed" ? payload : null;
-  }, 10000);
-  assert.equal(completed.latestRun.processedCount, 2);
-  assert.equal(itemListRequests, 1);
-  assert.equal(cargoListRequests, 1);
-});
-test("craft plan catalog refresh resets stale resume cursor counters when the saved target disappears", async (t) => {
-  const detailRequests = [];
-  const upstream = createServer((req, res) => {
-    const url = new URL(req.url, "http://127.0.0.1");
-    if (gameDataProbabilityFixture(url, res)) return;
-    if (url.pathname === "/api/items") {
-      const page = Number(url.searchParams.get("page") || 1);
-      if (page === 1) {
-        return json(res, {
-          items: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "resin.png" }],
-          pagination: { page, totalPages: 2, total: 2 },
-        });
-      }
-      if (page === 2) {
-        return json(res, {
-          items: [{ id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2, rarityStr: "Common", iconAssetName: "timber.png" }],
-          pagination: { page, totalPages: 2, total: 2 },
-        });
-      }
-      return json(res, { items: [], pagination: { page, totalPages: 2, total: 2 } });
-    }
-    if (url.pathname === "/api/cargo") {
-      return json(res, {
-        cargos: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1, rarityStr: "Common", iconAssetName: "bundle.png" }],
-        metrics: { total: 1, totalPages: 1, page: 1 },
-      });
-    }
-    if (url.pathname === "/api/resources") return json(res, { resources: [] });
-    if (url.pathname === "/api/items/100") {
-      detailRequests.push("items:100");
-      return json(res, {
-        item: { id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1, rarityStr: "Common", iconAssetName: "resin.png" },
-        craftingRecipes: [{
-          id: "resin-pack",
-          name: "Pack Resin",
-          stationName: "Packing Station",
-          craftedItemStacks: [{ item_id: "300", item_type: "cargo", quantity: 1 }],
-          craftedItems: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1 }],
-          consumedItemStacks: [{ item_id: "100", item_type: "item", quantity: 5 }],
-          consumedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
-        }],
-        itemListPossibilities: [{
-          targetId: "400",
-          targetItem: { id: "400", itemType: 0, name: "Sticky Residue", tag: "Residue", tier: 1 },
-          quantity: 1,
-          chance: 0.2,
-          isCargo: false,
-        }],
-      });
-    }
-    if (url.pathname === "/api/items/200") {
-      detailRequests.push("items:200");
-      return json(res, {
-        item: { id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2, rarityStr: "Common", iconAssetName: "timber.png" },
-        craftingRecipes: [{
-          id: "timber-finish",
-          name: "Finish Timber",
-          stationName: "Workbench",
-          craftedItemStacks: [{ item_id: "200", item_type: "item", quantity: 2 }],
-          craftedItems: [{ id: "200", itemType: 0, name: "Sawed Timber", tag: "Plank", tier: 2 }],
-          consumedItemStacks: [{ item_id: "100", item_type: "item", quantity: 1 }],
-          consumedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
-        }],
-      });
-    }
-    if (url.pathname === "/api/cargo/300") {
-      detailRequests.push("cargo:300");
-      return json(res, {
-        cargo: { id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1, rarityStr: "Common", iconAssetName: "bundle.png" },
-        recipesUsingItem: [{
-          id: "bundle-unpack",
-          name: "Unpack Resin",
-          stationName: "Unpacking Station",
-          craftedItemStacks: [{ item_id: "100", item_type: "item", quantity: 5 }],
-          craftedItems: [{ id: "100", itemType: 0, name: "Resin", tag: "Material", tier: 1 }],
-          consumedItemStacks: [{ item_id: "300", item_type: "cargo", quantity: 1 }],
-          consumedItems: [{ id: "300", itemType: 1, name: "Resin Bundle", tag: "Crate", tier: 1 }],
-        }],
-      });
-    }
-    return json(res, { error: "not found" }, 404);
-  });
-  const upstreamPort = await listen(upstream);
-  t.after(() => new Promise((resolve) => upstream.close(resolve)));
-
-  const appPort = await availablePort();
-  const dataDir = path.join(appDir, `.test-data-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-  await mkdir(dataDir, { recursive: true });
-  const child = spawn(process.execPath, ["server.mjs"], {
-    cwd: appDir,
-    env: {
-      ...process.env,
-      NODE_ENV: "production",
-      LEGAL_CONFIGURATION_CONFIRMED: "true",
-      BITCRAFT_TEST: "true",
-      ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
-      ENABLE_SERVER_POLLING: "false",
-      ENABLE_SCHEDULED_JOBS: "false",
-      BITCRAFT_PROCESS_ROLE: "all",
-      ADMIN_SETUP_KEY: "test-setup-key",
-      APP_HOST: "127.0.0.1",
-      APP_PORT: String(appPort),
-      BITCRAFT_LOCAL_DATA_DIR: dataDir,
-      BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
-      GAME_DATA_ITEM_LISTS_URL: `http://127.0.0.1:${upstreamPort}/game-data/item-lists`,
-      GAME_DATA_RESOURCES_URL: `http://127.0.0.1:${upstreamPort}/game-data/resources`,
-      GAME_DATA_SOURCE_URL: `http://127.0.0.1:${upstreamPort}/game-data`,
-      GAME_CATALOG_REFRESH_DETAIL_DELAY_MS: "0",
-    },
-    stdio: "ignore",
-  });
-  t.after(async () => {
-    await stop(child);
-    await rm(dataDir, { recursive: true, force: true });
-  });
-
-  const origin = `http://127.0.0.1:${appPort}`;
-  await waitForHealth(origin, child);
-
-  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (seedDb) => {
-    seedDb.prepare(`
-      INSERT INTO game_catalog_refresh_runs (
-        status, phase, cursor_kind, cursor_id, processed_count, total_count, item_count, cargo_count,
-        recipe_count, byproduct_count, failure_count, started_at, completed_at, last_error, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      "failed",
-      "item_detail",
-      "items",
-      "999",
-      7,
-      9,
-      5,
-      4,
-      11,
-      13,
-      17,
-      "2026-06-01T00:00:00.000Z",
-      null,
-      "stale resume cursor",
-      "2026-06-01T00:00:00.000Z",
-    );
-  });
-
-  const setup = await fetch(`${origin}/api/local/admin/setup`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify({ username: "admin", password: "correct horse battery", setupKey: "test-setup-key" }),
-  });
-  assert.equal(setup.status, 200);
-  const auth = await setup.json();
-  const cookie = setup.headers.get("set-cookie").split(";")[0];
-
-  const run = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
-    method: "POST",
-    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
-    body: "{}",
-  });
-  assert.equal(run.status, 202);
-
-  const completedStatus = await waitForCondition("completed craft plan catalog refresh after stale cursor reset", async () => {
-    const payload = await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, {
-      headers: { cookie, origin, "x-csrf-token": auth.csrfToken },
-    }).then((response) => response.json());
-    return payload.latestRun?.status === "completed" ? payload : null;
-  });
-
-  assert.deepEqual(detailRequests, ["items:100", "items:200", "cargo:300"]);
-  assert.equal(completedStatus.latestRun.cursorKind, "cargo");
-  assert.equal(completedStatus.latestRun.cursorId, "300");
-  assert.equal(completedStatus.latestRun.processedCount, 3);
-  assert.equal(completedStatus.latestRun.totalCount, 3);
-  assert.equal(completedStatus.latestRun.itemCount, 2);
-  assert.equal(completedStatus.latestRun.cargoCount, 1);
-  assert.equal(completedStatus.latestRun.recipeCount, 3);
-  assert.equal(completedStatus.latestRun.byproductCount, 1);
-  assert.equal(completedStatus.latestRun.failureCount, 0);
+  const database = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
+  const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+  database.close();
+  assert.equal(tables.has("recipe_catalog_entries"), false);
+  assert.equal(tables.has("game_catalog_refresh_runs"), false);
+  assert.equal(tables.has("game_catalog_refresh_targets"), false);
 });

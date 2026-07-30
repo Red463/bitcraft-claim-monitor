@@ -253,10 +253,13 @@ test("applySchemaIndexStatements executes each bootstrap index statement", () =>
   assert.deepEqual(statements, ["CREATE INDEX one;", "CREATE INDEX two;"]);
 });
 test("applyLegacySchemaCleanup drops legacy server-owned cache tables", () => {
-  const statements = [];
-  const db = { exec: (sql) => statements.push(sql) };
-
+  const executed = [];
+  const db = { exec: (sql) => executed.push(sql) };
   applyLegacySchemaCleanup(db);
-
-  assert.deepEqual(statements, ["DROP TABLE IF EXISTS current_claim_state;"]);
+  assert.equal(executed.length, 1);
+  assert.match(executed[0], /DROP TABLE IF EXISTS current_claim_state/);
+  assert.match(executed[0], /DROP TABLE IF EXISTS recipe_catalog_entries/);
+  assert.match(executed[0], /DROP TABLE IF EXISTS game_catalog_refresh_targets/);
+  assert.match(executed[0], /DROP TABLE IF EXISTS game_catalog_refresh_runs/);
+  assert.match(executed[0], /DELETE FROM scheduled_jobs WHERE job_key = 'recipe_catalog_refresh'/);
 });

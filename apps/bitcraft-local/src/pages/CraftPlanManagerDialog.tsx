@@ -147,14 +147,6 @@ function routeOutputKey(step: AnyRecord) {
   return itemKey(step.output ?? step);
 }
 
-const CATALOG_REFRESH_POLL_MS = 4000;
-
-type CatalogRefreshStatus = {
-  scheduledJob: AnyRecord | null;
-  latestRun: AnyRecord | null;
-  recentRuns: AnyRecord[];
-};
-
 const CRAFT_PLAN_AUDIT_CATEGORY_LABELS: Record<string, string> = {
   public_board: "Visibility",
   storage: "Settlement storage",
@@ -170,33 +162,6 @@ function firstText(...values: unknown[]) {
     if (text) return text;
   }
   return "";
-}
-
-function firstCount(...values: unknown[]) {
-  for (const value of values) {
-    const count = Number(value);
-    if (Number.isFinite(count)) return count;
-  }
-  return 0;
-}
-
-function formatCatalogPhase(value: unknown) {
-  const text = firstText(value);
-  const labels: Record<string, string> = {
-    list_items: "Discovering items",
-    list_cargo: "Discovering cargo",
-    detail_items: "Loading item details",
-    detail_cargo: "Loading cargo details",
-    waiting_retry: "Waiting to retry",
-    retry_failures: "Retrying failed details",
-    complete: "Complete",
-  };
-  return labels[text] ?? (text ? text.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Idle");
-}
-
-function formatCatalogMoment(value: unknown) {
-  const text = firstText(value);
-  return text ? { summary: timeAgo(text), detail: dateLabel(text) } : { summary: "Never", detail: "Not available" };
 }
 
 function progressEventLabel(value: unknown) {
@@ -221,9 +186,6 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [operation, setOperation] = React.useState<ManagerOperation>(null);
-  const [catalogStatus, setCatalogStatus] = React.useState<CatalogRefreshStatus | null>(null);
-  const [catalogError, setCatalogError] = React.useState<string | null>(null);
-  const [catalogBusy, setCatalogBusy] = React.useState(false);
   const [auditRows, setAuditRows] = React.useState<AnyRecord[]>([]);
   const [auditLoaded, setAuditLoaded] = React.useState(false);
   const [auditLoading, setAuditLoading] = React.useState(false);
@@ -232,13 +194,6 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [progressAuditError, setProgressAuditError] = React.useState<string | null>(null);
   const [auditDownloadRange, setAuditDownloadRange] = React.useState<string | null>(null);
   const [auditDownloadError, setAuditDownloadError] = React.useState<string | null>(null);
-  const catalogPollingActive = Boolean(
-    catalogStatus?.scheduledJob?.running
-    || catalogStatus?.scheduledJob?.metadata?.complete === false
-    || catalogStatus?.latestRun?.status === "running"
-    || catalogStatus?.latestRun?.status === "paused"
-  );
-
   async function adminApi(path: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers);
     headers.set("content-type", "application/json");
@@ -262,24 +217,6 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     } finally {
       setBusy(false);
       setOperation(null);
-    }
-  }, [csrfToken]);
-
-  const loadCatalogStatus = React.useCallback(async (options: { silent?: boolean } = {}) => {
-    const silent = options.silent === true;
-    if (!silent) setCatalogBusy(true);
-    setCatalogError(null);
-    try {
-      const result = await adminApi("/admin/craft-plan/catalog-refresh");
-      setCatalogStatus({
-        scheduledJob: result.scheduledJob ?? null,
-        latestRun: result.latestRun ?? null,
-        recentRuns: Array.isArray(result.recentRuns) ? result.recentRuns : [],
-      });
-    } catch (err) {
-      setCatalogError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (!silent) setCatalogBusy(false);
     }
   }, [csrfToken]);
 
@@ -333,8 +270,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   React.useEffect(() => {
     if (!open) return;
     void load();
-    void loadCatalogStatus();
-  }, [open, load, loadCatalogStatus]);
+  }, [open, load]);
 
   React.useEffect(() => {
     if (open) return;
@@ -353,14 +289,6 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     if (!open || activeTab !== "audit" || auditLoaded || auditLoading) return;
     void loadAudit();
   }, [open, activeTab, auditLoaded, auditLoading, loadAudit]);
-
-  React.useEffect(() => {
-    if (!open || !catalogPollingActive) return;
-    const interval = window.setInterval(() => {
-      void loadCatalogStatus({ silent: true });
-    }, CATALOG_REFRESH_POLL_MS);
-    return () => window.clearInterval(interval);
-  }, [open, catalogPollingActive, loadCatalogStatus]);
 
   React.useEffect(() => {
     const trimmed = query.trim();
@@ -447,25 +375,6 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     }
   }
 
-  async function triggerCatalogRefresh() {
-    if (busy || catalogBusy || catalogStatus?.scheduledJob?.running) return;
-    setCatalogBusy(true);
-    setCatalogError(null);
-    try {
-      const result = await adminApi("/admin/craft-plan/catalog-refresh", { method: "POST", body: "{}" });
-      setCatalogStatus({
-        scheduledJob: result.scheduledJob ?? null,
-        latestRun: result.latestRun ?? null,
-        recentRuns: Array.isArray(result.recentRuns) ? result.recentRuns : [],
-      });
-      setStatus(result.result?.started ? "Planner catalog refresh started." : "Planner catalog status updated.");
-    } catch (err) {
-      setCatalogError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCatalogBusy(false);
-    }
-  }
-
   async function save() {
     setBusy(true);
     setOperation("saving");
@@ -495,47 +404,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const tierPresets = state?.sources?.tierPresets ?? [];
   const workstationPresets = state?.sources?.workstationPresets ?? [];
   const routeSteps = Array.isArray(state?.plan?.steps) ? state.plan.steps : [];
-  const scheduledJob = catalogStatus?.scheduledJob ?? null;
-  const recentRuns = Array.isArray(catalogStatus?.recentRuns) ? catalogStatus.recentRuns : [];
-  const latestRun = catalogStatus?.latestRun ?? null;
-  const successfulRun = [latestRun, ...recentRuns].find((run) => run?.status === "completed" && firstText(run?.completedAt, run?.updatedAt)) ?? null;
-  const completedRun = [latestRun, ...recentRuns].find((run) => run?.status === "completed" && firstText(run?.completedAt, run?.updatedAt)) ?? null;
-  const catalogRunning = Boolean(scheduledJob?.running);
-  const catalogRetrying = !catalogRunning && latestRun?.phase === "waiting_retry" && scheduledJob?.metadata?.complete === false;
-  const catalogContinuing = !catalogRunning && !catalogRetrying && latestRun?.status === "paused" && scheduledJob?.metadata?.complete === false;
-  const catalogActive = catalogRunning || catalogRetrying || catalogContinuing;
-  const catalogPhase = formatCatalogPhase(firstText(latestRun?.phase, scheduledJob?.metadata?.phase, scheduledJob?.metadata?.stage, scheduledJob?.metadata?.step));
-  const processedCount = firstCount(latestRun?.processedCount, scheduledJob?.metadata?.processedCount, scheduledJob?.metadata?.current, scheduledJob?.metadata?.progressCurrent);
-  const totalCount = firstCount(latestRun?.totalCount, scheduledJob?.metadata?.totalCount, scheduledJob?.metadata?.total, scheduledJob?.metadata?.progressTotal);
-  const itemCount = firstCount(latestRun?.itemCount, successfulRun?.itemCount, scheduledJob?.metadata?.itemCount);
-  const cargoCount = firstCount(latestRun?.cargoCount, successfulRun?.cargoCount, scheduledJob?.metadata?.cargoCount);
-  const recipeCount = firstCount(latestRun?.recipeCount, successfulRun?.recipeCount, scheduledJob?.metadata?.recipeCount);
-  const byproductCount = firstCount(latestRun?.byproductCount, successfulRun?.byproductCount, scheduledJob?.metadata?.byproductCount);
-  const failureCount = firstCount(latestRun?.failureCount, completedRun?.failureCount, scheduledJob?.metadata?.failureCount);
-  const lastSuccessAt = firstText(scheduledJob?.lastSuccessAt, successfulRun?.completedAt, successfulRun?.updatedAt) || null;
-  const lastCompletedAt = firstText(completedRun?.completedAt, completedRun?.updatedAt) || null;
-  const nextRunAt = firstText(scheduledJob?.nextRunAt) || null;
-  const noCatalog = !lastSuccessAt && recipeCount <= 0 && byproductCount <= 0;
-  const catalogActionBusy = busy || catalogBusy || catalogActive;
-  const catalogStatusLabel = catalogRunning ? "Running" : catalogRetrying ? "Waiting to retry" : catalogContinuing ? "Continuing" : noCatalog ? "Refresh required" : latestRun?.status === "failed" ? "Attention" : "Ready";
-  const progressSummary = totalCount > 0 ? `${formatNumber(processedCount, 0)} / ${formatNumber(totalCount, 0)}` : processedCount > 0 ? formatNumber(processedCount, 0) : "Waiting";
-  const catalogSummary = catalogRunning
-    ? `${catalogPhase} in progress${totalCount > 0 ? `, ${progressSummary} processed.` : "."}`
-    : catalogRetrying
-      ? `BitJita is temporarily unavailable. Retrying automatically${nextRunAt ? ` at ${dateLabel(nextRunAt)}` : " shortly"}.`
-    : catalogContinuing
-      ? `Next batch queued${totalCount > 0 ? `, ${progressSummary} details loaded.` : "."}`
-    : noCatalog
-      ? "No planner catalog yet. Run a refresh to populate recipe diagnostics."
-      : latestRun?.status === "failed"
-        ? "The last refresh failed. Existing catalog data remains available until the next successful run."
-        : "Catalog diagnostics are ready for manual route and source review.";
-  const catalogSchedule = nextRunAt ? `Next scheduled run ${dateLabel(nextRunAt)}.` : (scheduledJob?.scheduleLabel ?? "Manual refresh only.");
-  const lastSuccess = formatCatalogMoment(lastSuccessAt);
-  const lastCompleted = formatCatalogMoment(lastCompletedAt);
-  const lastProgress = formatCatalogMoment(firstText(latestRun?.updatedAt, scheduledJob?.updatedAt));
-  const catalogPillClass = catalogActive ? "status-pill working" : catalogStatusLabel === "Ready" ? "status-pill complete" : "status-pill";
-  const pendingLabel = operation === "loading" ? "Loading plan data…" : operation === "refreshing" ? "Refreshing plan data…" : operation === "saving" ? "Saving plan…" : operation === "preset" ? "Loading workstation preset…" : catalogBusy ? "Refreshing catalog status…" : null;
+  const pendingLabel = operation === "loading" ? "Loading plan data…" : operation === "refreshing" ? "Refreshing plan data…" : operation === "saving" ? "Saving plan…" : operation === "preset" ? "Loading workstation preset…" : null;
 
   return (
     <Dialog open title="Craft plan manager" closeOnBackdrop={false} onClose={onClose} className="modal craft-plan-manager" backdropClassName="modal-backdrop craft-plan-manager-backdrop">
@@ -550,34 +419,9 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
           <label className="field craft-plan-name-field"><span>Plan name</span><input value={config.name} onChange={(event) => patchConfig({ name: event.target.value })} /></label>
           <label className="craft-plan-public-toggle"><input type="checkbox" checked={config.enabled !== false} onChange={(event) => patchConfig({ enabled: event.target.checked })} /><span><strong>Public board</strong><small>{config.enabled !== false ? "Visible to users" : "Hidden from users"}</small></span></label>
           <div className="craft-plan-manager-buttons">
-            <button className="toolbar-button" type="button" onClick={() => void load("refreshing")} disabled={busy || catalogBusy}>{operation === "refreshing" ? <LoaderCircle className="is-spinning" size={14} /> : <RefreshCw size={14} />} {operation === "refreshing" ? "Refreshing…" : "Refresh"}</button>
+            <button className="toolbar-button" type="button" onClick={() => void load("refreshing")} disabled={busy}>{operation === "refreshing" ? <LoaderCircle className="is-spinning" size={14} /> : <RefreshCw size={14} />} {operation === "refreshing" ? "Refreshing…" : "Refresh"}</button>
             <button className="toolbar-button primary" type="button" onClick={save} disabled={busy}>{operation === "saving" ? <LoaderCircle className="is-spinning" size={14} /> : <Save size={14} />} {operation === "saving" ? "Saving…" : "Save Plan"}</button>
           </div>
-          <section className="craft-plan-catalog-band" aria-label="Planner catalog diagnostics">
-            <div className="craft-plan-catalog-summary">
-              <div>
-                <strong>Planner catalog diagnostics</strong>
-                <p className={noCatalog ? "craft-plan-catalog-empty" : undefined}>{catalogSummary}</p>
-                <small>{catalogSchedule}{catalogActive ? ` Last progress ${lastProgress.summary}.` : ""}</small>
-              </div>
-              <div className="craft-plan-catalog-controls">
-                <span className={catalogPillClass}>{catalogStatusLabel}</span>
-                <button className="toolbar-button" type="button" onClick={triggerCatalogRefresh} disabled={catalogActionBusy}>{catalogBusy || catalogActive ? <LoaderCircle className="is-spinning" size={14} /> : <RefreshCw size={14} />} {catalogBusy ? "Starting refresh…" : catalogActive ? "Refresh running…" : "Refresh planner catalog"}</button>
-              </div>
-            </div>
-            {catalogError ? <p className="craft-plan-catalog-error">{catalogError}</p> : null}
-            <div className="craft-plan-catalog-stats">
-              <div className="craft-plan-catalog-stat"><small>Status</small><strong>{catalogStatusLabel}</strong><span>{catalogPhase}</span></div>
-              <div className="craft-plan-catalog-stat"><small>Progress</small><strong>{progressSummary}</strong><span>{totalCount > 0 ? `${formatNumber(processedCount, 0)} processed of ${formatNumber(totalCount, 0)}` : "Waiting for a completed scan"}</span></div>
-              <div className="craft-plan-catalog-stat"><small>Last success</small><strong>{lastSuccess.summary}</strong><span>{lastSuccess.detail}</span></div>
-              <div className="craft-plan-catalog-stat"><small>Last full refresh</small><strong>{lastCompleted.summary}</strong><span>{lastCompleted.detail}</span></div>
-              <div className="craft-plan-catalog-stat"><small>Items</small><strong>{formatNumber(itemCount, 0)}</strong><span>Item entities</span></div>
-              <div className="craft-plan-catalog-stat"><small>Cargo</small><strong>{formatNumber(cargoCount, 0)}</strong><span>Cargo entities</span></div>
-              <div className="craft-plan-catalog-stat"><small>Recipes</small><strong>{formatNumber(recipeCount, 0)}</strong><span>Catalog recipes</span></div>
-              <div className="craft-plan-catalog-stat"><small>Byproducts</small><strong>{formatNumber(byproductCount, 0)}</strong><span>Output variants</span></div>
-              <div className={`craft-plan-catalog-stat${failureCount > 0 ? " is-problem" : ""}`}><small>Failures</small><strong>{formatNumber(failureCount, 0)}</strong><span>{failureCount > 0 ? (catalogActive ? "Automatic recovery is active" : "Unavailable entities were skipped") : "No failures recorded"}</span></div>
-            </div>
-          </section>
         </div>
         {pendingLabel ? <div className="craft-plan-manager-pending" role="status" aria-live="polite"><LoaderCircle className="is-spinning" size={16} /><span>{pendingLabel}</span></div> : null}
         {error ? <div className="alert error">{error}</div> : null}
@@ -592,7 +436,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             ["audit", <History size={15} />, "Audit"],
           ].map(([id, icon, label]) => <button key={String(id)} type="button" className={activeTab === id ? "active" : ""} onClick={() => setActiveTab(id as ManagerTab)}>{icon}{label}</button>)}
         </nav>
-        <div className="craft-plan-manager-body" aria-busy={busy || catalogBusy}>
+        <div className="craft-plan-manager-body" aria-busy={busy}>
           {operation === "loading" && !state ? <div className="craft-plan-manager-loading"><LoaderCircle className="is-spinning" size={28} /><strong>Loading craft plan</strong><span>Fetching targets, inventories, players, deployables, routes, and presets.</span></div> : null}
           {activeTab === "targets" ? <section className="craft-plan-manager-panel">
             <div className="split-header"><div><h3>Target items</h3><p className="legend">Preset buttons add normal target rows. You can change quantities or remove them at any time.</p></div></div>

@@ -333,37 +333,14 @@ test("Craft Planning manager renders presets as compact tier-only controls", () 
 });
 
 
-test("Craft Planning manager shows compact catalog diagnostics and manual refresh controls", () => {
+test("Craft Planning manager does not expose the retired scheduled catalog refresh", () => {
   const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
 
-  assert.match(manager, /\/admin\/craft-plan\/catalog-refresh/);
-  assert.match(manager, /Refresh planner catalog/);
-  assert.match(manager, /No planner catalog yet/);
-  assert.match(manager, /processedCount/);
-  assert.match(manager, /totalCount/);
-  assert.match(manager, /itemCount/);
-  assert.match(manager, /cargoCount/);
-  assert.match(manager, /recipeCount/);
-  assert.match(manager, /byproductCount/);
-  assert.match(manager, /failureCount/);
-  assert.match(manager, /lastSuccessAt/);
-  assert.match(manager, /completedAt/);
-  assert.match(manager, /scheduledJob\?\.running/);
-  assert.match(manager, /catalogContinuing/);
-  assert.match(manager, /catalogPollingActive/);
-  assert.match(manager, /Last full refresh/);
-  assert.match(manager, /Next batch queued/);
-  assert.match(manager, /if \(!open \|\| !catalogPollingActive\) return/);
-  assert.match(manager, /window\.setInterval\(\(\) => \{\s*void loadCatalogStatus\(\{ silent: true \}\);\s*\}, CATALOG_REFRESH_POLL_MS\)/s);
-  assert.match(manager, /window\.clearInterval/);
-  assert.doesNotMatch(manager, /window\.setTimeout\(\(\) => \{\s*void loadCatalogStatus\(\{ silent: true \}\);\s*\}, CATALOG_REFRESH_POLL_MS\)/s);
-  assert.match(manager, /run\?\.status === "completed"/);
-  assert.doesNotMatch(manager, /run\?\.status === "complete"/);
-  assert.match(styles, /\.craft-plan-catalog-band/);
-  assert.match(styles, /\.craft-plan-catalog-stats/);
-  assert.match(styles, /\.craft-plan-catalog-stat/);
-  assert.match(styles, /\.craft-plan-catalog-empty/);
+  assert.doesNotMatch(manager, /\/admin\/craft-plan\/catalog-refresh/);
+  assert.doesNotMatch(manager, /Refresh planner catalog/);
+  assert.doesNotMatch(manager, /CATALOG_REFRESH_POLL_MS|catalogPollingActive|catalogContinuing/);
+  assert.doesNotMatch(styles, /\.craft-plan-catalog-band|\.craft-plan-catalog-stats|\.craft-plan-catalog-stat/);
   assert.match(styles, /\.craft-plan-manager-backdrop \{ position: fixed; inset: 0;/);
 });
 test("Dashboard shows Gather Next instead of Recent Activity", () => {
@@ -375,31 +352,13 @@ test("Dashboard shows Gather Next instead of Recent Activity", () => {
   assert.doesNotMatch(dashboard, /DashboardCardHeader title="Recent Activity"/);
 });
 
-test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not page-load requests", () => {
+test("Craft Planning reads the continuously projected Relay catalog without a scheduled ingestion job", () => {
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
 
   assert.match(server, /createGameCatalogRepository/);
-  assert.match(server, /runRecipeCatalogRefreshJob/);
-  assert.match(server, /weekly@1@00:00/);
-  assert.match(server, /catalog database/);
-  assert.match(server, /\/api\/local\/admin\/craft-plan\/catalog-refresh/);
-  assert.match(server, /\/items/);
-  assert.match(server, /\/cargo/);
-  assert.match(server, /cursor_kind|cursorKind/);
-  assert.match(server, /recipeDetailHasPlanningMetadata/);
-  assert.match(server, /refreshKnownRecipeCatalogEntries/);
-  assert.match(server, /refreshCraftPlanProducerCatalog/);
-  assert.match(server, /GAME_CATALOG_REFRESH_DETAIL_DELAY_MS/);
-  assert.match(server, /await delay\(gameCatalogRefreshDetailDelayMs\)/);
-  assert.match(server, /GAME_CATALOG_NORMALIZATION_VERSION/);
-  assert.match(server, /catalogRefreshShouldResume\(previousRun, storedNormalizationVersion\)/);
-  assert.match(server, /game_catalog_normalization_version/);
-  assert.match(server, /fetchGameDataProbabilitySnapshot\(\{/);
-  assert.match(server, /replaceProbabilitySnapshot\(probabilitySource\)/);
-  assert.match(server, /listProbabilityEffortCandidates\(\)/);
-  assert.match(server, /replaceEffortWeights\(\s*effortCandidates,\s*CRAFT_PLAN_EFFORT_MODEL_VERSION/);
-  assert.match(server, /game_catalog_effort_model_version/);
-  assert.match(server, /scheduleGameCatalogNormalizationRefresh\(\)/);
+  assert.doesNotMatch(server, /runRecipeCatalogRefreshJob|recipe_catalog_refresh|game_catalog_refresh_runs|game_catalog_refresh_targets/);
+  assert.doesNotMatch(server, /\/api\/local\/admin\/craft-plan\/catalog-refresh/);
+  assert.doesNotMatch(server, /fetchGameDataProbabilitySnapshot|GAME_CATALOG_REFRESH_/);
 
   const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?const bitjitaProxyCache/)?.[0] ?? "";
   assert.match(computedCraftPlan, /const catalogTargets = craftPlanCatalogTargets\(config\)/);

@@ -245,8 +245,8 @@ Initial candidates requiring explicit dependency proof are:
 
 | Existing table or group | Planned disposition |
 |---|---|
-| `recipe_catalog_entries` | Retire after every planner/catalog reader uses the normalized `game_catalog_*` projection. |
-| `game_catalog_refresh_runs`, `game_catalog_refresh_targets` | Retire when continuous global subscription health and generation state fully replace BitJita catalog refresh orchestration. |
+| `recipe_catalog_entries` | Retired. Planner and recipe-detail readers now use the normalized `game_catalog_*` projection. |
+| `game_catalog_refresh_runs`, `game_catalog_refresh_targets` | Retired. Continuous global subscription health and generation state replace catalog refresh orchestration. |
 | `settlement_state_current` | Merge or retire if `domain_payload_current` and typed projections become its only source and cover every reader. |
 | `market_buy_orders_current`, `market_regional_sale_averages_current` | Keep only when they provide a measured indexed derived-current benefit; update them from order events rather than a long scheduled sweep. |
 | `scheduled_jobs` | Keep for legitimate maintenance and delivery work; delete retired ingestion-job definitions and UI controls. |
@@ -287,8 +287,10 @@ the schema and every retained table has a current owner and update trigger.
 ### Milestone 2
 
 - Populate `game_catalog_*` continuously from typed global subscriptions.
-- Move planner/catalog readers away from `recipe_catalog_entries`.
-- Remove legacy catalog refresh runs/targets after static and runtime proofs.
+- Keep planner/catalog readers on the normalized `game_catalog_*` projection;
+  `recipe_catalog_entries` has been removed.
+- Keep the retired catalog refresh runs/targets, scheduler key, route, and UI
+  absent after static and runtime proofs.
 - Acceptance adds: a catalog insert/update/delete reaches planner reads without
   a daily refresh job.
 

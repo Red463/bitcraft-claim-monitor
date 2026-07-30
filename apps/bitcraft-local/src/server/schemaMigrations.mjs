@@ -120,5 +120,11 @@ export function applySchemaIndexStatements(db, statements = schemaIndexStatement
   for (const statement of statements) db.exec(statement);
 }
 export function applyLegacySchemaCleanup(db) {
-  db.exec("DROP TABLE IF EXISTS current_claim_state;");
+  db.exec(`
+    DROP TABLE IF EXISTS current_claim_state;
+    DROP TABLE IF EXISTS recipe_catalog_entries;
+    DROP TABLE IF EXISTS game_catalog_refresh_targets;
+    DROP TABLE IF EXISTS game_catalog_refresh_runs;
+    DELETE FROM scheduled_jobs WHERE job_key = 'recipe_catalog_refresh';
+  `);
 }

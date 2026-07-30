@@ -51,7 +51,6 @@ export function adminPermissionFor(method, pathname) {
   if (pathname === "/api/local/admin/settings") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/popups") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/access-control") return method === "GET" ? "settings.view" : "settings.manage";
-  if (pathname === "/api/local/admin/craft-plan/catalog-refresh") return method === "GET" ? "settings.view" : "settings.manage";
   if (pathname === "/api/local/admin/craft-plan/audit") return "audit.view";
   if (pathname === "/api/local/admin/craft-plan/progress-audit") return "audit.view";
   if (pathname === "/api/local/admin/craft-plan/progress-audit/export") return "data.export";

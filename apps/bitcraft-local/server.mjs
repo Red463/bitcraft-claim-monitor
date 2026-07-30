@@ -24,17 +24,10 @@ import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAl
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatchesListing } from "./src/server/marketActivity.mjs";
 import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey, productionMetrics } from "./src/server/productionActivity.mjs";
-import { recipeCatalogKey, recipeDetailHasPlanningMetadata, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
-import {
-  GAME_CATALOG_NORMALIZATION_VERSION,
-  catalogNormalizationNeedsRefresh,
-  catalogRefreshShouldResume,
-  createGameCatalogRepository,
-} from "./src/server/gameCatalog.mjs";
+import { createGameCatalogRepository } from "./src/server/gameCatalog.mjs";
 import { createProviderCatalogRepository } from "./src/server/catalogRepository.mjs";
-import { fetchGameDataProbabilitySnapshot } from "./src/server/gameDataProbabilitySource.mjs";
 import { buildProbabilityWorkbookBuffer } from "./src/server/probabilityWorkbook.mjs";
-import { classifyCatalogRefreshError, parseRetryAfterMs, withCatalogRefreshTargetContext } from "./src/server/catalogRefreshRecovery.mjs";
+import { parseRetryAfterMs } from "./src/server/retryAfter.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
@@ -309,24 +302,6 @@ const marketTradeJobBudget = normalizeJobBudget({
   batchSize: process.env.MARKET_TRADES_BATCH_SIZE ?? 20,
 });
 const MARKET_DAILY_HISTORY_LIMIT = 365;
-const gameCatalogRefreshJobBudget = normalizeJobBudget({
-  maxRuntimeMs: process.env.GAME_CATALOG_REFRESH_MAX_RUNTIME_MS ?? 30000,
-  batchSize: process.env.GAME_CATALOG_REFRESH_BATCH_SIZE ?? 250,
-});
-const gameCatalogRefreshDetailDelaySetting = Number(process.env.GAME_CATALOG_REFRESH_DETAIL_DELAY_MS ?? process.env.GAME_CATALOG_REFRESH_DELAY_MS ?? 100);
-const gameCatalogRefreshDetailDelayMs = Number.isFinite(gameCatalogRefreshDetailDelaySetting) && gameCatalogRefreshDetailDelaySetting >= 0
-  ? Math.floor(gameCatalogRefreshDetailDelaySetting)
-  : 100;
-const gameCatalogRefreshContinueDelaySetting = Number(process.env.GAME_CATALOG_REFRESH_CONTINUE_DELAY_MS ?? 5000);
-const gameCatalogRefreshContinueDelayMs = Number.isFinite(gameCatalogRefreshContinueDelaySetting) && gameCatalogRefreshContinueDelaySetting >= 1000
-  ? Math.floor(gameCatalogRefreshContinueDelaySetting)
-  : 5000;
-const gameCatalogRefreshRetryDelaysMs = String(process.env.GAME_CATALOG_REFRESH_RETRY_DELAYS_MS ?? "15000,60000,300000")
-  .split(",")
-  .map((value) => Number(value.trim()))
-  .filter((value) => Number.isFinite(value) && value > 0)
-  .map((value) => Math.floor(value));
-if (!gameCatalogRefreshRetryDelaysMs.length) gameCatalogRefreshRetryDelaysMs.push(15000, 60000, 300000);
 const marketTradeNotificationRecoveryWindowMs = Math.max(1, toNumber(process.env.MARKET_TRADE_NOTIFICATION_RECOVERY_HOURS ?? 24)) * 60 * 60 * 1000;
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const relayHttpRefreshSetting = Number(process.env.RELAY_HTTP_REFRESH_MS ?? 15000);
@@ -478,652 +453,6 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function upsertRecipeCatalogDetail(target, detail, source = "bitjita") {
-  const normalized = recipeTargetFromDetail(detail, target);
-  const now = new Date().toISOString();
-  statements.upsertRecipeCatalogEntry.run(
-    recipeCatalogKey(normalized.kind, normalized.id),
-    normalized.kind,
-    normalized.id,
-    normalized.itemType,
-    normalized.name,
-    normalized.tier,
-    normalized.rarity,
-    normalized.tag,
-    normalized.iconAssetName,
-    JSON.stringify(detail),
-    source,
-    now,
-    now,
-  );
-  return normalized;
-}
-
-async function fetchAndStoreRecipeDetail(target, source = "on_demand") {
-  const kind = String(target.kind ?? "") === "cargo" ? "cargo" : "items";
-  const id = String(target.id ?? "").trim();
-  if (!id) {
-    const error = new Error("Recipe target id is required");
-    error.statusCode = 400;
-    throw error;
-  }
-  const detail = await fetchBitjita(`/${kind}/${encodeURIComponent(id)}`);
-  upsertRecipeCatalogDetail({ ...target, id, kind }, detail, source);
-  return detail;
-}
-
-async function recipeDetailFromCatalogOrFetch(target) {
-  const kind = String(target.kind ?? "") === "cargo" ? "cargo" : "items";
-  const id = String(target.id ?? "").trim();
-  const key = recipeCatalogKey(kind, id);
-  const cached = statements.getRecipeCatalogEntry.get(key);
-  if (cached?.detail_json) {
-    const detail = safeJson(cached.detail_json, {});
-    if (recipeDetailHasPlanningMetadata(detail, { ...target, id, kind })) {
-      return {
-        detail,
-        cached: true,
-        lastSyncedAt: cached.last_synced_at,
-        lastError: cached.last_error,
-      };
-    }
-    try {
-      const refreshed = await fetchAndStoreRecipeDetail({ ...target, id, kind }, "metadata_refresh");
-      return {
-        detail: refreshed,
-        cached: false,
-        lastSyncedAt: new Date().toISOString(),
-        lastError: null,
-      };
-    } catch {
-      return {
-        detail,
-        cached: true,
-        lastSyncedAt: cached.last_synced_at,
-        lastError: cached.last_error,
-      };
-    }
-  }
-  const detail = await fetchAndStoreRecipeDetail({ ...target, id, kind }, "on_demand");
-  return {
-    detail,
-    cached: false,
-    lastSyncedAt: new Date().toISOString(),
-    lastError: null,
-  };
-}
-
-function recipeDetailFromCatalog(target) {
-  const kind = String(target.kind ?? "") === "cargo" ? "cargo" : "items";
-  const id = String(target.id ?? "").trim();
-  const cached = statements.getRecipeCatalogEntry.get(recipeCatalogKey(kind, id));
-  if (!cached?.detail_json) return null;
-  const detail = safeJson(cached.detail_json, {});
-  if (!recipeDetailHasPlanningMetadata(detail, { ...target, id, kind })) return null;
-  return {
-    detail,
-    cached: true,
-    lastSyncedAt: cached.last_synced_at,
-    lastError: cached.last_error,
-  };
-}
-
-function recipeCatalogCached(target) {
-  return Boolean(recipeDetailFromCatalog(target));
-}
-
-function craftPlanRecipeDiscoveryLimit() {
-  return Math.max(1, Math.min(Number(process.env.RECIPE_CATALOG_DISCOVERY_LIMIT ?? 2000), 2000));
-}
-
-function craftPlanCatalogCandidateTarget(kind, row = {}) {
-  const id = String(row.id ?? row.itemId ?? "").trim();
-  if (!/^\d+$/.test(id)) return null;
-  return { id, kind, itemType: kind === "cargo" ? 1 : 0, name: row.name, tier: row.tier, tag: row.tag, iconAssetName: row.iconAssetName };
-}
-
-async function refreshCraftPlanProducerCatalog({ jobKey } = {}) {
-  const [itemRows, cargoRows] = await Promise.all([
-    craftPlanItemCatalogRowsCached().catch(() => []),
-    craftPlanCargoCatalogRowsCached().catch(() => []),
-  ]);
-  const candidates = [
-    ...itemRows.filter((row) => craftPlanHasItemListOutputs(row) && !craftPlanCargoLooksLikeTransportPackage(row)).map((row) => craftPlanCatalogCandidateTarget("items", row)),
-    ...cargoRows.filter((row) => !craftPlanCargoLooksLikeTransportPackage(row)).map((row) => craftPlanCatalogCandidateTarget("cargo", row)),
-  ].filter(Boolean).filter((target) => !recipeCatalogCached(target));
-  const limit = craftPlanRecipeDiscoveryLimit();
-  const selected = candidates.slice(0, limit);
-  let discovered = 0;
-  let discoveryFailed = 0;
-  let stoppedEarly = false;
-  for (const target of selected) {
-    try {
-      await fetchAndStoreRecipeDetail(target, "scheduled_job");
-      discovered += 1;
-    } catch (error) {
-      discoveryFailed += 1;
-      const message = error instanceof Error ? error.message : String(error);
-      statements.updateRecipeCatalogError.run(message, new Date().toISOString(), recipeCatalogKey(target.kind, target.id));
-      if (message.includes("HTTP 429")) {
-        stoppedEarly = true;
-        break;
-      }
-    }
-    if ((discovered + discoveryFailed) % 25 === 0) updateScheduledJobProgress(jobKey, { stage: "recipe_discovery", discovered, discoveryFailed, candidates: candidates.length });
-    await delay(100);
-  }
-  return {
-    discovered,
-    discoveryFailed,
-    discoverySkipped: Math.max(candidates.length - discovered - discoveryFailed, 0),
-    discoveryCandidates: candidates.length,
-    discoveryLimit: limit,
-    discoveryStoppedEarly: stoppedEarly,
-  };}
-
-async function refreshKnownRecipeCatalogEntries({ jobKey } = {}) {
-  const limit = Math.max(1, Math.min(Number(process.env.RECIPE_CATALOG_REFRESH_LIMIT ?? 250), 1000));
-  const rows = statements.listRecipeCatalogEntries.all(limit)
-    .filter((row) => String(row.source ?? "") !== "game_catalog_refresh");
-
-  let refreshed = 0;
-  let failed = 0;
-  let stoppedEarly = false;
-
-  for (const row of rows) {
-    const target = recipeTargetFromRow(row);
-    try {
-      await fetchAndStoreRecipeDetail(target, "scheduled_job");
-      refreshed += 1;
-    } catch (error) {
-      failed += 1;
-      const message = error instanceof Error ? error.message : String(error);
-      statements.updateRecipeCatalogError.run(message, new Date().toISOString(), row.catalog_key);
-      if (message.includes("HTTP 429")) {
-        stoppedEarly = true;
-        break;
-      }
-    }
-    if ((refreshed + failed) % 25 === 0) updateScheduledJobProgress(jobKey, { stage: "legacy_recipe_catalog", refreshed, failed, knownRows: rows.length });
-    if (gameCatalogRefreshDetailDelayMs > 0) await delay(gameCatalogRefreshDetailDelayMs);
-  }
-
-  const discovery = stoppedEarly ? {
-    discovered: 0,
-    discoveryFailed: 0,
-    discoverySkipped: 0,
-    discoveryCandidates: 0,
-    discoveryLimit: craftPlanRecipeDiscoveryLimit(),
-    discoveryStoppedEarly: true,
-  } : await refreshCraftPlanProducerCatalog({ jobKey });
-  const knownRecipes = toNumber(statements.recipeCatalogCount.get()?.count);
-  return {
-    refreshed,
-    failed,
-    skipped: Math.max(knownRecipes - refreshed - failed - discovery.discovered, 0),
-    knownRecipes,
-    stoppedEarly: stoppedEarly || discovery.discoveryStoppedEarly,
-    ...discovery,
-  };
-}
-
-function firstArrayValue(...values) {
-  for (const value of values) {
-    if (Array.isArray(value)) return value;
-  }
-  return [];
-}
-
-function firstObjectValue(...values) {
-  for (const value of values) {
-    if (value && typeof value === "object" && !Array.isArray(value)) return value;
-  }
-  return {};
-}
-
-function gameCatalogListRows(kind, payload) {
-  const nested = firstObjectValue(payload?.data, payload?.result, payload?.payload);
-  return firstArrayValue(
-    payload?.[kind === "cargo" ? "cargos" : "items"],
-    payload?.items,
-    payload?.cargos,
-    payload?.results,
-    nested?.[kind === "cargo" ? "cargos" : "items"],
-    nested?.items,
-    nested?.cargos,
-    nested?.results,
-  ).filter((row) => row && typeof row === "object");
-}
-
-function gameCatalogListMetrics(payload) {
-  const nested = firstObjectValue(payload?.data, payload?.result, payload?.payload);
-  return firstObjectValue(payload?.metrics, payload?.pagination, nested?.metrics, nested?.pagination, payload, nested);
-}
-
-function gameCatalogListTarget(kind, row = {}) {
-  const id = String(row.id ?? row.itemId ?? row.targetId ?? "").trim();
-  if (!/^\d+$/.test(id)) return null;
-  return {
-    id,
-    kind: kind === "cargo" ? "cargo" : "items",
-    itemType: kind === "cargo" ? 1 : 0,
-    name: row.name ?? row.itemName ?? null,
-    tag: row.tag ?? null,
-    tier: row.tier ?? null,
-    rarityStr: row.rarityStr ?? row.rarity ?? null,
-    iconAssetName: row.iconAssetName ?? null,
-    itemListId: row.itemListId ?? row.item_list_id ?? null,
-    catalogRow: row,
-  };
-}
-
-function gameCatalogRefreshTargetKey(target) {
-  return `${target.kind}:${target.id}`;
-}
-
-function gameCatalogRefreshPhase(target) {
-  return target?.kind === "cargo" ? "detail_cargo" : "detail_items";
-}
-
-function seedCraftPlanCatalogCaches(itemTargets, cargoTargets) {
-  const nowMs = Date.now();
-  craftPlanItemCatalogCache = { expiresAt: nowMs + CRAFT_PLAN_ITEM_CATALOG_TTL_MS, rows: itemTargets.map((target) => target.catalogRow ?? target) };
-  craftPlanCargoCatalogCache = { expiresAt: nowMs + CRAFT_PLAN_CARGO_CATALOG_TTL_MS, rows: cargoTargets.map((target) => target.catalogRow ?? target) };
-}
-
-async function fetchGameCatalogTargets(kind) {
-  const endpoint = kind === "cargo" ? "/cargo" : "/items";
-  const rows = [];
-  let page = 1;
-  let totalPages = 1;
-  do {
-    const payload = await fetchBitjita(`${endpoint}?page=${page}`, { cache: false });
-    const pageRows = gameCatalogListRows(kind, payload);
-    rows.push(...pageRows);
-    const metrics = gameCatalogListMetrics(payload);
-    const pageCount = Math.floor(toNumber(metrics.totalPages ?? metrics.total_pages ?? metrics.pages ?? 1) || 1);
-    if (pageCount > 1) totalPages = pageCount;
-    else {
-      const totalRows = Math.floor(toNumber(metrics.total ?? metrics.totalCount ?? metrics.count ?? pageRows.length) || pageRows.length);
-      totalPages = pageRows.length > 0 ? Math.max(1, Math.ceil(totalRows / pageRows.length)) : 1;
-    }
-    page += 1;
-  } while (page <= totalPages);
-
-  const seen = new Set();
-  const targets = [];
-  for (const row of rows) {
-    const target = gameCatalogListTarget(kind, row);
-    if (!target) continue;
-    const key = gameCatalogRefreshTargetKey(target);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    targets.push(target);
-  }
-  return targets;
-}
-
-async function fetchAndStoreGameCatalogDetail(target) {
-  try {
-    const endpointKind = target.kind === "cargo" ? "cargo" : "items";
-    const payload = await fetchBitjita(`/${endpointKind}/${encodeURIComponent(target.id)}`, { cache: false });
-    const stored = gameCatalogRepository.upsertDetail(payload, {
-      updatedAt: new Date().toISOString(),
-      fallback: { id: target.id, kind: target.kind, itemType: target.itemType, name: target.name, tag: target.tag, tier: target.tier, rarity: target.rarityStr, iconAssetName: target.iconAssetName, itemListId: target.itemListId },
-    });
-    upsertRecipeCatalogDetail(target, payload, "game_catalog_refresh");
-    return stored;
-  } catch (error) {
-    throw withCatalogRefreshTargetContext(error, target);
-  }
-}
-
-function storedGameCatalogNormalizationVersion() {
-  return Number(statements.getSetting.get("game_catalog_normalization_version")?.value ?? 0);
-}
-
-async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
-  const startedAt = new Date().toISOString();
-  const previousRun = gameCatalogRepository.getLatestRefreshRun();
-  const storedNormalizationVersion = storedGameCatalogNormalizationVersion();
-  const resuming = catalogRefreshShouldResume(previousRun, storedNormalizationVersion);
-  let refreshRun = resuming
-    ? gameCatalogRepository.updateRefreshRun(previousRun.id, {
-      status: "running",
-      phase: previousRun.phase ?? "list_items",
-      completedAt: null,
-      lastError: null,
-      updatedAt: startedAt,
-    })
-    : gameCatalogRepository.beginRefreshRun({
-      status: "running",
-      phase: "list_items",
-      startedAt,
-      updatedAt: startedAt,
-    });
-  if (!resuming) {
-    statements.upsertSetting.run(
-      "game_catalog_normalization_version",
-      String(GAME_CATALOG_NORMALIZATION_VERSION),
-      startedAt,
-    );
-  }
-  let queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-  let itemCount = refreshRun.itemCount;
-  let cargoCount = refreshRun.cargoCount;
-
-  if (queueCounts.total === 0) {
-    updateScheduledJobProgress(jobKey, { stage: "list_items", processedCount: 0, totalCount: 0 });
-    const itemTargets = await fetchGameCatalogTargets("items");
-    for (const target of itemTargets) gameCatalogRepository.upsertEntityIdentity(target, { updatedAt: new Date().toISOString(), kind: "items" });
-    refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-      phase: "list_cargo",
-      itemCount: itemTargets.length,
-      updatedAt: new Date().toISOString(),
-    });
-
-    updateScheduledJobProgress(jobKey, { stage: "list_cargo", itemCount: itemTargets.length, processedCount: 0, totalCount: 0 });
-    const cargoTargets = await fetchGameCatalogTargets("cargo");
-    for (const target of cargoTargets) gameCatalogRepository.upsertEntityIdentity(target, { updatedAt: new Date().toISOString(), kind: "cargo" });
-    seedCraftPlanCatalogCaches(itemTargets, cargoTargets);
-    gameCatalogRepository.replaceRefreshTargets(refreshRun.id, [...itemTargets, ...cargoTargets]);
-    queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-    itemCount = itemTargets.length;
-    cargoCount = cargoTargets.length;
-    refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-      phase: "detail_items",
-      cursorKind: null,
-      cursorId: null,
-      processedCount: 0,
-      totalCount: queueCounts.total,
-      itemCount,
-      cargoCount,
-      recipeCount: 0,
-      byproductCount: 0,
-      failureCount: 0,
-      lastError: null,
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
-  let batch = gameCatalogRepository.listPendingRefreshTargets(refreshRun.id, gameCatalogRefreshJobBudget.batchSize);
-  let retryingFailures = false;
-  const resumeFailedTargetFirst = queueCounts.failed > 0 && (
-    previousRun?.status === "failed"
-    || previousRun?.phase === "waiting_retry"
-    || previousRun?.phase === "retry_failures"
-  );
-  if (resumeFailedTargetFirst) {
-    const retries = gameCatalogRepository.listRetryableRefreshTargets(refreshRun.id, gameCatalogRefreshJobBudget.batchSize, 3);
-    const remainingSlots = Math.max(0, gameCatalogRefreshJobBudget.batchSize - retries.length);
-    batch = [...retries, ...gameCatalogRepository.listPendingRefreshTargets(refreshRun.id, remainingSlots || 1).slice(0, remainingSlots)];
-    retryingFailures = retries.length > 0;
-  } else if (!batch.length && queueCounts.failed > 0) {
-    batch = gameCatalogRepository.listRetryableRefreshTargets(refreshRun.id, gameCatalogRefreshJobBudget.batchSize, 3);
-    retryingFailures = batch.length > 0;
-  }
-  const startedAtMs = Date.now();
-  let processedThisRun = 0;
-  let processedCount = queueCounts.processed;
-  let recipeCount = refreshRun.recipeCount;
-  let byproductCount = refreshRun.byproductCount;
-  let failureCount = refreshRun.failureCount;
-  let cursorKind = refreshRun.cursorKind;
-  let cursorId = refreshRun.cursorId;
-  let pausedForBudget = false;
-
-  refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-    phase: retryingFailures ? "retry_failures" : gameCatalogRefreshPhase(batch[0]),
-    cursorKind,
-    cursorId,
-    totalCount: queueCounts.total,
-    itemCount,
-    cargoCount,
-    processedCount,
-    recipeCount,
-    byproductCount,
-    failureCount,
-    lastError: null,
-    updatedAt: new Date().toISOString(),
-  });
-
-  for (const target of batch) {
-    if (!jobBudgetAllowsMore(startedAtMs, gameCatalogRefreshJobBudget, processedThisRun)) {
-      pausedForBudget = true;
-      break;
-    }
-
-    try {
-      const detail = await fetchAndStoreGameCatalogDetail(target);
-      processedThisRun += 1;
-      processedCount += 1;
-      recipeCount += detail.recipes.length;
-      byproductCount += detail.itemListOutputs.length;
-      cursorKind = target.kind;
-      cursorId = target.id;
-      gameCatalogRepository.markRefreshTargetProcessed(refreshRun.id, target.catalogKey);
-      queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-      processedCount = queueCounts.processed;
-      refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-        phase: gameCatalogRefreshPhase(target),
-        cursorKind,
-        cursorId,
-        processedCount,
-        totalCount: queueCounts.total,
-        itemCount,
-        cargoCount,
-        recipeCount,
-        byproductCount,
-        failureCount,
-        updatedAt: new Date().toISOString(),
-      });
-      updateScheduledJobProgress(jobKey, {
-        stage: gameCatalogRefreshPhase(target),
-        cursorKind,
-        cursorId,
-        processedCount,
-        totalCount: queueCounts.total,
-        itemCount,
-        cargoCount,
-        recipeCount,
-        byproductCount,
-        failureCount,
-      });
-      if (gameCatalogRefreshDetailDelayMs > 0) await delay(gameCatalogRefreshDetailDelayMs);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const recovery = classifyCatalogRefreshError(error, {
-        attemptNumber: Number(target.attemptCount ?? 0) + 1,
-        retryDelaysMs: gameCatalogRefreshRetryDelaysMs,
-      });
-
-      if (recovery.action === "stop") {
-        gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-          status: "failed",
-          phase: gameCatalogRefreshPhase(target),
-          cursorKind,
-          cursorId,
-          processedCount,
-          totalCount: queueCounts.total,
-          itemCount,
-          cargoCount,
-          recipeCount,
-          byproductCount,
-          failureCount,
-          lastError: message,
-          updatedAt: new Date().toISOString(),
-        });
-        throw error;
-      }
-
-      failureCount += 1;
-      if (recovery.action === "retry") {
-        gameCatalogRepository.markRefreshTargetFailed(refreshRun.id, target.catalogKey, message);
-        queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-        gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-          status: "paused",
-          phase: "waiting_retry",
-          cursorKind,
-          cursorId,
-          processedCount,
-          totalCount: queueCounts.total,
-          itemCount,
-          cargoCount,
-          recipeCount,
-          byproductCount,
-          failureCount,
-          lastError: message,
-          updatedAt: new Date().toISOString(),
-        });
-        return {
-          complete: false,
-          continueAfterMs: recovery.delayMs,
-          retryReason: recovery.reason,
-          lastError: message,
-          processedCount,
-          totalCount: queueCounts.total,
-          itemCount,
-          cargoCount,
-          recipeCount,
-          byproductCount,
-          failureCount,
-          resumed: resuming,
-          cursorKind,
-          cursorId,
-        };
-      }
-
-      gameCatalogRepository.markRefreshTargetUnavailable(refreshRun.id, target.catalogKey, message, 3);
-      queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-      refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-        status: "running",
-        phase: gameCatalogRefreshPhase(target),
-        cursorKind,
-        cursorId,
-        processedCount,
-        totalCount: queueCounts.total,
-        itemCount,
-        cargoCount,
-        recipeCount,
-        byproductCount,
-        failureCount,
-        lastError: message,
-        updatedAt: new Date().toISOString(),
-      });
-    }
-  }
-
-  queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-  const retryableFailures = gameCatalogRepository.listRetryableRefreshTargets(refreshRun.id, 1, 3).length;
-  if (pausedForBudget || queueCounts.pending > 0 || retryableFailures > 0) {
-    const pausedAt = new Date().toISOString();
-    gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-      status: "paused",
-      phase: retryableFailures > 0 && queueCounts.pending === 0
-        ? "retry_failures"
-        : gameCatalogRefreshPhase(batch[Math.max(0, processedThisRun - 1)] ?? batch[0] ?? null),
-      cursorKind,
-      cursorId,
-      processedCount,
-      totalCount: queueCounts.total,
-      itemCount,
-      cargoCount,
-      recipeCount,
-      byproductCount,
-      failureCount,
-      lastError: null,
-      updatedAt: pausedAt,
-    });
-    return {
-      complete: false,
-      continueAfterMs: gameCatalogRefreshContinueDelayMs,
-      processedCount,
-      totalCount: queueCounts.total,
-      itemCount,
-      cargoCount,
-      recipeCount,
-      byproductCount,
-      failureCount,
-      resumed: resuming,
-      cursorKind,
-      cursorId,
-    };
-  }
-
-  gameCatalogRepository.deleteOrphanRecipes();
-  const legacyRefresh = await refreshKnownRecipeCatalogEntries({ jobKey });
-  updateScheduledJobProgress(jobKey, { stage: "probability_snapshot" });
-  const probabilitySource = await fetchGameDataProbabilitySnapshot({
-    itemListsUrl: process.env.GAME_DATA_ITEM_LISTS_URL,
-    resourcesUrl: process.env.GAME_DATA_RESOURCES_URL,
-    sourceUrl: process.env.GAME_DATA_SOURCE_URL,
-  });
-  probabilitySource.sources = [
-    {
-      sourceKind: "bitjita_catalog",
-      sourceUrl: `${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api`,
-      sourceRevision: `catalog-normalization-${GAME_CATALOG_NORMALIZATION_VERSION}`,
-    },
-    ...(probabilitySource.sources ?? []),
-  ];
-  const probabilitySnapshot = gameCatalogRepository.replaceProbabilitySnapshot(probabilitySource);
-  const effortCandidates = gameCatalogRepository.listProbabilityEffortCandidates();
-  const effortUpdatedAt = new Date().toISOString();
-  const completedAt = new Date().toISOString();
-  const effortWeightCount = gameCatalogRepository.replaceEffortWeights(
-    effortCandidates,
-    CRAFT_PLAN_EFFORT_MODEL_VERSION,
-    effortUpdatedAt,
-    () => {
-      statements.upsertSetting.run(
-        "game_catalog_effort_model_version",
-        String(CRAFT_PLAN_EFFORT_MODEL_VERSION),
-        effortUpdatedAt,
-      );
-      gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-        status: "completed",
-        phase: "complete",
-        cursorKind,
-        cursorId,
-        processedCount,
-        totalCount: queueCounts.total,
-        itemCount,
-        cargoCount,
-        recipeCount,
-        byproductCount,
-        failureCount,
-        lastError: null,
-        completedAt,
-        updatedAt: completedAt,
-      });
-    },
-  );
-  craftPlanEffortBaselineCache.clear();
-  craftPlanResponseGeneration += 1;
-  craftPlanResponseCache.clear();
-  probabilityWorkbookCache = null;
-  probabilityWorkbookInflight = null;
-
-  return {
-    complete: true,
-    processedCount,
-    totalCount: queueCounts.total,
-    itemCount,
-    cargoCount,
-    recipeCount,
-    byproductCount,
-    failureCount,
-    resumed: resuming,
-    cursorKind,
-    cursorId,
-    effortModelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
-    effortWeightCount,
-    effortUpdatedAt,
-    probabilitySnapshot,
-    ...legacyRefresh,
-  };
-}
-
 function updateScheduledJobProgress(jobKey, metadata) {
   if (!jobKey) return;
   const row = statements.getScheduledJob.get(jobKey);
@@ -1236,14 +565,6 @@ async function runPrivacyRetentionJob() {
 // background task. Jobs should report progress in metadata when they can run for
 // longer than a normal request.
 const scheduledJobRegistry = {
-  recipe_catalog_refresh: {
-    label: "Recipe catalog refresh",
-    description: "Refreshes the Craft Planning catalog database from BitJita once per week, storing normalized item, cargo, recipe, and byproduct records for future planner reads.",
-    schedule: "weekly@1@00:00",
-    legacySchedules: ["daily_midnight", "daily@00:00"],
-    enabled: true,
-    run: runRecipeCatalogRefreshJob,
-  },
   global_market_insights: {
     label: "Global market insights",
     description: "Refreshes all-region market snapshots and overview modules from live BitJita data.",
@@ -1300,22 +621,10 @@ function seedScheduledJobs() {
 }
 
 const scheduledJobStaleAfterMs = 15 * 60 * 1000;
-const recipeCatalogStaleAfterMs = 2 * 60 * 1000;
 const scheduledJobContinuationTimers = new Map();
 
 function recoverStaleScheduledJobs() {
-  const recovered = recoverStaleScheduledJobsRegistry({ statements, staleAfterMs: scheduledJobStaleAfterMs });
-  const current = new Date();
-  const updatedAt = current.toISOString();
-  const catalogCutoff = new Date(current.getTime() - recipeCatalogStaleAfterMs).toISOString();
-  const catalogResult = statements.resetStaleRecipeCatalogJob.run(
-    "Recovered stalled planner catalog refresh after two minutes without progress.",
-    updatedAt,
-    JSON.stringify({ recoveredAt: updatedAt, staleAfterMinutes: 2, reason: "no_progress" }),
-    updatedAt,
-    catalogCutoff,
-  );
-  return recovered + catalogResult.changes;
+  return recoverStaleScheduledJobsRegistry({ statements, staleAfterMs: scheduledJobStaleAfterMs });
 }
 
 function scheduledJobRow(row) {
@@ -1342,31 +651,6 @@ function scheduleScheduledJobContinuation(jobKey, delayMs) {
   }, Math.max(0, delayMs));
   timer.unref?.();
   scheduledJobContinuationTimers.set(jobKey, timer);
-}
-
-function craftPlanCatalogRefreshStatus() {
-  recoverStaleScheduledJobs();
-  const storedNormalizationVersion = storedGameCatalogNormalizationVersion();
-  const storedEffortModelVersion = Number(statements.getSetting.get("game_catalog_effort_model_version")?.value ?? 0);
-  const effortCompatible = storedEffortModelVersion === CRAFT_PLAN_EFFORT_MODEL_VERSION;
-  const effortWeights = effortCompatible
-    ? gameCatalogRepository.getEffortWeights(CRAFT_PLAN_EFFORT_MODEL_VERSION)
-    : new Map();
-  return {
-    scheduledJob: scheduledJobRow(statements.getScheduledJob.get("recipe_catalog_refresh")),
-    latestRun: gameCatalogRepository.getLatestRefreshRun(),
-    recentRuns: gameCatalogRepository.listRefreshRuns(10),
-    normalizationVersion: GAME_CATALOG_NORMALIZATION_VERSION,
-    storedNormalizationVersion,
-    normalizationOutdated: catalogNormalizationNeedsRefresh(storedNormalizationVersion),
-    effortModelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
-    storedEffortModelVersion,
-    effortCompatible,
-    effortWeightCount: effortWeights.size,
-    effortUpdatedAt: effortCompatible
-      ? gameCatalogRepository.getEffortWeightRevision(CRAFT_PLAN_EFFORT_MODEL_VERSION)
-      : null,
-  };
 }
 
 async function runScheduledJob(jobKey, { manual = false } = {}) {
@@ -1427,18 +711,6 @@ function checkScheduledJobs() {
 }
 
 seedScheduledJobs();
-
-function scheduleGameCatalogNormalizationRefresh() {
-  if (!scheduledJobsEnabled || isTestRuntime) return;
-  if (!catalogNormalizationNeedsRefresh(storedGameCatalogNormalizationVersion())) return;
-  const key = "recipe_catalog_refresh";
-  const row = statements.getScheduledJob.get(key);
-  if (!row || row.enabled === 0 || row.running) return;
-  const now = new Date().toISOString();
-  statements.updateScheduledJobSettings.run(row.schedule, 1, now, now, key);
-}
-
-scheduleGameCatalogNormalizationRefresh();
 
 function publicDiscordYouTubeChannel(row) {
   return row ? {
@@ -2231,6 +1503,32 @@ function currentCraftPlanProjection(claimId) {
   );
 }
 
+function recipeDetailFromLocalCatalog(target) {
+  const kind = String(target?.kind ?? "") === "cargo" ? "cargo" : "items";
+  const id = String(target?.id ?? "").trim();
+  const key = `${kind}:${id}`;
+  const { detailsByKey, warnings } = collectLocalCatalogCraftPlanDetails(
+    gameCatalogRepository,
+    [{ ...target, id, kind, itemType: kind === "cargo" ? 1 : 0 }],
+    {},
+    64,
+  );
+  const detail = detailsByKey.get(key);
+  if (!detail) {
+    const error = new Error(`Relay catalog has no detail for ${key}`);
+    error.statusCode = 404;
+    throw error;
+  }
+  return {
+    detail,
+    cached: true,
+    provider: "relay",
+    lastSyncedAt: providerCatalogRepository.getSourceState()?.receivedAt ?? null,
+    lastError: null,
+    warnings,
+  };
+}
+
 async function craftPlanTierPresets(claimId) {
   const projection = currentResearchProjection(claimId);
   return buildResearchTierPresets(
@@ -2340,195 +1638,6 @@ function craftPlanAuditLabels(sources = {}, materials = []) {
 }
 
 
-const CRAFT_PLAN_CARGO_CATALOG_TTL_MS = 15 * 60 * 1000;
-const CRAFT_PLAN_ITEM_CATALOG_TTL_MS = 15 * 60 * 1000;
-let craftPlanCargoCatalogCache = { expiresAt: 0, rows: [] };
-let craftPlanItemCatalogCache = { expiresAt: 0, rows: [] };
-
-function unwrapRecipeDetailPayload(detail) {
-  return detail?.detail && typeof detail.detail === "object" ? detail.detail : detail;
-}
-
-function craftPlanStackTarget(stack = {}, display = {}) {
-  const id = String(stack.item_id ?? stack.itemId ?? stack.id ?? display.id ?? "").trim();
-  if (!id) return null;
-  const kind = String(stack.item_type ?? stack.itemType ?? display.itemType ?? display.kind) === "cargo" || String(stack.item_type ?? stack.itemType ?? display.itemType ?? display.kind) === "1" ? "cargo" : "items";
-  return {
-    id,
-    kind,
-    itemType: kind === "cargo" ? 1 : 0,
-    name: String(display.name ?? stack.name ?? `${kind === "cargo" ? "Cargo" : "Item"} #${id}`),
-    tier: display.tier ?? stack.tier ?? null,
-    tag: display.tag ?? stack.tag ?? null,
-    iconAssetName: display.iconAssetName ?? stack.iconAssetName ?? null,
-  };
-}
-
-function craftPlanPossibilityTargets(detail) {
-  const payload = unwrapRecipeDetailPayload(detail);
-  return (payload?.itemListPossibilities ?? []).map((possibility) => {
-    const target = possibility.targetItem ?? {};
-    const id = String(possibility.targetId ?? target.id ?? possibility.itemId ?? possibility.id ?? "").trim();
-    if (!id) return null;
-    const kind = possibility.isCargo === true || String(possibility.itemType ?? possibility.item_type) === "1" ? "cargo" : "items";
-    return { id, kind };
-  }).filter(Boolean);
-}
-
-function craftPlanDetailTarget(detail) {
-  const payload = unwrapRecipeDetailPayload(detail);
-  return recipeTargetFromDetail(payload, {});
-}
-
-function craftPlanDetailTier(detail) {
-  const target = craftPlanDetailTarget(detail);
-  const tier = Number(target?.tier);
-  return Number.isFinite(tier) && tier > 0 ? tier : null;
-}
-
-function craftPlanCargoCatalogRows(payload) {
-  return unwrap(payload, "cargos", []).filter((row) => row && typeof row === "object");
-}
-
-function craftPlanItemCatalogRows(payload) {
-  return unwrap(payload, "items", []).filter((row) => row && typeof row === "object");
-}
-
-function craftPlanHasItemListOutputs(row = {}) {
-  const itemListId = String(row.itemListId ?? row.item_list_id ?? "").trim();
-  return itemListId !== "" && itemListId !== "0";
-}
-
-function craftPlanCargoLooksLikeTransportPackage(row = {}) {
-  const tag = String(row.tag ?? "").trim();
-  const name = String(row.name ?? "").trim();
-  return /^package$/i.test(tag) || /\b(package|pack)\b/i.test(name);
-}
-
-async function craftPlanCargoCatalogRowsCached() {
-  const now = Date.now();
-  if (craftPlanCargoCatalogCache.expiresAt > now) return craftPlanCargoCatalogCache.rows;
-  const payload = await fetchBitjita("/cargo").catch(() => null);
-  const rows = craftPlanCargoCatalogRows(payload);
-  craftPlanCargoCatalogCache = { expiresAt: now + CRAFT_PLAN_CARGO_CATALOG_TTL_MS, rows };
-  return rows;
-}
-
-async function craftPlanItemCatalogRowsCached() {
-  const now = Date.now();
-  if (craftPlanItemCatalogCache.expiresAt > now) return craftPlanItemCatalogCache.rows;
-  const payload = await fetchBitjita("/items").catch(() => null);
-  const rows = craftPlanItemCatalogRows(payload);
-  craftPlanItemCatalogCache = { expiresAt: now + CRAFT_PLAN_ITEM_CATALOG_TTL_MS, rows };
-  return rows;
-}
-
-async function craftPlanItemProducerIdsFromCatalog(detailsByKey) {
-  const tiers = new Set([...detailsByKey.values()].map(craftPlanDetailTier).filter((tier) => tier != null));
-  if (!tiers.size) return [];
-  const rows = await craftPlanItemCatalogRowsCached();
-  const ids = new Set();
-  for (const row of rows) {
-    const id = String(row.id ?? "").trim();
-    const tier = Number(row.tier);
-    if (!/^\d+$/.test(id) || !Number.isFinite(tier) || !tiers.has(tier)) continue;
-    if (!craftPlanHasItemListOutputs(row)) continue;
-    if (craftPlanCargoLooksLikeTransportPackage(row)) continue;
-    ids.add(id);
-  }
-  return [...ids];
-}
-
-async function craftPlanCargoIdsFromCatalog(detailsByKey) {
-  const tiers = new Set([...detailsByKey.values()].map(craftPlanDetailTier).filter((tier) => tier != null));
-  if (!tiers.size) return [];
-  const rows = await craftPlanCargoCatalogRowsCached();
-  const ids = new Set();
-  for (const row of rows) {
-    const id = String(row.id ?? "").trim();
-    const tier = Number(row.tier);
-    if (!/^\d+$/.test(id) || !Number.isFinite(tier) || !tiers.has(tier)) continue;
-    if (craftPlanCargoLooksLikeTransportPackage(row)) continue;
-    ids.add(id);
-  }
-  return [...ids];
-}
-
-function craftPlanOutputPossibilityMatchesTargets(outputDetail, targetKeys) {
-  return craftPlanPossibilityTargets(outputDetail).some((target) => targetKeys.has(recipeCatalogKey(target.kind, target.id)));
-}
-
-function craftPlanCargoIdsFromSources(sources = []) {
-  const ids = new Set();
-  for (const source of sources) {
-    for (const item of source?.items ?? []) {
-      const kind = String(item.kind ?? (String(item.itemType ?? item.item_type) === "1" ? "cargo" : "items"));
-      const id = String(item.id ?? item.itemId ?? "").trim();
-      if (kind === "cargo" && /^\d+$/.test(id)) ids.add(id);
-    }
-  }
-  return [...ids];
-}
-
-async function addCraftPlanItemOutputDetails(detailsByKey) {
-  const targetKeys = new Set([...detailsByKey.values()].map((detail) => {
-    const target = craftPlanDetailTarget(detail);
-    return target.id ? recipeCatalogKey(target.kind, target.id) : null;
-  }).filter(Boolean));
-  if (!targetKeys.size) return detailsByKey;
-
-  for (const itemId of await craftPlanItemProducerIdsFromCatalog(detailsByKey)) {
-    const key = recipeCatalogKey("items", itemId);
-    if (detailsByKey.has(key)) continue;
-    const detail = recipeDetailFromCatalog({ id: itemId, kind: "items", itemType: 0 });
-    if (detail && craftPlanOutputPossibilityMatchesTargets(detail, targetKeys)) detailsByKey.set(key, detail);
-  }
-  return detailsByKey;
-}
-
-async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
-  const targetKeys = new Set([...detailsByKey.values()].map((detail) => {
-    const target = craftPlanDetailTarget(detail);
-    return target.id ? recipeCatalogKey(target.kind, target.id) : null;
-  }).filter(Boolean));
-  if (!targetKeys.size) return detailsByKey;
-
-  const sourceCargoIds = new Set(craftPlanCargoIdsFromSources(sources));
-  const cargoIds = [...new Set([...sourceCargoIds, ...await craftPlanCargoIdsFromCatalog(detailsByKey)])];
-  for (const cargoId of cargoIds) {
-    const cargoKey = recipeCatalogKey("cargo", cargoId);
-    if (!/^\d+$/.test(cargoId)) continue;
-    let cargoDetail = detailsByKey.get(cargoKey);
-    if (!cargoDetail) {
-      const target = { id: cargoId, kind: "cargo", itemType: 1 };
-      cargoDetail = sourceCargoIds.has(cargoId)
-        ? await recipeDetailFromCatalogOrFetch(target).catch(() => null)
-        : recipeDetailFromCatalog(target);
-      if (!cargoDetail) continue;
-    }
-    const payload = unwrapRecipeDetailPayload(cargoDetail);
-    const recipes = [...(payload?.recipesUsingItem ?? []), ...(payload?.craftingRecipes ?? []), ...(payload?.extractionRecipes ?? [])];
-    let cargoIsRelevant = false;
-    for (const recipe of recipes) {
-      const outputs = Array.isArray(recipe?.craftedItemStacks) ? recipe.craftedItemStacks : [];
-      for (let index = 0; index < outputs.length; index += 1) {
-        const outputTarget = craftPlanStackTarget(outputs[index], Array.isArray(recipe?.craftedItems) ? recipe.craftedItems[index] : {});
-        if (!outputTarget || outputTarget.kind !== "items") continue;
-        const outputKey = recipeCatalogKey(outputTarget.kind, outputTarget.id);
-        let outputDetail = detailsByKey.get(outputKey);
-        if (!outputDetail) {
-          outputDetail = sourceCargoIds.has(cargoId)
-            ? await recipeDetailFromCatalogOrFetch(outputTarget).catch(() => null)
-            : recipeDetailFromCatalog(outputTarget);
-          if (outputDetail) detailsByKey.set(outputKey, outputDetail);
-        }
-        if (outputDetail && craftPlanOutputPossibilityMatchesTargets(outputDetail, targetKeys)) cargoIsRelevant = true;
-      }
-    }
-    if (cargoIsRelevant) detailsByKey.set(cargoKey, cargoDetail);
-  }
-  return detailsByKey;
-}
 async function computedCraftPlanResponse(claimId = getSettings().claimId, options = {}) {
   return (await computedCraftPlanWorkspace(claimId, options)).plan;
 }
@@ -10434,8 +9543,6 @@ const server = createServer(async (req, res) => {
         const kind = String(url.searchParams.get("kind") ?? "items") === "cargo" ? "cargo" : "items";
         const id = String(url.searchParams.get("id") ?? "").trim();
         if (!/^\d+$/.test(id)) return send(res, 400, { error: "Recipe item id is required" });
-        const cached = statements.getRecipeCatalogEntry.get(recipeCatalogKey(kind, id));
-        if (!cached && !rateLimit(req, res, "recipe-detail", RATE_LIMITS.expensiveLocal)) return;
         const target = {
           id,
           kind,
@@ -10446,9 +9553,9 @@ const server = createServer(async (req, res) => {
           tag: url.searchParams.get("tag") ?? undefined,
           iconAssetName: url.searchParams.get("iconAssetName") ?? undefined,
         };
-        return send(res, 200, await recipeDetailFromCatalogOrFetch(target));
+        return send(res, 200, recipeDetailFromLocalCatalog(target));
       } catch (error) {
-        return send(res, error?.statusCode ?? 502, { error: error instanceof Error ? error.message : "Unable to load recipe detail" });
+        return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Unable to load recipe detail" });
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/legal") {
@@ -11192,21 +10299,6 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/access-control") {
         return send(res, 200, adminAccessControlResponse());
-      }
-      if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/catalog-refresh") {
-        return send(res, 200, craftPlanCatalogRefreshStatus());
-      }
-      if (req.method === "POST" && url.pathname === "/api/local/admin/craft-plan/catalog-refresh") {
-        const key = "recipe_catalog_refresh";
-        recoverStaleScheduledJobs();
-        const row = statements.getScheduledJob.get(key);
-        if (!row) return send(res, 404, { error: "Scheduled job is not configured", ...craftPlanCatalogRefreshStatus() });
-        if (row.running) return send(res, 409, { error: "Scheduled job is already running", ...craftPlanCatalogRefreshStatus() });
-        audit(user, "craft_plan.catalog_refresh_started", { key });
-        void runScheduledJob(key, { manual: true })
-          .then((result) => audit(user, "craft_plan.catalog_refresh_completed", { key, metadata: result.metadata }))
-          .catch((error) => console.warn(`Manual scheduled job ${key} failed: ${error instanceof Error ? error.message : String(error)}`));
-        return send(res, 202, { ...craftPlanCatalogRefreshStatus(), result: { ok: true, key, started: true } });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/progress-audit") {
         const claimId = getSettings().claimId;

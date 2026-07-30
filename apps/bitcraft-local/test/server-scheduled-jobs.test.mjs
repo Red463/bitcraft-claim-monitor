@@ -224,17 +224,16 @@ test("scheduledJobsStatus recovers stale jobs before returning public status", (
   const status = scheduledJobsStatus({
     enabled: true,
     statements: {
-      recipeCatalogCount: { get: () => (calls.push("count"), { count: "42" }) },
       listScheduledJobs: { all: () => (calls.push("list"), [{ job_key: "job", label: "Job", description: "Desc", schedule: "interval@120", enabled: 0, running: 1, metadata_json: "{}" }]) },
     },
     recoverStaleJobs: () => calls.push("recover"),
     now: () => new Date("2026-06-29T12:34:56.000Z"),
   });
 
-  assert.deepEqual(calls, ["recover", "count", "list"]);
+  assert.deepEqual(calls, ["recover", "list"]);
   assert.equal(status.enabled, true);
   assert.equal(status.serverTime, "2026-06-29T12:34:56.000Z");
-  assert.equal(status.recipeCatalogCount, 42);
+  assert.equal("recipeCatalogCount" in status, false);
   assert.equal(status.jobs.length, 1);
   assert.equal(status.jobs[0].scheduleLabel, "Every 2 minutes");
   assert.equal(status.jobs[0].running, true);
@@ -252,12 +251,12 @@ test("server registers the six-hour Empire Hexite reserves refresh", () => {
   assert.match(server, /requestsPerMinute: Math\.max\(1, Math\.min\([^\n]+150\)\)/);
 });
 
-test("planner catalog refresh uses heartbeat-based recovery and a responsive scheduler", () => {
+test("scheduled ingestion no longer owns the planner catalog", () => {
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const statements = readFileSync(new URL("../src/server/preparedStatements.mjs", import.meta.url), "utf8");
 
-  assert.match(server, /const recipeCatalogStaleAfterMs = 2 \* 60 \* 1000/);
-  assert.match(server, /resetStaleRecipeCatalogJob\.run/);
+  assert.doesNotMatch(server, /recipe_catalog_refresh:\s*\{/);
+  assert.doesNotMatch(server, /resetStaleRecipeCatalogJob\.run/);
   assert.match(server, /setInterval\(checkScheduledJobs, 10 \* 1000\)/);
-  assert.match(statements, /resetStaleRecipeCatalogJob:[^\n]+job_key = 'recipe_catalog_refresh'[^\n]+updated_at IS NULL OR updated_at < \?/);
+  assert.doesNotMatch(statements, /resetStaleRecipeCatalogJob/);
 });

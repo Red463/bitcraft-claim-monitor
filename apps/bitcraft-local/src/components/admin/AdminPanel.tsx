@@ -1278,7 +1278,6 @@ export function AdminPanel({
             </div>
             <div className="status-detail">
               <Info label="Scheduler" value={scheduledJobs?.enabled ? "Enabled" : "Disabled"} />
-              <Info label="Recipe records" value={formatNumber(scheduledJobs?.recipeCatalogCount)} />
               <Info label="Server time" value={dateLabel(scheduledJobs?.serverTime)} />
             </div>
             <div className="scheduled-job-list">

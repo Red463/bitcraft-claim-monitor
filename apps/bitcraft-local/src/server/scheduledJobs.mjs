@@ -180,11 +180,9 @@ export function scheduledJobsStatus({
   now = () => new Date(),
 }) {
   recoverStaleJobs();
-  const recipeCatalogCount = toNumber(statements.recipeCatalogCount.get()?.count);
   return {
     enabled,
     serverTime: now().toISOString(),
-    recipeCatalogCount,
     jobs: statements.listScheduledJobs.all().map(publicScheduledJobRow),
   };
 }

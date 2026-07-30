@@ -4,9 +4,6 @@ import test from "node:test";
 
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import {
-  GAME_CATALOG_NORMALIZATION_VERSION,
-  catalogNormalizationNeedsRefresh,
-  catalogRefreshShouldResume,
   createGameCatalogRepository,
   gameCatalogKey,
   normalizeGameCatalogDetail,
@@ -205,10 +202,11 @@ test("game catalog schema bootstraps normalized catalog tables, indexes, and cas
     "game_catalog_recipe_sources",
     "game_catalog_item_list_outputs",
     "game_catalog_effort_weights",
-    "game_catalog_refresh_runs",
   ]) {
     assert.equal(tables.has(tableName), true, `${tableName} should exist`);
   }
+  assert.equal(tables.has("game_catalog_refresh_runs"), false);
+  assert.equal(tables.has("game_catalog_refresh_targets"), false);
 
   assert.deepEqual(
     sortStrings(db.prepare("PRAGMA index_list(game_catalog_entities)").all().map((row) => row.name)),
@@ -226,11 +224,6 @@ test("game catalog schema bootstraps normalized catalog tables, indexes, and cas
     sortStrings(db.prepare("PRAGMA index_list(game_catalog_item_list_outputs)").all().map((row) => row.name)),
     ["idx_game_catalog_item_list_outputs_output_producer", "sqlite_autoindex_game_catalog_item_list_outputs_1"],
   );
-  assert.deepEqual(
-    sortStrings(db.prepare("PRAGMA index_list(game_catalog_refresh_runs)").all().map((row) => row.name)),
-    ["idx_game_catalog_refresh_runs_status_time", "idx_game_catalog_refresh_runs_updated_at"],
-  );
-
   assert.deepEqual(
     db.prepare("PRAGMA foreign_key_list(game_catalog_recipe_inputs)").all().map((row) => ({
       table: row.table,
@@ -421,17 +414,6 @@ test("normalizeGameCatalogDetail preserves complete Ocean and Lake Fish Oil dist
   assert.equal(ocean.itemListOutputs.find((output) => output.outputKey === "items:1110010")?.guaranteedQuantity, 3);
   assert.equal(lake.itemListOutputs.find((output) => output.outputKey === "items:1110010")?.quantity, 1);
   assert.equal(lake.itemListOutputs.find((output) => output.outputKey === "items:1110010")?.guaranteedQuantity, 1);
-});
-
-test("catalog normalization version prevents mixed-version refresh runs from resuming", () => {
-  const incompleteRun = { status: "paused" };
-
-  assert.equal(GAME_CATALOG_NORMALIZATION_VERSION, 8);
-  assert.equal(catalogNormalizationNeedsRefresh(null), true);
-  assert.equal(catalogNormalizationNeedsRefresh(GAME_CATALOG_NORMALIZATION_VERSION), false);
-  assert.equal(catalogRefreshShouldResume(incompleteRun, GAME_CATALOG_NORMALIZATION_VERSION), true);
-  assert.equal(catalogRefreshShouldResume(incompleteRun, GAME_CATALOG_NORMALIZATION_VERSION - 1), false);
-  assert.equal(catalogRefreshShouldResume({ status: "completed" }, GAME_CATALOG_NORMALIZATION_VERSION), false);
 });
 
 test("game catalog repository persists expected and guaranteed item-list quantities", () => {
@@ -711,85 +693,12 @@ test("game catalog detail replacement rolls back all writes when a linked row fa
   assert.deepEqual(db.prepare("SELECT recipe_key, name FROM game_catalog_recipes ORDER BY recipe_key").all(), before);
   assert.equal(repository.listProducerRecipesForOutput("items:1220019").length, 2);
 });
-test("game catalog repository persists resumable refresh runs and list identity writes", () => {
+test("game catalog repository preserves separate item and cargo identities without refresh-ledger APIs", () => {
   const db = createDb();
   const repository = createGameCatalogRepository(db);
 
   repository.upsertEntityIdentity({ id: "1220019", itemType: 0, name: "Basic Bait and Shells", tag: "Bait Output", tier: 1, rarityStr: "Common", iconAssetName: "bait-shells.png" }, { updatedAt: UPDATED_AT, kind: "items" });
   repository.upsertEntityIdentity({ id: "1220019", itemType: 1, name: "Cargo With Colliding Id", tag: "Package", tier: 4, rarityStr: "Rare", iconAssetName: "cargo-collision.png" }, { updatedAt: UPDATED_AT, kind: "cargo" });
-
-  const started = repository.beginRefreshRun({
-    status: "running",
-    phase: "detail_items",
-    totalCount: 2,
-    itemCount: 1,
-    cargoCount: 1,
-    startedAt: "2026-07-10T12:00:00.000Z",
-    updatedAt: "2026-07-10T12:00:00.000Z",
-  });
-
-  assert.equal(started.status, "running");
-  assert.equal(started.phase, "detail_items");
-  assert.equal(started.totalCount, 2);
-
-  repository.updateRefreshRun(started.id, {
-    status: "failed",
-    phase: "detail_cargo",
-    cursorKind: "items",
-    cursorId: "1220019",
-    processedCount: 1,
-    recipeCount: 3,
-    byproductCount: 2,
-    failureCount: 1,
-    lastError: "HTTP 429",
-    updatedAt: "2026-07-10T12:05:00.000Z",
-  });
-
-  assert.deepEqual(repository.getLatestRefreshRun(), {
-    id: started.id,
-    status: "failed",
-    phase: "detail_cargo",
-    cursorKind: "items",
-    cursorId: "1220019",
-    processedCount: 1,
-    totalCount: 2,
-    itemCount: 1,
-    cargoCount: 1,
-    recipeCount: 3,
-    byproductCount: 2,
-    failureCount: 1,
-    startedAt: "2026-07-10T12:00:00.000Z",
-    completedAt: null,
-    lastError: "HTTP 429",
-    updatedAt: "2026-07-10T12:05:00.000Z",
-  });
-
-  repository.updateRefreshRun(started.id, {
-    status: "completed",
-    phase: "complete",
-    processedCount: 2,
-    completedAt: "2026-07-10T12:06:00.000Z",
-    updatedAt: "2026-07-10T12:06:00.000Z",
-  });
-
-  assert.deepEqual(repository.listRefreshRuns(5), [{
-    id: started.id,
-    status: "completed",
-    phase: "complete",
-    cursorKind: "items",
-    cursorId: "1220019",
-    processedCount: 2,
-    totalCount: 2,
-    itemCount: 1,
-    cargoCount: 1,
-    recipeCount: 3,
-    byproductCount: 2,
-    failureCount: 1,
-    startedAt: "2026-07-10T12:00:00.000Z",
-    completedAt: "2026-07-10T12:06:00.000Z",
-    lastError: "HTTP 429",
-    updatedAt: "2026-07-10T12:06:00.000Z",
-  }]);
 
   assert.deepEqual(repository.getEntity(gameCatalogKey("items", "1220019")), {
     catalogKey: "items:1220019",
@@ -815,45 +724,7 @@ test("game catalog repository persists resumable refresh runs and list identity 
     iconAssetName: "cargo-collision.png",
     updatedAt: UPDATED_AT,
   });
-});
-
-test("game catalog refresh targets persist a database-backed work queue", () => {
-  const db = createDb();
-  const repository = createGameCatalogRepository(db);
-  const run = repository.beginRefreshRun({ startedAt: UPDATED_AT, updatedAt: UPDATED_AT });
-
-  repository.replaceRefreshTargets(run.id, [
-    { id: "100", kind: "items", itemType: 0, name: "Resin" },
-    { id: "200", kind: "items", itemType: 0, name: "Timber" },
-    { id: "300", kind: "cargo", itemType: 1, name: "Trunk" },
-  ]);
-
-  assert.deepEqual(repository.getRefreshTargetCounts(run.id), {
-    total: 3,
-    pending: 3,
-    processed: 0,
-    failed: 0,
-  });
-  assert.deepEqual(repository.listPendingRefreshTargets(run.id, 2).map((target) => target.catalogKey), ["items:100", "items:200"]);
-
-  repository.markRefreshTargetProcessed(run.id, "items:100");
-  repository.markRefreshTargetFailed(run.id, "items:200", "temporary failure");
-
-  assert.deepEqual(repository.getRefreshTargetCounts(run.id), {
-    total: 3,
-    pending: 1,
-    processed: 1,
-    failed: 1,
-  });
-  assert.deepEqual(repository.listPendingRefreshTargets(run.id, 10).map((target) => target.catalogKey), ["cargo:300"]);
-  assert.deepEqual(repository.listRetryableRefreshTargets(run.id, 10, 3).map((target) => target.catalogKey), ["items:200"]);
-
-  repository.markRefreshTargetUnavailable(run.id, "cargo:300", "HTTP 404", 3);
-  assert.deepEqual(repository.getRefreshTargetCounts(run.id), {
-    total: 3,
-    pending: 0,
-    processed: 1,
-    failed: 2,
-  });
-  assert.deepEqual(repository.listRetryableRefreshTargets(run.id, 10, 3).map((target) => target.catalogKey), ["items:200"]);
+  assert.equal("beginRefreshRun" in repository, false);
+  assert.equal("replaceRefreshTargets" in repository, false);
+  db.close();
 });
