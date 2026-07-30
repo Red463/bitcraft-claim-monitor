@@ -165,6 +165,12 @@ test("Activity member filters use the current Relay member domain", async () => 
   assert.doesNotMatch(activityPage, /\/api\/bitjita|fetch\([^)]*members/);
 });
 
+test("Public Craft Finder gets monitored-settlement context from Relay", () => {
+  assert.equal(usesProviderNeutralGameData("publiccrafts"), true);
+  assert.deepEqual(pageDomains("publiccrafts"), ["claim"]);
+  assert.deepEqual(legacyPageEndpointMap("1369094286777412590", "publiccrafts"), {});
+});
+
 test("server background ingestion keeps citizens and the primary-region player session current", async () => {
   const source = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(source, /RelayPrimaryRegionRuntime/);

@@ -44,6 +44,7 @@ Disposition values:
 | Browser page-navigation state | no table | In-memory last-rendered snapshot plus immediate provider-neutral local re-read | Migrated pages reuse visible data only to avoid a blank transition; the browser snapshot never suppresses a current-generation read and does not justify SQL persistence. |
 | Activity member-filter roster | no table | Current Relay `members` domain passed through `AppShell` | The Activity page shares the normal live member generation and no longer performs or persists a separate roster fetch. |
 | Craft Calculator and Sync opening state | no table | Their focused local/browser-owned services | Neither page consumes the central settlement payload, so opening them starts no legacy claim/member request and requires no replacement current table. |
+| Public Craft Finder monitored-settlement context | no table | Current Relay `claim` domain | Region and owner context share the current claim generation; the later cross-region job projection must not introduce a page cache table. |
 | `market_deal_watches` | keep-user | Authenticated deal-watch edits | User-owned alert configuration. |
 | `market_deal_alerts` | keep-history | Locally derived market transitions | Alert deduplication, acknowledgement, and delivery history. |
 | `admin_audit_log`, `admin_login_events` | keep-operations | Auth/admin security events | Security and accountability history. |
