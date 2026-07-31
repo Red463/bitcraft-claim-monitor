@@ -9,6 +9,9 @@ export function requiredDecimal(value, label) {
 function committedRelaySnapshotForReconciliation(readSnapshot, claimId, domain, { allowedWarnings = [] } = {}) {
   const snapshot = readSnapshot(String(claimId), domain);
   if (!snapshot?.data) throw new Error(`Relay ${domain} input is unavailable.`);
+  if (snapshot.provenance?.provider !== "relay") {
+    throw new Error(`Relay ${domain} input is not Relay-owned.`);
+  }
   if (snapshot.confidence === "partial" || snapshot.confidence === "unknown") {
     throw new Error(`Relay ${domain} input is partial.`);
   }

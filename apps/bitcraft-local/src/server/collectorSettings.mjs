@@ -27,3 +27,23 @@ export function normalizeCollectorSettings(value = {}) {
   }));
 }
 
+function configuredReconciliationKeys(settings = {}) {
+  return Object.keys(domainCollectorDefaults).filter((key) => Object.hasOwn(settings, key));
+}
+
+export function reconciliationCollectorStatuses(settings, statuses = {}) {
+  return Object.fromEntries(
+    configuredReconciliationKeys(settings)
+      .filter((key) => Object.hasOwn(statuses, key))
+      .map((key) => [key, statuses[key]]),
+  );
+}
+
+export function applyReconciliationSchedule(settings, statuses = {}, nextRunAt) {
+  for (const key of configuredReconciliationKeys(settings)) {
+    if (!Object.hasOwn(statuses, key)) continue;
+    statuses[key] = { ...statuses[key], nextRunAt };
+  }
+  return statuses;
+}
+

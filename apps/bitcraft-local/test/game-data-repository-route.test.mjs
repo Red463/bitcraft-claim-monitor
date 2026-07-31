@@ -36,6 +36,32 @@ function relayProvenance(receivedAt, sourceObservedAt = receivedAt) {
   };
 }
 
+test("current-state reads reject legacy rows rather than manufacturing Relay provenance", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const repository = createCurrentStateRepository(db);
+  const observedAt = "2026-07-29T09:00:00.000Z";
+
+  db.prepare(`
+    INSERT INTO domain_payload_current (
+      claim_id, domain, data_json, collected_at, last_attempt_at,
+      last_success_at, last_error, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
+  `).run(
+    "1369094286777412590",
+    "claim",
+    JSON.stringify({ entityId: "1369094286777412590", name: "Legacy cache" }),
+    observedAt,
+    observedAt,
+    observedAt,
+    observedAt,
+  );
+
+  assert.equal(repository.read("1369094286777412590", "claim"), null);
+  db.close();
+});
+
 test("generation commit atomically replaces only the submitted domains", async () => {
   const db = new DatabaseSync(":memory:");
   applySchemaBootstrap(db);

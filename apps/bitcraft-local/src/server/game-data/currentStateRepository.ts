@@ -83,7 +83,9 @@ export function createCurrentStateRepository(
       warnings_json = excluded.warnings_json
     WHERE excluded.generation >= domain_payload_current.generation
   `);
-  const read = db.prepare("SELECT * FROM domain_payload_current WHERE claim_id = ? AND domain = ?");
+  const read = db.prepare(
+    "SELECT * FROM domain_payload_current WHERE claim_id = ? AND domain = ? AND provider = 'relay'",
+  );
   const markError = db.prepare(`
     UPDATE domain_payload_current
     SET last_attempt_at = ?, last_error = ?, updated_at = ?

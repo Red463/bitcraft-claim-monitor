@@ -2438,12 +2438,29 @@ test("background polling failures keep the server online", async (t) => {
   const fallbackDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
   const fallbackCollectedAt = "2026-06-30T09:00:00.000Z";
   const fallbackPayload = fallbackDb.prepare(`
-    INSERT INTO domain_payload_current (claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at, last_error, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO domain_payload_current (
+      claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at,
+      last_error, updated_at, provider, source_key, region_id, database_name,
+      schema_fingerprint, source_observed_at, received_at, freshness, confidence,
+      generation, warnings_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'relay', 'relay-cache', '19', NULL, NULL, ?, ?, 'stale', 'joined', 1, '[]')
   `);
-  fallbackPayload.run(claimId, "claim", JSON.stringify({ entityId: claimId, supplies: 111, treasury: 222, regionName: "Cached Region" }), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
-  fallbackPayload.run(claimId, "members", JSON.stringify([{ playerEntityId: "player-1", userName: "Cached Tester" }]), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
-  fallbackPayload.run(claimId, "construction", JSON.stringify({ buildings: [{ entityId: "building-1" }] }), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
+  const insertFallbackPayload = (domain, payload) => fallbackPayload.run(
+    claimId,
+    domain,
+    JSON.stringify(payload),
+    fallbackCollectedAt,
+    fallbackCollectedAt,
+    fallbackCollectedAt,
+    null,
+    fallbackCollectedAt,
+    fallbackCollectedAt,
+    fallbackCollectedAt,
+  );
+  insertFallbackPayload("claim", { entityId: claimId, supplies: 111, treasury: 222, regionName: "Cached Region" });
+  insertFallbackPayload("members", [{ playerEntityId: "player-1", userName: "Cached Tester" }]);
+  insertFallbackPayload("construction", { buildings: [{ entityId: "building-1" }] });
   fallbackDb.close();
   const lastGoodGameDataResponse = await fetch(`${origin}/api/local/game-data?claimId=${claimId}&domains=claim,members`);
   assert.equal(lastGoodGameDataResponse.status, 200);

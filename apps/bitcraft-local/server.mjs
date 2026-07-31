@@ -60,7 +60,11 @@ import { resolveDiscordChannelSelection } from "./src/server/discordNotification
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
-import { normalizeCollectorSettings } from "./src/server/collectorSettings.mjs";
+import {
+  applyReconciliationSchedule,
+  normalizeCollectorSettings,
+  reconciliationCollectorStatuses,
+} from "./src/server/collectorSettings.mjs";
 import {
   fetchCraftContributionEvidence,
   readRelayClaimForSupplyReport,
@@ -6162,6 +6166,10 @@ function collectorStatusPayload() {
   const intervalMs = serverRefreshIntervalMs();
   pollStatus.intervalMs = intervalMs;
   const nextRunAt = pollStatus.running ? null : pollStatus.nextRunAt;
+  const reconciliationStatuses = reconciliationCollectorStatuses(
+    getCollectorSettings(),
+    pollStatus.collectors,
+  );
   return {
     enabled: serverPollingEnabled,
     intervalMs,
@@ -6170,7 +6178,7 @@ function collectorStatusPayload() {
     lastAttemptAt: pollStatus.lastAttemptAt,
     lastSuccessAt: pollStatus.lastSuccessAt,
     lastError: pollStatus.lastError,
-    collectors: Object.fromEntries(Object.entries(pollStatus.collectors).map(([key, value]) => {
+    collectors: Object.fromEntries(Object.entries(reconciliationStatuses).map(([key, value]) => {
       const lastSuccessAt = value.lastSuccessAt ?? null;
       const collectorNextRunAt = lastSuccessAt && value.enabled !== false
         ? new Date(new Date(lastSuccessAt).getTime() + toNumber(value.intervalMs ?? intervalMs)).toISOString()
@@ -9844,9 +9852,11 @@ function scheduleServerPolling(delayMs = 0) {
   const intervalMs = serverRefreshIntervalMs();
   pollStatus.intervalMs = intervalMs;
   pollStatus.nextRunAt = new Date(Date.now() + delayMs).toISOString();
-  for (const key of Object.keys(pollStatus.collectors)) {
-    setCollectorStatus(key, { nextRunAt: pollStatus.nextRunAt });
-  }
+  applyReconciliationSchedule(
+    getCollectorSettings(),
+    pollStatus.collectors,
+    pollStatus.nextRunAt,
+  );
   serverPollTimer = setTimeout(async () => {
     try {
       await collectServerSnapshot();

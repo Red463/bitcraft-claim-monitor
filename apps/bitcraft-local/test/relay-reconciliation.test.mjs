@@ -18,7 +18,15 @@ function snapshot(data, overrides = {}) {
     data,
     confidence: "joined",
     lastError: null,
-    provenance: { receivedAt },
+    provenance: {
+      provider: "relay",
+      sourceKey: "relay-cache",
+      regionId: "19",
+      database: null,
+      schemaFingerprint: null,
+      sourceObservedAt: receivedAt,
+      receivedAt,
+    },
     warnings: [],
     ...overrides,
   };
@@ -60,6 +68,17 @@ test("relay reconciliation rejects partial, warning-bearing, malformed, and cros
   assert.throws(() => readRelayClaimForSupplyReport(partialClaim, claimId), /partial/);
   assert.throws(() => readRelayMembersForTradeReconciliation(warnedRoster, claimId), /partial/);
   assert.throws(() => readRelayCraftsForContributionReconciliation(foreignCraft, claimId), /cross-claim/);
+});
+
+test("relay reconciliation rejects snapshots that are not Relay-owned", () => {
+  const legacyClaim = (_claimId, domain) => domain === "claim"
+    ? snapshot(
+      { entityId: claimId, supplies: "900" },
+      { provenance: { provider: "legacy", receivedAt } },
+    )
+    : null;
+
+  assert.throws(() => readRelayClaimForSupplyReport(legacyClaim, claimId), /not Relay-owned/);
 });
 
 test("reconciliation cadence skips disabled or not-due imports but force runs them", () => {

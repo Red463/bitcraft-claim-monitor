@@ -3,8 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  applyReconciliationSchedule,
   domainCollectorDefaults,
   normalizeCollectorSettings,
+  reconciliationCollectorStatuses,
   reconciliationHistoryTables,
 } from "../src/server/collectorSettings.mjs";
 
@@ -47,6 +49,28 @@ test("collector configuration describes only reconciliation history rather than 
 test("side-effect collector intervals do not monopolize production", () => {
   assert.equal(domainCollectorDefaults.productionContributions.intervalSeconds, 300);
   assert.equal(domainCollectorDefaults.marketTrades.intervalSeconds, 60);
+});
+
+test("reconciliation status and cadence exclude live commit side effects", () => {
+  const settings = normalizeCollectorSettings({});
+  const statuses = {
+    productionContributions: { nextRunAt: null },
+    marketTrades: { nextRunAt: null },
+    production: { source: "relay-commits", nextRunAt: null },
+    settlementTransitions: { source: "relay-commits", nextRunAt: null },
+    empireMembership: { source: "relay-subscription", nextRunAt: null },
+  };
+  const nextRunAt = "2026-07-31T12:05:00.000Z";
+  const visible = reconciliationCollectorStatuses(settings, statuses);
+
+  assert.deepEqual(Object.keys(visible), ["productionContributions", "marketTrades"]);
+  applyReconciliationSchedule(settings, statuses, nextRunAt);
+  assert.equal(statuses.productionContributions.nextRunAt, nextRunAt);
+  assert.equal(statuses.marketTrades.nextRunAt, nextRunAt);
+  assert.equal(statuses.production.nextRunAt, null);
+  assert.equal(statuses.settlementTransitions.nextRunAt, null);
+  assert.equal(statuses.empireMembership.nextRunAt, null);
+  assert.equal(statuses.empireMembership.source, "relay-subscription");
 });
 
 test("construction current state has one Relay owner and no scheduled BitJita writer", () => {
