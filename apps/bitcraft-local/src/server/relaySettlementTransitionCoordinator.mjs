@@ -311,6 +311,9 @@ export function createRelaySettlementTransitionCoordinator({
           )
         )
       ) {
+        if (retryClaimId !== claimId) {
+          healthRecoveryPending = true;
+        }
         cancelRetry();
       }
       const pendingClaimId = normalizedClaimId(pendingEvent?.claimId);

@@ -397,6 +397,56 @@ test("an in-flight old claim failure cannot poison health after switching back t
   ]);
 });
 
+test("switching claims cancels failed old-claim retry and recovers health from a deduplicated current claim", async () => {
+  let configuredClaimId = "claim-2";
+  const snapshotsByClaim = {
+    "claim-1": settlementSnapshots("claim-1", 100),
+    "claim-2": settlementSnapshots("claim-2", 1),
+  };
+  const applications = [];
+  const healthEvents = [];
+  const coordinator = createRelaySettlementTransitionCoordinator({
+    configuredClaimId: () => configuredClaimId,
+    readDomainSnapshot: (claimId, domain) => snapshotsByClaim[claimId][domain],
+    applySettlementTransition: async (claimId) => {
+      applications.push(claimId);
+      if (claimId === "claim-1") {
+        throw new Error("claim-1 failed before claim-2 became current");
+      }
+    },
+    retryDelaysMs: [100],
+    onAttempt: (event) => healthEvents.push(`attempt:${event.claimId}`),
+    onSuccess: (event) => healthEvents.push(`healthy:${event.claimId}`),
+    onFailure: (_error, event) => healthEvents.push(`failed:${event.claimId}`),
+    onRecovery: (event) => healthEvents.push(`recovered:${event.claimId}`),
+  });
+
+  coordinator.onCommit({ claimId: "claim-2", generation: 1, changedDomains: ["claim"] });
+  await coordinator.whenIdle();
+
+  configuredClaimId = "claim-1";
+  coordinator.onCommit({ claimId: "claim-1", generation: 100, changedDomains: ["claim"] });
+  await flushAsyncWork();
+
+  configuredClaimId = "claim-2";
+  snapshotsByClaim["claim-2"].claim = {
+    generation: 2,
+    data: { ...snapshotsByClaim["claim-2"].claim.data },
+  };
+  coordinator.onCommit({ claimId: "claim-2", generation: 2, changedDomains: ["claim"] });
+  await coordinator.whenIdle();
+  await delay(120);
+
+  assert.deepEqual(applications, ["claim-2", "claim-1"]);
+  assert.deepEqual(healthEvents, [
+    "attempt:claim-2",
+    "healthy:claim-2",
+    "attempt:claim-1",
+    "failed:claim-1",
+    "recovered:claim-2",
+  ]);
+});
+
 test("a corrected equivalent generation reports health recovery without duplicate transition work", async () => {
   const snapshots = settlementSnapshots();
   let applications = 0;
