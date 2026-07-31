@@ -156,9 +156,9 @@ const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
   {
     label: "Operations",
     tabs: [
-      { key: "status", label: "Status", description: "Health, collection, jobs, and endpoint checks" },
+      { key: "status", label: "Status", description: "Health, reconciliation, jobs, and endpoint checks" },
       { key: "server-health", label: "Server Health", description: "Owner-only VPS performance, services, trends, and logs" },
-      { key: "configuration", label: "Configuration", description: "Settlement defaults, privacy, collectors, and branding" },
+      { key: "configuration", label: "Configuration", description: "Settlement defaults, privacy, reconciliation, and branding" },
       { key: "diagnostics", label: "Diagnostics", description: "Browser and map troubleshooting data" },
     ],
   },
@@ -342,9 +342,9 @@ export function AdminPanel({
   }
 
   async function collectNowWithLiveStatus() {
-    // Manual collection can run for long enough that a static button looks
+    // Manual reconciliation can run for long enough that a static button looks
     // broken. Polling status while it runs gives admins live feedback without
-    // changing the collector implementation.
+    // delaying committed Relay generations.
     let timer: number | null = window.setInterval(() => {
       void refreshStatus().catch(() => undefined);
     }, 1000);
@@ -972,7 +972,7 @@ export function AdminPanel({
   const adminSetupItems = [
     { label: "Discord administrator", done: Boolean(auth?.user), detail: auth?.user?.username ? `Signed in as ${auth.user.username}` : "Sign in with an approved Discord admin account." },
     { label: "Settlement defaults", done: Boolean(draft.claimId), detail: draft.claimId ? `Settlement ${draft.claimId}` : "Add the monitored settlement ID." },
-    { label: "Local data collection", done: Boolean(status?.polling?.enabled || status?.polling?.lastSuccessAt || status?.polling?.collectors?.claim?.lastSuccessAt), detail: status?.polling?.enabled ? `Collects every ${Math.round(toNumber(status.polling.intervalMs) / 1000)} seconds` : "Enable server polling in production or run manual collection." },
+    { label: "Live Relay provider", done: Boolean(status?.gameDataProvider?.running && status?.gameDataProvider?.cacheReady), detail: status?.gameDataProvider?.running ? "Committed Relay generations update current pages immediately." : "Start the Relay provider to load current settlement data." },
     { label: "Database history", done: toNumber(status?.counts?.activity_events) > 0 || toNumber(status?.counts?.market_trades) > 0, detail: `${formatNumber(status?.counts?.activity_events)} activity events, ${formatNumber(status?.counts?.market_trades)} trades` },
     { label: "Branding", done: Boolean(draft.branding?.logo || draft.branding?.favicon), detail: draft.branding?.logo || draft.branding?.favicon ? "Custom brand assets configured." : "Optional logo and favicon can be added." },
     { label: "Discord bot", done: Boolean(draft.discord?.botTokenConfigured && draft.discord?.enabled), detail: draft.discord?.botTokenConfigured ? (draft.discord.enabled ? "Enabled and token configured." : "Token configured, bot disabled.") : "Optional bot token not configured." },
@@ -1163,7 +1163,7 @@ export function AdminPanel({
           <div className="dashboard-top-meta" aria-label="Admin status">
             <div className="dashboard-meta-cluster">
               <span><Server size={15} /> {status?.environment ?? "Local"}</span>
-              <span>{status?.polling?.enabled ? "Collection enabled" : "Collection disabled"}</span>
+              <span>{status?.polling?.enabled ? "Reconciliation enabled" : "Reconciliation disabled"}</span>
             </div>
             <div className="toolbar">
               <a className="toolbar-button" href="/bot" target="_blank" rel="noreferrer"><MessageCircle size={15} /> Bot Dashboard</a>
@@ -1226,7 +1226,7 @@ export function AdminPanel({
             <Stat icon={<Activity />} label="Activity Events" value={formatNumber(status?.counts?.activity_events)} />
           </div>
           <section className="form-card">
-            <div className="split-header"><div><h3><Server size={17} /> Health Summary</h3><p className="legend">Relay data is collected server-side and served from generation-safe local snapshots, including last-good stale data during an outage.</p></div><div className="toolbar"><button className={busyButtonClass("status-refresh")} disabled={isBusyAction("status-refresh")} onClick={() => run(refreshStatus, undefined, "status-refresh")}><RefreshCw size={15} /> {isBusyAction("status-refresh") ? "Refreshing..." : "Refresh"}</button><button className={busyButtonClass("collect-now", "toolbar-button primary")} disabled={isBusyAction("collect-now")} onClick={() => run(collectNowWithLiveStatus, "Collection run completed.", "collect-now")}><RefreshCw size={15} /> {isBusyAction("collect-now") ? "Collecting..." : "Collect Now"}</button></div></div>
+            <div className="split-header"><div><h3><Server size={17} /> Health Summary</h3><p className="legend">Committed Relay generations serve current data immediately, with last-good snapshots retained during an outage.</p></div><div className="toolbar"><button className={busyButtonClass("status-refresh")} disabled={isBusyAction("status-refresh")} onClick={() => run(refreshStatus, undefined, "status-refresh")}><RefreshCw size={15} /> {isBusyAction("status-refresh") ? "Refreshing..." : "Refresh"}</button><button className={busyButtonClass("collect-now", "toolbar-button primary")} disabled={isBusyAction("collect-now")} onClick={() => run(collectNowWithLiveStatus, "Reconciliation run completed.", "collect-now")}><RefreshCw size={15} /> {isBusyAction("collect-now") ? "Reconciling..." : "Run Reconciliation"}</button></div></div>
             <div className="status-detail">
               <Info label="Game data provider" value={status?.gameDataProvider?.running ? `Relay generation ${formatNumber(status.gameDataProvider.generation)}` : "Relay provider not running in this process"} />
               <Info label="Relay cache" value={status?.gameDataProvider?.cacheReady ? "Ready" : "Unavailable or starting"} />
@@ -1251,9 +1251,9 @@ export function AdminPanel({
                 ?? status?.gameDataProvider?.primaryRegion?.subscription?.lastError
                 ?? "None"} />
               <Info label="Discord delivery" value={status?.discord?.mode === "live" ? "Live delivery enabled" : "Record only (no messages sent)"} />
-              <Info label="Background collection" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Legacy collectors disabled; Relay provider health is shown above"} />
-              <Info label="Last successful collection" value={dateLabel(status?.polling?.lastSuccessAt)} />
-              <Info label="Next scheduled collection" value={dateLabel(status?.polling?.nextRunAt)} />
+              <Info label="Reconciliation cadence" value={status?.polling?.enabled ? `Enabled, every ${Math.round(status.polling.intervalMs / 1000)} seconds` : "Disabled; Relay provider health is shown above"} />
+              <Info label="Last successful reconciliation" value={dateLabel(status?.polling?.lastSuccessAt)} />
+              <Info label="Next reconciliation run" value={dateLabel(status?.polling?.nextRunAt)} />
               <Info label="Last error" value={status?.polling?.lastError ?? "None"} />
               <Info label="Discord delivery" value={discordDeliveryLabel} />
               <Info label="Storage" value={status?.storageLabel ?? "-"} />
@@ -1415,7 +1415,7 @@ export function AdminPanel({
           <section className="form-card">
             <div className="split-header">
               <div>
-                <h3><Activity size={17} /> BitJita Endpoint Check</h3>
+                <h3><Activity size={17} /> Relay Endpoint Check</h3>
                 <p className="legend">Runs live timing checks for public data sources and settlement storage containers.</p>
               </div>
               <button className={busyButtonClass("endpoint-checks")} title="Run bounded live timing checks against Relay endpoints and settlement storage containers." disabled={isBusyAction("endpoint-checks")} onClick={() => run(async () => setDiagnostics((await api("/admin/diagnostics", { method: "POST", body: "{}" })).checks ?? []), "Endpoint check completed.", "endpoint-checks")}><RefreshCw size={15} /> {isBusyAction("endpoint-checks") ? "Checking..." : "Run Checks"}</button>
@@ -1560,9 +1560,9 @@ export function AdminPanel({
                 <small>How often browser tabs refresh live page data through the local proxy.</small>
               </label>
               <label className="field unit-field">
-                <span>Server collection interval</span>
+                <span>Reconciliation cadence</span>
                 <div className="unit-input"><input type="number" min={15} max={300} value={draft.serverRefreshSeconds} onChange={(event) => updateDraft("serverRefreshSeconds", Number(event.target.value))} /><em>seconds</em></div>
-                <small>Fallback interval for background history and notification collectors.</small>
+                <small>Cadence only for the two blocked evidence imports and independent maintenance; it never refreshes current page data.</small>
               </label>
               <label className="field unit-field">
                 <span>Full IP retention</span>
@@ -1729,22 +1729,22 @@ export function AdminPanel({
           <section className="form-card">
             <div className="split-header">
               <div>
-                <h3><RefreshCw size={17} /> Background Collection</h3>
-                <p className="legend">These jobs do not power live page rendering. They quietly maintain history, notifications, cached tools, analytics, and diagnostics while users browse live BitJita data through the local proxy.</p>
+                <h3><RefreshCw size={17} /> Blocked Evidence Reconciliation</h3>
+                <p className="legend">Current pages update from committed Relay generations. These two jobs only preserve history that still needs an authoritative upstream mapping.</p>
               </div>
             </div>
             <div className="collector-summary">
               <div>
                 <strong>Live pages</strong>
-                <span>Refresh through the local BitJita proxy while viewed.</span>
+                <span>Publish from committed Relay generations without waiting for a scheduled job.</span>
               </div>
               <div>
-                <strong>Background jobs</strong>
-                <span>Record history, notifications, cached tools, and diagnostics.</span>
+                <strong>Blocked imports</strong>
+                <span>Use validated Relay inputs, then request only the still-unproven contribution or completed-sale evidence.</span>
               </div>
               <div>
                 <strong>Disabling a job</strong>
-                <span>Leaves pages usable, but related history or alerts may stop updating.</span>
+                <span>Leaves live pages unchanged, but the related historical reconciliation pauses.</span>
               </div>
             </div>
             <div className="collector-settings-list">
@@ -1782,7 +1782,7 @@ export function AdminPanel({
                     <label className={`toggle-line member-tracking-row ${tracked ? "" : "is-hidden"}`} key={id || memberDisplayName(member)}>
                       <span>
                         <strong>{memberDisplayName(member)}</strong>
-                        <small>{id || "No stable player ID returned by BitJita"}</small>
+                        <small>{id || "No stable player ID returned by Relay"}</small>
                       </span>
                       <input
                         type="checkbox"
@@ -1792,7 +1792,7 @@ export function AdminPanel({
                       />
                     </label>
                   );
-                }) : <p className="legend">Member data has not loaded yet. Refresh BitJita data and return here to configure per-player tracking.</p>}
+                }) : <p className="legend">Member data has not loaded yet. Wait for the Relay member generation, then return here to configure per-player tracking.</p>}
               </div>
             </section>
             <section className="form-card">

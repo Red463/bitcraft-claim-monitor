@@ -219,20 +219,6 @@ export function createPreparedStatements(db) {
     INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
   `),
-  domainPayloadsByClaim: db.prepare("SELECT * FROM domain_payload_current WHERE claim_id = ?"),
-  domainPayload: db.prepare("SELECT * FROM domain_payload_current WHERE claim_id = ? AND domain = ?"),
-  upsertDomainPayload: db.prepare(`
-    INSERT INTO domain_payload_current (claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at, last_error, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(claim_id, domain) DO UPDATE SET
-      data_json = excluded.data_json,
-      collected_at = excluded.collected_at,
-      last_attempt_at = excluded.last_attempt_at,
-      last_success_at = excluded.last_success_at,
-      last_error = excluded.last_error,
-      updated_at = excluded.updated_at
-  `),
-  updateDomainPayloadError: db.prepare("UPDATE domain_payload_current SET last_attempt_at = ?, last_error = ?, updated_at = ? WHERE claim_id = ? AND domain = ?"),
   getSecret: db.prepare("SELECT value FROM app_secrets WHERE key = ?"),
   upsertSecret: db.prepare(`
     INSERT INTO app_secrets (key, value, updated_at) VALUES (?, ?, ?)

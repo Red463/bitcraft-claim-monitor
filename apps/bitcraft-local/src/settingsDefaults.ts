@@ -137,21 +137,10 @@ export const DEFAULT_DISCORD_PRESENCE: DiscordPresence = {
 export const DISCORD_CHANNEL_FIELDS = Object.keys(DEFAULT_DISCORD_CHANNELS);
 
 export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {
-  // Background collectors support local history, notifications, diagnostics,
-  // and cached tools. Live public pages primarily read BitJita through the local
-  // proxy, so these intervals are not the same as the browser display refresh.
-  claim: { label: "Claim", enabled: true, intervalSeconds: 30 },
-  members: { label: "Members", enabled: true, intervalSeconds: 30 },
-  players: { label: "Player details", enabled: true, intervalSeconds: 60 },
-  professions: { label: "Professions", enabled: true, intervalSeconds: 30 },
-  production: { label: "Production", enabled: true, intervalSeconds: 30 },
-  inventory: { label: "Inventory and storage", enabled: true, intervalSeconds: 60 },
-  market: { label: "Market", enabled: true, intervalSeconds: 60 },
-  region: { label: "Region", enabled: true, intervalSeconds: 300 },
-  mapCatalog: { label: "Map/catalog", enabled: true, intervalSeconds: 600 },
-  empireMembership: { label: "Empire membership history", enabled: true, intervalSeconds: 60 },
-  productionContributions: { label: "Production contribution sync", enabled: true, intervalSeconds: 300 },
-  marketTrades: { label: "Member market trades", enabled: true, intervalSeconds: 60 },
+  // Current page data is committed by the Relay provider. Only the two
+  // unresolved evidence imports retain a periodic reconciliation cadence.
+  productionContributions: { label: "Production contribution reconciliation (blocked upstream mapping)", enabled: true, intervalSeconds: 300 },
+  marketTrades: { label: "Completed member-sale reconciliation (blocked upstream mapping)", enabled: true, intervalSeconds: 60 },
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {

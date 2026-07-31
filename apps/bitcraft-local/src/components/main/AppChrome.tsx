@@ -114,12 +114,12 @@ export function RefreshStatus({
       </span>
       {collectors.length ? (
         <div className="refresh-breakdown" role="tooltip">
-          {/* This hover panel reports server background collectors. It is
+          {/* This hover panel reports background reconciliation. It is
               diagnostic only; page data can also come directly from a current
               provider generation. */}
           <header>
-            <strong>Collector status</strong>
-            <span>{collectorStatus?.intervalMs ? `Server every ${Math.round(toNumber(collectorStatus.intervalMs) / 1000)}s` : "Server schedule"}</span>
+            <strong>Reconciliation status</strong>
+            <span>{collectorStatus?.intervalMs ? `Reconciliation every ${Math.round(toNumber(collectorStatus.intervalMs) / 1000)}s` : "Reconciliation schedule"}</span>
           </header>
           <div className="refresh-breakdown-list">
             {collectors.map(([key, collector]) => (

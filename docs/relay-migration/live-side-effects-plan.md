@@ -61,16 +61,24 @@ be observed.
 
 ## Task 3 — Retire migrated current-data collector ownership
 
-- Remove periodic current-state acquisition for claim, members, citizens,
-  players, inventories, crafts, market, and catalog skills once their live
-  side-effect consumers use committed Relay generations.
-- Remove obsolete collector settings, status controls, prepared statements,
-  and legacy `domain_payload_current` writers that can overwrite Relay
-  provenance.
-- Keep only legitimate reconciliation/history jobs whose inputs are already
-  committed normalized domains.
-- Leave craft contributions and completed market-sale import explicitly
-  blocked until authoritative Relay mappings are proven; do not silently retire
-  their useful functionality.
-- Update the parity matrix and SQL table inventory, then prove current features
-  continue updating with scheduled ingestion disabled.
+- Retire periodic current-state acquisition for `claim`, `members`,
+  `citizens`, `players`, `inventories`, `crafts`, `market`, and catalog skills.
+  A provider commit now publishes each of those domains immediately; no page or
+  live side effect waits for the reconciliation cadence.
+- Remove obsolete current-data collector settings, status controls, prepared
+  statements, and writers. `domain_payload_current` remains the provider-owned
+  normalized, atomic last-good boundary: a reconciliation task cannot overwrite
+  its Relay provenance or freshness.
+- Keep only the two evidence reconcilers: craft contributions and completed
+  member-sale imports. Each has its own enabled/due/force decision and failure
+  status, reads a complete claim-fenced committed Relay `crafts` or `members`
+  input first, and cannot prevent the other reconciler, reports, maintenance,
+  or current-state publication from running.
+- Until the Relay contributor and authoritative sale-close mappings are proven,
+  these two reconcilers make only their narrow existing BitJita evidence calls.
+  This is not a claim/member/catalog/current-state fallback and does not make a
+  zero-BitJita claim for this stage.
+- Admin describes the remaining cadence as evidence reconciliation, not live
+  data collection. The parity matrix and SQL inventory record the split, and
+  focused tests prove current features remain usable with scheduled ingestion
+  disabled.

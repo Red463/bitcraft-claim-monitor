@@ -60,7 +60,15 @@ import { resolveDiscordChannelSelection } from "./src/server/discordNotification
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
-import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector, payloadDomainsForCollectors } from "./src/server/collectorSettings.mjs";
+import { normalizeCollectorSettings } from "./src/server/collectorSettings.mjs";
+import {
+  fetchCraftContributionEvidence,
+  readRelayClaimForSupplyReport,
+  readRelayCraftsForContributionReconciliation,
+  readRelayMembersForTradeReconciliation,
+  runIndependentReconciliation,
+  sideEffectCollectorIsDue,
+} from "./src/server/relayReconciliation.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { evaluateLiveDealWatches, sameEnabledDealWatchRevision } from "./src/server/liveDealWatch.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
@@ -430,19 +438,7 @@ const providerCatalogRepository = createProviderCatalogRepository(db);
 productionRelayLifecycleCoordinator = createRelayProductionLifecycleCoordinator({
   configuredClaimId: currentClaimId,
   readCraftSnapshot: (claimId) => currentStateRepository.read(claimId, "crafts"),
-  enrichCrafts: (crafts) => {
-    const enriched = enrichCraftsForPlanning(
-      crafts,
-      (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
-      (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
-    );
-    const catalog = Object.values(enriched.catalog ?? {});
-    return {
-      ...enriched,
-      items: catalog.filter((item) => item.kind !== "cargo" && Number(item.itemType) !== 1),
-      cargos: catalog.filter((item) => item.kind === "cargo" || Number(item.itemType) === 1),
-    };
-  },
+  enrichCrafts: enrichRelayCraftsForSideEffects,
   applyProductionLifecycle: async (claimId, crafts) => {
     await runProductionActivityCollector(claimId, { crafts });
   },
@@ -1187,13 +1183,13 @@ function currentClaimId() {
   return statements.getSetting.get("claim_id")?.value ?? defaultClaimId;
 }
 
-function migrateRetiredBuyOrderCollector() {
+function migrateRetiredCollectorSettings() {
   const now = new Date().toISOString();
   const source = safeJson(statements.getSetting.get("collector_settings_json")?.value, {});
-  const current = source && typeof source === "object" && !Array.isArray(source) ? source : {};
-  if (Object.hasOwn(current, "buyOrders")) {
-    delete current.buyOrders;
-    statements.upsertSetting.run("collector_settings_json", JSON.stringify(current), now);
+  const normalized = normalizeCollectorSettings(source);
+  const serialized = JSON.stringify(normalized);
+  if (statements.getSetting.get("collector_settings_json")?.value !== serialized) {
+    statements.upsertSetting.run("collector_settings_json", serialized, now);
   }
   db.prepare("DELETE FROM scheduled_jobs WHERE job_key = ?").run("regional_buy_order_sale_baselines_refresh");
   db.prepare("DELETE FROM app_settings WHERE key IN (?, ?)").run(
@@ -1211,7 +1207,7 @@ function migrateMarketAccessSplit() {
   statements.upsertSetting.run(markerKey, now, now);
 }
 
-migrateRetiredBuyOrderCollector();
+migrateRetiredCollectorSettings();
 migrateMarketAccessSplit();
 
 function marketDealWatchSettings() {
@@ -1256,7 +1252,6 @@ const pollStatus = {
   lastAttemptAt: null,
   lastSuccessAt: null,
   lastError: null,
-  lastRunMetrics: null,
   collectors: Object.fromEntries(Object.entries(getCollectorSettings()).map(([key, value]) => [key, { ...value, intervalMs: value.intervalSeconds * 1000, lastAttemptAt: null, lastSuccessAt: null, lastError: null, durationMs: null, nextRunAt: null }])),
   storageLastAttemptAt: null,
   storageLastSuccessAt: null,
@@ -1291,11 +1286,6 @@ function collectorAttempt(key, step = "Starting") {
   setCollectorStatus(key, {
     lastAttemptAt: new Date().toISOString(),
     lastError: null,
-    fetchDurationMs: null,
-    fetchSteps: [],
-    payloadWriteDurationMs: null,
-    rowCount: null,
-    tableCounts: null,
     running: true,
     currentStep: step,
     progressCurrent: null,
@@ -1337,103 +1327,13 @@ function collectorFailure(key, startedAt, error) {
 }
 
 function sideEffectCollectorDue(key, force = false) {
-  if (force) return true;
-  const settings = getCollectorSettings()[key];
-  if (!settings || settings.enabled === false) return false;
-  const lastSuccessAt = pollStatus.collectors[key]?.lastSuccessAt;
-  if (!lastSuccessAt) return true;
-  return Date.now() - new Date(lastSuccessAt).getTime() >= settings.intervalSeconds * 1000;
-}
-function blankCollectionMetrics() {
-  return {
-    startedAt: new Date().toISOString(),
-    collectors: {},
-    domainPayloadWriteDurationMs: null,
-    currentTableCounts: {},
-  };
-}
-
-function collectorMetric(metrics, key) {
-  if (!metrics || !key) return null;
-  metrics.collectors[key] ??= {
-    fetchDurationMs: 0,
-    fetchSteps: [],
-    payloadWriteDurationMs: 0,
-    tableCounts: {},
-    rowCount: 0,
-  };
-  return metrics.collectors[key];
-}
-
-function recordCollectorFetch(metrics, key, label, durationMs, error = null) {
-  const metric = collectorMetric(metrics, key);
-  if (!metric) return;
-  const roundedDuration = Math.max(Math.round(durationMs), 0);
-  metric.fetchDurationMs += roundedDuration;
-  metric.fetchSteps.push({
-    label,
-    durationMs: roundedDuration,
-    error: error ? (error instanceof Error ? error.message : String(error)) : null,
+  return sideEffectCollectorIsDue({
+    key,
+    force,
+    settings: getCollectorSettings(),
+    statuses: pollStatus.collectors,
   });
 }
-
-function recordCollectorPayloadWrite(metrics, domain, durationMs) {
-  const key = payloadDomainCollector[domain];
-  const metric = collectorMetric(metrics, key);
-  if (!metric) return;
-  metric.payloadWriteDurationMs += Math.max(Math.round(durationMs), 0);
-}
-
-async function timedCollectorFetch(metrics, key, label, load) {
-  const startedAt = Date.now();
-  collectorProgress(key, `Fetching ${label}`);
-  try {
-    const result = await load();
-    recordCollectorFetch(metrics, key, label, Date.now() - startedAt);
-    return result;
-  } catch (error) {
-    recordCollectorFetch(metrics, key, label, Date.now() - startedAt, error);
-    throw error;
-  }
-}
-
-function tableCount(table, claimId = "") {
-  try {
-    return toNumber(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE claim_id = ?`).get(String(claimId ?? ""))?.count);
-  } catch {
-    return null;
-  }
-}
-
-function collectorTableCounts(claimId) {
-  return Object.fromEntries(Object.entries(collectorCurrentTables).map(([key, tables]) => {
-    const tableCounts = Object.fromEntries(tables.map((table) => [table, tableCount(table, claimId)]));
-    return [key, {
-      tables: tableCounts,
-      rowCount: Object.values(tableCounts).reduce((sum, count) => sum + (Number.isFinite(Number(count)) ? Number(count) : 0), 0),
-    }];
-  }));
-}
-
-function applyCollectionMetrics(metrics, collectorKeys, claimId, collectedAt) {
-  if (!metrics) return;
-  const counts = collectorTableCounts(claimId);
-  metrics.completedAt = collectedAt;
-  metrics.currentTableCounts = counts;
-  for (const key of collectorKeys) {
-    const metric = metrics.collectors[key] ?? {};
-    const count = counts[key] ?? { tables: {}, rowCount: 0 };
-    setCollectorStatus(key, {
-      fetchDurationMs: Number.isFinite(Number(metric.fetchDurationMs)) ? Number(metric.fetchDurationMs) : null,
-      fetchSteps: Array.isArray(metric.fetchSteps) ? metric.fetchSteps : [],
-      payloadWriteDurationMs: Number.isFinite(Number(metric.payloadWriteDurationMs)) ? Number(metric.payloadWriteDurationMs) : null,
-      tableCounts: count.tables,
-      rowCount: count.rowCount,
-    });
-  }
-  pollStatus.lastRunMetrics = metrics;
-}
-
 
 function getSessionUser(req) {
   return lookupHttpSessionUser({
@@ -5065,7 +4965,13 @@ function insertConfirmedMarketTrade(claimId, trade, listing = {}, importedAt = n
 }
 
 function craftOutputCatalog(craftsPayload) {
-  return new Map([...(craftsPayload?.items ?? []), ...(craftsPayload?.cargos ?? [])].map((item) => [String(item.id), item]));
+  return new Map([...(craftsPayload?.items ?? []), ...(craftsPayload?.cargos ?? [])]
+    .map((item) => {
+      const kind = String(item?.kind ?? item?.itemType ?? "").toLowerCase() === "cargo" || Number(item?.itemType) === 1 ? "cargo" : "items";
+      const id = String(item?.targetId ?? item?.id ?? "").trim();
+      return [`${kind}:${id}`, item];
+    })
+    .filter(([key]) => key !== "items:" && key !== "cargo:"));
 }
 
 function craftPrimarySkill(craft) {
@@ -5079,8 +4985,10 @@ function craftExperiencePerProgress(craft) {
 }
 
 function craftContributionOutputItem(craft, catalog) {
-  const outputId = craft.craftedItem?.[0]?.item_id;
-  return catalog.get(String(outputId)) ?? {};
+  const output = craft.craftedItem?.[0] ?? {};
+  const kind = String(output.itemType ?? output.item_type ?? "").toLowerCase() === "cargo" || Number(output.itemType ?? output.item_type) === 1 ? "cargo" : "items";
+  const outputId = String(output.itemId ?? output.item_id ?? "").trim();
+  return catalog.get(`${kind}:${outputId}`) ?? {};
 }
 
 function craftContributionRecord(claimId, craft, contribution, catalog, observedAt) {
@@ -5115,10 +5023,12 @@ async function collectProductionContributionRecords(claimId, craftsPayload, cont
   const catalog = craftOutputCatalog(craftsPayload);
   const entries = await mapWithConcurrency(crafts, 4, async (craft) => {
     const craftId = String(craft.entityId);
-    const contributions = Object.prototype.hasOwnProperty.call(contributionsByCraft ?? {}, craftId)
-      ? contributionsByCraft[craftId]
-      : await fetchCachedCraftContributions(craftId);
-    return (Array.isArray(contributions) ? contributions : [])
+    if (!Object.prototype.hasOwnProperty.call(contributionsByCraft ?? {}, craftId)) {
+      throw new Error(`Craft ${craftId} contribution evidence is unavailable.`);
+    }
+    const contributions = contributionsByCraft[craftId];
+    if (!Array.isArray(contributions)) throw new Error(`Craft ${craftId} contribution evidence is malformed.`);
+    return contributions
       .map((contribution) => craftContributionRecord(claimId, craft, contribution, catalog, observedAt))
       .filter(Boolean);
   });
@@ -5622,12 +5532,7 @@ async function importMemberSellTrades(claimId, members, options = {}) {
   for (const member of batch.items) {
     if (!jobBudgetAllowsMore(startedAtMs, budget, processedMembers.length)) break;
     processedMembers.push(member);
-    try {
-      imports.push(await fetchMemberSettlementSellTrades(claimId, member));
-    } catch (error) {
-      console.warn(`BitCraft market trade import failed for ${member.userName ?? member.playerEntityId}: ${error instanceof Error ? error.message : String(error)}`);
-      imports.push(null);
-    }
+    imports.push(await fetchMemberSettlementSellTrades(claimId, member));
   }
   const importedAt = new Date().toISOString();
   let inserted = 0;
@@ -5747,7 +5652,8 @@ async function fetchCachedCraftContributions(craftId, options = {}) {
   const cached = craftContributionCache.get(key);
   if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
   const payload = await fetchBitjita(`/crafts/${encodeURIComponent(key)}/contributions`, { forceRefresh: options.forceRefresh === true });
-  const value = payload.contributions ?? [];
+  if (!Array.isArray(payload?.contributions)) throw new Error(`Craft ${key} contribution evidence is malformed.`);
+  const value = payload.contributions;
   craftContributionCache.set(key, { value, expiresAt: Date.now() + 15 * 1000 });
   return value;
 }
@@ -6023,22 +5929,15 @@ async function settlementProductionCrafts(body) {
   }, { forceRefresh: body?.forceRefresh === true });
 }
 function storedDashboardDataFallback(claimId, error) {
-  const rowsByDomain = readDomainPayloadMap(claimId);
-  if (!Object.keys(rowsByDomain).length) return null;
-  const value = domainRowsToAppData(claimId, rowsByDomain);
+  const value = relayDashboardFallbackData(claimId);
+  if (!value) return null;
   const message = error instanceof Error ? error.message : String(error);
   const partialErrors = Array.isArray(value.partialErrors) ? value.partialErrors : [];
   return {
     ...value,
     stale: true,
     partialErrors: [...new Set([...partialErrors, `Dashboard refresh failed: ${message}`])],
-    serverFreshness: {
-      ...(value.serverFreshness ?? {}),
-      cacheState: "stored-stale-if-error",
-      cachedAt: value.serverFreshness?.lastSuccessAt ?? value.serverFreshness?.collectedAt ?? null,
-      stale: true,
-      lastError: message,
-    },
+    serverFreshness: { ...(value.serverFreshness ?? {}), cacheState: "stored-stale-if-error", stale: true, lastError: message },
   };
 }
 async function dashboardData(claimId, options = {}) {
@@ -6151,84 +6050,65 @@ async function craftContributionMap(crafts) {
   return Object.fromEntries(entries);
 }
 
-function currentStateCounts(data) {
+function relayDashboardFallbackData(claimId) {
+  const id = String(claimId ?? "");
+  const domains = ["claim", "members", "citizens", "construction", "research", "market", "crafts", "players", "region-claims", "region", "inventories", "recruitment", "skills"];
+  const snapshots = Object.fromEntries(domains.map((domain) => [domain, currentStateRepository.read(id, domain)]));
+  const claim = snapshots.claim;
+  if (!claim?.data || typeof claim.data !== "object" || Array.isArray(claim.data)) return null;
+  const receivedAt = Object.values(snapshots)
+    .map((snapshot) => snapshot?.provenance?.receivedAt)
+    .filter(Boolean)
+    .sort()
+    .at(-1) ?? null;
+  const partialErrors = Object.entries(snapshots).flatMap(([domain, snapshot]) => [
+    ...(snapshot?.warnings ?? []).map((warning) => `${domain}: ${warning}`),
+    ...(snapshot?.lastError ? [`${domain}: ${snapshot.lastError}`] : []),
+  ]);
+  const members = Array.isArray(snapshots.members?.data) ? snapshots.members.data : [];
+  const citizens = Array.isArray(snapshots.citizens?.data) ? snapshots.citizens.data : [];
+  const crafts = snapshots.crafts?.data && typeof snapshots.crafts.data === "object" ? snapshots.crafts.data : { craftResults: [] };
+  const market = snapshots.market?.data && typeof snapshots.market.data === "object" ? snapshots.market.data : { listings: [] };
+  const players = Array.isArray(snapshots.players?.data) ? snapshots.players.data : [];
+  const buildings = Array.isArray(snapshots.construction?.data?.buildings)
+    ? snapshots.construction.data.buildings
+    : [];
+  const dataAgeSeconds = receivedAt ? Math.max(Math.round((Date.now() - new Date(receivedAt).getTime()) / 1000), 0) : null;
   return {
-    members: unwrap(data.members, "members", []).length,
-    citizens: unwrap(data.citizens, "citizens", []).length,
-    crafts: unwrap(data.crafts, "craftResults", []).length,
-    marketListings: unwrap(data.market, "listings", []).length,
-    players: Array.isArray(data.players) ? data.players.length : 0,
-  };
-}
-
-function domainPayloadFromData(data, domain) {
-  if (domain === "players") return { players: Array.isArray(data.players) ? data.players : [] };
-  if (domain === "playerDetailDiagnostics") return data.playerDetailDiagnostics ?? {};
-  return data[domain] ?? {};
-}
-
-function readDomainPayloadMap(claimId) {
-  // Domain payloads preserve the most recent background collection for history,
-  // diagnostics, and notifications. They are not intended to replace live
-  // page-driven BitJita reads for the main app.
-  return Object.fromEntries(statements.domainPayloadsByClaim.all(String(claimId ?? "")).map((row) => [row.domain, {
-    ...row,
-    data: safeJson(row.data_json, {}),
-  }]));
-}
-
-function rowData(row) {
-  return safeJson(row?.data_json, {});
-}
-
-function domainRowsToAppData(claimId, rowsByDomain) {
-  const payload = (domain, fallback) => rowsByDomain[domain]?.data ?? fallback;
-  const partialErrors = Object.values(rowsByDomain)
-    .flatMap((row) => {
-      const data = row.data && typeof row.data === "object" ? row.data : {};
-      return [...(Array.isArray(data.partialErrors) ? data.partialErrors : []), row.last_error].filter(Boolean);
-    })
-    .map((error) => String(error));
-  const lastSuccessValues = Object.values(rowsByDomain).map((row) => row.last_success_at ?? row.collected_at).filter(Boolean);
-  const lastAttemptValues = Object.values(rowsByDomain).map((row) => row.last_attempt_at).filter(Boolean);
-  const lastSuccessAt = lastSuccessValues.sort().at(-1) ?? null;
-  const lastAttemptAt = lastAttemptValues.sort().at(-1) ?? null;
-  const lastError = Object.values(rowsByDomain).map((row) => row.last_error).filter(Boolean).at(-1) ?? null;
-  const counts = currentStateCounts({
-    members: payload("members", { members: [] }),
-    citizens: payload("citizens", { citizens: [] }),
-    crafts: payload("crafts", { craftResults: [] }),
-    market: payload("market", { listings: [] }),
-    players: unwrap(payload("players", { players: [] }), "players", []),
-  });
-  const dataAgeSeconds = lastSuccessAt ? Math.max(Math.round((Date.now() - new Date(lastSuccessAt).getTime()) / 1000), 0) : null;
-  return {
-    claim: payload("claim", {}),
-    members: payload("members", { members: [] }),
-    citizens: payload("citizens", { citizens: [] }),
-    buildings: payload("buildings", { buildings: [] }),
-    construction: currentConstructionProjection(claimId),
-    research: currentResearchProjection(claimId),
-    market: payload("market", { listings: [] }),
-    crafts: payload("crafts", { craftResults: [] }),
-    players: unwrap(payload("players", { players: [] }), "players", []),
-    playerDetailDiagnostics: payload("playerDetailDiagnostics", {}),
-    contributions: payload("contributions", {}),
-    region: payload("region-claims", { claims: [] }),
-    regionStatus: payload("region", { regions: [] }),
-    inventories: payload("inventories", { buildings: [] }),
-    recruitment: currentRecruitmentProjection(claimId),
-    skills: payload("skills", {}),
+    // Dashboard callers still receive the established BitJita-shaped wrapper,
+    // while the stored Relay claim remains the plain normalized entity.
+    claim: { claim: claim.data },
+    members: { members },
+    citizens: { citizens },
+    buildings: { buildings },
+    construction: currentConstructionProjection(id),
+    research: currentResearchProjection(id),
+    market,
+    crafts,
+    players,
+    playerDetailDiagnostics: {},
+    contributions: {},
+    region: snapshots["region-claims"]?.data ?? { claims: [] },
+    regionStatus: snapshots.region?.data ?? { regions: [] },
+    inventories: snapshots.inventories?.data ?? { buildings: [] },
+    recruitment: currentRecruitmentProjection(id),
+    skills: snapshots.skills?.data ?? {},
     partialErrors: [...new Set(partialErrors)],
     serverFreshness: {
-      claimId: String(claimId ?? ""),
-      collectedAt: lastSuccessAt,
-      lastAttemptAt,
-      lastSuccessAt,
-      lastError,
+      claimId: id,
+      collectedAt: receivedAt,
+      lastAttemptAt: receivedAt,
+      lastSuccessAt: receivedAt,
+      lastError: partialErrors.at(-1) ?? null,
       dataAgeSeconds,
-      stale: dataAgeSeconds != null ? dataAgeSeconds > serverRefreshIntervalMs() / 1000 * 2 : true,
-      counts,
+      stale: true,
+      counts: {
+        members: members.length,
+        citizens: citizens.length,
+        crafts: Array.isArray(crafts.craftResults) ? crafts.craftResults.length : 0,
+        marketListings: Array.isArray(market.listings) ? market.listings.length : 0,
+        players: players.length,
+      },
     },
     collectorStatus: collectorStatusPayload(),
   };
@@ -6277,178 +6157,9 @@ function inventoryStoredTotalsFromPayload(inventories) {
   return totals;
 }
 
-function persistDomainPayloads(claimId, data, attemptedAt, collectedAt, metrics = null, domains = domainPayloadKeys) {
-  const payloadWriteStartedAt = Date.now();
-  for (const domain of domains) {
-    const domainStartedAt = Date.now();
-    const payload = domainPayloadFromData(data, domain);
-    const domainError = payload && typeof payload === "object" && !Array.isArray(payload) ? payload.partialError : null;
-    statements.upsertDomainPayload.run(String(claimId), domain, JSON.stringify(payload), collectedAt, attemptedAt, collectedAt, domainError ? String(domainError) : null, collectedAt);
-    recordCollectorPayloadWrite(metrics, domain, Date.now() - domainStartedAt);
-  }
-  if (metrics) metrics.domainPayloadWriteDurationMs = Math.max(Date.now() - payloadWriteStartedAt, 0);
-}
-
-function collectorDue(claimId, collectorKey, payloadDomain, options = {}) {
-  if (options.force) return true;
-  const settings = getCollectorSettings()[collectorKey] ?? { enabled: true, intervalSeconds: Math.round(serverRefreshIntervalMs() / 1000) };
-  const row = statements.domainPayload.get(String(claimId ?? ""), payloadDomain);
-  if (!row) return settings.enabled !== false;
-  if (settings.enabled === false) return false;
-  const lastSuccessAt = row.last_success_at ?? row.collected_at;
-  if (!lastSuccessAt) return true;
-  return Date.now() - new Date(lastSuccessAt).getTime() >= settings.intervalSeconds * 1000;
-}
-
-function previousPayload(previous, domain, fallback) {
-  return previous[domain]?.data ?? fallback;
-}
-
-async function fetchDomainPayload(previous, domain, fallback, label, load) {
-  try {
-    return await load();
-  } catch (error) {
-    const fallbackPayload = previousPayload(previous, domain, fallback);
-    const message = `${label} refresh failed: ${error instanceof Error ? error.message : String(error)}`;
-    if (!fallbackPayload || typeof fallbackPayload !== "object" || Array.isArray(fallbackPayload)) {
-      return { value: fallbackPayload, partialError: message, partialErrors: [message] };
-    }
-    return {
-      ...fallbackPayload,
-      partialError: message,
-      partialErrors: [...(Array.isArray(fallbackPayload.partialErrors) ? fallbackPayload.partialErrors : []), message],
-    };
-  }
-}
-
-async function buildCurrentClaimData(claimId, options = {}) {
-  const id = String(claimId ?? "").trim();
-  if (!/^\d{8,}$/.test(id)) {
-    const error = new Error("Choose a valid BitCraft settlement ID");
-    error.statusCode = 400;
-    throw error;
-  }
-  const metrics = options.metrics ?? null;
-  const previous = readDomainPayloadMap(id);
-  const claimPayload = collectorDue(id, "claim", "claim", options)
-    ? await timedCollectorFetch(metrics, "claim", "claim", () => fetchBitjita(`/claims/${id}`, { forceRefresh: options.force === true }))
-    : previousPayload(previous, "claim", {});
-  const claim = claimPayload.claim ?? claimPayload;
-  const membersPayload = collectorDue(id, "members", "members", options)
-    ? await timedCollectorFetch(metrics, "members", "members", () => fetchBitjita(`/claims/${id}/members`))
-    : previousPayload(previous, "members", { members: [] });
-  const members = unwrap(membersPayload, "members", []);
-
-  const [
-    citizensPayload,
-    buildingsPayload,
-    marketPayload,
-    productionPayload,
-    playerPayload,
-    inventoriesPayload,
-    skillsPayload,
-  ] = await Promise.all([
-    collectorDue(id, "professions", "citizens", options) ? fetchDomainPayload(previous, "citizens", { citizens: [] }, "Citizens", () => timedCollectorFetch(metrics, "professions", "citizens", () => fetchBitjita(`/claims/${id}/citizens`))) : Promise.resolve(previousPayload(previous, "citizens", { citizens: [] })),
-    collectorDue(id, "claim", "buildings", options) ? fetchDomainPayload(previous, "buildings", { buildings: [] }, "Buildings", () => timedCollectorFetch(metrics, "claim", "buildings", () => fetchBitjita(`/claims/${id}/buildings`))) : Promise.resolve(previousPayload(previous, "buildings", { buildings: [] })),
-    collectorDue(id, "market", "market", options) ? fetchDomainPayload(previous, "market", { listings: [] }, "Market", () => timedCollectorFetch(metrics, "market", "market listings", () => fetchAllClaimListings(id, { cache: options.force !== true }))) : Promise.resolve(previousPayload(previous, "market", { listings: [] })),
-    collectorDue(id, "production", "crafts", options)
-      ? timedCollectorFetch(metrics, "production", "production crafts", () => settlementProductionCrafts({ claimId: id, members, forceRefresh: true })).catch((error) => {
-        const fallback = previousPayload(previous, "crafts", { craftResults: [] });
-        return { ...fallback, partialError: error instanceof Error ? error.message : String(error) };
-      })
-      : Promise.resolve(previousPayload(previous, "crafts", { craftResults: [] })),
-    collectorDue(id, "players", "players", options) ? fetchDomainPayload(previous, "players", { players: [] }, "Player details", () => timedCollectorFetch(metrics, "players", "player details", () => playerDetailSummaries({ members }))) : Promise.resolve(previousPayload(previous, "players", { players: [] })),
-    collectorDue(id, "inventory", "inventories", options) ? fetchDomainPayload(previous, "inventories", { buildings: [] }, "Inventories", () => timedCollectorFetch(metrics, "inventory", "inventories", () => fetchBitjita(`/claims/${id}/inventories`))) : Promise.resolve(previousPayload(previous, "inventories", { buildings: [] })),
-    collectorDue(id, "mapCatalog", "skills", options) || collectorDue(id, "professions", "skills", options) ? fetchDomainPayload(previous, "skills", { skills: [] }, "Skills catalogue", () => timedCollectorFetch(metrics, collectorDue(id, "mapCatalog", "skills", options) ? "mapCatalog" : "professions", "skills catalogue", () => fetchBitjita("/skills"))) : Promise.resolve(previousPayload(previous, "skills", { skills: [] })),
-  ]);
-  const productionCrafts = unwrap(productionPayload, "craftResults", []);
-  const constructionPayload = currentConstructionProjection(id);
-  const researchPayload = currentResearchProjection(id);
-  const recruitmentPayload = currentRecruitmentProjection(id);
-  const contributionEntries = collectorDue(id, "production", "contributions", options)
-    ? Object.entries(await timedCollectorFetch(metrics, "production", "craft contributions", () => craftContributionMap(productionCrafts)))
-    : Object.entries(previousPayload(previous, "contributions", {}));
-  const providerClaim = currentStateRepository.read(id, "claim")?.data ?? {};
-  const derivedRegionId = String(
-    claim?.regionId
-    ?? claim?.region_id
-    ?? claim?.region
-    ?? providerClaim.regionId
-    ?? getSettings().defaultRegion
-    ?? "",
-  ).trim();
-  const claimPayloadWithRegion = derivedRegionId && !String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? "").trim()
-    ? (claimPayload?.claim
-      ? { ...claimPayload, claim: { ...claimPayload.claim, regionId: derivedRegionId } }
-      : { ...claimPayload, regionId: derivedRegionId })
-    : claimPayload;
-  const region = currentStateRepository.read(id, "region-claims")?.data ?? { claims: [] };
-  const regionStatus = currentStateRepository.read(id, "region")?.data ?? { regions: [] };
-  const players = unwrap(playerPayload, "players", Array.isArray(playerPayload) ? playerPayload : []);
-  return {
-    claim: claimPayloadWithRegion,
-    members: membersPayload,
-    citizens: citizensPayload,
-    buildings: buildingsPayload,
-    construction: constructionPayload,
-    research: researchPayload,
-    market: marketPayload,
-    crafts: productionPayload,
-    players,
-    playerDetailDiagnostics: {
-      requested: playerPayload.requested ?? previousPayload(previous, "playerDetailDiagnostics", {}).requested ?? 0,
-      failed: playerPayload.failed ?? previousPayload(previous, "playerDetailDiagnostics", {}).failed ?? 0,
-      failures: playerPayload.failures ?? previousPayload(previous, "playerDetailDiagnostics", {}).failures ?? [],
-    },
-    contributions: Object.fromEntries(contributionEntries),
-    region,
-    regionStatus,
-    inventories: inventoriesPayload,
-    recruitment: recruitmentPayload,
-    skills: skillsPayload,
-  };
-}
-
-function readCurrentClaimState(claimId) {
-  const rowsByDomain = readDomainPayloadMap(claimId);
-  if (!Object.keys(rowsByDomain).length) return null;
-  return domainRowsToAppData(claimId, rowsByDomain);
-}
-
-async function refreshCurrentClaimState(claimId, options = {}) {
-  // Background collectors maintain local history and notification inputs. Page
-  // rendering intentionally still uses the BitJita proxy/live helper path so a
-  // broken cached domain table cannot blank the main UI.
-  const id = String(claimId ?? "").trim();
-  const attemptedAt = new Date().toISOString();
-  const metrics = blankCollectionMetrics();
-  const dueCollectors = Object.entries(collectorPrimaryPayloadDomain)
-    .filter(([key, domain]) => collectorDue(id, key, domain, options))
-    .map(([key]) => key);
-  const domainStartedAt = Object.fromEntries(dueCollectors.map((key) => [key, collectorAttempt(key)]));
-  try {
-    const data = await buildCurrentClaimData(id, { ...options, metrics });
-    const collectedAt = new Date().toISOString();
-    persistDomainPayloads(id, data, attemptedAt, collectedAt, metrics, payloadDomainsForCollectors(dueCollectors));
-    applyCollectionMetrics(metrics, dueCollectors, id, collectedAt);
-    for (const [key, startedAt] of Object.entries(domainStartedAt)) collectorSuccess(key, startedAt);
-    return readCurrentClaimState(id);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    for (const [key, startedAt] of Object.entries(domainStartedAt)) {
-      statements.updateDomainPayloadError.run(attemptedAt, message, attemptedAt, id, key);
-      collectorFailure(key, startedAt, error);
-    }
-    const cached = options.allowStaleOnError ? readCurrentClaimState(id) : null;
-    if (cached) return cached;
-    throw error;
-  }
-}
-
 function collectorStatusPayload() {
   refreshCollectorStatusSettings();
   const intervalMs = serverRefreshIntervalMs();
-  const claimId = currentClaimId();
   pollStatus.intervalMs = intervalMs;
   const nextRunAt = pollStatus.running ? null : pollStatus.nextRunAt;
   return {
@@ -6459,11 +6170,8 @@ function collectorStatusPayload() {
     lastAttemptAt: pollStatus.lastAttemptAt,
     lastSuccessAt: pollStatus.lastSuccessAt,
     lastError: pollStatus.lastError,
-    lastRunMetrics: pollStatus.lastRunMetrics,
     collectors: Object.fromEntries(Object.entries(pollStatus.collectors).map(([key, value]) => {
-      const domain = collectorPrimaryPayloadDomain[key];
-      const row = domain ? statements.domainPayload.get(claimId, domain) : null;
-      const lastSuccessAt = value.lastSuccessAt ?? row?.last_success_at ?? row?.collected_at ?? null;
+      const lastSuccessAt = value.lastSuccessAt ?? null;
       const collectorNextRunAt = lastSuccessAt && value.enabled !== false
         ? new Date(new Date(lastSuccessAt).getTime() + toNumber(value.intervalMs ?? intervalMs)).toISOString()
         : value.nextRunAt ?? nextRunAt;
@@ -6540,17 +6248,70 @@ async function runProductionActivityCollector(claimId, currentData) {
   await deliverProductionNotifications(productionResult.pendingNotifications ?? []);
 }
 
-async function runProductionContributionCollector(claimId, currentData, force = false) {
-  if (!sideEffectCollectorDue("productionContributions", force)) return;
+function enrichRelayCraftsForSideEffects(crafts) {
+  const enriched = enrichCraftsForPlanning(
+    crafts,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
+  );
+  if (enriched.warnings.length) throw new Error(`Relay craft catalog input is partial: ${enriched.warnings[0]}`);
+  const catalog = Object.values(enriched.catalog ?? {});
+  return {
+    ...enriched,
+    items: catalog.filter((item) => item.kind !== "cargo" && Number(item.itemType) !== 1),
+    cargos: catalog.filter((item) => item.kind === "cargo" || Number(item.itemType) === 1),
+  };
+}
+
+async function runProductionContributionCollector(claimId, force = false) {
+  if (!sideEffectCollectorDue("productionContributions", force)) return { skipped: true };
   const startedAt = collectorAttempt("productionContributions");
   try {
-    await syncProductionContributionsForSnapshot(claimId, currentData.crafts, currentData.contributions, new Date().toISOString());
+    const crafts = enrichRelayCraftsForSideEffects(readRelayCraftsForContributionReconciliation(
+      (id, domain) => currentStateRepository.read(id, domain),
+      claimId,
+    ));
+    const contributions = await fetchCraftContributionEvidence({
+      craftsPayload: crafts,
+      fetchContribution: fetchCachedCraftContributions,
+      mapWithConcurrency,
+    });
+    await syncProductionContributionsForSnapshot(claimId, crafts, contributions, new Date().toISOString());
     collectorSuccess("productionContributions", startedAt);
+    return { skipped: false };
   } catch (error) {
     collectorFailure("productionContributions", startedAt, error);
     throw error;
   }
 }
+
+async function runMarketTradeCollector(claimId, force = false) {
+  if (!sideEffectCollectorDue("marketTrades", force)) return { skipped: true };
+  const startedAt = collectorAttempt("marketTrades");
+  try {
+    const members = readRelayMembersForTradeReconciliation(
+      (id, domain) => currentStateRepository.read(id, domain),
+      claimId,
+    );
+    const result = await importMemberSellTrades(claimId, members, { budget: marketTradeJobBudget });
+    pollStatus.marketTradesProcessed = result.processed;
+    pollStatus.marketTradesInserted = result.inserted;
+    pollStatus.marketTradesComplete = result.complete;
+    collectorSuccess("marketTrades", startedAt);
+    return { ...result, skipped: false };
+  } catch (error) {
+    collectorFailure("marketTrades", startedAt, error);
+    throw error;
+  }
+}
+
+async function runScheduledSupplyReport(claimId) {
+  return sendScheduledSupplyReportIfDue(readRelayClaimForSupplyReport(
+    (id, domain) => currentStateRepository.read(id, domain),
+    claimId,
+  ));
+}
+
 async function collectServerSnapshot(force = false) {
   // Polling remains only for unresolved contribution and completed-sale
   // imports. Committed Relay generations own live settlement transitions.
@@ -6560,24 +6321,19 @@ async function collectServerSnapshot(force = false) {
   pollStatus.lastAttemptAt = new Date().toISOString();
   try {
     const { claimId } = getSettings();
-    await processDiscordTempBans().catch((error) => console.warn(`Discord temporary ban processing failed: ${error instanceof Error ? error.message : String(error)}`));
-    await refreshCurrentClaimState(claimId, { force });
-    const currentData = domainRowsToAppData(claimId, readDomainPayloadMap(claimId));
-    const claim = currentData.claim?.claim ?? currentData.claim;
-    const members = unwrap(currentData.members, "members", []);
-    await sendScheduledSupplyReportIfDue(claim).catch((error) => console.warn(`Discord supply report failed: ${error instanceof Error ? error.message : String(error)}`));
-    await runProductionContributionCollector(claimId, currentData, force);
-    const marketStartedAt = collectorAttempt("marketTrades");
-    const marketTradeResult = await importMemberSellTrades(claimId, members, { budget: marketTradeJobBudget });
-    pollStatus.marketTradesProcessed = marketTradeResult.processed;
-    pollStatus.marketTradesInserted = marketTradeResult.inserted;
-    pollStatus.marketTradesComplete = marketTradeResult.complete;
-    collectorSuccess("marketTrades", marketStartedAt);
+    const reconciliation = await runIndependentReconciliation({
+      runMaintenance: () => processDiscordTempBans(),
+      runSupplyReport: () => runScheduledSupplyReport(claimId),
+      runContributions: () => runProductionContributionCollector(claimId, force),
+      runMarketTrades: () => runMarketTradeCollector(claimId, force),
+    });
+    if (reconciliation.maintenanceError) console.warn(`Discord maintenance skipped: ${reconciliation.maintenanceError}`);
+    if (reconciliation.supplyError) console.warn(`Discord supply report skipped: ${reconciliation.supplyError}`);
     pollStatus.lastSuccessAt = new Date().toISOString();
-    pollStatus.lastError = null;
+    pollStatus.lastError = [reconciliation.maintenanceError, reconciliation.supplyError, reconciliation.contributionError, reconciliation.marketError].filter(Boolean).join("; ") || null;
   } catch (error) {
     pollStatus.lastError = error instanceof Error ? error.message : String(error);
-    console.error(`BitCraft settlement collection failed: ${pollStatus.lastError}`);
+    console.error(`Relay reconciliation loop failed: ${pollStatus.lastError}`);
   } finally {
     pollStatus.running = false;
   }
@@ -9059,7 +8815,7 @@ const server = createServer(async (req, res) => {
         const refreshSeconds = Number(body.refreshSeconds ?? 30);
         if (!validRefreshIntervalSeconds(refreshSeconds)) return send(res, 400, { error: "Display refresh interval must be between 15 and 300 seconds" });
         const serverRefreshSeconds = Number(body.serverRefreshSeconds ?? refreshSeconds);
-        if (!validRefreshIntervalSeconds(serverRefreshSeconds)) return send(res, 400, { error: "Server collection interval must be between 15 and 300 seconds" });
+        if (!validRefreshIntervalSeconds(serverRefreshSeconds)) return send(res, 400, { error: "Reconciliation cadence must be between 15 and 300 seconds" });
         const collectorSettings = normalizeCollectorSettings(body.collectorSettings ?? {});
         const defaultPage = String(body.defaultPage ?? DEFAULT_APP_PAGE);
         if (!validAppPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
@@ -10098,7 +9854,7 @@ function scheduleServerPolling(delayMs = 0) {
       const message = error instanceof Error ? error.message : String(error);
       pollStatus.lastAttemptAt = new Date().toISOString();
       pollStatus.lastError = message;
-      if (!isTestRuntime) console.warn(`Server settlement collection failed: ${message}`);
+      if (!isTestRuntime) console.warn(`Relay reconciliation schedule failed: ${message}`);
     } finally {
       scheduleServerPolling(serverRefreshIntervalMs());
     }
@@ -10391,7 +10147,7 @@ function startBackgroundTasks() {
     void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
   }, 5000);
   if (serverPollingEnabled) {
-    console.log(`Server settlement collection enabled every ${serverRefreshIntervalMs() / 1000} seconds`);
+    console.log(`Relay reconciliation enabled every ${serverRefreshIntervalMs() / 1000} seconds`);
     scheduleServerPolling(0);
   }
   if (scheduledJobsEnabled && !isTestRuntime) {

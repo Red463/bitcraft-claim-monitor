@@ -162,6 +162,7 @@ function zipStore(entries) {
 test("server collection paginates listings and protects production mutations", async (t) => {
   const requestedPages = [];
   const seasonalClaimId = "seasonal-claim";
+  const relayCraftId = (revision) => (1369094286777412600n + BigInt(revision)).toString();
   const listings = [
     { entityId: "1001", itemName: "Bronze Ingot", ownerUsername: "Tester", ownerEntityId: "player-1", itemId: 10, itemType: "item", quantity: 12, price: 4, side: "sell" },
     { entityId: "1002", itemName: "Oak Plank", ownerUsername: "Tester", ownerEntityId: "player-1", itemId: 20, itemType: "item", quantity: 8, price: 6, side: "sell" },
@@ -415,14 +416,14 @@ test("server collection paginates listings and protects production mutations", a
         ],
       });
     }
-    if (url.pathname === "/api/market/player/player-1/history") return json(res, {
+    if (url.pathname === "/api/market/player/player-1/history" || url.pathname === "/api/market/player/1369094286777412591/history") return json(res, {
       sellOrderHistory: [
         { entityId: "historic-order", claimEntityId: claimId, status: "COMPLETED" },
         { entityId: "foreign-order", claimEntityId: "other-claim", status: "COMPLETED" },
       ],
       totalSellOrders: 2,
     });
-    if (url.pathname === "/api/market/player/player-1/trades") {
+    if (url.pathname === "/api/market/player/player-1/trades" || url.pathname === "/api/market/player/1369094286777412591/trades") {
       const orderId = url.searchParams.get("orderEntityId");
       if (orderId === "historic-order") return json(res, { trades: historicalTrades });
       if (orderId === "foreign-order") return json(res, { trades: [foreignTrade] });
@@ -445,7 +446,7 @@ test("server collection paginates listings and protects production mutations", a
       items: [{ id: "craft-item-1", name: "Public Output", tier: 2, itemType: "0", rarityStr: "Common", iconAssetName: "public_output.png" }],
       cargos: [],
     });
-    if (url.pathname === "/api/crafts/public-craft-0/contributions" || url.pathname === "/api/crafts/public-craft-1/contributions" || url.pathname === "/api/crafts/public-craft-2/contributions" || url.pathname === "/api/crafts/public-craft-3/contributions") {
+    if (url.pathname === "/api/crafts/public-craft-0/contributions" || url.pathname === "/api/crafts/public-craft-1/contributions" || url.pathname === "/api/crafts/public-craft-2/contributions" || url.pathname === "/api/crafts/public-craft-3/contributions" || /^\/api\/crafts\/136909428677741260[0-4]\/contributions$/.test(url.pathname)) {
       craftContributionRequests += 1;
       return json(res, { contributions: [{
         contributorEntityId: "player-1",
@@ -508,6 +509,57 @@ test("server collection paginates listings and protects production mutations", a
 
   const origin = `http://127.0.0.1:${appPort}`;
   await waitForHealth(origin, child);
+  const seedCommittedRelayInputs = async () => {
+    const receivedAt = new Date().toISOString();
+    const craftId = relayCraftId(craftEntityRevision);
+    await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (relayStateDb) => {
+      relayStateDb.prepare(`
+        INSERT OR REPLACE INTO game_catalog_descriptions (
+          description_kind, description_id, data_json, updated_at
+        ) VALUES ('crafting_recipe', '77', ?, ?)
+      `).run(JSON.stringify({
+        kind: "crafting_recipe",
+        id: "77",
+        name: "Public Output",
+        isPassive: false,
+        levelRequirements: [{ skill_id: 1 }],
+        experiencePerProgress: [{ skill_id: 1, quantity: 1 }],
+      }), receivedAt);
+      const insert = relayStateDb.prepare(`
+        INSERT OR REPLACE INTO domain_payload_current (
+          claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at,
+          last_error, updated_at, provider, source_key, region_id, database_name,
+          schema_fingerprint, source_observed_at, received_at, freshness, confidence,
+          generation, warnings_json
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'relay', 'relay-cache', '19',
+          'relay-region-19', 'regional-v1', NULL, ?, 'fresh', 'authoritative', ?, '[]')
+      `);
+      const generation = 100 + craftEntityRevision;
+      const payloads = [
+        ["claim", { entityId: claimId, supplies: "500" }],
+        ["members", [{ claimEntityId: claimId, playerEntityId: "1369094286777412591", userName: "Tester" }]],
+        ["market", { listings: currentListings }],
+        ["crafts", {
+          craftResults: [{
+            entityId: craftId,
+            claimEntityId: claimId,
+            buildingName: craftBuildingName,
+            ownerUsername: craftOwnerUsername,
+            isPublic: true,
+            recipeId: "77",
+            craftedItem: [{ item_id: "2020003", item_type: 0 }],
+            totalActionsRequired: 100,
+            progress: craftProgressOverride ?? 20 + craftEntityRevision,
+          }],
+          items: [{ id: "2020003", name: "Simple Plank", tier: 2, itemType: "0", rarityStr: "Common", iconAssetName: "public_output.png" }],
+          cargos: [],
+        }],
+      ];
+      for (const [domain, data] of payloads) {
+        insert.run(claimId, domain, JSON.stringify(data), receivedAt, receivedAt, receivedAt, receivedAt, receivedAt, generation);
+      }
+    });
+  };
   const health = await fetch(`${origin}/api/local/health`);
   assert.equal(health.headers.get("x-content-type-options"), "nosniff");
   assert.equal(health.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
@@ -1388,7 +1440,7 @@ test("server collection paginates listings and protects production mutations", a
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
     body: "{}",
   }).then((response) => response.json());
-  assert.match(failedCollect.collectorStatus.lastError, /HTTP 429/);
+  assert.match(failedCollect.collectorStatus.lastError, /Relay (claim|crafts|members) input is unavailable/);
   failClaimRefresh = false;
   const initialConfig = await fetch(`${origin}/api/local/config`).then((response) => response.json());
   assert.equal(initialConfig.analytics, undefined);
@@ -2053,6 +2105,10 @@ test("server collection paginates listings and protects production mutations", a
   const adminUserList = await fetch(`${origin}/api/local/admin/users`, { headers: { cookie: adminCookie, origin } });
   assert.equal(adminUserList.status, 200);
 
+  // The two retained evidence reconcilers deliberately consume committed Relay
+  // domains, not the legacy claim/member/craft collector.
+  await seedCommittedRelayInputs();
+
   const poll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -2060,10 +2116,12 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(poll.status, 200);
   const pollJson = await poll.json();
-  assert.equal(typeof pollJson.collectorStatus.collectors.production.fetchDurationMs, "number");
-  assert.equal(Array.isArray(pollJson.collectorStatus.collectors.production.fetchSteps), true);
-  assert.equal(typeof pollJson.collectorStatus.collectors.production.payloadWriteDurationMs, "number");
-  assert.equal(typeof pollJson.collectorStatus.collectors.production.rowCount, "number");
+  const reconcilers = pollJson.collectorStatus.collectors;
+  assert.deepEqual(Object.keys(reconcilers).sort(), ["marketTrades", "productionContributions"]);
+  assert.equal(typeof reconcilers.productionContributions.intervalMs, "number");
+  assert.equal(typeof reconcilers.marketTrades.intervalMs, "number");
+  assert.equal(reconcilers.production, undefined);
+  assert.equal(reconcilers.marketTrades.lastError, null, JSON.stringify(reconcilers.marketTrades));
   const baselineHistory = await fetch(`${origin}/api/local/market/history?claimId=${claimId}&owner=Tester`).then((response) => response.json());
   assert.ok(baselineHistory.totals, JSON.stringify(baselineHistory));
   assert.equal(baselineHistory.totals.confirmedSales, 1);
@@ -2173,6 +2231,7 @@ test("server collection paginates listings and protects production mutations", a
 
   currentListings = [{ ...listings[0], quantity: 9 }, listings[1]];
   craftEntityRevision = 1;
+  await seedCommittedRelayInputs();
   trades = [
     historicalTrade,
     { id: "fill-1", orderEntityId: "1001", itemId: 10, itemType: "item", sellerEntityId: "player-1", quantity: 1, price: 4, totalPrice: 4 },
@@ -2189,7 +2248,7 @@ test("server collection paginates listings and protects production mutations", a
   const pageOneRequests = requestedPages.filter((page) => page === 1).length;
   const pageTwoRequests = requestedPages.filter((page) => page === 2).length;
   assert.equal(pageOneRequests, pageTwoRequests);
-  assert.ok(pageOneRequests >= 4);
+  assert.equal(requestedPages.length, marketPageRequestsAfterDashboardOne);
   assert.equal(history.liveListings.length, 2);
   assert.equal(history.totals.newListings ?? 0, 0);
   assert.equal(history.totals.confirmedSales, 1);
@@ -2205,6 +2264,7 @@ test("server collection paginates listings and protects production mutations", a
   currentListings = [{ ...listings[0], quantity: 8 }, listings[1]];
   craftEntityRevision = 2;
   craftOwnerUsername = "OtherTester";
+  await seedCommittedRelayInputs();
   const thirdPoll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -2253,6 +2313,7 @@ test("server collection paginates listings and protects production mutations", a
   craftEntityRevision = 3;
   craftOwnerUsername = "Tester";
   craftBuildingName = "Age Gate Station";
+  await seedCommittedRelayInputs();
   const ageGatedPoll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -2267,6 +2328,7 @@ test("server collection paginates listings and protects production mutations", a
   craftOwnerUsername = "Tester";
   craftBuildingName = "Collected Station";
   craftProgressOverride = 100;
+  await seedCommittedRelayInputs();
   const completedOnArrivalPoll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -2379,14 +2441,15 @@ test("background polling failures keep the server online", async (t) => {
     INSERT INTO domain_payload_current (claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at, last_error, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  fallbackPayload.run(claimId, "claim", JSON.stringify({ claim: { entityId: claimId, supplies: 111, treasury: 222, regionName: "Cached Region" } }), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
-  fallbackPayload.run(claimId, "members", JSON.stringify({ members: [{ playerEntityId: "player-1", userName: "Cached Tester" }] }), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
+  fallbackPayload.run(claimId, "claim", JSON.stringify({ entityId: claimId, supplies: 111, treasury: 222, regionName: "Cached Region" }), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
+  fallbackPayload.run(claimId, "members", JSON.stringify([{ playerEntityId: "player-1", userName: "Cached Tester" }]), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
+  fallbackPayload.run(claimId, "construction", JSON.stringify({ buildings: [{ entityId: "building-1" }] }), fallbackCollectedAt, fallbackCollectedAt, fallbackCollectedAt, null, fallbackCollectedAt);
   fallbackDb.close();
   const lastGoodGameDataResponse = await fetch(`${origin}/api/local/game-data?claimId=${claimId}&domains=claim,members`);
   assert.equal(lastGoodGameDataResponse.status, 200);
   const lastGoodGameData = await lastGoodGameDataResponse.json();
   assert.equal(lastGoodGameData.domains.claim.freshness, "stale");
-  assert.equal(lastGoodGameData.domains.members.data.members[0].userName, "Cached Tester");
+  assert.equal(lastGoodGameData.domains.members.data[0].userName, "Cached Tester");
   assert.equal((await fetch(`${origin}/api/local/game-data?claimId=99999999&domains=claim`)).status, 403);
   const fallbackDashboardResponse = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`);
   assert.equal(fallbackDashboardResponse.status, 200);
@@ -2394,12 +2457,13 @@ test("background polling failures keep the server online", async (t) => {
   assert.equal(fallbackDashboard.stale, true);
   assert.equal(fallbackDashboard.serverFreshness.cacheState, "stored-stale-if-error");
   assert.equal(fallbackDashboard.claim.claim.entityId, claimId);
+  assert.deepEqual(fallbackDashboard.buildings, { buildings: [{ entityId: "building-1" }] });
   assert.match(fallbackDashboard.partialErrors.join("\n"), /Dashboard refresh failed/);
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal(child.exitCode, null);
   const health = await fetch(`${origin}/api/local/health`).then((response) => response.json());
   assert.equal(health.ok, true);
-  assert.match(String(health.polling.lastError ?? ""), /HTTP 500|upstream unavailable/);
+  assert.match(String(health.polling.lastError ?? ""), /Relay (claim|crafts|members) input is unavailable/);
 });
 
 
@@ -2518,7 +2582,7 @@ test("regional market retirement cleanup runs after the older collector marker",
     WHERE key IN ('regional_buy_order_collector_retired_at', 'regional_buy_order_state_retired_at')
   `).get().count;
   migratedDatabase.close();
-  assert.equal(Object.hasOwn(collectorSettings, "buyOrders"), false);
-  assert.equal(collectorSettings.market.enabled, true);
+  assert.deepEqual(Object.keys(collectorSettings).sort(), ["marketTrades", "productionContributions"]);
+  assert.equal(collectorSettings.marketTrades.enabled, true);
   assert.equal(markerCount, 0);
 });
