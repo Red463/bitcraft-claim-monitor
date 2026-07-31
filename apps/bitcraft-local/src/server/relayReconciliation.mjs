@@ -62,6 +62,59 @@ export function readRelayMembersForTradeReconciliation(readSnapshot, claimId) {
   return snapshot.data;
 }
 
+export function readRelayOnlineMembers(readSnapshot, claimId) {
+  const members = readRelayMembersForTradeReconciliation(readSnapshot, claimId);
+  const playersSnapshot = committedRelaySnapshotForReconciliation(
+    readSnapshot,
+    claimId,
+    "players",
+  );
+  if (!Array.isArray(playersSnapshot.data)) {
+    throw new Error("Relay players input is malformed.");
+  }
+  const playersById = new Map();
+  for (const player of playersSnapshot.data) {
+    if (!player || typeof player !== "object") {
+      throw new Error("Relay players input contains a malformed player.");
+    }
+    const playerId = requiredDecimal(
+      player.playerEntityId ?? player.entityId,
+      "player entity id",
+    );
+    if (playersById.has(playerId)) {
+      throw new Error(`Relay players input contains duplicate player ${playerId}.`);
+    }
+    if (typeof player.signedIn !== "boolean") {
+      throw new Error(`Relay player ${playerId} online state is malformed.`);
+    }
+    playersById.set(playerId, player);
+  }
+  return members.map((member) => {
+    const playerId = requiredDecimal(
+      member.playerEntityId ?? member.entityId,
+      "member player id",
+    );
+    const player = playersById.get(playerId);
+    if (!player) {
+      throw new Error(`Relay players input is partial: member ${playerId} is unavailable.`);
+    }
+    return { member, player };
+  });
+}
+
+export function readRelayCraftsForDiscord(readSnapshot, claimId) {
+  const payload = readRelayCraftsForContributionReconciliation(readSnapshot, claimId);
+  for (const craft of payload.craftResults) {
+    if (typeof craft.completed !== "boolean") {
+      throw new Error(`Relay craft ${craft.entityId} completion state is malformed.`);
+    }
+  }
+  return {
+    ...payload,
+    craftResults: payload.craftResults.filter((craft) => craft.completed === false),
+  };
+}
+
 export async function fetchCraftContributionEvidence({ craftsPayload, fetchContribution, mapWithConcurrency }) {
   const crafts = Array.isArray(craftsPayload?.craftResults) ? craftsPayload.craftResults : [];
   const entries = await mapWithConcurrency(crafts, 4, async (craft) => {

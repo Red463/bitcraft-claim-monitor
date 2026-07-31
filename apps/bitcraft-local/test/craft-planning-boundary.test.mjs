@@ -406,10 +406,11 @@ test("Craft Planning reads the continuously projected Relay catalog without a sc
   assert.doesNotMatch(computedCraftPlan, /recipeDetailFromCatalogOrFetch|addCraftPlanItemOutputDetails|addCraftPlanCargoDerivationDetails|collectRecipeDetails|enrichCraftPlanSourceItems|fetchCraftPlanItemDetail/);
 });
 
-test("Craft Planning serves a compact live board and lazy item drilldowns", () => {
+test("Craft Planning serves a compact live board and lazy item drilldowns", async () => {
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
-  const legacyPageEndpoints = readFileSync(new URL("../src/api/legacyPageEndpoints.ts", import.meta.url), "utf8");
+  const gameDataLoader = readFileSync(new URL("../src/api/gameDataLoader.ts", import.meta.url), "utf8");
+  const { pageDomains } = await import(new URL("../src/api/pageDomains.ts", import.meta.url).href);
 
   assert.match(server, /computedCompactCraftPlanResponse/);
   assert.match(server, /createCraftPlanResponseWorkspace/);
@@ -427,7 +428,9 @@ test("Craft Planning serves a compact live board and lazy item drilldowns", () =
   assert.match(page, /Confirmed stock and guaranteed active crafts/);
   assert.match(page, /Effort progress unavailable/);
   assert.doesNotMatch(page, /needsBoardCompletion/);
-  assert.match(legacyPageEndpoints, /activePanel === "planning"/);
+  assert.deepEqual(pageDomains("planning"), []);
+  assert.match(gameDataLoader, /const domains = pageDomains\(activePanel\)/);
+  assert.doesNotMatch(gameDataLoader, /legacyPageEndpoint|\/api\/bitjita/);
 });
 
 test("Craft Planning explains unavailable producer yields and labels logistics routes", () => {

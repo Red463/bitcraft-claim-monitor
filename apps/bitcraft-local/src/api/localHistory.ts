@@ -9,9 +9,9 @@ import { localHistoryIncludeForPanel } from "./localHistoryInclude";
 const LOCAL_API = "/api/local";
 
 /**
- * Loads locally recorded history that BitJita does not provide directly.
+ * Loads locally recorded history that the live Relay generation does not retain.
  *
- * Live page data still comes from BitJita/proxy calls, but activity history,
+ * Live page data comes from provider-neutral local routes, while activity history,
  * dashboard trend data, and market history are built from SQLite records
  * captured by the local server.
  */

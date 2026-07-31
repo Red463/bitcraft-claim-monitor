@@ -81,6 +81,78 @@ test("relay reconciliation rejects snapshots that are not Relay-owned", () => {
   assert.throws(() => readRelayClaimForSupplyReport(legacyClaim, claimId), /not Relay-owned/);
 });
 
+test("Discord online state joins exact member and player decimal-string identities", async () => {
+  const relay = await import("../src/server/relayReconciliation.mjs");
+  assert.equal(typeof relay.readRelayOnlineMembers, "function");
+  const largePlayerId = "18446744073709551614";
+  const otherPlayerId = "18446744073709551613";
+  const snapshots = {
+    members: snapshot([
+      { claimEntityId: claimId, playerEntityId: largePlayerId, userName: "Exact Match" },
+    ]),
+    players: snapshot([
+      { entityId: otherPlayerId, playerEntityId: otherPlayerId, username: "Wrong", signedIn: true },
+      { entityId: largePlayerId, playerEntityId: largePlayerId, username: "Exact Match", signedIn: true },
+    ]),
+  };
+
+  const rows = relay.readRelayOnlineMembers?.(
+    (_claimId, domain) => snapshots[domain] ?? null,
+    claimId,
+  );
+  assert.deepEqual(rows, [{
+    member: snapshots.members.data[0],
+    player: snapshots.players.data[1],
+  }]);
+});
+
+test("Discord online state rejects unavailable, partial, and malformed player snapshots", async () => {
+  const relay = await import("../src/server/relayReconciliation.mjs");
+  assert.equal(typeof relay.readRelayOnlineMembers, "function");
+  const members = snapshot([
+    { claimEntityId: claimId, playerEntityId: "18446744073709551614", userName: "Exact Match" },
+  ]);
+  const readWithPlayers = (players) => (_claimId, domain) => (
+    domain === "members" ? members : domain === "players" ? players : null
+  );
+
+  assert.throws(() => relay.readRelayOnlineMembers?.(readWithPlayers(null), claimId), /unavailable/);
+  assert.throws(() => relay.readRelayOnlineMembers?.(
+    readWithPlayers(snapshot([], { confidence: "partial" })),
+    claimId,
+  ), /partial/);
+  assert.throws(() => relay.readRelayOnlineMembers?.(
+    readWithPlayers(snapshot([{ entityId: "rounded-id", playerEntityId: "rounded-id", signedIn: true }])),
+    claimId,
+  ), /malformed/);
+});
+
+test("Discord crafts keep only incomplete claim-fenced normalized rows", async () => {
+  const relay = await import("../src/server/relayReconciliation.mjs");
+  assert.equal(typeof relay.readRelayCraftsForDiscord, "function");
+  const active = {
+    entityId: "1369094286777412591",
+    claimEntityId: claimId,
+    recipeId: "77",
+    completed: false,
+  };
+  const completed = {
+    entityId: "1369094286777412592",
+    claimEntityId: claimId,
+    recipeId: "78",
+    completed: true,
+  };
+  const read = (_claimId, domain) => domain === "crafts"
+    ? snapshot({ craftResults: [active, completed] }, {
+      warnings: ["Craft contributor history is not available from the proven Relay mapping."],
+    })
+    : null;
+
+  assert.deepEqual(relay.readRelayCraftsForDiscord?.(read, claimId), {
+    craftResults: [active],
+  });
+});
+
 test("reconciliation cadence skips disabled or not-due imports but force runs them", () => {
   const settings = {
     productionContributions: { enabled: true, intervalSeconds: 300 },

@@ -566,32 +566,9 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(health.headers.get("x-frame-options"), "SAMEORIGIN");
   assert.match(health.headers.get("content-security-policy") ?? "", /default-src 'self'/);
 
-  const [proxyOne, proxyTwo] = await Promise.all([
-    fetch(`${origin}/api/bitjita/cache-test?same=1`),
-    fetch(`${origin}/api/bitjita/cache-test?same=1`),
-  ]);
-  assert.equal(proxyOne.status, 200);
-  assert.equal(proxyTwo.status, 200);
-  assert.equal(proxyCacheRequests, 1);
-  assert.deepEqual(
-    [proxyOne.headers.get("x-bitjita-cache"), proxyTwo.headers.get("x-bitjita-cache")].sort(),
-    ["deduped", "miss"],
-  );
-  assert.deepEqual(await proxyOne.json(), { ok: true, request: 1 });
-  assert.deepEqual(await proxyTwo.json(), { ok: true, request: 1 });
-  await new Promise((resolve) => setTimeout(resolve, 1100));
-  failCacheTest = true;
-  const staleProxy = await fetch(`${origin}/api/bitjita/cache-test?same=1`);
-  assert.equal(staleProxy.status, 200);
-  assert.equal(staleProxy.headers.get("x-bitjita-cache"), "stale-if-error");
-  assert.equal(staleProxy.headers.get("x-bitjita-stale"), "1");
-  assert.deepEqual(await staleProxy.json(), { ok: true, request: 1 });
-  failCacheTest = false;
-  const proxiedResourcesOne = await fetch(`${origin}/api/bitjita/resources`);
-  const proxiedResourcesTwo = await fetch(`${origin}/api/bitjita/resources`);
-  assert.equal(proxiedResourcesOne.headers.get("cache-control"), "public, max-age=3600");
-  assert.equal(proxiedResourcesOne.headers.get("x-bitjita-cache"), "miss");
-  assert.equal(proxiedResourcesTwo.headers.get("x-bitjita-cache"), "hit");
+  const retiredProxy = await fetch(`${origin}/api/bitjita/cache-test?same=1`);
+  assert.equal(retiredProxy.status, 404);
+  assert.equal(proxyCacheRequests, 0);
   await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (catalogDb) => {
     const receivedAt = new Date().toISOString();
     const insert = catalogDb.prepare(`
@@ -641,7 +618,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.deepEqual(mapCatalogTwo.creatures.map((row) => [row.enemyType, row.name, row.huntable]), [["42", "Sagi Bird", true]]);
   assert.equal(mapCatalogOne.provider, "relay");
   assert.equal(mapCatalogOne.source.generation, 1);
-  assert.equal(resourceCatalogRequests, 1);
+  assert.equal(resourceCatalogRequests, 0);
   assert.equal(creatureCatalogRequests, 0);
   const activeRegions = await fetch(`${origin}/api/local/regions/active?include=24`).then((response) => response.json());
   assert.deepEqual(activeRegions.regions.map((region) => region.regionId), ["19"]);
@@ -945,88 +922,18 @@ test("server collection paginates listings and protects production mutations", a
   assert.deepEqual(catalogSearch.items.map((item) => [item.id, item.name, item.itemType]), [["2020003", "Simple Plank", 0]]);
   assert.deepEqual(catalogSearch.cargos, []);
   assert.equal(recipeDetailRequests, 0);
-  const playerDetailPayload = { members: [{ playerEntityId: "player-1", userName: "Tester" }] };
-  const playerDetailsOne = await fetch(`${origin}/api/local/player-details`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify(playerDetailPayload),
-  }).then((response) => response.json());
-  const playerDetailsTwo = await fetch(`${origin}/api/local/player-details`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify(playerDetailPayload),
-  }).then((response) => response.json());
-  assert.equal(playerDetailsOne.players[0].username, "Tester");
-  assert.equal(playerDetailsTwo.players[0].signedIn, true);
-  assert.equal(playerDetailsOne.serverFreshness.cacheState, "miss");
-  assert.equal(playerDetailsTwo.serverFreshness.cacheState, "hit");
-  assert.match(playerDetailsOne.serverFreshness.cachedAt, /^\d{4}-\d{2}-\d{2}T/);
-  const missingPlayerDetails = await fetch(`${origin}/api/local/player-details`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify({ members: [{ playerEntityId: "player-missing", userName: "Fallback Tester" }] }),
-  }).then((response) => response.json());
-  assert.equal(missingPlayerDetails.players[0].entityId, "player-missing");
-  assert.equal(missingPlayerDetails.players[0].username, "Fallback Tester");
-  assert.equal(missingPlayerDetails.players[0].detailAvailable, false);
-  assert.equal(missingPlayerDetails.failed, 1);
-  assert.equal(playerDetailRequests, 1);
-  const dashboardDataOne = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`).then((response) => response.json());
-  const claimRequestsAfterDashboardOne = claimDetailRequests;
-  const memberRequestsAfterDashboardOne = memberListRequests;
-  const marketPageRequestsAfterDashboardOne = requestedPages.length;
-  const dashboardDataTwo = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`).then((response) => response.json());
-  assert.equal(dashboardDataOne.players[0].username, "Tester");
-  assert.equal(dashboardDataOne.serverFreshness.cacheState, "miss");
-  assert.equal(dashboardDataTwo.serverFreshness.cacheState, "hit");
-  assert.match(dashboardDataOne.serverFreshness.cachedAt, /^\d{4}-\d{2}-\d{2}T/);
-  assert.equal(dashboardDataOne.market.listings.length, 2);
-  assert.equal(dashboardDataOne.region.claims.length >= 0, true);
-  assert.equal(Array.isArray(dashboardDataOne.contributions["public-craft-0"]), true);
-  assert.equal(Array.isArray(dashboardDataTwo.contributions["public-craft-0"]), true);
-  assert.equal(claimDetailRequests, claimRequestsAfterDashboardOne);
-  assert.equal(memberListRequests, memberRequestsAfterDashboardOne);
-  assert.equal(requestedPages.length, marketPageRequestsAfterDashboardOne);
-  assert.equal(playerDetailRequests, 1);
-  assert.equal(craftContributionRequests, 1);
-  const passivePayload = { members: [{ playerEntityId: "player-1", userName: "Tester" }] };
-  const passiveOne = await fetch(`${origin}/api/local/passive-crafts`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify(passivePayload),
-  }).then((response) => response.json());
-  const passiveTwo = await fetch(`${origin}/api/local/passive-crafts`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify(passivePayload),
-  }).then((response) => response.json());
-  assert.equal(passiveOne.rows[0].recipe, "Collect Fine Timber");
-  assert.equal(passiveOne.serverFreshness.cacheState, "miss");
-  assert.equal(passiveTwo.serverFreshness.cacheState, "hit");
-  assert.equal(passiveOne.rows[0].quantity, 5);
-  assert.equal(passiveOne.rows[0].memberName, "Tester");
-  assert.equal(passiveTwo.rows[0].recipe, "Collect Fine Timber");
-  assert.equal(passiveCraftRequests, 1);
-  const productionCraftPayload = { claimId, members: [{ playerEntityId: "player-1", userName: "Tester" }] };
-  const productionOne = await fetch(`${origin}/api/local/production/crafts`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify(productionCraftPayload),
-  }).then((response) => response.json());
-  const productionTwo = await fetch(`${origin}/api/local/production/crafts`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify(productionCraftPayload),
-  }).then((response) => response.json());
-  assert.equal(productionOne.publicCount, 1);
-  assert.equal(productionOne.serverFreshness.cacheState, "miss");
-  assert.equal(productionTwo.serverFreshness.cacheState, "hit");
-  assert.match(productionOne.serverFreshness.cachedAt, /^\d{4}-\d{2}-\d{2}T/);
-  assert.equal(productionOne.privateCount, 1);
-  assert.deepEqual(productionOne.craftResults.map((craft) => craft.entityId).sort(), ["private-craft", "public-craft-0"]);
-  assert.equal(productionOne.craftResults.find((craft) => craft.entityId === "private-craft").isPublic, false);
-  assert.equal(productionTwo.privateCount, 1);
-  assert.equal(playerCraftRequests, 1);
+  for (const [route, init] of [
+    ["/api/local/player-details", { method: "POST", headers: { "content-type": "application/json", origin }, body: "{}" }],
+    ["/api/local/passive-crafts", { method: "POST", headers: { "content-type": "application/json", origin }, body: "{}" }],
+    ["/api/local/production/crafts", { method: "POST", headers: { "content-type": "application/json", origin }, body: "{}" }],
+    [`/api/local/dashboard-data?claimId=${claimId}`, undefined],
+  ]) {
+    const response = await fetch(`${origin}${route}`, init);
+    assert.equal(response.status, 404, `${route} must remain retired`);
+  }
+  assert.equal(playerDetailRequests, 0);
+  assert.equal(passiveCraftRequests, 0);
+  assert.equal(playerCraftRequests, 0);
 
   const setup = await fetch(`${origin}/api/local/admin/setup`, {
     method: "POST",
@@ -2248,7 +2155,6 @@ test("server collection paginates listings and protects production mutations", a
   const pageOneRequests = requestedPages.filter((page) => page === 1).length;
   const pageTwoRequests = requestedPages.filter((page) => page === 2).length;
   assert.equal(pageOneRequests, pageTwoRequests);
-  assert.equal(requestedPages.length, marketPageRequestsAfterDashboardOne);
   assert.equal(history.liveListings.length, 2);
   assert.equal(history.totals.newListings ?? 0, 0);
   assert.equal(history.totals.confirmedSales, 1);
@@ -2469,13 +2375,7 @@ test("background polling failures keep the server online", async (t) => {
   assert.equal(lastGoodGameData.domains.members.data[0].userName, "Cached Tester");
   assert.equal((await fetch(`${origin}/api/local/game-data?claimId=99999999&domains=claim`)).status, 403);
   const fallbackDashboardResponse = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`);
-  assert.equal(fallbackDashboardResponse.status, 200);
-  const fallbackDashboard = await fallbackDashboardResponse.json();
-  assert.equal(fallbackDashboard.stale, true);
-  assert.equal(fallbackDashboard.serverFreshness.cacheState, "stored-stale-if-error");
-  assert.equal(fallbackDashboard.claim.claim.entityId, claimId);
-  assert.deepEqual(fallbackDashboard.buildings, { buildings: [{ entityId: "building-1" }] });
-  assert.match(fallbackDashboard.partialErrors.join("\n"), /Dashboard refresh failed/);
+  assert.equal(fallbackDashboardResponse.status, 404);
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal(child.exitCode, null);
   const health = await fetch(`${origin}/api/local/health`).then((response) => response.json());

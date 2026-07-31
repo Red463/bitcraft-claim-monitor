@@ -1,85 +1,52 @@
 import React from "react";
 
-import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
+import type { AnyRecord } from "../main-app-data";
 import type { ManualRefreshRequest } from "../refresh/ManualRefreshContext";
-import { manualRefreshApplies, manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
+import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import type { ActivePanel, LoadState } from "../types/app";
-import { mapWithBrowserConcurrency } from "../utils/concurrency";
-import { normalizePlayer } from "../utils/normalize";
 import { loadGameData } from "./gameData.ts";
-import { legacyPageEndpointMap } from "./legacyPageEndpoints.ts";
-import { pageDomains, usesProviderNeutralGameData } from "./pageDomains.ts";
+import { pageDomains } from "./pageDomains.ts";
 
-/*
- * Transitional page loader. Migrated panels use the provider-neutral local
- * game-data contract; remaining panels stay on the legacy proxy until their
- * Relay vertical slice is complete.
- */
-
-const LEGACY_API = "/api/bitjita";
-const LOCAL_API = "/api/local";
-function appendPartialError(raw: AnyRecord, message: string) {
-  const current = Array.isArray(raw.partialErrors) ? raw.partialErrors : [];
-  raw.partialErrors = [...current, message];
-}
-
-function dataAreaLabel(path: string) {
-  if (path.includes("/market/")) return "market data";
-  if (path.includes("/crafts")) return "production data";
-  if (path.includes("/members")) return "member data";
-  if (path.includes("/citizens")) return "member profession data";
-  if (path.includes("/inventories")) return "inventory data";
-  if (path.includes("/construction")) return "construction data";
-  if (path.includes("/regions")) return "region data";
-  if (path.includes("/skills")) return "profession reference data";
-  if (path.includes("/claims/")) return "settlement data";
-  return "BitJita data";
-}
-
-function httpErrorMessage(path: string, status: number) {
-  const label = dataAreaLabel(path);
-  const statusText = status >= 500
-    ? "BitJita may be having a temporary issue."
-    : status === 429
-      ? "The local app or BitJita is rate limiting requests. Refresh will retry automatically."
-    : "The request could not be completed.";
-  return `Unable to refresh ${label} (HTTP ${status}). ${statusText}`;
-}
-
-function fallbackPlayerFromMember(member: AnyRecord, error: string): AnyRecord {
-  const playerId = String(member.playerEntityId ?? member.entityId ?? member.playerId ?? "");
-  return normalizePlayer({
-    entityId: playerId,
-    playerEntityId: playerId,
-    username: member.userName ?? member.username ?? member.playerUsername ?? member.name ?? playerId,
-    userName: member.userName ?? member.username ?? member.playerUsername ?? member.name ?? playerId,
-    signedIn: false,
-    detailAvailable: false,
-    detailError: error,
-  });
-}
-
-const PAGE_NAVIGATION_CACHE_TTL_MS = 20_000;
 type PageFreshness = { updatedAt: string; cacheState: string | null; stale: boolean };
-const pageNavigationCache = new Map<string, PageFreshness & { data: AnyRecord; cachedAt: number }>();
+const pageNavigationCache = new Map<string, PageFreshness & { data: AnyRecord }>();
 
-function freshnessFromPayload(data: AnyRecord, fallbackMs = Date.now(), overrideCacheState?: string): PageFreshness {
+function freshnessFromPayload(data: AnyRecord, fallbackMs = Date.now()): PageFreshness {
   const serverFreshness = data?.serverFreshness ?? {};
-  const updatedAt = String(serverFreshness.lastSuccessAt ?? serverFreshness.collectedAt ?? serverFreshness.cachedAt ?? new Date(fallbackMs).toISOString());
-  const cacheState = overrideCacheState ?? (serverFreshness.cacheState == null ? null : String(serverFreshness.cacheState));
-  const stale = Boolean(data?.stale || serverFreshness.stale || cacheState === "stale-if-error");
+  const updatedAt = String(
+    serverFreshness.lastSuccessAt
+      ?? serverFreshness.collectedAt
+      ?? serverFreshness.cachedAt
+      ?? new Date(fallbackMs).toISOString(),
+  );
+  const cacheState = serverFreshness.cacheState == null
+    ? null
+    : String(serverFreshness.cacheState);
+  const stale = Boolean(
+    data?.stale
+      || serverFreshness.stale
+      || cacheState === "stale-if-error",
+  );
   return { updatedAt, cacheState, stale };
 }
 
-function loadedState(data: AnyRecord, overrideCacheState?: string): LoadState<AnyRecord> {
-  return { loading: false, error: null, data, ...freshnessFromPayload(data, Date.now(), overrideCacheState) };
+function loadedState(data: AnyRecord): LoadState<AnyRecord> {
+  return {
+    loading: false,
+    error: null,
+    data,
+    ...freshnessFromPayload(data),
+  };
 }
+
 export function useGameData(
   refreshToken: number,
   claimId: string,
   activePanel: ActivePanel,
   manualRefreshRequest: ManualRefreshRequest | null = null,
-  trackManualRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (_taskKey, promise) => promise,
+  trackManualRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (
+    _taskKey,
+    promise,
+  ) => promise,
 ): LoadState<AnyRecord> {
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
@@ -90,153 +57,45 @@ export function useGameData(
   React.useEffect(() => {
     const cacheKey = `${claimId}:${activePanel}`;
     const cached = pageNavigationCache.get(cacheKey);
-    const cachedAgeMs = cached ? Date.now() - cached.cachedAt : Number.POSITIVE_INFINITY;
-    const providerNeutral = usesProviderNeutralGameData(activePanel);
-    const forced = manualRefreshApplies(manualRefreshRequest, activePanel);
+    const domains = pageDomains(activePanel);
     const manualHeaders = manualRefreshHeaders(manualRefreshRequest, activePanel);
-    if (!providerNeutral && !forced && cached && cachedAgeMs < PAGE_NAVIGATION_CACHE_TTL_MS) {
-      setState({ loading: false, error: null, data: cached.data, updatedAt: cached.updatedAt, cacheState: "browser-cache", stale: cached.stale });
+    if (domains.length === 0) {
+      setState({ data: null, loading: false, error: null });
       return;
     }
     if (cached) {
-      setState({ loading: true, error: null, data: cached.data, updatedAt: cached.updatedAt, cacheState: cached.cacheState, stale: cached.stale });
+      setState({
+        loading: true,
+        error: null,
+        data: cached.data,
+        updatedAt: cached.updatedAt,
+        cacheState: cached.cacheState,
+        stale: cached.stale,
+      });
     }
 
     let cancelled = false;
     const controller = new AbortController();
     async function load() {
       try {
-        async function request(path: string) {
-          const response = await fetch(`${LEGACY_API}${path}`, { headers: { ...manualHeaders }, signal: controller.signal });
-          if (!response.ok) throw new Error(httpErrorMessage(path, response.status));
-          return response.json();
-        }
-        async function requestAllMarketListings() {
-          const first = await request(`/claims/${claimId}/market/listings?page=1&limit=200`);
-          const totalPages = Math.max(toNumber(first.totalPages) || 1, 1);
-          const remaining = totalPages > 1
-            ? await mapWithBrowserConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => request(`/claims/${claimId}/market/listings?page=${page}&limit=200`))
-            : [];
-          return { ...first, listings: [first, ...remaining].flatMap((page) => page.listings ?? []) };
-        }
-        if (providerNeutral) {
-          const raw = await loadGameData(
-            claimId,
-            pageDomains(activePanel),
-            fetch,
-            { headers: { ...manualHeaders }, signal: controller.signal },
-          );
-          const freshness = freshnessFromPayload(raw);
-          pageNavigationCache.set(cacheKey, { data: raw, cachedAt: Date.now(), ...freshness });
-          if (!cancelled) React.startTransition(() => setState(loadedState(raw)));
-          return;
-        }
-        const requestedEndpoints = legacyPageEndpointMap(claimId, activePanel);
-        if (Object.keys(requestedEndpoints).length === 0) {
-          if (!cancelled) React.startTransition(() => setState((prev) => ({ ...prev, loading: false, error: null })));
-          return;
-        }
-        if (!cached) setState((prev) => ({ ...prev, loading: true, error: null }));
-        const entries = await Promise.all(
-          Object.entries(requestedEndpoints).map(async ([key, path]) => {
-            return [key, key === "market" ? await requestAllMarketListings() : await request(path)] as const;
-          }),
+        const raw = await loadGameData(
+          claimId,
+          domains,
+          fetch,
+          { headers: { ...manualHeaders }, signal: controller.signal },
         );
-        const raw = Object.fromEntries(entries) as AnyRecord;
-        const claim = raw.claim?.claim ?? raw.claim;
-        const members = unwrap<AnyRecord[]>(raw.members, "members", []);
-        if (activePanel === "craft-monitor") {
-          try {
-            // Production cards need contribution and station details that are
-            // expensive to request one-by-one from the browser. The local helper
-            // batches those lookups and falls back to raw /crafts data on failure.
-            const response = await fetch(`${LOCAL_API}/production/crafts`, {
-              method: "POST",
-              headers: { "content-type": "application/json", ...manualHeaders },
-              signal: controller.signal,
-              body: JSON.stringify({ claimId, members }),
-            });
-            if (response.ok) {
-              raw.crafts = await response.json();
-              if (raw.crafts?.stale) {
-                raw.stale = true;
-                appendPartialError(raw, "Production craft details are using cached data while refresh recovers.");
-              }
-            } else {
-              appendPartialError(raw, `Unable to refresh full production details (HTTP ${response.status}). Showing direct BitJita craft data only.`);
-            }
-          } catch (error) {
-            if (!cancelled) {
-              appendPartialError(raw, `Production craft aggregation failed: ${error instanceof Error ? error.message : String(error)}. Showing direct BitJita craft data only.`);
-            }
-          }
-        }
-        const crafts = unwrap<AnyRecord[]>(raw.crafts, "craftResults", []);
-        const readsPlayerDetail = activePanel === "map" || activePanel === "leaderboard";
-        const readsProductionDetail = activePanel === "craft-monitor";
-        const [playerResults, contributionResults] = await Promise.all([
-          readsPlayerDetail ? fetch(`${LOCAL_API}/player-details`, {
-            // Player detail requests are batched server-side because each member
-            // can require an individual BitJita lookup for online/session state.
-            method: "POST",
-            headers: { "content-type": "application/json", ...manualHeaders },
-            signal: controller.signal,
-            body: JSON.stringify({ members }),
-          })
-            .then((response) => response.ok ? response.json() : Promise.reject(new Error(`player details HTTP ${response.status}`)))
-            .then((payload) => {
-              raw.playerDetailDiagnostics = {
-                requested: payload.requested ?? members.length,
-                failed: payload.failed ?? 0,
-                failures: payload.failures ?? [],
-              };
-              if (payload.failed) appendPartialError(raw, `${payload.failed} player detail request${payload.failed === 1 ? "" : "s"} failed. Player names remain available, but online status may be incomplete.`);
-              if (payload.stale) {
-                raw.stale = true;
-                appendPartialError(raw, "Player detail data is using cached data while refresh recovers.");
-              }
-              return unwrap<AnyRecord[]>(payload, "players", []).map((player) => ({ status: "fulfilled", value: player }) as PromiseFulfilledResult<AnyRecord>);
-            })
-            .catch((error): Array<PromiseFulfilledResult<AnyRecord>> => {
-              const message = error instanceof Error ? error.message : String(error);
-              raw.playerDetailDiagnostics = { requested: members.length, failed: members.length, failures: members.map((member) => ({ playerId: String(member.playerEntityId ?? member.entityId ?? ""), error: message })).slice(0, 20) };
-              appendPartialError(raw, `Player detail refresh failed: ${message}. Using settlement member names without live online status.`);
-              return members.map((member) => ({ status: "fulfilled", value: fallbackPlayerFromMember(member, message) }) as PromiseFulfilledResult<AnyRecord>);
-            }) : Promise.resolve([] as Array<PromiseFulfilledResult<AnyRecord>>),
-          readsProductionDetail ? mapWithBrowserConcurrency(crafts.filter((craft) => craft.entityId), 4, async (craft) => {
-            try {
-              return {
-                status: "fulfilled",
-                value: {
-                  craftId: String(craft.entityId),
-                  // Contribution data is treated as API-owned truth. The app
-                  // deliberately does not infer contribution from progress bars.
-                  payload: await request(`/crafts/${craft.entityId}/contributions`),
-                },
-              } as PromiseFulfilledResult<{ craftId: string; payload: AnyRecord }>;
-            } catch (reason) {
-              return { status: "rejected", reason } as PromiseRejectedResult;
-            }
-          }) : Promise.resolve([]),
-        ]);
-        raw.players = playerResults
-          .filter((result): result is PromiseFulfilledResult<AnyRecord> => result.status === "fulfilled")
-          .map((result) => normalizePlayer(result.value));
-        raw.marketApi = { histories: [], trades: [] };
-        const failedContributionCount = contributionResults.filter((result) => result.status === "rejected").length;
-        if (failedContributionCount) {
-          appendPartialError(raw, `${failedContributionCount} production contribution request${failedContributionCount === 1 ? "" : "s"} failed. Some contributor totals may be incomplete.`);
-        }
-        raw.contributions = Object.fromEntries(contributionResults
-          .filter((result): result is PromiseFulfilledResult<{ craftId: string; payload: AnyRecord }> => result.status === "fulfilled")
-          .map((result) => [result.value.craftId, result.value.payload.contributions ?? []]));
         const freshness = freshnessFromPayload(raw);
-        pageNavigationCache.set(cacheKey, { data: raw, cachedAt: Date.now(), ...freshness });
+        pageNavigationCache.set(cacheKey, { data: raw, ...freshness });
         if (!cancelled) React.startTransition(() => setState(loadedState(raw)));
-      } catch (err) {
+      } catch (error) {
         if (cancelled || controller.signal.aborted) return;
-        setState((prev) => ({ ...prev, loading: false, error: err instanceof Error ? err.message : String(err), stale: Boolean(prev.data) || prev.stale }));
-        throw err;
+        setState((previous) => ({
+          ...previous,
+          loading: false,
+          error: error instanceof Error ? error.message : String(error),
+          stale: Boolean(previous.data) || previous.stale,
+        }));
+        throw error;
       }
     }
     void trackManualRefreshPromise("main-data", load()).catch(() => {});
@@ -244,7 +103,13 @@ export function useGameData(
       cancelled = true;
       controller.abort();
     };
-  }, [activePanel, claimId, manualRefreshRequest?.sequence, refreshToken, trackManualRefreshPromise]);
+  }, [
+    activePanel,
+    claimId,
+    manualRefreshRequest?.sequence,
+    refreshToken,
+    trackManualRefreshPromise,
+  ]);
 
   return state;
 }

@@ -8,7 +8,7 @@ test("routeGroup classifies public API, admin, auth, Discord, static, and app ro
   assert.equal(routeGroup("/api/local/auth/me"), "auth");
   assert.equal(routeGroup("/api/local/user/preferences"), "auth");
   assert.equal(routeGroup("/api/discord/interactions"), "discord");
-  assert.equal(routeGroup("/api/bitjita/claims"), "bitjita-proxy");
+  assert.equal(routeGroup("/api/bitjita/claims"), "app");
   assert.equal(routeGroup("/api/local/history"), "local-api");
   assert.equal(routeGroup("/assets/index.js"), "static");
   assert.equal(routeGroup("/favicon.svg"), "static");

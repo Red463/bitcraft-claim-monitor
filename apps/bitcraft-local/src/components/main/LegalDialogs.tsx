@@ -180,7 +180,7 @@ export function DedicatedLegalPage({ type }: { type: "terms" | "privacy" }) {
         </div>
         <footer>
           <span>Questions or privacy requests: <a href={`mailto:${DEFAULT_LEGAL_POLICY.operator.privacyEmail}`}>{DEFAULT_LEGAL_POLICY.operator.privacyEmail}</a>.</span>
-          <span>Data provided by the <a href="https://bitjita.com/docs/api">BitJita API</a>. Source available on <a href={GITHUB_REPOSITORY}>GitHub</a>.</span>
+          <span>Current game data is provided by <a href="https://relay.bitcraftsync.app/">BitCraft Relay</a>. The <a href="https://bitjita.com/docs/api">BitJita API</a> remains in limited use for craft-contribution and completed-sale evidence. Source available on <a href={GITHUB_REPOSITORY}>GitHub</a>.</span>
           <span>Application version {APP_VERSION} · {isTerms ? <a href="/privacy">Read the Privacy Policy</a> : <a href="/terms">Read the Terms of Service</a>}</span>
         </footer>
       </article>

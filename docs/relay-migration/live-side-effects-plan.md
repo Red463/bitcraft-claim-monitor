@@ -82,3 +82,24 @@ be observed.
   data collection. The parity matrix and SQL inventory record the split, and
   focused tests prove current features remain usable with scheduled ingestion
   disabled.
+
+## Task 4 — Retire legacy browser, proxy, helper, and command acquisition
+
+- Remove the legacy browser endpoint map and compatibility loader. Domain pages
+  read the current committed local generation on navigation; focused-route
+  pages make no unused central request.
+- Remove `/api/bitjita/*` and the dashboard, player-details, passive-crafts,
+  and production-crafts helper routes with their dead acquisition functions
+  and in-process response caches.
+- Read Discord `/supplies`, `/online`, and `/crafts` from complete,
+  configured-claim-fenced Relay generations and the local catalog. Preserve
+  exact decimal-string IDs and report unavailable/partial inputs explicitly.
+- Reconcile Craft Plan buildings from the committed construction generation.
+  If that generation is unavailable, leave targets pending rather than
+  guessing or delaying the save on an upstream fetch.
+- Keep only the narrow craft-contributor and completed-member-sale BitJita
+  evidence calls until their authoritative Relay mappings are proven. They are
+  not current-state fallbacks.
+- Add no replacement SQL current cache. Retain SQLite only where the table
+  inventory records independent history, user, operational, restart, indexing,
+  or process-sharing value.

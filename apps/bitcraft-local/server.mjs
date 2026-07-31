@@ -68,8 +68,10 @@ import {
 import {
   fetchCraftContributionEvidence,
   readRelayClaimForSupplyReport,
+  readRelayCraftsForDiscord,
   readRelayCraftsForContributionReconciliation,
   readRelayMembersForTradeReconciliation,
+  readRelayOnlineMembers,
   runIndependentReconciliation,
   sideEffectCollectorIsDue,
 } from "./src/server/relayReconciliation.mjs";
@@ -1365,32 +1367,13 @@ function audit(user, action, details = {}) {
 }
 
 const adminLoginAttempts = createAdminLoginAttemptStore();
-const claimDetailCache = new Map();
-const playerDetailCache = new Map();
 const craftContributionCache = new Map();
-const passiveCraftsCache = new Map();
-const playerDetailSummariesCache = new Map();
-const playerDetailSummariesInflight = new Map();
-const passiveCraftSummariesCache = new Map();
-const passiveCraftSummariesInflight = new Map();
-const productionCraftsCache = new Map();
-const productionCraftsInflight = new Map();
-const dashboardDataCache = new Map();
-const dashboardDataInflight = new Map();
 const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
 const UPSTREAM_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.BITJITA_PROXY_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 const UPSTREAM_CACHE_MAX_ENTRIES = Math.max(25, Number(process.env.BITJITA_PROXY_CACHE_MAX_ENTRIES ?? 300));
 const BITJITA_FETCH_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_FETCH_TIMEOUT_MS ?? 15000));
 const BITJITA_PROXY_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_TIMEOUT_MS ?? 12000));
 const SLOW_REQUEST_LOG_MS = Math.max(1000, Number(process.env.SLOW_REQUEST_LOG_MS ?? 8000));
-const PRODUCTION_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_CRAFT_TIMEOUT_MS ?? 10000));
-const PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS ?? 6000));
-const PLAYER_DETAIL_SUMMARY_CACHE_TTL_MS = Math.max(5000, Number(process.env.PLAYER_DETAIL_SUMMARY_CACHE_MS ?? 30_000));
-const PASSIVE_CRAFT_SUMMARY_CACHE_TTL_MS = Math.max(5000, Number(process.env.PASSIVE_CRAFT_SUMMARY_CACHE_MS ?? 60_000));
-const PRODUCTION_CRAFT_CACHE_TTL_MS = Math.max(5000, Number(process.env.PRODUCTION_CRAFT_CACHE_MS ?? 30_000));
-const LOCAL_HELPER_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.LOCAL_HELPER_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
-const DASHBOARD_DATA_CACHE_TTL_MS = Math.max(5000, Number(process.env.DASHBOARD_DATA_CACHE_MS ?? 20_000));
-const DASHBOARD_DATA_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.DASHBOARD_DATA_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 
 const CRAFT_PLAN_KEY = "active";
 const CRAFT_PLAN_RESPONSE_CACHE_TTL_MS = Math.max(1000, Number(process.env.CRAFT_PLAN_RESPONSE_CACHE_MS ?? 5_000));
@@ -5169,18 +5152,6 @@ async function fetchBitjitaUncoordinated(pathname, options = {}) {
   }
 }
 
-async function fetchAllClaimListings(claimId, options = {}) {
-  const side = String(options.side ?? "").toLowerCase();
-  const sideParam = side === "buy" || side === "sell" ? `&side=${side}` : "";
-  const base = `/claims/${claimId}/market/listings?limit=200${sideParam}`;
-  const first = await fetchBitjita(`${base}&page=1`, { cache: options.cache !== false });
-  const totalPages = Math.max(toNumber(first.totalPages) || 1, 1);
-  const pages = totalPages > 1
-    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`, { cache: options.cache !== false }))
-    : [];
-  return { ...first, listings: [first, ...pages].flatMap((page) => unwrap(page, "listings", [])), page: 1, totalPages };
-}
-
 function relayEmpireCurrentData(claimId = currentClaimId()) {
   return currentStateRepository.read(claimId, "empires")?.data ?? null;
 }
@@ -5620,37 +5591,6 @@ async function mapWithConcurrency(values, concurrency, mapper) {
   return results;
 }
 
-async function fetchCachedClaimDetail(claimId) {
-  const cached = claimDetailCache.get(String(claimId));
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const value = await fetchBitjita(`/claims/${claimId}`);
-  claimDetailCache.set(String(claimId), { value, expiresAt: Date.now() + 10 * 60 * 1000 });
-  return value;
-}
-
-async function fetchCachedPlayerDetail(playerId, options = {}) {
-  const key = String(playerId);
-  const cached = playerDetailCache.get(key);
-  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
-  const payload = await fetchBitjita(`/players/${encodeURIComponent(key)}`, { forceRefresh: options.forceRefresh === true });
-  const value = payload.player ?? payload;
-  playerDetailCache.set(key, { value, expiresAt: Date.now() + 60 * 1000 });
-  return value;
-}
-
-function fallbackPlayerFromMember(member, error) {
-  const playerId = String(member?.playerEntityId ?? member?.entityId ?? member?.playerId ?? "").trim();
-  return {
-    entityId: playerId,
-    playerEntityId: playerId,
-    username: member?.userName ?? member?.username ?? member?.playerUsername ?? member?.name ?? playerId,
-    userName: member?.userName ?? member?.username ?? member?.playerUsername ?? member?.name ?? playerId,
-    signedIn: false,
-    detailAvailable: false,
-    detailError: error instanceof Error ? error.message : String(error ?? "Player detail unavailable"),
-  };
-}
-
 async function fetchCachedCraftContributions(craftId, options = {}) {
   const key = String(craftId);
   const cached = craftContributionCache.get(key);
@@ -5660,462 +5600,6 @@ async function fetchCachedCraftContributions(craftId, options = {}) {
   const value = payload.contributions;
   craftContributionCache.set(key, { value, expiresAt: Date.now() + 15 * 1000 });
   return value;
-}
-
-function passiveCraftTimestamp(value) {
-  const parsed = new Date(String(value ?? ""));
-  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-}
-
-function summarizePassiveCrafts(payload) {
-  const catalog = new Map(
-    [...(payload?.items ?? []), ...(payload?.cargos ?? [])].map((item) => [String(item.id), item]),
-  );
-  const summaries = new Map();
-  for (const craft of payload?.craftResults ?? []) {
-    const output = craft.craftedItem?.[0] ?? {};
-    const item = catalog.get(String(output.item_id)) ?? {};
-    const outputName = item.name ?? "crafted item";
-    const recipe = String(craft.recipeName ?? "Craft {0}")
-      .replace(/\s*\{\d+\}/g, ` ${outputName}`)
-      .replace(/\s+/g, " ")
-      .trim();
-    const key = [recipe, craft.buildingName, craft.status, item.id ?? output.item_id].join("|");
-    const current = summaries.get(key);
-    const timestamp = passiveCraftTimestamp(craft.timestamp);
-    if (current) {
-      current.quantity += toNumber(output.quantity) || 1;
-      if (timestamp > current.sortTimestamp) {
-        current.timestamp = craft.timestamp;
-        current.sortTimestamp = timestamp;
-      }
-      continue;
-    }
-    summaries.set(key, {
-      recipe,
-      status: craft.status ?? "unknown",
-      structure: craft.buildingName ?? "Unknown structure",
-      timestamp: craft.timestamp,
-      sortTimestamp: timestamp,
-      quantity: toNumber(output.quantity) || 1,
-      tier: item.tier,
-    });
-  }
-  return Array.from(summaries.values()).sort((a, b) => b.sortTimestamp - a.sortTimestamp).slice(0, 8);
-}
-
-async function fetchCachedPassiveCrafts(member, options = {}) {
-  const playerId = String(member.playerEntityId ?? member.entityId ?? "").trim();
-  if (!playerId) return { ok: false, error: "Missing player id" };
-  const cached = passiveCraftsCache.get(playerId);
-  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
-  const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/passive-crafts?status=all`, { forceRefresh: options.forceRefresh === true });
-  const value = {
-    ok: true,
-    playerId,
-    memberName: member.userName ?? member.username ?? member.name ?? "Unknown member",
-    rows: summarizePassiveCrafts(payload),
-  };
-  passiveCraftsCache.set(playerId, { value, expiresAt: Date.now() + 60 * 1000 });
-  return value;
-}
-
-function withServerFreshness(value, cacheState, cachedAt, stale = false) {
-  const serverFreshness = { ...(value?.serverFreshness ?? {}), cacheState, cachedAt };
-  if (stale) serverFreshness.stale = true;
-  return { ...value, ...(stale ? { stale: true } : {}), serverFreshness };
-}
-
-async function loadHelperCached(cache, inflight, key, ttlMs, loader, options = {}) {
-  const now = Date.now();
-  const cached = cache.get(key);
-  if (!options.forceRefresh && cached && cached.expiresAt > now) return withServerFreshness(cached.value, "hit", cached.cachedAt);
-  const pending = !options.forceRefresh ? inflight.get(key) : null;
-  if (pending) {
-    const entry = await pending;
-    return withServerFreshness(entry.value, entry.stale ? "stale-if-error" : "deduped", entry.cachedAt, entry.stale);
-  }
-  const stale = !options.forceRefresh && cached && (cached.staleExpiresAt ?? cached.expiresAt) > now ? cached : null;
-  const request = (async () => {
-    try {
-      const value = await loader();
-      const cachedAt = new Date().toISOString();
-      const entry = {
-        value,
-        cachedAt,
-        expiresAt: Date.now() + ttlMs,
-        staleExpiresAt: Date.now() + ttlMs + LOCAL_HELPER_STALE_IF_ERROR_MS,
-      };
-      cache.set(key, entry);
-      return entry;
-    } catch (error) {
-      if (stale) {
-        const partialErrors = Array.isArray(stale.value?.partialErrors) ? stale.value.partialErrors : [];
-        return {
-          ...stale,
-          stale: true,
-          value: { ...stale.value, partialErrors: [...partialErrors, `Refresh failed: ${errorMessage(error)}`] },
-        };
-      }
-      throw error;
-    } finally {
-      inflight.delete(key);
-    }
-  })();
-  inflight.set(key, request);
-  const entry = await request;
-  return withServerFreshness(entry.value, entry.stale ? "stale-if-error" : "miss", entry.cachedAt, entry.stale);
-}
-
-function uniqueSummaryMembers(body, maxMembers) {
-  const members = Array.isArray(body?.members) ? body.members : [];
-  return [...new Map(members
-    .filter((member) => member && (member.playerEntityId ?? member.entityId))
-    .slice(0, maxMembers)
-    .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
-}
-
-function summaryMemberCacheKey(members) {
-  return members.map((member) => String(member.playerEntityId ?? member.entityId ?? "")).filter(Boolean).sort().join(",") || "empty";
-}
-
-async function passiveCraftSummaries(body) {
-  const uniqueMembers = uniqueSummaryMembers(body, 50);
-  const cacheKey = summaryMemberCacheKey(uniqueMembers);
-  return loadHelperCached(passiveCraftSummariesCache, passiveCraftSummariesInflight, cacheKey, PASSIVE_CRAFT_SUMMARY_CACHE_TTL_MS, async () => {
-    const results = await mapWithConcurrency(uniqueMembers, 4, async (member) => {
-      try {
-        return await fetchCachedPassiveCrafts(member, { forceRefresh: body?.forceRefresh === true });
-      } catch (error) {
-        return {
-          ok: false,
-          playerId: String(member.playerEntityId ?? member.entityId ?? ""),
-          memberName: member.userName ?? member.username ?? member.name ?? "Unknown member",
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    });
-    const rows = results
-      .flatMap((result) => result.ok ? result.rows.map((row) => ({ ...row, playerId: result.playerId, memberName: result.memberName })) : [])
-      .sort((a, b) => b.sortTimestamp - a.sortTimestamp)
-      .slice(0, 18);
-    return {
-      rows,
-      requested: uniqueMembers.length,
-      failed: results.filter((result) => !result.ok).length,
-    };
-  }, { forceRefresh: body?.forceRefresh === true });
-}
-
-async function playerDetailSummaries(body) {
-  const uniqueMembers = uniqueSummaryMembers(body, 100);
-  const cacheKey = summaryMemberCacheKey(uniqueMembers);
-  return loadHelperCached(playerDetailSummariesCache, playerDetailSummariesInflight, cacheKey, PLAYER_DETAIL_SUMMARY_CACHE_TTL_MS, async () => {
-    const results = await mapWithConcurrency(uniqueMembers, 6, async (member) => {
-      const playerId = String(member.playerEntityId ?? member.entityId ?? "");
-      try {
-        const player = await fetchCachedPlayerDetail(playerId, { forceRefresh: body?.forceRefresh === true });
-        return { ok: true, player: { ...player, detailAvailable: true } };
-      } catch (error) {
-        return { ok: false, playerId, player: fallbackPlayerFromMember(member, error), error: error instanceof Error ? error.message : String(error) };
-      }
-    });
-    return {
-      players: results.map((result) => result.player),
-      requested: uniqueMembers.length,
-      failed: results.filter((result) => !result.ok).length,
-      failures: results.filter((result) => !result.ok).map((result) => ({ playerId: result.playerId, error: result.error })).slice(0, 20),
-    };
-  }, { forceRefresh: body?.forceRefresh === true });
-}
-function itemCatalogKey(item) {
-  const id = item?.id ?? item?.entityId ?? item?.itemId;
-  return id == null ? "" : String(id);
-}
-
-function mergeCraftCatalogs(payloads) {
-  const items = new Map();
-  const cargos = new Map();
-  const claims = new Map();
-  for (const payload of payloads) {
-    for (const item of unwrap(payload, "items", [])) {
-      const key = itemCatalogKey(item);
-      if (key) items.set(key, item);
-    }
-    for (const cargo of unwrap(payload, "cargos", [])) {
-      const key = itemCatalogKey(cargo);
-      if (key) cargos.set(key, cargo);
-    }
-    for (const claim of unwrap(payload, "claims", [])) {
-      const key = itemCatalogKey(claim);
-      if (key) claims.set(key, claim);
-    }
-  }
-  return {
-    items: [...items.values()],
-    cargos: [...cargos.values()],
-    claims: [...claims.values()],
-  };
-}
-
-function craftClaimId(craft) {
-  return String(craft?.claimEntityId ?? craft?.claim_entity_id ?? craft?.claim?.entityId ?? craft?.claimId ?? "");
-}
-
-function productionCraftCacheKey(claimId, members) {
-  const ids = members.map((member) => String(member.playerEntityId ?? member.entityId ?? "")).filter(Boolean).sort();
-  return `${claimId}:${ids.join(",")}`;
-}
-
-async function settlementProductionCrafts(body) {
-  const claimId = String(body?.claimId ?? "").trim();
-  if (!claimId) return withServerFreshness({ craftResults: [], items: [], cargos: [], claims: [], count: 0, publicCount: 0, privateCount: 0, failedMemberRequests: 0 }, "miss", new Date().toISOString());
-  const uniqueMembers = uniqueSummaryMembers(body, 50);
-  const cacheKey = productionCraftCacheKey(claimId, uniqueMembers);
-  return loadHelperCached(productionCraftsCache, productionCraftsInflight, cacheKey, PRODUCTION_CRAFT_CACHE_TTL_MS, async () => {
-    let publicFetchError = "";
-    const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { timeoutMs: PRODUCTION_CRAFT_TIMEOUT_MS, cache: body?.forceRefresh !== true }).catch((error) => {
-      publicFetchError = error instanceof Error ? error.message : String(error);
-      return { craftResults: [] };
-    });
-    const publicCrafts = unwrap(publicPayload, "craftResults", []);
-    const publicIds = new Set(publicCrafts.map((craft) => String(craft.entityId ?? "")).filter(Boolean));
-    const memberResults = await mapWithConcurrency(uniqueMembers, 8, async (member) => {
-      const playerId = String(member.playerEntityId ?? member.entityId ?? "");
-      try {
-        return { ok: true, payload: await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=false`, { timeoutMs: PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS, cache: body?.forceRefresh !== true }) };
-      } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
-      }
-    });
-    const memberPayloads = memberResults.filter((result) => result.ok).map((result) => result.payload);
-    const merged = new Map();
-
-    for (const craft of publicCrafts) {
-      if (!craft?.entityId || craftClaimId(craft) !== claimId) continue;
-      merged.set(String(craft.entityId), { ...craft, isPublic: craft.isPublic !== false, visibilitySource: "claim-public" });
-    }
-
-    for (const payload of memberPayloads) {
-      for (const craft of unwrap(payload, "craftResults", [])) {
-        if (!craft?.entityId || craftClaimId(craft) !== claimId) continue;
-        const id = String(craft.entityId);
-        const existing = merged.get(id) ?? {};
-        const isPublic = craft.isPublic === false ? false : publicIds.has(id) || craft.isPublic === true;
-        merged.set(id, {
-          ...existing,
-          ...craft,
-          isPublic,
-          visibilitySource: isPublic ? existing.visibilitySource ?? "player-public" : "player-private",
-        });
-      }
-    }
-
-    const catalog = mergeCraftCatalogs([publicPayload, ...memberPayloads]);
-    const craftResults = [...merged.values()].sort((a, b) => toNumber(b.totalActionsRequired) - toNumber(a.totalActionsRequired));
-    const partialErrors = [
-      publicFetchError ? `Public craft refresh failed: ${publicFetchError}` : "",
-      ...memberResults.filter((result) => !result.ok).map((result) => `Member craft refresh failed: ${result.error}`),
-    ].filter(Boolean);
-    if (publicFetchError && !memberPayloads.length) {
-      throw new Error(`Production refresh failed: ${publicFetchError}`);
-    }
-    return {
-      craftResults,
-      ...catalog,
-      count: craftResults.length,
-      publicCount: craftResults.filter((craft) => craft.isPublic !== false).length,
-      privateCount: craftResults.filter((craft) => craft.isPublic === false).length,
-      failedMemberRequests: memberResults.filter((result) => !result.ok).length,
-      partialError: partialErrors[0] ?? null,
-      partialErrors,
-    };
-  }, { forceRefresh: body?.forceRefresh === true });
-}
-function storedDashboardDataFallback(claimId, error) {
-  const value = relayDashboardFallbackData(claimId);
-  if (!value) return null;
-  const message = error instanceof Error ? error.message : String(error);
-  const partialErrors = Array.isArray(value.partialErrors) ? value.partialErrors : [];
-  return {
-    ...value,
-    stale: true,
-    partialErrors: [...new Set([...partialErrors, `Dashboard refresh failed: ${message}`])],
-    serverFreshness: { ...(value.serverFreshness ?? {}), cacheState: "stored-stale-if-error", stale: true, lastError: message },
-  };
-}
-async function dashboardData(claimId, options = {}) {
-  const id = String(claimId ?? "").trim();
-  if (!/^\d{8,}$/.test(id)) {
-    const error = new Error("Choose a valid BitCraft settlement ID");
-    error.statusCode = 400;
-    throw error;
-  }
-  const now = Date.now();
-  const cached = dashboardDataCache.get(id);
-  if (!options.forceRefresh && cached && cached.expiresAt > now) {
-    return { ...cached.value, serverFreshness: { ...(cached.value.serverFreshness ?? {}), cacheState: "hit", cachedAt: cached.cachedAt } };
-  }
-  const inflight = dashboardDataInflight.get(id);
-  if (!options.forceRefresh && inflight) return inflight;
-  const stale = cached && (cached.staleExpiresAt ?? cached.expiresAt) > now ? cached : null;
-  const request = (async () => {
-    try {
-      const value = await dashboardDataFresh(id, { forceRefresh: options.forceRefresh === true });
-      const cachedAt = new Date().toISOString();
-      dashboardDataCache.set(id, {
-        value,
-        cachedAt,
-        expiresAt: Date.now() + DASHBOARD_DATA_CACHE_TTL_MS,
-        staleExpiresAt: Date.now() + DASHBOARD_DATA_CACHE_TTL_MS + DASHBOARD_DATA_STALE_IF_ERROR_MS,
-      });
-      return { ...value, serverFreshness: { ...(value.serverFreshness ?? {}), cacheState: "miss", cachedAt } };
-    } catch (error) {
-      if (stale) {
-        const message = error instanceof Error ? error.message : String(error);
-        const partialErrors = Array.isArray(stale.value.partialErrors) ? stale.value.partialErrors : [];
-        return {
-          ...stale.value,
-          stale: true,
-          partialErrors: [...partialErrors, `Dashboard refresh failed: ${message}`],
-          serverFreshness: { ...(stale.value.serverFreshness ?? {}), cacheState: "stale-if-error", cachedAt: stale.cachedAt },
-        };
-      }
-      const storedFallback = storedDashboardDataFallback(id, error);
-      if (storedFallback) return storedFallback;
-      throw error;
-    } finally {
-      dashboardDataInflight.delete(id);
-    }
-  })();
-  dashboardDataInflight.set(id, request);
-  return request;
-}
-async function dashboardDataFresh(claimId, options = {}) {
-  const id = String(claimId ?? "").trim();
-  if (!/^\d{8,}$/.test(id)) {
-    const error = new Error("Choose a valid BitCraft settlement ID");
-    error.statusCode = 400;
-    throw error;
-  }
-  const forceRefresh = options.forceRefresh === true;
-  const [claimPayload, membersPayload, citizensPayload, buildingsPayload, marketPayload, craftsPayload] = await Promise.all([
-    fetchBitjita(`/claims/${id}`, { forceRefresh }),
-    fetchBitjita(`/claims/${id}/members`, { forceRefresh }),
-    fetchBitjita(`/claims/${id}/citizens`, { forceRefresh }).catch(() => ({ citizens: [] })),
-    fetchBitjita(`/claims/${id}/buildings`, { forceRefresh }),
-    fetchAllClaimListings(id, { cache: !forceRefresh }).catch(() => ({ listings: [] })),
-    fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(id)}&completed=false`, { forceRefresh }).catch(() => ({ craftResults: [] })),
-  ]);
-  const claim = claimPayload.claim ?? claimPayload;
-  const constructionPayload = currentConstructionProjection(id);
-  const researchPayload = currentResearchProjection(id);
-  const members = unwrap(membersPayload, "members", []);
-  const crafts = unwrap(craftsPayload, "craftResults", []);
-  const [playerPayload, contributionEntries] = await Promise.all([
-    playerDetailSummaries({ members, forceRefresh }),
-    mapWithConcurrency(crafts.filter((craft) => craft.entityId), 4, async (craft) => {
-      try {
-        return [String(craft.entityId), await fetchCachedCraftContributions(craft.entityId, { forceRefresh })];
-      } catch {
-        return [String(craft.entityId), []];
-      }
-    }),
-  ]);
-  return {
-    claim: claimPayload,
-    members: membersPayload,
-    citizens: citizensPayload,
-    buildings: buildingsPayload,
-    construction: constructionPayload,
-    research: researchPayload,
-    market: marketPayload,
-    crafts: craftsPayload,
-    players: playerPayload.players ?? [],
-    playerDetailDiagnostics: {
-      requested: playerPayload.requested ?? 0,
-      failed: playerPayload.failed ?? 0,
-      failures: playerPayload.failures ?? [],
-    },
-    contributions: Object.fromEntries(contributionEntries),
-    region: currentStateRepository.read(id, "region-claims")?.data ?? { claims: [] },
-    regionStatus: currentStateRepository.read(id, "region")?.data ?? { regions: [] },
-  };
-}
-
-async function craftContributionMap(crafts) {
-  const entries = await mapWithConcurrency(crafts.filter((craft) => craft?.entityId), 4, async (craft) => {
-    try {
-      return [String(craft.entityId), await fetchCachedCraftContributions(craft.entityId)];
-    } catch {
-      return [String(craft.entityId), []];
-    }
-  });
-  return Object.fromEntries(entries);
-}
-
-function relayDashboardFallbackData(claimId) {
-  const id = String(claimId ?? "");
-  const domains = ["claim", "members", "citizens", "construction", "research", "market", "crafts", "players", "region-claims", "region", "inventories", "recruitment", "skills"];
-  const snapshots = Object.fromEntries(domains.map((domain) => [domain, currentStateRepository.read(id, domain)]));
-  const claim = snapshots.claim;
-  if (!claim?.data || typeof claim.data !== "object" || Array.isArray(claim.data)) return null;
-  const receivedAt = Object.values(snapshots)
-    .map((snapshot) => snapshot?.provenance?.receivedAt)
-    .filter(Boolean)
-    .sort()
-    .at(-1) ?? null;
-  const partialErrors = Object.entries(snapshots).flatMap(([domain, snapshot]) => [
-    ...(snapshot?.warnings ?? []).map((warning) => `${domain}: ${warning}`),
-    ...(snapshot?.lastError ? [`${domain}: ${snapshot.lastError}`] : []),
-  ]);
-  const members = Array.isArray(snapshots.members?.data) ? snapshots.members.data : [];
-  const citizens = Array.isArray(snapshots.citizens?.data) ? snapshots.citizens.data : [];
-  const crafts = snapshots.crafts?.data && typeof snapshots.crafts.data === "object" ? snapshots.crafts.data : { craftResults: [] };
-  const market = snapshots.market?.data && typeof snapshots.market.data === "object" ? snapshots.market.data : { listings: [] };
-  const players = Array.isArray(snapshots.players?.data) ? snapshots.players.data : [];
-  const buildings = Array.isArray(snapshots.construction?.data?.buildings)
-    ? snapshots.construction.data.buildings
-    : [];
-  const dataAgeSeconds = receivedAt ? Math.max(Math.round((Date.now() - new Date(receivedAt).getTime()) / 1000), 0) : null;
-  return {
-    // Dashboard callers still receive the established BitJita-shaped wrapper,
-    // while the stored Relay claim remains the plain normalized entity.
-    claim: { claim: claim.data },
-    members: { members },
-    citizens: { citizens },
-    buildings: { buildings },
-    construction: currentConstructionProjection(id),
-    research: currentResearchProjection(id),
-    market,
-    crafts,
-    players,
-    playerDetailDiagnostics: {},
-    contributions: {},
-    region: snapshots["region-claims"]?.data ?? { claims: [] },
-    regionStatus: snapshots.region?.data ?? { regions: [] },
-    inventories: snapshots.inventories?.data ?? { buildings: [] },
-    recruitment: currentRecruitmentProjection(id),
-    skills: snapshots.skills?.data ?? {},
-    partialErrors: [...new Set(partialErrors)],
-    serverFreshness: {
-      claimId: id,
-      collectedAt: receivedAt,
-      lastAttemptAt: receivedAt,
-      lastSuccessAt: receivedAt,
-      lastError: partialErrors.at(-1) ?? null,
-      dataAgeSeconds,
-      stale: true,
-      counts: {
-        members: members.length,
-        citizens: citizens.length,
-        crafts: Array.isArray(crafts.craftResults) ? crafts.craftResults.length : 0,
-        marketListings: Array.isArray(market.listings) ? market.listings.length : 0,
-        players: players.length,
-      },
-    },
-    collectorStatus: collectorStatusPayload(),
-  };
 }
 
 function meaningfulItemName(value) {
@@ -7608,36 +7092,41 @@ async function discordCraftWatchCommand(interaction) {
 
 async function discordSuppliesCommand() {
   const { claimId } = getSettings();
-  const payload = await fetchBitjita(`/claims/${claimId}`);
-  const claim = payload.claim ?? payload;
+  const claim = readRelayClaimForSupplyReport(
+    (id, domain) => currentStateRepository.read(id, domain),
+    claimId,
+  );
   return discordSupplyEmbed(claim);
 }
 
 async function discordOnlineCommand() {
   const { claimId } = getSettings();
-  const membersPayload = await fetchBitjita(`/claims/${claimId}/members`);
-  const members = unwrap(membersPayload, "members", []);
-  const details = await mapWithConcurrency(members.slice(0, 80), 8, async (member) => {
-    const playerId = String(member.playerEntityId ?? member.entityId ?? "");
-    if (!playerId) return null;
-    try {
-      const payload = await fetchBitjita(`/players/${playerId}`);
-      const player = payload.player ?? payload;
-      return { name: player.username ?? member.userName ?? member.username ?? playerId, online: Boolean(player.signedIn ?? player.online) };
-    } catch {
-      return { name: member.userName ?? member.username ?? playerId, online: false };
-    }
-  });
-  const online = details.filter((entry) => entry?.online);
-  return discordCommandEmbed("Members Online", online.length ? `**${online.length}/${members.length}** settlement members are online.` : `No settlement members appear online right now.`, [
+  const tracked = readRelayOnlineMembers(
+    (id, domain) => currentStateRepository.read(id, domain),
+    claimId,
+  );
+  const online = tracked
+    .filter(({ player }) => player.signedIn === true)
+    .map(({ member, player }) => ({
+      name: player.username ?? member.userName ?? member.username ?? player.playerEntityId,
+    }));
+  return discordCommandEmbed("Members Online", online.length ? `**${online.length}/${tracked.length}** settlement members are online.` : `No settlement members appear online right now.`, [
     { name: "Online", value: online.length ? online.map((entry) => entry.name).join(", ").slice(0, 1024) : "None", inline: false },
-    { name: "Tracked members", value: String(members.length), inline: true },
+    { name: "Tracked members", value: String(tracked.length), inline: true },
   ], online.length ? 0x4ee28a : 0x838e9e);
 }
 
 async function discordCraftsCommand(skillFilter = "") {
   const { claimId } = getSettings();
-  const payload = await fetchBitjita(`/crafts?claimEntityId=${claimId}&completed=false`);
+  const committed = readRelayCraftsForDiscord(
+    (id, domain) => currentStateRepository.read(id, domain),
+    claimId,
+  );
+  const payload = enrichCraftsForPlanning(
+    committed,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
+  );
   const filter = skillFilter.trim().toLowerCase();
   const jobs = unwrap(payload, "craftResults", [])
     .filter((job) => !filter || JSON.stringify(job.levelRequirements ?? job.experiencePerProgress ?? "").toLowerCase().includes(filter) || String(job.recipeName ?? "").toLowerCase().includes(filter))
@@ -7760,22 +7249,6 @@ async function serveBuiltFrontend(url, method, res) {
   if (method === "HEAD") return res.end();
   res.end(content);
   return true;
-}
-
-async function proxyBitjita(req, url, res) {
-  // Browser pages call this local proxy instead of bitjita.com directly. The
-  // proxy centralises CORS avoidance, upstream caching, and rate limiting while
-  // preserving the old page-driven "fetch fresh data while viewing a page" model.
-  const upstream = new URL(process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com");
-  upstream.pathname = `/api/${url.pathname.slice("/api/bitjita/".length)}`;
-  upstream.search = url.search;
-  const refresh = manualRefreshAccess(req, res);
-  if (!refresh) return;
-  const { forceRefresh } = refresh;
-  if ((forceRefresh || !bitjitaProxyCache.hasFreshCache(upstream)) && !bitjitaProxyCache.hasInflight(upstream) && !rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
-  const response = await bitjitaProxyCache.fetchUpstreamCached(upstream, { forceRefresh });
-  res.writeHead(response.status, securityHeaders({ ...response.headers, "x-bitjita-cache": response.cacheState, ...(response.stale ? { "x-bitjita-stale": "1", warning: '110 - "Response is stale because BitJita is currently unavailable"' } : {}) }));
-  res.end(response.body);
 }
 
 function manualRefreshAccess(req, res) {
@@ -8092,9 +7565,6 @@ const server = createServer(async (req, res) => {
         items: rows.filter((row) => row.kind === "items").map(item),
         cargos: rows.filter((row) => row.kind === "cargo").map(item),
       });
-    }
-    if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) {
-      return proxyBitjita(req, url, res);
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
     if (req.method === "GET" && url.pathname === "/api/local/popups") return send(res, 200, { popups: publicPopups(appPopupConfig()) });
@@ -8970,10 +8440,10 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req, BODY_LIMITS.settings);
         let submittedConfig = normalizeCraftPlanConfig(body);
         try {
-          const buildingsPayload = await fetchBitjita(`/claims/${encodeURIComponent(getSettings().claimId)}/buildings`);
+          const buildingsPayload = currentClaimBuildingsProjection(getSettings().claimId);
           submittedConfig = reconcileCraftPlanBuildingProgress(submittedConfig, buildingsPayload).config;
         } catch {
-          // Leave newly added building targets pending until a successful building discovery request.
+          // Leave newly added building targets pending until a complete Relay building generation commits.
         }
         const config = saveCraftPlanConfig(submittedConfig);
         const response = await craftPlanAdminResponse(getSettings().claimId);
@@ -9750,41 +9220,6 @@ const server = createServer(async (req, res) => {
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
       return send(res, 200, contributionLeaderboard(url.searchParams.get("claimId") ?? ""));
-    }
-    if (req.method === "POST" && url.pathname === "/api/local/passive-crafts") {
-      if (!rateLimit(req, res, "passive-crafts", RATE_LIMITS.expensiveLocal)) return;
-      const refresh = manualRefreshAccess(req, res);
-      if (!refresh) return;
-      const { forceRefresh } = refresh;
-      const body = await readJson(req, BODY_LIMITS.json);
-      return send(res, 200, await passiveCraftSummaries({ ...body, forceRefresh }));
-    }
-    if (req.method === "POST" && url.pathname === "/api/local/player-details") {
-      if (!rateLimit(req, res, "player-details", RATE_LIMITS.expensiveLocal)) return;
-      const refresh = manualRefreshAccess(req, res);
-      if (!refresh) return;
-      const { forceRefresh } = refresh;
-      const body = await readJson(req, BODY_LIMITS.json);
-      return send(res, 200, await playerDetailSummaries({ ...body, forceRefresh }));
-    }
-    if (req.method === "POST" && url.pathname === "/api/local/production/crafts") {
-      if (!rateLimit(req, res, "production-crafts", RATE_LIMITS.expensiveLocal)) return;
-      const refresh = manualRefreshAccess(req, res);
-      if (!refresh) return;
-      const { forceRefresh } = refresh;
-      const body = await readJson(req, BODY_LIMITS.json);
-      return send(res, 200, await settlementProductionCrafts({ ...body, forceRefresh }));
-    }
-    if (req.method === "GET" && url.pathname === "/api/local/dashboard-data") {
-      if (!rateLimit(req, res, "dashboard-data", RATE_LIMITS.expensiveLocal)) return;
-      try {
-        const refresh = manualRefreshAccess(req, res);
-        if (!refresh) return;
-        const { forceRefresh } = refresh;
-        return send(res, 200, await dashboardData(url.searchParams.get("claimId") ?? "", { forceRefresh }));
-      } catch (error) {
-        return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Unable to load dashboard data" });
-      }
     }
     if (req.method === "GET" && url.pathname === "/api/local/history") {
       const refresh = manualRefreshAccess(req, res);

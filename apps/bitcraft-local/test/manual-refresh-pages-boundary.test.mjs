@@ -10,14 +10,13 @@ function source(path) {
   return readFileSync(new URL(path, import.meta.url), "utf8");
 }
 
-test("main game-data loader keeps Relay pages live while legacy pages retain navigation throttling", () => {
+test("main game-data loader always re-reads provider-neutral page domains", () => {
   const loader = source("../src/api/gameDataLoader.ts");
 
-  assert.match(loader, /manualRefreshApplies/);
   assert.match(loader, /manualRefreshHeaders/);
-  assert.match(loader, /const providerNeutral = usesProviderNeutralGameData\(activePanel\)/);
-  assert.match(loader, /const forced = manualRefreshApplies\(manualRefreshRequest, activePanel\)/);
-  assert.match(loader, /if \(!providerNeutral && !forced && cached && cachedAgeMs < PAGE_NAVIGATION_CACHE_TTL_MS\)/);
+  assert.match(loader, /const domains = pageDomains\(activePanel\)/);
+  assert.match(loader, /if \(domains\.length === 0\)/);
+  assert.doesNotMatch(loader, /PAGE_NAVIGATION_CACHE_TTL_MS|legacyPageEndpointMap/);
   assert.match(loader, /headers:\s*\{[^}]*\.\.\.manualHeaders/s);
   assert.match(loader, /trackManualRefreshPromise\("main-data", load\(\)\)/);
 });
