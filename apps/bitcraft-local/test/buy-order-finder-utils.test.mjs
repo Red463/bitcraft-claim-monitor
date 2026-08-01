@@ -5,6 +5,7 @@ import {
   buyOrderQueryFromLocation,
   buyOrderSearchTransition,
   formatExactDecimalInteger,
+  maxExactDecimalInteger,
   sumExactDecimalIntegers,
 } from "../src/pages/market/buyOrderFinderUtils.ts";
 
@@ -38,4 +39,12 @@ test("buy-order metric sums remain exact above Number.MAX_SAFE_INTEGER", () => {
     formatExactDecimalInteger(sumExactDecimalIntegers(["9007199254740993", "9007199254740994"])),
     "18,014,398,509,481,987",
   );
+});
+
+test("highest visible buy-order price remains exact regardless of row order", () => {
+  assert.equal(
+    maxExactDecimalInteger(["2", "9007199254740993", "100", "invalid"]),
+    "9007199254740993",
+  );
+  assert.equal(maxExactDecimalInteger([]), null);
 });

@@ -124,6 +124,99 @@ test("skips malformed quantities and totals with a warning", () => {
   assert.deepEqual(result.warnings, ["Ignored malformed confirmed trade relay_closed_listing:19:malformed."]);
 });
 
+test("rejects zero and negative exact sale values before they count toward the baseline", () => {
+  const db = database();
+  const sale = {
+    claimId: "claim", regionId: "19", itemId: "43", itemType: "cargo",
+    occurredAt: "2026-08-01T11:00:00.000Z",
+  };
+  insert(db, { ...sale, tradeId: "relay_closed_listing:19:valid", quantity: "2", totalPrice: "20" });
+  insert(db, { ...sale, tradeId: "relay_closed_listing:19:zero", quantity: "1", totalPrice: "000" });
+  insert(db, { ...sale, tradeId: "relay_closed_listing:19:negative", quantity: "1", totalPrice: "-1" });
+
+  const result = readBuyOrderSaleBaselines(db, {
+    claimId: "claim",
+    allowedRegionIds: ["19"],
+    itemKeys: new Set([buyOrderBaselineKey("19", "cargo", "43")]),
+    nowMs: Date.parse("2026-08-01T12:00:00.000Z"),
+  });
+
+  assert.equal(result.baselines.get("19:cargo:43").salesCount, 1);
+  assert.equal(result.baselines.get("19:cargo:43").totalValue, "20");
+  assert.deepEqual(result.warnings, [
+    "Ignored malformed confirmed trade relay_closed_listing:19:negative.",
+    "Ignored malformed confirmed trade relay_closed_listing:19:zero.",
+  ]);
+});
+
+test("selects only requested typed item keys and regions from SQLite", () => {
+  const sqlite = database();
+  const now = "2026-08-01T11:00:00.000Z";
+  const common = { claimId: "claim", quantity: "1", totalPrice: "10", occurredAt: now };
+  insert(sqlite, {
+    ...common, tradeId: "relay_closed_listing:19:requested-cargo",
+    regionId: "19", itemId: "43", itemType: "cargo",
+  });
+  insert(sqlite, {
+    ...common, tradeId: "relay_closed_listing:19:wrong-type",
+    regionId: "19", itemId: "43", itemType: "item",
+  });
+  insert(sqlite, {
+    ...common, tradeId: "relay_closed_listing:19:wrong-item",
+    regionId: "19", itemId: "44", itemType: "cargo",
+  });
+  insert(sqlite, {
+    ...common, tradeId: "relay_closed_listing:20:wrong-region",
+    regionId: "20", itemId: "43", itemType: "cargo",
+  });
+  let selectedRows = [];
+  let selectedSql = "";
+  let selectedArgs = [];
+  const db = {
+    prepare(sql) {
+      selectedSql = sql;
+      const statement = sqlite.prepare(sql);
+      return {
+        all(...args) {
+          selectedArgs = args;
+          selectedRows = statement.all(...args);
+          return selectedRows;
+        },
+      };
+    },
+  };
+
+  readBuyOrderSaleBaselines(db, {
+    claimId: "claim",
+    allowedRegionIds: ["19"],
+    itemKeys: new Set([buyOrderBaselineKey("19", "cargo", "43")]),
+    nowMs: Date.parse("2026-08-01T12:00:00.000Z"),
+  });
+
+  assert.deepEqual(selectedRows.map((row) => row.tradeId), [
+    "relay_closed_listing:19:requested-cargo",
+  ]);
+  assert.match(selectedSql, /json_each\s*\(\s*\?\s*\)/);
+  assert.ok(
+    selectedArgs.some((arg) => String(arg).includes('"itemType":"cargo"')),
+    "typed requested keys must be bound as data",
+  );
+});
+
+test("binds large requested item-key sets without one SQLite parameter per key", () => {
+  const db = database();
+  const itemKeys = new Set(
+    Array.from({ length: 1_200 }, (_, index) => buyOrderBaselineKey("19", "item", String(index + 1))),
+  );
+
+  assert.doesNotThrow(() => readBuyOrderSaleBaselines(db, {
+    claimId: "claim",
+    allowedRegionIds: ["19"],
+    itemKeys,
+    nowMs: Date.parse("2026-08-01T12:00:00.000Z"),
+  }));
+});
+
 test("uses only authoritative Relay sale closure trades", () => {
   const db = database();
   const sale = {

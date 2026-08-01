@@ -17,7 +17,10 @@ test("global Buy Orders renders the dedicated live Relay finder", () => {
   assert.match(finder, /\.catch\(\(error\) => \{[\s\S]*?setState\(\(current\) => \(\{\s*\.\.\.current,[\s\S]*?error:/);
   assert.doesNotMatch(finder, /\.catch\(\(error\) => \{[\s\S]{0,500}?data:\s*null/);
   assert.match(finder, /formatExactDecimalInteger/);
+  assert.match(finder, /maxExactDecimalInteger/);
   assert.match(finder, /sumExactDecimalIntegers/);
+  assert.match(finder, /Highest Visible Unit Price/);
+  assert.doesNotMatch(finder, /label="Best Unit Price"/);
   assert.doesNotMatch(finder, /formatCompactNumber|toNumber\(order\.(?:quantity|totalValue)\)|formatNumber\(order\.(?:quantity|unitPrice|totalValue|averageUnitPrice)\)/);
   assert.match(finder, /refreshSequence/);
   assert.match(finder, /refreshHeaders/);

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-BitCraft Claim Monitor is a local-first settlement operations dashboard for BitCraft. It uses the public BitJita API, records local SQLite history, and includes a Discord bot/admin dashboard.
+BitCraft Claim Monitor is a local-first settlement operations dashboard for BitCraft. This standalone Relay edition ingests live data through Relay HTTP and typed SpacetimeDB subscriptions, records durable SQLite history, and includes a Discord bot/admin dashboard.
 
 The maintained application is:
 
@@ -75,7 +75,7 @@ apps/bitcraft-local/data/bitcraft-local.sqlite
 * Production database path:
 
 ```txt
-/var/lib/bitcraft-claim-monitor
+/var/lib/bitcraft-claim-monitor-relay
 ```
 
 ## Useful Commands
@@ -109,8 +109,8 @@ corepack pnpm --filter @workspace/bitcraft-local test
 The local dev command normally starts:
 
 ```txt
-frontend:  http://localhost:18428
-local API: http://127.0.0.1:18430
+frontend:  http://localhost:19428
+local API: http://127.0.0.1:19430
 ```
 
 Only inspect running processes, logs, or alternative ports when the user mentions a non-default port, says the server is already running, or reports a local loading issue.
@@ -519,7 +519,7 @@ The production server is:
 apps/bitcraft-local/server.mjs
 ```
 
-It serves the production frontend, proxies/restricts BitJita API access, manages admin sessions, stores SQLite data, runs server polling, and sends Discord notifications.
+It serves the production frontend and provider-neutral local API, manages admin sessions, reads normalized Relay generations, stores durable SQLite data, runs server-owned collection, and sends Discord notifications. Relay ingestion lives behind `src/server/game-data/`; React must not depend on Relay or SpacetimeDB wire records.
 
 Important backend constraints:
 
@@ -527,9 +527,11 @@ Important backend constraints:
 * Do not expose admin secrets.
 * Do not return sensitive configuration in public API responses.
 * Keep admin mutations behind authenticated admin routes and CSRF checks.
-* Public BitCraft/BitJita game data can be shown to ordinary users unless it is app configuration, secrets, or admin-only testing data.
-* Production polling should continue without any browser open.
-* Normal main-app page refreshes should use live BitJita data through the local `/api/bitjita/*` proxy. SQLite is retained for history, notifications, cached tools, analytics and diagnostics, not as the source of truth for normal page rendering.
+* Public BitCraft game data can be shown to ordinary users unless it is app configuration, secrets, or admin-only testing data.
+* Production Relay subscriptions, collection, history, and notifications must continue without any browser open.
+* Normal page requests compose the latest complete normalized Relay generation through provider-neutral `/api/local/*` routes. Preserve last-good generations during source outages and expose their freshness, age, and warnings.
+* Do not add upstream-specific browser routes, direct browser fetches, legacy API fallbacks, remote asset requests, or runtime configuration for the retired provider.
+* Do not create scheduled feature-cache tables when a current Relay generation or bounded live service can answer the feature. SQLite remains appropriate for atomic last-good provider generations, observed history/events, notification outbox and deduplication, settings, analytics, and diagnostics.
 * Settlement-specific history should be filtered to the configured claim/settlement where relevant.
 
 When changing backend code, prefer small focused tests over broad brittle snapshots.
@@ -545,10 +547,25 @@ apps/bitcraft-local/data/bitcraft-local.sqlite
 Production data lives outside the Git checkout:
 
 ```txt
-/var/lib/bitcraft-claim-monitor
+/var/lib/bitcraft-claim-monitor-relay
 ```
 
 Do not commit database files.
+
+The production identities are isolated from the maintained legacy service:
+
+```txt
+/opt/bitcraft-claim-monitor-relay
+/var/lib/bitcraft-claim-monitor-relay
+/var/backups/bitcraft-claim-monitor-relay
+/etc/bitcraft-claim-monitor-relay.env
+bitcraft-claim-monitor-relay.service
+bitcraft-claim-monitor-relay-worker.service
+bitcraft-claim-monitor-relay-collector.service
+bitcraft-claim-monitor-relay-collector.timer
+bitcraft-claim-monitor-relay-backup.service
+bitcraft-claim-monitor-relay-backup.timer
+```
 
 Be careful with migrations or schema changes:
 
@@ -569,18 +586,18 @@ For Discord changes:
 * Test delivery logic with focused tests where practical.
 * Do not change permissions or moderation behaviour broadly unless requested.
 
-## BitJita and Public Game Data
+## Relay and Public Game Data
 
-The app uses public BitJita API data.
+When changing Relay-backed behavior:
 
-When changing BitJita-related logic:
-
-* Preserve existing API response handling unless the task requires a change.
-* Handle missing, null, or partial data safely.
-* Avoid assuming every field is present.
-* Keep settlement-specific filtering accurate.
-* Do not expose admin-only app configuration just because the underlying game data is public.
-* For BitJita inventory stack contents, preserve `itemType` semantics: `0` is a regular item resolved through `/api/items/{id}`, and `1` is cargo resolved through `/api/cargo/{id}`. Do not treat numeric `itemId` values as globally unique across item and cargo catalogs.
+* Keep topology discovery, Relay HTTP, typed subscriptions, normalization, current-state storage, and health reporting behind the provider seam.
+* Handle missing, null, partial, stale, or schema-incompatible data explicitly; never invent unavailable semantics.
+* Keep settlement and active-region filtering accurate and reject cross-claim or cross-region leakage.
+* Preserve 64-bit IDs and large amounts as decimal strings/BigInts until display formatting.
+* Preserve typed market and inventory identity: numeric item type `0` is an item and `1` is cargo. An item ID and cargo ID with the same digits are different identities.
+* Wire records must not enter React or history tables directly. Normalize once, then expose provider-neutral domain envelopes and projections.
+* Do not expose admin-only app configuration merely because the underlying game data is public.
+* A schema fingerprint mismatch must stop the affected generation and retain last-good data until matching bindings are deployed.
 
 ## Final Response Expectations
 

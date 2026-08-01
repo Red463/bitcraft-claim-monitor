@@ -1,3 +1,9 @@
+import {
+  marketIdentityKey,
+  normalizeMarketItemType,
+  parseMarketIdentityKey,
+} from "./marketIdentity.mjs";
+
 const DAY_MS = 86_400_000;
 
 function decimal(value) {
@@ -5,14 +11,8 @@ function decimal(value) {
   return /^\d+$/.test(text) ? text : null;
 }
 
-function normalizedItemType(value) {
-  return value === 1 || value === "1" || String(value).toLowerCase() === "cargo"
-    ? "cargo"
-    : "item";
-}
-
 export function buyOrderBaselineKey(regionId, itemType, itemId) {
-  return `${decimal(regionId) ?? "0"}:${normalizedItemType(itemType)}:${decimal(itemId) ?? "0"}`;
+  return marketIdentityKey(regionId, itemType, itemId);
 }
 
 export function readBuyOrderSaleBaselines(db, options = {}) {
@@ -26,22 +26,63 @@ export function readBuyOrderSaleBaselines(db, options = {}) {
   if (!claimId || !regionIds.length || !itemKeys.size) {
     return { baselines: new Map(), historyObservedSince: null, warnings: [] };
   }
+  const requestedRegionIds = new Set(regionIds);
+  const requestedItems = [...new Map(
+    [...itemKeys]
+      .map(parseMarketIdentityKey)
+      .filter((identity) => identity && requestedRegionIds.has(identity.regionId))
+      .map((identity) => [marketIdentityKey(
+        identity.regionId,
+        identity.itemType,
+        identity.itemId,
+      ), identity]),
+  ).values()];
+  if (!requestedItems.length) {
+    return { baselines: new Map(), historyObservedSince: null, warnings: [] };
+  }
   const nowMs = options.nowMs ?? Date.now();
   const cutoff = new Date(nowMs - 7 * DAY_MS).toISOString();
   const now = new Date(nowMs).toISOString();
-  const placeholders = regionIds.map(() => "?").join(", ");
   const rows = db.prepare(`
-    SELECT trade_id AS tradeId, region_id AS regionId, item_id AS itemId,
-      item_type AS itemType, quantity, total_price AS totalPrice,
-      occurred_at AS occurredAt
-    FROM market_trades
-    WHERE claim_id = ?
-      AND region_id IN (${placeholders})
-      AND occurred_at >= ?
-      AND occurred_at <= ?
-      AND trade_id LIKE 'relay_closed_listing:' || region_id || ':%'
-    ORDER BY occurred_at ASC, trade_id ASC
-  `).all(claimId, ...regionIds, cutoff, now);
+    WITH requested_regions AS (
+      SELECT CAST(value AS TEXT) AS region_id
+      FROM json_each(?)
+    ),
+    requested_items AS (
+      SELECT
+        CAST(json_extract(value, '$.regionId') AS TEXT) AS region_id,
+        CAST(json_extract(value, '$.itemType') AS TEXT) AS item_type,
+        CAST(json_extract(value, '$.itemId') AS TEXT) AS item_id
+      FROM json_each(?)
+    )
+    SELECT trade.trade_id AS tradeId, trade.region_id AS regionId,
+      trade.item_id AS itemId, trade.item_type AS itemType,
+      trade.quantity, trade.total_price AS totalPrice,
+      trade.occurred_at AS occurredAt
+    FROM requested_items AS requested
+    INNER JOIN requested_regions AS region
+      ON region.region_id = requested.region_id
+    INNER JOIN market_trades AS trade
+      ON trade.region_id = requested.region_id
+      AND trade.item_id = requested.item_id
+      AND CASE
+        WHEN CAST(trade.item_type AS TEXT) = '1'
+          OR lower(CAST(trade.item_type AS TEXT)) = 'cargo'
+          THEN 'cargo'
+        ELSE 'item'
+      END = requested.item_type
+    WHERE trade.claim_id = ?
+      AND trade.occurred_at >= ?
+      AND trade.occurred_at <= ?
+      AND trade.trade_id LIKE 'relay_closed_listing:' || trade.region_id || ':%'
+    ORDER BY trade.occurred_at ASC, trade.trade_id ASC
+  `).all(
+    JSON.stringify(regionIds),
+    JSON.stringify(requestedItems),
+    claimId,
+    cutoff,
+    now,
+  );
   const baselines = new Map();
   const warnings = [];
   for (const row of rows) {
@@ -57,15 +98,16 @@ export function readBuyOrderSaleBaselines(db, options = {}) {
       || occurredAtMs < nowMs - 7 * DAY_MS
       || occurredAtMs > nowMs
       || !quantity
-      || quantity === "0"
+      || BigInt(quantity) <= 0n
       || !totalPrice
+      || BigInt(totalPrice) <= 0n
     ) {
       warnings.push(`Ignored malformed confirmed trade ${String(row.tradeId)}.`);
       continue;
     }
     const current = baselines.get(key) ?? {
       regionId: String(row.regionId),
-      itemType: normalizedItemType(row.itemType),
+      itemType: normalizeMarketItemType(row.itemType),
       itemId: String(row.itemId),
       salesCount: 0,
       unitsSold: "0",

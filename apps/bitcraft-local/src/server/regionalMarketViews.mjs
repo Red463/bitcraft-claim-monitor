@@ -1,3 +1,8 @@
+import {
+  marketIdentityKey,
+  normalizeMarketItemType,
+} from "./marketIdentity.mjs";
+
 function record(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -22,7 +27,7 @@ function multiply(left, right) {
 }
 
 function baselineKey(row) {
-  return `${row.regionId}:${row.itemType}:${row.itemId}`;
+  return marketIdentityKey(row.regionId, row.itemType, row.itemId);
 }
 
 function divideRoundedHalfUp(numerator, denominator) {
@@ -71,9 +76,7 @@ function regionIds(value) {
 }
 
 function itemType(value) {
-  return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo"
-    ? "cargo"
-    : "item";
+  return normalizeMarketItemType(value);
 }
 
 function catalogItem(value) {

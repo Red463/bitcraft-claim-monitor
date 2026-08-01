@@ -22,3 +22,12 @@ export function sumExactDecimalIntegers(values: Iterable<unknown>): string {
   for (const value of values) total += decimalInteger(value) ?? 0n;
   return total.toString();
 }
+
+export function maxExactDecimalInteger(values: Iterable<unknown>): string | null {
+  let maximum: bigint | null = null;
+  for (const value of values) {
+    const candidate = decimalInteger(value);
+    if (candidate != null && (maximum == null || candidate > maximum)) maximum = candidate;
+  }
+  return maximum?.toString() ?? null;
+}
