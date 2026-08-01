@@ -186,8 +186,8 @@ addresses all five deployment-review findings:
    presence/content, reloads systemd, and restores the prior web, worker, and
    backup-timer runtime state.
 3. `deployment_succeeded=1` is now set only after the candidate updater is
-   installed, the backup timer is enabled/started, and release pruning
-   completes.
+   installed and the backup timer is enabled/started. Release pruning runs only
+   after that transaction commit as best-effort maintenance.
 4. Updater logs now use root-owned mode-`0700`
    `/var/log/bitcraft-claim-monitor-relay` and an unpredictable `mktemp` name;
    logs are mode `0600`. A test override must name a path that does not already
@@ -211,3 +211,37 @@ The full application suite and production build were not repeated for this
 follow-up because it changes only the deployment shell script, its focused
 tests, and the runbook; no application runtime or TypeScript code changed.
 Linux-only Bash, systemd, and Caddy checks remain mandatory workflow gates.
+
+## Second P1 review follow-up
+
+A second separate follow-up on top of
+`6f8c32b9cb812674842e31e8e3833521175c273e` resolves the remaining rollback
+and pruning findings:
+
+- `restore_live_path` records both removal and copy failures.
+  `restore_live_installation` independently attempts all eleven live paths and
+  `systemctl daemon-reload`, accumulates every result, and returns nonzero if
+  any operation fails. Runtime restoration is still attempted afterward.
+- Cleanup distinguishes an attempted incomplete rollback from an unattempted
+  rollback. It never deletes an incomplete recovery snapshot; instead it emits
+  and logs the exact private snapshot path for supervised recovery.
+- The updater now commits only after unit installation/cutover health, updater
+  installation, and backup-timer enablement. The previous active release
+  therefore remains available throughout the transaction.
+- Release pruning runs after commit through a best-effort wrapper. Pruning
+  failures are warnings and cannot fail deployment or trigger rollback.
+- Focused static contracts cover error accumulation, snapshot retention,
+  finalization ordering, and post-commit pruning. Linux integration cases
+  simulate one failed restore operation and a failed prune with
+  `KEEP_RELEASES=1` plus multiple releases.
+- RED: the focused updater contracts produced 20 passes and 2 expected
+  failures before the implementation changed.
+- GREEN: focused updater contracts passed 22/22. The full targeted deployment
+  and boundary set passed 57/57 runnable tests with 14 Bash-only tests skipped
+  on this Windows host.
+- `git diff --check` passed with only expected Windows LF/CRLF notices.
+
+The application test suite and build were not repeated because this P1
+follow-up changes only the deployment shell script, deployment documentation,
+and focused deployment tests. No application runtime or TypeScript code
+changed.

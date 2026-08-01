@@ -334,14 +334,27 @@ For every requested revision the updater:
 7. Installs only Relay units, atomically switches `current`, and restarts only
    the Relay web and worker.
 8. Checks the local release version and public preview.
+9. Installs the candidate updater, enables/starts the backup timer, and commits
+   the deployment transaction.
+10. Prunes old releases as best-effort post-commit maintenance.
 
-Any failure after the live snapshot—including updater installation, backup
-timer enablement, or release pruning—restores the exact prior symlink, updater,
-helpers, and unit files, reloads systemd, and restores the prior web, worker,
-and backup-timer runtime state. Failed releases are retained for diagnosis.
-Rollback never restores SQLite automatically because that could discard writes
-accepted during deployment. Database migrations must stay backward compatible
-with the immediately previous release.
+Any failure after the live snapshot and before commit—including updater
+installation or backup-timer enablement—restores the exact prior symlink,
+updater, helpers, and unit files, reloads systemd, and restores the prior web,
+worker, and backup-timer runtime state. The previous active release cannot be
+pruned before this commit. Post-commit pruning is best effort: a pruning error
+is logged as a warning and does not fail or roll back the deployed release.
+
+If any individual restore or systemd reload operation fails, rollback continues
+attempting every remaining restore and retains its private transaction snapshot.
+The failure summary and full log print the exact recovery snapshot path for
+supervised repair. Do not delete that directory until the live installation has
+been recovered and checked.
+
+Failed releases are retained for diagnosis. Rollback never restores SQLite
+automatically because that could discard writes accepted during deployment.
+Database migrations must stay backward compatible with the immediately
+previous release.
 
 Before relying on unattended preview deployments, perform one successful
 deployment and one forced-failure rollback in a supervised window.

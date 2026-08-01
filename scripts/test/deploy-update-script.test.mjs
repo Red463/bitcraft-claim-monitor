@@ -73,7 +73,7 @@ test("Relay updater validates cutover and restores the previous release on failu
 test("Relay updater retains three releases only after success", () => {
   assert.match(script, /KEEP_RELEASES="\$\{KEEP_RELEASES:-3\}"/);
   assert.match(script, /prune_releases\(\)/);
-  assert.match(script, /prune_releases "\$release_dir"[\s\S]*deployment_succeeded=1/);
+  assert.match(script, /deployment_succeeded=1[\s\S]*post_commit_prune "\$release_dir"/);
   assert.match(script, /sudo -u "\$RUN_USER" git -C "\$SOURCE_DIR" worktree remove --force/);
   assert.match(script, /sudo -u "\$RUN_USER" git -C "\$SOURCE_DIR" worktree prune/);
 });
@@ -142,6 +142,24 @@ test("Relay updater snapshots and restores every live install target transaction
   assert.match(script, /restart_service "\$WORKER_SERVICE"/);
 });
 
+test("Relay rollback accumulates every restore failure and retains incomplete snapshots", () => {
+  const restore = script.slice(
+    script.indexOf("restore_live_installation()"),
+    script.indexOf("restore_service_runtime()"),
+  );
+  assert.match(restore, /local status=0/);
+  assert.equal((restore.match(/restore_live_path [^\n]+ \|\| status=1/g) || []).length, 11);
+  assert.match(restore, /systemctl daemon-reload \|\| status=1/);
+  assert.match(restore, /return "\$status"/);
+  assert.match(script, /rollback_attempted=1/);
+  assert.match(script, /Recovery snapshot retained at: \$transaction_dir/);
+  assert.match(script, /log_detail "\$recovery_message"/);
+  assert.match(
+    script,
+    /if \[\[ \( "\$deployment_succeeded" == "1" \|\| "\$transaction_restored" == "1" \)[\s\S]*rm -rf -- "\$transaction_dir"/,
+  );
+});
+
 test("Relay updater cannot roll back help or pre-snapshot failures", () => {
   const main = script.slice(script.indexOf("main()"));
   assert.ok(main.indexOf('parse_args "$@"') < main.indexOf("trap cleanup_deployment_transaction EXIT"));
@@ -158,12 +176,19 @@ test("Relay updater commits success only after every finalization step", () => {
   for (const required of [
     'install -m 0755 "$release_dir/deploy/update-bitcraft-claim-monitor-relay"',
     'systemctl enable --now "$BACKUP_TIMER"',
-    'prune_releases "$release_dir"',
   ]) {
     const requiredIndex = main.indexOf(required);
     assert.ok(requiredIndex >= 0, `missing finalization step: ${required}`);
     assert.ok(successIndex > requiredIndex, `success must follow: ${required}`);
   }
+  assert.ok(successIndex < main.indexOf('post_commit_prune "$release_dir"'));
+  assert.match(script, /post_commit_prune\(\)[\s\S]*if ! prune_releases "\$release_dir"/);
+  assert.match(script, /Release pruning failed after deployment commit; continuing/);
+  const prune = script.slice(script.indexOf("prune_releases()"), script.indexOf("post_commit_prune()"));
+  assert.match(prune, /local status=0/);
+  assert.match(prune, /worktree remove --force "\$path" \|\| status=1/);
+  assert.match(prune, /worktree prune \|\| status=1/);
+  assert.match(prune, /return "\$status"/);
 });
 
 test("Relay updater validates and installs only Relay units", () => {

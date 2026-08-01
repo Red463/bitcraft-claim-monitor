@@ -33,6 +33,7 @@ PUBLIC_SUMMARY="Public: skipped"
 deployment_succeeded=0
 transaction_started=0
 transaction_restored=0
+rollback_attempted=0
 transaction_dir=""
 web_was_active=0
 worker_was_active=0
@@ -323,10 +324,12 @@ restore_live_path() {
   local name="$1"
   local live_path="$2"
   local snapshot_dir="$transaction_dir/$name"
-  rm -f -- "$live_path"
+  local status=0
+  rm -f -- "$live_path" || status=1
   if [[ -f "$snapshot_dir/present" ]]; then
-    cp -a -- "$snapshot_dir/value" "$live_path"
+    cp -a -- "$snapshot_dir/value" "$live_path" || status=1
   fi
+  return "$status"
 }
 
 snapshot_live_installation() {
@@ -353,18 +356,20 @@ snapshot_live_installation() {
 }
 
 restore_live_installation() {
-  restore_live_path backup-helper "$BACKUP_HELPER_PATH"
-  restore_live_path backup-crypto-helper "$BACKUP_CRYPTO_HELPER_PATH"
-  restore_live_path privacy-replay-helper "$PRIVACY_REPLAY_HELPER_PATH"
-  restore_live_path updater "$UPDATER_PATH"
-  restore_live_path current-link "$CURRENT_LINK"
-  restore_live_path web-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service"
-  restore_live_path worker-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-worker.service"
-  restore_live_path collector-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.service"
-  restore_live_path collector-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.timer"
-  restore_live_path backup-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.service"
-  restore_live_path backup-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.timer"
-  systemctl daemon-reload
+  local status=0
+  restore_live_path backup-helper "$BACKUP_HELPER_PATH" || status=1
+  restore_live_path backup-crypto-helper "$BACKUP_CRYPTO_HELPER_PATH" || status=1
+  restore_live_path privacy-replay-helper "$PRIVACY_REPLAY_HELPER_PATH" || status=1
+  restore_live_path updater "$UPDATER_PATH" || status=1
+  restore_live_path current-link "$CURRENT_LINK" || status=1
+  restore_live_path web-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service" || status=1
+  restore_live_path worker-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-worker.service" || status=1
+  restore_live_path collector-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.service" || status=1
+  restore_live_path collector-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.timer" || status=1
+  restore_live_path backup-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.service" || status=1
+  restore_live_path backup-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.timer" || status=1
+  systemctl daemon-reload || status=1
+  return "$status"
 }
 
 restore_service_runtime() {
@@ -402,6 +407,7 @@ restore_previous_runtime() {
 rollback_deployment_transaction() {
   [[ "$transaction_started" == "1" ]] || return 0
   local status=0
+  rollback_attempted=1
   log "Restoring previous deployment transaction"
   restore_live_installation || status=1
   restore_previous_runtime || status=1
@@ -411,18 +417,29 @@ rollback_deployment_transaction() {
   return "$status"
 }
 
+report_retained_recovery_snapshot() {
+  local recovery_message="Rollback incomplete. Recovery snapshot retained at: $transaction_dir"
+  printf "%s\n" "$recovery_message" >&2
+  log_detail "$recovery_message"
+}
+
 cleanup_deployment_transaction() {
   local status=$?
   local rollback_status=0
   set +e
   if [[ "$transaction_started" == "1" \
     && "$deployment_succeeded" != "1" \
-    && "$transaction_restored" != "1" ]]; then
+    && "$transaction_restored" != "1" \
+    && "$rollback_attempted" != "1" ]]; then
     rollback_deployment_transaction
     rollback_status=$?
   fi
-  if [[ -n "$transaction_dir" && -d "$transaction_dir" ]]; then
+  if [[ ( "$deployment_succeeded" == "1" || "$transaction_restored" == "1" ) \
+    && -n "$transaction_dir" && -d "$transaction_dir" ]]; then
     rm -rf -- "$transaction_dir"
+  elif [[ "$transaction_started" == "1" && -n "$transaction_dir" && -d "$transaction_dir" ]]; then
+    report_retained_recovery_snapshot
+    rollback_status=1
   fi
   if [[ "$status" -eq 0 && "$rollback_status" -ne 0 ]]; then
     status="$rollback_status"
@@ -526,6 +543,7 @@ prune_releases() {
   active_path="$(readlink -f "$1")"
   local keep_inactive=$((KEEP_RELEASES - 1))
   local kept=0
+  local status=0
   local entry path
   local -a candidates=()
 
@@ -540,9 +558,20 @@ prune_releases() {
       continue
     fi
     run_logged "Removing old release $(basename "$path")" \
-      sudo -u "$RUN_USER" git -C "$SOURCE_DIR" worktree remove --force "$path"
+      sudo -u "$RUN_USER" git -C "$SOURCE_DIR" worktree remove --force "$path" || status=1
   done
-  sudo -u "$RUN_USER" git -C "$SOURCE_DIR" worktree prune
+  sudo -u "$RUN_USER" git -C "$SOURCE_DIR" worktree prune || status=1
+  return "$status"
+}
+
+post_commit_prune() {
+  local release_dir="$1"
+  if ! prune_releases "$release_dir"; then
+    local warning="Release pruning failed after deployment commit; continuing"
+    printf "Warning: %s. Inspect %s.\n" "$warning" "$LOG_FILE" >&2
+    log_detail "$warning"
+  fi
+  return 0
 }
 
 print_summary() {
@@ -640,7 +669,7 @@ main() {
     if rollback_deployment_transaction; then
       rollback_summary="restored $(basename "$previous_release") successfully"
     else
-      rollback_summary="failed; inspect systemd and $LOG_FILE immediately"
+      rollback_summary="failed; recovery snapshot retained at $transaction_dir; inspect systemd and $LOG_FILE immediately"
     fi
     cutover_finished="$(date +%s)"
     print_failure_summary "$previous_release" "$release_dir" "$expected_version" \
@@ -653,8 +682,8 @@ main() {
   install -m 0755 "$release_dir/deploy/update-bitcraft-claim-monitor-relay" \
     "$UPDATER_PATH"
   systemctl enable --now "$BACKUP_TIMER" >>"$LOG_FILE" 2>&1
-  prune_releases "$release_dir"
   deployment_succeeded=1
+  post_commit_prune "$release_dir"
   print_summary "$previous_release" "$release_dir" "$expected_version" \
     "$((prepare_finished - deploy_started))" "$((cutover_finished - cutover_started))"
 }

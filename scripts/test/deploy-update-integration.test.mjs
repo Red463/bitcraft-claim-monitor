@@ -172,6 +172,93 @@ test("failure after backup timer enable is restored by EXIT cleanup", { skip: !h
   }
 });
 
+test("individual restore failure attempts every path and retains the recovery snapshot", { skip: !hasBash }, () => {
+  const root = mkdtempSync(join(tmpdir(), "bitcraft-restore-failure-"));
+  const harness = `
+    set -euo pipefail
+    source "$1"
+    TEST_ROOT="$2"
+    LOG_FILE="$2/update.log"
+    transaction_dir="$2/recovery"
+    transaction_started=1
+    mkdir -p "$transaction_dir"
+    : >"$LOG_FILE"
+    restore_live_path() {
+      printf '%s\n' "$1" >>"$TEST_ROOT/restore-attempts"
+      [[ "$1" != "updater" ]]
+    }
+    systemctl() {
+      if [[ "$1" == "daemon-reload" ]]; then
+        : >"$TEST_ROOT/daemon-reload-attempted"
+      fi
+      return 0
+    }
+    restore_previous_runtime() { return 0; }
+
+    set +e
+    rollback_deployment_transaction
+    rollback_status=$?
+    cleanup_deployment_transaction
+    cleanup_status=$?
+    set -e
+
+    [[ "$rollback_status" -ne 0 ]]
+    [[ "$cleanup_status" -ne 0 ]]
+    [[ "$(wc -l <"$2/restore-attempts")" -eq 11 ]]
+    [[ -f "$2/daemon-reload-attempted" ]]
+    [[ -d "$transaction_dir" ]]
+    grep -Fq "Recovery snapshot retained at: $transaction_dir" "$LOG_FILE"
+  `;
+
+  try {
+    const result = spawnSync("bash", ["-c", harness, "test", script.pathname, root], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("KEEP_RELEASES=1 commits before best-effort prune and prune failure cannot roll back", { skip: !hasBash }, () => {
+  const root = mkdtempSync(join(tmpdir(), "bitcraft-post-commit-prune-"));
+  const harness = `
+    set -euo pipefail
+    source "$1"
+    TEST_ROOT="$2"
+    RELEASES_DIR="$2/releases"
+    KEEP_RELEASES=1
+    LOG_FILE="$2/update.log"
+    transaction_dir="$2/transaction"
+    transaction_started=1
+    mkdir -p "$RELEASES_DIR/previous" "$RELEASES_DIR/candidate" "$RELEASES_DIR/older" "$transaction_dir"
+    : >"$LOG_FILE"
+    rollback_deployment_transaction() {
+      : >"$TEST_ROOT/rollback-triggered"
+      return 0
+    }
+    prune_releases() {
+      [[ "$KEEP_RELEASES" == "1" ]]
+      [[ -d "$RELEASES_DIR/previous" && -d "$RELEASES_DIR/older" ]]
+      return 1
+    }
+
+    [[ -d "$RELEASES_DIR/previous" ]]
+    deployment_succeeded=1
+    post_commit_prune "$RELEASES_DIR/candidate"
+    cleanup_deployment_transaction
+
+    [[ -d "$RELEASES_DIR/previous" ]]
+    [[ ! -e "$2/rollback-triggered" ]]
+    grep -Fq "Release pruning failed after deployment commit; continuing" "$LOG_FILE"
+  `;
+
+  try {
+    const result = spawnSync("bash", ["-c", harness, "test", script.pathname, root], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("schema backup selection distinguishes ordinary, migration, and forced deployments", { skip: !hasBash }, () => {
   const root = mkdtempSync(join(tmpdir(), "bitcraft-schema-"));
   const previous = join(root, "previous");
