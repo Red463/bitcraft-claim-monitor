@@ -115,21 +115,38 @@ At the base revision, runtime and presentation references were concentrated in:
 - icon URL resolution in `src/utils/items.ts`;
 - legacy source labels, explanatory copy, and legal acknowledgements.
 
-The first Relay slice replaces claim/member collection and browser reads. The
-remaining references are migration inventory, not approved long-term
-dependencies. Final acceptance requires the inventory to reach zero in source,
-built bundles, routes, CSP, assets, retries, and fallbacks.
+The migration has removed the runtime dependency inventory. Automated source,
+built-bundle, route, CSP, asset, retry, and fallback checks now reject runtime
+BitJita traffic. Historical migration notes and test descriptions may retain
+the provider name as evidence, but they are not executable dependencies.
 
 ## External evidence gates
 
 - The repository owner's confirmation in
-  [`asset-permission.md`](./asset-permission.md) satisfies the permission gate
-  for vendoring the icons. The files, source identities, and digests still
-  need to be acquired and verified before the local-asset gate can pass.
+  [`asset-permission.md`](./asset-permission.md) satisfies the permission gate.
+  The local manifest now verifies 1,191 vendored source-available icons and
+  records 480 upstream-unavailable assets with text fallback.
 - Relay operator production intent, HTTP/WebSocket limits, multi-region load,
   schema-change channel, and incident expectations have not yet been recorded.
 - The seven-day observation period cannot begin until useful parity is deployed
   at `relay.timbersteeltrade.com`.
+
+## Current completion-audit evidence
+
+- Every fresh SQLite table has an explicit live-first ownership decision in
+  [`table-inventory.md`](./table-inventory.md). Every table declared retired is
+  absent from bootstrap and present in the idempotent cleanup migration; an
+  automated boundary test enforces both directions.
+- Relay preview web, worker, collector, backup, environment, data, and Caddy
+  configuration use the isolated relay service identity and port `19430`.
+  Preview Discord delivery is record-only.
+- The latest full production build passed, including server/provider
+  compilation and the local-asset digest check. The complete suite passed
+  1,504 tests before the SQL ownership boundary added two further passing
+  tests.
+- The remaining functional evidence gates are the approved Buy Order Finder
+  presentation, authoritative siege completion semantics, production Relay
+  operator confirmation, and the seven-day preview soak/cutover drill.
 
 ## Implemented foundation evidence
 
