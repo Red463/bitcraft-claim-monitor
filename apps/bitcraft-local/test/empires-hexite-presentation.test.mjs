@@ -83,6 +83,23 @@ test("live treasury presentation keeps an exact large decimal in its detail and 
   assert.doesNotMatch(result.details.join("\n"), /90,071,992,547,409,940,000/);
 });
 
+test("live Foundry presentation includes completed Capsules without claiming inventory coverage", () => {
+  const result = presentHexiteReserveSummary(liveEmpireHexiteProjection({
+    treasury: "5000",
+    foundryCapsules: "25",
+    memberCount: 4,
+    claimCount: 1,
+    observedAt: "2026-07-19T10:00:00.000Z",
+  }));
+
+  assert.match(result.primary, /30\.0K tower energy/);
+  assert.equal(result.secondary, "5.0K HE + 25 Capsules");
+  assert.match(result.status, /Inventory coverage incomplete/);
+  assert.match(result.details.join("\n"), /25 completed in Empire Foundries/);
+  assert.doesNotMatch(result.details.join("\n"), /Foundry.*unavailable/i);
+  assert.match(result.details.join("\n"), /Player wallets and storage: unavailable/);
+});
+
 test("combined Hexite summary distinguishes reused and missing inventory sources", () => {
   const reused = structuredClone(fullyCoveredLegacySnapshot);
   reused.coverage.players = { fresh: 316, reused: 1, missing: 0, total: 317 };

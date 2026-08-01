@@ -1,5 +1,5 @@
 const REQUIRED_DOMAINS = ["claim", "members", "inventories", "market"];
-const RELEVANT_DOMAINS = new Set(REQUIRED_DOMAINS);
+const RELEVANT_DOMAINS = new Set([...REQUIRED_DOMAINS, "construction"]);
 const DEFAULT_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
 
 class SettlementSourceValidationError extends Error {
@@ -67,6 +67,32 @@ function readCompleteSettlement(readDomainSnapshot, claimId, event) {
     }
     snapshots[domain] = snapshot;
   }
+  const construction = readDomainSnapshot(claimId, "construction");
+  if (construction?.data) {
+    const generation = validGeneration(construction.generation);
+    if (generation == null) {
+      throw sourceValidationError("Relay settlement construction snapshot generation is malformed");
+    }
+    if (
+      construction.confidence === "partial"
+      || construction.confidence === "unknown"
+    ) {
+      throw sourceValidationError("Relay settlement construction snapshot is incomplete");
+    }
+    if (event.changedDomains.includes("construction") && generation < event.generation) {
+      throw sourceValidationError("Relay settlement construction snapshot is stale");
+    }
+    const constructionData = record(construction.data);
+    if (!constructionData || !Array.isArray(constructionData.buildings)) {
+      throw sourceValidationError("Relay settlement construction snapshot is malformed");
+    }
+    if (constructionData.buildings.some((value) => (
+      normalizedClaimId(record(value)?.claimEntityId) !== claimId
+    ))) {
+      throw sourceValidationError("Relay settlement construction escaped the configured claim");
+    }
+    snapshots.construction = construction;
+  }
   return snapshots;
 }
 
@@ -101,19 +127,22 @@ function composeSummary(snapshots, claimId) {
   if (normalizedClaimId(market.claimId) !== claimId) {
     throw sourceValidationError("Relay settlement market escaped the configured claim");
   }
+  const construction = snapshots.construction == null
+    ? null
+    : record(snapshots.construction.data);
 
   return {
     claimId,
     supplies: exactInteger(claim.supplies, "claim supplies"),
     treasury: exactInteger(claim.treasury, "claim treasury"),
     membersCount: members.length,
-    buildingsCount: null,
+    buildingsCount: construction == null ? null : construction.buildings.length,
     marketCount: market.listings.length,
   };
 }
 
 function generationVector(snapshots) {
-  return REQUIRED_DOMAINS
+  return [...REQUIRED_DOMAINS, ...(snapshots.construction ? ["construction"] : [])]
     .map((domain) => `${domain}:${snapshots[domain].generation}`)
     .join("|");
 }

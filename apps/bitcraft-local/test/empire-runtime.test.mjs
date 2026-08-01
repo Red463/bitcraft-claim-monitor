@@ -74,6 +74,7 @@ test("Empire runtime atomically merges only configured regional generations", as
   const handlers = new Map();
   const sessionConfigs = new Map();
   const writes = [];
+  let stored = null;
   const runtime = new runtimeModule.RelayEmpireRuntime({
     manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
     discoverTopology: async () => topology(),
@@ -86,9 +87,12 @@ test("Empire runtime atomically merges only configured regional generations", as
       health: () => ({ connected: true, applied: true, stage: "live" }),
     }),
     currentStateRepository: {
-      read: () => null,
+      read: () => stored,
       nextGeneration: () => writes.length + 1,
-      commitGeneration: (batch) => writes.push(batch),
+      commitGeneration: (batch) => {
+        writes.push(batch);
+        stored = batch.domains.empires;
+      },
     },
     poolOptions: {
       maxSessions: 2,
@@ -145,6 +149,42 @@ test("Empire runtime atomically merges only configured regional generations", as
     ["19", "190"],
   ]);
   assert.deepEqual(combined.regions.map((row) => row.regionId), ["7", "19"]);
+  assert.equal(combined.foundries, null);
+
+  await runtime.updateGlobalFoundries({
+    foundries: [{
+      entityId: "7001",
+      empireEntityId: "190",
+      hexiteCapsules: "12",
+      queued: "2",
+      startedAt: "2026-06-04T17:55:57.807Z",
+    }],
+    warnings: [],
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 4,
+    receivedAt: "2026-07-30T18:02:15.000Z",
+  });
+  assert.equal(writes.length, 3);
+  assert.equal(writes[2].domains.empires.data.foundries[0].hexiteCapsules, "12");
+
+  await runtime.updateGlobalFoundries({
+    foundries: [{
+      entityId: "7001",
+      empireEntityId: "190",
+      hexiteCapsules: "13",
+      queued: "1",
+      startedAt: "2026-06-04T17:55:57.807Z",
+    }],
+    warnings: [],
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 5,
+    receivedAt: "2026-07-30T18:02:30.000Z",
+  });
+  assert.equal(writes.length, 4);
+  assert.equal(writes[3].domains.empires.data.foundries[0].hexiteCapsules, "13");
+  assert.equal(writes[3].domains.empires.provenance.sourceKey, "global");
 
   await assert.rejects(
     async () => handlers.get("19")({

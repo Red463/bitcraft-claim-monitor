@@ -129,6 +129,13 @@ function fakeBindings() {
       }]),
       buffDesc: cachedTable([]),
       claimTechDesc: cachedTable([]),
+      empireFoundryState: cachedTable([{
+        entityId: 7001n,
+        empireEntityId: 501n,
+        hexiteCapsules: 12,
+        queued: 2,
+        started: { microsSinceUnixEpoch: 1780595757807377n },
+      }]),
       regionPopulationInfo: cachedTable([{
         regionId: 19,
         signedInPlayers: 42,
@@ -246,6 +253,7 @@ test("typed global catalog session subscribes narrowly and emits normalized item
     "SELECT * FROM tool_desc",
     "SELECT * FROM buff_desc",
     "SELECT * FROM claim_tech_desc",
+    "SELECT * FROM empire_foundry_state",
     "SELECT * FROM region_population_info",
     "SELECT * FROM region_control_info",
     "SELECT * FROM world_region_name_state",
@@ -359,7 +367,15 @@ test("typed global catalog session subscribes narrowly and emits normalized item
       signedInPlayers: 42,
       playersInQueue: 3,
     }],
-    changed: ["catalogs", "region"],
+    foundries: [{
+      entityId: "7001",
+      empireEntityId: "501",
+      hexiteCapsules: "12",
+      queued: "2",
+      startedAt: "2026-06-04T17:55:57.807Z",
+    }],
+    foundryWarnings: [],
+    changed: ["catalogs", "region", "empire-foundries"],
     database: "relay-mirror-bc-global",
     schemaFingerprint: "global-v1",
     generation: 9,
@@ -376,6 +392,15 @@ test("typed global catalog session subscribes narrowly and emits normalized item
   assert.deepEqual(snapshots[1].changed, ["region"]);
   assert.deepEqual(snapshots[1].entities, []);
   assert.deepEqual(snapshots[1].descriptions, {});
+  assert.deepEqual(snapshots[1].foundries, []);
+
+  fake.connection.db.empireFoundryState.triggerUpdate();
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 3);
+  assert.deepEqual(snapshots[2].changed, ["empire-foundries"]);
+  assert.equal(snapshots[2].foundries[0].hexiteCapsules, "12");
 
   fake.state.onDisconnect({}, undefined);
   assert.equal(session.health().state, "disconnected");

@@ -1,6 +1,7 @@
 import {
   normalizeCatalogDescription,
   normalizeCatalogEntity,
+  normalizeGlobalEmpireFoundries,
   normalizeGlobalRegions,
   type CatalogDescriptionKind,
 } from "./normalizers.ts";
@@ -25,6 +26,7 @@ export const GLOBAL_CATALOG_QUERIES = [
   "SELECT * FROM tool_desc",
   "SELECT * FROM buff_desc",
   "SELECT * FROM claim_tech_desc",
+  "SELECT * FROM empire_foundry_state",
   "SELECT * FROM region_population_info",
   "SELECT * FROM region_control_info",
   "SELECT * FROM world_region_name_state",
@@ -56,6 +58,7 @@ type BindingConnection = {
   db: Record<string, CachedTable> & {
     itemDesc: CachedTable;
     cargoDesc: CachedTable;
+    empireFoundryState: CachedTable;
     regionPopulationInfo: CachedTable;
     regionControlInfo: CachedTable;
     worldRegionNameState: CachedTable;
@@ -83,7 +86,9 @@ export type GlobalCatalogSnapshot = {
   entities: ReturnType<typeof normalizeCatalogEntity>[];
   descriptions: Record<CatalogDescriptionKind, ReturnType<typeof normalizeCatalogDescription>[]>;
   regions: ReturnType<typeof normalizeGlobalRegions>;
-  changed: Array<"catalogs" | "region">;
+  foundries: ReturnType<typeof normalizeGlobalEmpireFoundries>["data"];
+  foundryWarnings: string[];
+  changed: Array<"catalogs" | "region" | "empire-foundries">;
   database: string;
   schemaFingerprint: string;
   generation: number;
@@ -145,6 +150,7 @@ export class RelayGlobalCatalogSession {
   #listenersAttached = false;
   readonly #catalogChanged = () => this.#queueSnapshot("catalogs");
   readonly #regionChanged = () => this.#queueSnapshot("region");
+  readonly #foundryChanged = () => this.#queueSnapshot("empire-foundries");
   #health = {
     state: "stopped" as "stopped" | "connecting" | "connected" | "disconnected",
     connected: false,
@@ -188,7 +194,7 @@ export class RelayGlobalCatalogSession {
         this.#health.lastError = null;
         this.#subscription = connection.subscriptionBuilder()
           .onApplied(() => {
-            this.#applySnapshot(connection, new Set(["catalogs", "region"]));
+            this.#applySnapshot(connection, new Set(["catalogs", "region", "empire-foundries"]));
             this.#attachTableListeners(connection);
           })
           .onError((_context, error) => this.#recordError(error))
@@ -236,6 +242,9 @@ export class RelayGlobalCatalogSession {
             [...connection.db.worldRegionNameState.iter()],
           )
         : [];
+      const foundries = changed.has("empire-foundries")
+        ? normalizeGlobalEmpireFoundries([...connection.db.empireFoundryState.iter()])
+        : { data: [], warnings: [] };
       const receivedAt = this.#now().toISOString();
       const generation = this.#nextGeneration;
       this.#nextGeneration += 1;
@@ -244,6 +253,8 @@ export class RelayGlobalCatalogSession {
         entities,
         descriptions,
         regions,
+        foundries: foundries.data,
+        foundryWarnings: foundries.warnings,
         changed: [...changed],
         database: config.database,
         schemaFingerprint: config.schemaFingerprint,
@@ -285,6 +296,9 @@ export class RelayGlobalCatalogSession {
       table.onUpdate?.(this.#regionChanged);
       table.onDelete?.(this.#regionChanged);
     }
+    connection.db.empireFoundryState.onInsert?.(this.#foundryChanged);
+    connection.db.empireFoundryState.onUpdate?.(this.#foundryChanged);
+    connection.db.empireFoundryState.onDelete?.(this.#foundryChanged);
     this.#listenersAttached = true;
   }
 
@@ -300,6 +314,9 @@ export class RelayGlobalCatalogSession {
       table.removeOnUpdate?.(this.#regionChanged);
       table.removeOnDelete?.(this.#regionChanged);
     }
+    this.#connection.db.empireFoundryState.removeOnInsert?.(this.#foundryChanged);
+    this.#connection.db.empireFoundryState.removeOnUpdate?.(this.#foundryChanged);
+    this.#connection.db.empireFoundryState.removeOnDelete?.(this.#foundryChanged);
     this.#listenersAttached = false;
   }
 

@@ -45,6 +45,24 @@ test("live Empire Hexite projection publishes an exact treasury minimum immediat
   });
 });
 
+test("live Empire Hexite projection adds completed global Foundry capsules to the known minimum", () => {
+  const projection = liveEmpireHexiteProjection({
+    treasury: "5000",
+    foundryCapsules: "25",
+    memberCount: 4,
+    claimCount: 1,
+    observedAt: "2026-07-19T09:00:00.000Z",
+  });
+
+  assert.equal(projection.estimatedEnergyEquivalent, "30000");
+  assert.equal(projection.energy.total, "5000");
+  assert.equal(projection.capsules.foundry, "25");
+  assert.equal(projection.capsules.readyTotal, "25");
+  assert.equal(projection.coverage.foundry, "complete");
+  assert.equal(projection.errors.some((error) => /Foundry output is not available/i.test(error)), false);
+  assert.equal(projection.errors.some((error) => /inventory joins are not available/i.test(error)), true);
+});
+
 test("live Empire Hexite projection never invents invalid counts or amounts", () => {
   const projection = liveEmpireHexiteProjection({
     treasury: "not-an-amount",

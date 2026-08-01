@@ -17,15 +17,23 @@ function observedAt(value) {
 
 export function liveEmpireHexiteProjection({
   treasury,
+  foundryCapsules,
   memberCount,
   claimCount,
   observedAt: sourceObservedAt,
 } = {}) {
   const exactTreasury = decimalAmount(treasury);
+  const exactFoundryCapsules = decimalAmount(foundryCapsules);
   const players = count(memberCount);
   const claims = count(claimCount);
+  const estimatedEnergyEquivalent = exactTreasury == null
+    ? null
+    : (
+        BigInt(exactTreasury)
+        + (BigInt(exactFoundryCapsules ?? "0") * BigInt(HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE))
+      ).toString();
   return {
-    estimatedEnergyEquivalent: exactTreasury,
+    estimatedEnergyEquivalent,
     capsuleEnergyCost: null,
     capsuleWatchtowerEnergyValue: HEXITE_CAPSULE_WATCHTOWER_ENERGY_VALUE,
     energy: {
@@ -38,13 +46,13 @@ export function liveEmpireHexiteProjection({
       playerInventories: null,
       sharedClaimInventories: null,
       reserveBuildings: null,
-      foundry: null,
-      readyTotal: null,
+      foundry: exactFoundryCapsules,
+      readyTotal: exactFoundryCapsules,
     },
     coverage: {
       players: { fresh: 0, reused: 0, missing: players, total: players },
       claims: { fresh: 0, reused: 0, missing: claims, total: claims },
-      foundry: "unavailable",
+      foundry: exactFoundryCapsules == null ? "unavailable" : "complete",
     },
     status: exactTreasury == null ? "error" : "partial",
     sweepStartedAt: null,
@@ -53,7 +61,7 @@ export function liveEmpireHexiteProjection({
     errors: [
       ...(exactTreasury == null ? ["Empire treasury amount is unavailable."] : []),
       "Live regional player and claim inventory joins are not available yet.",
-      "Completed Foundry output is not available.",
+      ...(exactFoundryCapsules == null ? ["Completed Foundry output is not available."] : []),
     ],
   };
 }

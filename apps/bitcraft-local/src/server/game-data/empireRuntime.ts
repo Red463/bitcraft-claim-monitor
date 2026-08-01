@@ -83,6 +83,13 @@ type NodeRow = Record<string, unknown> & {
   empireEntityId: string;
   regionId: string;
 };
+type FoundryRow = Record<string, unknown> & {
+  entityId: string;
+  empireEntityId: string;
+  hexiteCapsules: string;
+  queued: string;
+  startedAt: string | null;
+};
 type RegionState = {
   empires: EmpireRow[];
   members: MemberRow[];
@@ -103,6 +110,7 @@ export type EmpireCombinedData = {
   settlements: SettlementRow[];
   claimMembers: ClaimMemberRow[];
   nodes: NodeRow[];
+  foundries: FoundryRow[] | null;
   regions: Array<{
     regionId: string;
     empireCount: number;
@@ -164,6 +172,8 @@ export class RelayEmpireRuntime {
   readonly #onSnapshotCommitted: RuntimeDependencies["onSnapshotCommitted"];
   readonly #regions = new Map<string, RegionState>();
   readonly #sourceErrors = new Map<string, string>();
+  #globalFoundries: FoundryRow[] | null = null;
+  #globalFoundryWarnings: string[] = [];
   readonly #activeSessionIds = new Map<string, number>();
   #pool: AdaptiveRegionSessionPool | null = null;
   #relayBaseUrl: string | null = null;
@@ -218,6 +228,91 @@ export class RelayEmpireRuntime {
       primaryRegionId,
       activeRegionIds,
     };
+  }
+
+  async updateGlobalFoundries(snapshot: {
+    foundries: unknown[];
+    warnings: string[];
+    database: string;
+    schemaFingerprint: string;
+    generation: number;
+    receivedAt: string;
+  }): Promise<void> {
+    const foundries = snapshot.foundries.map((value, index) => {
+      const row = asRecord(value);
+      const entityId = decimalInteger(row.entityId, `Relay Empire Foundry ${index} entity id`);
+      const empireEntityId = decimalInteger(
+        row.empireEntityId,
+        `Relay Empire Foundry ${index} Empire id`,
+      );
+      const hexiteCapsules = decimalInteger(
+        row.hexiteCapsules,
+        `Relay Empire Foundry ${index} completed Capsules`,
+      );
+      const queued = decimalInteger(row.queued, `Relay Empire Foundry ${index} queued Capsules`);
+      const startedAt = row.startedAt == null ? null : String(row.startedAt).trim();
+      if (startedAt !== null && !Number.isFinite(Date.parse(startedAt))) {
+        throw new TypeError(`Relay Empire Foundry ${index} startedAt is invalid`);
+      }
+      return {
+        ...row,
+        entityId,
+        empireEntityId,
+        hexiteCapsules,
+        queued,
+        startedAt,
+      } as FoundryRow;
+    });
+    const entityIds = new Set(foundries.map(({ entityId }) => entityId));
+    if (entityIds.size !== foundries.length) {
+      throw new TypeError("Relay Empire Foundry generation contains duplicate entity ids");
+    }
+    const committedFoundries = foundries.sort((left, right) => (
+      numericStringOrder(left.empireEntityId, right.empireEntityId)
+      || numericStringOrder(left.entityId, right.entityId)
+    ));
+    this.#globalFoundries = committedFoundries;
+    const committedWarnings = snapshot.warnings.map(String);
+    this.#globalFoundryWarnings = committedWarnings;
+    if (!this.#started || !this.#claimId) return;
+    const claimId = this.#claimId;
+    const commit = this.#commitTail.then(async () => {
+      if (!this.#started || this.#claimId !== claimId) return;
+      const stored = this.#currentStateRepository.read?.(claimId, "empires");
+      const storedData = asRecord(stored?.data);
+      if (!stored || !Array.isArray(storedData.activeRegionIds)) return;
+      const retainedWarnings = (stored.warnings ?? [])
+        .filter((warning) => !String(warning).startsWith("Global Foundry:"));
+      const warnings = [
+        ...retainedWarnings,
+        ...committedWarnings.map((warning) => `Global Foundry: ${warning}`),
+      ];
+      await this.#currentStateRepository.commitGeneration({
+        claimId,
+        generation: this.#currentStateRepository.nextGeneration(claimId),
+        domains: {
+          empires: {
+            data: {
+              ...storedData,
+              foundries: [...committedFoundries],
+            },
+            confidence: warnings.length ? "partial" : stored.confidence,
+            provenance: {
+              provider: "relay",
+              sourceKey: "global",
+              regionId: null,
+              database: snapshot.database,
+              schemaFingerprint: snapshot.schemaFingerprint,
+              sourceObservedAt: null,
+              receivedAt: snapshot.receivedAt,
+            },
+            warnings,
+          },
+        },
+      });
+    });
+    this.#commitTail = commit.catch(() => {});
+    await commit;
   }
 
   async start(config: RuntimeConfig): Promise<void> {
@@ -468,6 +563,7 @@ export class RelayEmpireRuntime {
       ...this.#activeRegionIds.flatMap((regionId) => (
         (nextRegions.get(regionId)?.warnings ?? []).map((warning) => `Region ${regionId}: ${warning}`)
       )),
+      ...this.#globalFoundryWarnings.map((warning) => `Global Foundry: ${warning}`),
     ];
     const sortEntities = <T extends { regionId: string }>(
       values: T[],
@@ -496,6 +592,7 @@ export class RelayEmpireRuntime {
       settlements: sortEntities(settlements, (row) => row.buildingEntityId),
       claimMembers: sortEntities(claimMembers, (row) => row.entityId),
       nodes: sortEntities(nodes, (row) => row.entityId),
+      foundries: this.#globalFoundries == null ? null : [...this.#globalFoundries],
       regions: this.#activeRegionIds.flatMap((regionId) => {
         const region = nextRegions.get(regionId);
         if (!region) return [];
@@ -583,6 +680,7 @@ export class RelayEmpireRuntime {
       settlements,
       claimMembers,
       nodes,
+      foundries: this.#globalFoundries == null ? null : [...this.#globalFoundries],
       regions: this.#activeRegionIds.flatMap((regionId) => {
         const region = this.#regions.get(regionId);
         if (!region) return [];

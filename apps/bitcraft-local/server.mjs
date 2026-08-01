@@ -494,6 +494,10 @@ const relayGlobalCatalogRuntime = new RelayGlobalCatalogRuntime({
   manifest: relayBindingManifest,
   catalogRepository: providerCatalogRepository,
   currentStateRepository,
+  onEmpireFoundries: (snapshot) => relayEmpireRuntime.updateGlobalFoundries({
+    ...snapshot,
+    warnings: snapshot.foundryWarnings,
+  }),
 });
 const relayPrimaryRegionRuntime = new RelayPrimaryRegionRuntime({
   manifest: relayBindingManifest,
@@ -5008,9 +5012,17 @@ function relayEmpireRegionalClaims(claimId, regionId) {
   return String(data?.regionId ?? "") === String(regionId) ? data : null;
 }
 
-function relayEmpireHexiteForView(_empireId, empire, observedAt) {
+function relayEmpireHexiteForView(empireId, empire, observedAt) {
+  const current = relayEmpireCurrentData();
+  const foundries = Array.isArray(current?.foundries)
+    ? current.foundries.filter((row) => String(row?.empireEntityId ?? "") === String(empireId))
+    : null;
+  const foundryCapsules = foundries == null
+    ? null
+    : foundries.reduce((total, row) => total + BigInt(String(row.hexiteCapsules)), 0n).toString();
   return liveEmpireHexiteProjection({
     treasury: empire?.empireCurrencyTreasury,
+    foundryCapsules,
     memberCount: empire?.memberCount,
     claimCount: empire?.numClaims,
     observedAt,

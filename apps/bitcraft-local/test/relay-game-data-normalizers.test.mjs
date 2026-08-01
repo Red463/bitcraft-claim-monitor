@@ -25,6 +25,7 @@ const {
   normalizeRegionalPlayers,
   normalizeRegionalRecruitment,
   normalizeRegionalResearch,
+  normalizeGlobalEmpireFoundries,
   normalizeGlobalRegions,
   normalizeStorageLogs,
   normalizeTimestamp,
@@ -1172,6 +1173,52 @@ test("global region rows join population, control, and player-facing names", () 
     signedInPlayers: 42,
     playersInQueue: 3,
   }]);
+});
+
+test("global Empire Foundry rows preserve exact identity and completed capsule counts", () => {
+  assert.deepEqual(normalizeGlobalEmpireFoundries([
+    {
+      entityId: 1008806316623100408n,
+      empireEntityId: 4085486n,
+      hexiteCapsules: 125,
+      queued: 3,
+      started: { microsSinceUnixEpoch: 1780595757807377n },
+    },
+    {
+      entity_id: "2",
+      empire_entity_id: "9",
+      hexite_capsules: -1,
+      queued: 0,
+      started: { __timestamp_micros_since_unix_epoch__: "1780595757807377" },
+    },
+    {
+      entityId: 3n,
+      empireEntityId: 9n,
+      hexiteCapsules: 0,
+      queued: 0,
+      started: { microsSinceUnixEpoch: 0n },
+    },
+  ]), {
+    data: [
+      {
+        entityId: "1008806316623100408",
+        empireEntityId: "4085486",
+        hexiteCapsules: "125",
+        queued: "3",
+        startedAt: "2026-06-04T17:55:57.807Z",
+      },
+      {
+        entityId: "3",
+        empireEntityId: "9",
+        hexiteCapsules: "0",
+        queued: "0",
+        startedAt: null,
+      },
+    ],
+    warnings: [
+      "Global empire_foundry_state omitted row 1: global Empire Foundry 1 completed Capsules must be non-negative.",
+    ],
+  });
 });
 
 test("claim technology descriptions retain progression caps and automatic unlocks", () => {

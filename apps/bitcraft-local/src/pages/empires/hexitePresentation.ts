@@ -166,6 +166,7 @@ export function presentHexiteReserveSummary(
 
   const energy = optionalDecimalValue(value.energy?.total);
   const capsules = optionalDecimalValue(value.capsules?.readyTotal);
+  const foundryCapsules = optionalDecimalValue(value.capsules?.foundry);
   if (value.status === "error" || energy == null) {
     const details = [
       "The live Relay treasury amount is unavailable.",
@@ -224,13 +225,15 @@ export function presentHexiteReserveSummary(
     `Known Watchtower energy: at least ${formatted(knownTotal)}`,
     `Stored HE: ${formatted(energy)} total`,
     `Treasury: ${formatted(value.energy?.treasury)} HE`,
-    `Player wallets and storage: ${formatted(value.energy?.playerInventories)} HE`,
-    `Shared claim storage: ${formatted(value.energy?.sharedClaimInventories)} HE`,
-    `Ready Capsules: ${formatted(capsules)}; ${formatted(value.capsules?.reserveBuildings)} in Hexite Reserve buildings`,
+    `Player wallets and storage: ${formattedOptional(value.energy?.playerInventories, " HE")}`,
+    `Shared claim storage: ${formattedOptional(value.energy?.sharedClaimInventories, " HE")}`,
+    `Ready Capsule known minimum: ${formatted(capsules)}; ${formattedOptional(value.capsules?.reserveBuildings)} in Hexite Reserve buildings`,
+    foundryCapsules == null
+      ? "Completed Foundry Capsules are unavailable in the current Relay projection and are excluded."
+      : `${formatted(foundryCapsules)} completed in Empire Foundries`,
     `Capsules cost ${cost} HE to craft and provide ${formatted(WATCHTOWER_ENERGY_PER_CAPSULE)} Watchtower energy when deployed.`,
     coverageDetails("Player", value.coverage?.players),
     coverageDetails("Claim", value.coverage?.claims),
-    "Completed Foundry Capsules are unavailable in the current Relay projection and are excluded.",
   ];
   if (Array.isArray(value.errors) && value.errors.length) {
     details.push(`Data limitations: ${value.errors.slice(0, 3).join("; ")}`);
@@ -258,6 +261,7 @@ export function presentHexiteReserveMetric(
 
   const capsules = number(value.capsules?.readyTotal);
   const reserveCapsules = number(value.capsules?.reserveBuildings);
+  const foundryCapsules = optionalNumber(value.capsules?.foundry);
   const watchtowerValue = number(value.capsuleWatchtowerEnergyValue);
   const status = value.status === "complete" ? "Complete" : "Partial";
   const detail = `${status} · ${coveragePercent(value)}% inventory coverage · ${ageLabel(value.calculatedAt, nowMs)}`;
@@ -288,7 +292,9 @@ export function presentHexiteReserveMetric(
   if (metric === "capsules") {
     return {
       primary: formatted(metricTotal),
-      secondary: `${formatted(reserveCapsules)} in Hexite Reserves`,
+      secondary: optionalNumber(value.capsules?.reserveBuildings) == null
+        ? `${formatted(foundryCapsules)} completed in Foundries`
+        : `${formatted(reserveCapsules)} in Hexite Reserves`,
       detail,
       sortValue: metricTotal,
       tone,
@@ -341,8 +347,10 @@ export function describeHexiteReserveMetric(
         ];
   } else if (metric === "capsules") {
     lines = [
-      `${formatted(value.capsules?.readyTotal)} ready Capsules; ${formatted(value.capsules?.reserveBuildings)} in Hexite Reserves.`,
-      "Hexite Reserve Capsules are included in the ready total, not added again.",
+      `${formatted(value.capsules?.readyTotal)} ready Capsule known minimum; ${formattedOptional(value.capsules?.reserveBuildings)} in Hexite Reserves.`,
+      value.capsules?.foundry == null
+        ? "Completed Foundry Capsules are unavailable."
+        : `${formatted(value.capsules.foundry)} completed in Empire Foundries.`,
     ];
   } else {
     lines = optionalNumber(value.capsules?.readyTotal) == null
@@ -365,7 +373,11 @@ export function describeHexiteReserveMetric(
         ];
   }
 
-  lines.push("Completed Foundry Capsules are unavailable in the current Relay projection and are excluded.");
+  lines.push(
+    value.capsules?.foundry == null
+      ? "Completed Foundry Capsules are unavailable in the current Relay projection and are excluded."
+      : `${formatted(value.capsules.foundry)} completed in Empire Foundries.`,
+  );
   if (Array.isArray(value.errors) && value.errors.length) lines.push(`Data limitations: ${value.errors.slice(0, 3).join("; ")}`);
   return lines.join("\n");
 }

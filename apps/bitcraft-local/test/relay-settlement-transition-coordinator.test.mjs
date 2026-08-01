@@ -127,6 +127,53 @@ test("settlement transitions wait for all four valid claim-fenced domains", asyn
   ]);
 });
 
+test("settlement transitions count live construction buildings without making them a required source", async () => {
+  const snapshots = settlementSnapshots();
+  snapshots.construction = {
+    generation: 2,
+    data: {
+      projects: [],
+      buildings: [
+        { entityId: "building-1", claimEntityId: "claim-1" },
+        { entityId: "building-2", claimEntityId: "claim-1" },
+      ],
+    },
+  };
+  const applied = [];
+  const failures = [];
+  const coordinator = createRelaySettlementTransitionCoordinator({
+    configuredClaimId: () => "claim-1",
+    readDomainSnapshot: (_claimId, domain) => snapshots[domain],
+    applySettlementTransition: async (_claimId, summary) => applied.push(summary),
+    onFailure: (error) => failures.push(error.message),
+  });
+
+  assert.equal(coordinator.onCommit({
+    claimId: "claim-1",
+    generation: 2,
+    changedDomains: ["construction"],
+  }), true);
+  await coordinator.whenIdle();
+  assert.equal(applied[0].buildingsCount, 2);
+
+  snapshots.construction = {
+    generation: 3,
+    data: {
+      projects: [],
+      buildings: [{ entityId: "building-3", claimEntityId: "other-claim" }],
+    },
+  };
+  coordinator.onCommit({
+    claimId: "claim-1",
+    generation: 3,
+    changedDomains: ["construction"],
+  });
+  await coordinator.whenIdle();
+
+  assert.equal(applied.length, 1);
+  assert.deepEqual(failures, ["Relay settlement construction escaped the configured claim"]);
+});
+
 test("settlement transition notifications return before side effects settle", async () => {
   const snapshots = settlementSnapshots();
   let releaseApply;

@@ -12,6 +12,7 @@ test("global catalog runtime discovers topology and atomically publishes reposit
   assert.ok(runtimeModule, "global catalog runtime module must exist");
   const catalogWrites = [];
   const domainWrites = [];
+  const foundryWrites = [];
   let startedConfig = null;
   let snapshotHandler = null;
   const session = {
@@ -47,6 +48,7 @@ test("global catalog runtime discovers topology and atomically publishes reposit
       nextGeneration: () => 21,
       commitGeneration: (batch) => domainWrites.push(batch),
     },
+    onEmpireFoundries: (snapshot) => foundryWrites.push(snapshot),
   });
 
   await runtime.start({
@@ -89,7 +91,15 @@ test("global catalog runtime discovers topology and atomically publishes reposit
       signedInPlayers: 42,
       playersInQueue: 2,
     }],
-    changed: ["catalogs", "region"],
+    foundries: [{
+      entityId: "7001",
+      empireEntityId: "501",
+      hexiteCapsules: "12",
+      queued: "2",
+      startedAt: "2026-06-04T17:55:57.807Z",
+    }],
+    foundryWarnings: [],
+    changed: ["catalogs", "region", "empire-foundries"],
     database: "relay-global",
     schemaFingerprint: "global-v1",
     generation: 8,
@@ -97,6 +107,8 @@ test("global catalog runtime discovers topology and atomically publishes reposit
   });
 
   assert.equal(catalogWrites.length, 1);
+  assert.equal(foundryWrites.length, 1);
+  assert.equal(foundryWrites[0].foundries[0].hexiteCapsules, "12");
   assert.deepEqual(catalogWrites[0].metadata, {
     provider: "relay",
     database: "relay-global",
@@ -205,6 +217,28 @@ test("global catalog runtime discovers topology and atomically publishes reposit
   assert.equal(catalogWrites.length, 1, "population updates must not rewrite the catalog");
   assert.deepEqual(Object.keys(domainWrites[1].domains), ["region"]);
   assert.equal(domainWrites[1].domains.region.data.regions[0].signedInPlayers, 43);
+
+  await snapshotHandler({
+    entities: [],
+    descriptions: {},
+    regions: [],
+    foundries: [{
+      entityId: "7001",
+      empireEntityId: "501",
+      hexiteCapsules: "13",
+      queued: "1",
+      startedAt: "2026-06-04T17:55:57.807Z",
+    }],
+    foundryWarnings: [],
+    changed: ["empire-foundries"],
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 10,
+    receivedAt: "2026-07-29T20:22:00.000Z",
+  });
+  assert.equal(foundryWrites.length, 2);
+  assert.equal(foundryWrites[1].foundries[0].hexiteCapsules, "13");
+  assert.equal(domainWrites.length, 2, "Foundry-only changes must not publish an empty browser domain generation");
 });
 
 test("global catalog runtime refuses an unavailable global source without constructing a session", async () => {

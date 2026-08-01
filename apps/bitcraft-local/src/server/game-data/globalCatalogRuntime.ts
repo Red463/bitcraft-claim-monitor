@@ -55,6 +55,10 @@ type RuntimeDependencies = {
   manifest: BindingManifest;
   catalogRepository: CatalogRepository;
   currentStateRepository: CurrentStateRepository;
+  onEmpireFoundries?: (snapshot: Pick<
+    GlobalCatalogSnapshot,
+    "foundries" | "foundryWarnings" | "database" | "schemaFingerprint" | "generation" | "receivedAt"
+  >) => Promise<void> | void;
   discoverTopology?: (
     baseUrl: string,
     options?: RelayTopologyDiscoveryOptions,
@@ -105,6 +109,7 @@ export class RelayGlobalCatalogRuntime {
   readonly #createSession: CatalogSessionFactory;
   readonly #now: () => number;
   readonly #topologyRefreshMs: number;
+  readonly #onEmpireFoundries: RuntimeDependencies["onEmpireFoundries"];
   #session: CatalogSession | null = null;
   #relayBaseUrl: string | null = null;
   #claimId: string | null = null;
@@ -127,6 +132,7 @@ export class RelayGlobalCatalogRuntime {
       ?? ((options) => new RelayGlobalCatalogSession(options));
     this.#now = dependencies.now ?? Date.now;
     this.#topologyRefreshMs = dependencies.topologyRefreshMs ?? 60_000;
+    this.#onEmpireFoundries = dependencies.onEmpireFoundries;
   }
 
   async start(config: { relayBaseUrl: string; claimId: string }): Promise<void> {
@@ -260,11 +266,23 @@ export class RelayGlobalCatalogRuntime {
           warnings: [],
         };
       }
-      await this.#currentStateRepository.commitGeneration({
-        claimId,
-        generation: this.#currentStateRepository.nextGeneration(claimId),
-        domains,
-      });
+      if (Object.keys(domains).length) {
+        await this.#currentStateRepository.commitGeneration({
+          claimId,
+          generation: this.#currentStateRepository.nextGeneration(claimId),
+          domains,
+        });
+      }
+      if (snapshot.changed.includes("empire-foundries")) {
+        await this.#onEmpireFoundries?.({
+          foundries: snapshot.foundries,
+          foundryWarnings: snapshot.foundryWarnings,
+          database: snapshot.database,
+          schemaFingerprint: snapshot.schemaFingerprint,
+          generation: snapshot.generation,
+          receivedAt: snapshot.receivedAt,
+        });
+      }
       const health = this.#session?.health();
       await this.#currentStateRepository.recordSubscriptionHealth?.({
         sourceKey: "global",

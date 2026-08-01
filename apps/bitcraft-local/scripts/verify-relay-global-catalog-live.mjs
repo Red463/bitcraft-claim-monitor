@@ -69,6 +69,15 @@ try {
       `Relay catalog snapshot was incomplete: ${itemCount} items, ${cargoCount} cargo`,
     );
   }
+  if (snapshot.foundryWarnings.length) {
+    throw new Error(
+      `Relay global Empire Foundry rows were malformed: ${snapshot.foundryWarnings.join("; ")}`,
+    );
+  }
+  const foundryCapsules = snapshot.foundries.reduce(
+    (total, row) => total + BigInt(row.hexiteCapsules),
+    0n,
+  ).toString();
   const entityIconUrls = snapshot.entities
     .map((entity) => gameIconUrl(entity))
     .filter(Boolean);
@@ -155,6 +164,8 @@ try {
     missingEntityIconCount,
     sharedEntityIconCount: entityIconUrls.length - uniqueEntityIconUrls.size,
     sampleEntityIconUrls: [...uniqueEntityIconUrls].slice(0, 5),
+    empireFoundryCount: snapshot.foundries.length,
+    completedFoundryCapsules: foundryCapsules,
     descriptionCounts,
     workstationPresetCount: workstationPresets.length,
     workstationCount,

@@ -136,6 +136,62 @@ export function normalizeGlobalRegions(
   });
 }
 
+export function normalizeGlobalEmpireFoundries(values: unknown[]) {
+  const data = [];
+  const warnings: string[] = [];
+  for (const [index, value] of values.entries()) {
+    try {
+      const row = record(value, `global Empire Foundry ${index}`);
+      const hexiteCapsules = integer(
+        row.hexiteCapsules ?? row.hexite_capsules,
+        `global Empire Foundry ${index} completed Capsules`,
+      );
+      const queued = integer(
+        row.queued,
+        `global Empire Foundry ${index} queued Capsules`,
+      );
+      if (hexiteCapsules < 0) {
+        throw new TypeError(
+          `global Empire Foundry ${index} completed Capsules must be non-negative.`,
+        );
+      }
+      if (queued < 0) {
+        throw new TypeError(
+          `global Empire Foundry ${index} queued Capsules must be non-negative.`,
+        );
+      }
+      const timestamp = record(row.started, `global Empire Foundry ${index} started timestamp`);
+      const startedMicros = decimalString(
+        timestamp.__timestamp_micros_since_unix_epoch__
+          ?? timestamp.microsSinceUnixEpoch
+          ?? timestamp.micros_since_unix_epoch,
+        `global Empire Foundry ${index} started timestamp`,
+      );
+      const startedAt = BigInt(startedMicros) === 0n
+        ? null
+        : normalizeTimestamp(startedMicros, "microseconds");
+      data.push({
+        entityId: decimalString(
+          row.entityId ?? row.entity_id,
+          `global Empire Foundry ${index} entity id`,
+        ),
+        empireEntityId: decimalString(
+          row.empireEntityId ?? row.empire_entity_id,
+          `global Empire Foundry ${index} Empire id`,
+        ),
+        hexiteCapsules: String(hexiteCapsules),
+        queued: String(queued),
+        startedAt,
+      });
+    } catch (error) {
+      warnings.push(
+        `Global empire_foundry_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return { data, warnings };
+}
+
 export function normalizeRegionalClaims(options: {
   regionId: string;
   claimRows: unknown[];

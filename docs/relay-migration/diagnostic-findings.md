@@ -714,10 +714,20 @@ current row per Empire rather than preserving append-only history. None of the
 five tables therefore has independent ownership after the crawl is removed.
 
 They are retired together with the scheduled job. Each complete typed Empire
-generation already contains the exact treasury amount, so the local Empire
-views now publish that value immediately as a known minimum. Missing player
-and claim inventories, ready Capsules, and completed Foundry output are
-reported as unavailable and are never coerced to zero.
+generation already contains the exact treasury amount. The continuously
+connected global session also subscribes to `empire_foundry_state` and
+publishes completed Foundry Capsules into the same current Empire projection
+as soon as either source changes. Local Empire views therefore publish the
+exact treasury plus completed Foundry Capsules immediately as a known minimum.
+Missing player and claim inventories and their ready Capsules are reported as
+unavailable and are never coerced to zero.
+
+The 2026-08-01 live diagnostic observed 197 Foundry entities across 157 Empire
+IDs, with at most five Foundries for one Empire, 20,466 completed Capsules, and
+900 queued Capsules. Six idle rows used `started = 0` as a sentinel; the
+normalizer preserves those rows with `startedAt: null` instead of treating the
+sentinel as a malformed timestamp. Entity IDs remain the unique row identity,
+and Capsule totals are aggregated by `empire_entity_id`.
 
 The regional `inventory_state` schema exposes owner fields and inventory
 pockets, but complete bounded joins across all Empire players and aligned
@@ -728,8 +738,8 @@ immediately without hiding that limitation or recreating a scheduled crawl.
 ## Remaining diagnostic blockers
 
 - attacker/defender meaning and completion semantics for empire siege rows;
-- bounded multi-region player/claim inventory and Foundry joins for complete
-  Hexite reserve aggregation.
+- bounded multi-region player/claim inventory joins for complete Hexite reserve
+  aggregation.
 
 ## Claim-market completed-sale evidence — 2026-08-01
 
@@ -844,3 +854,19 @@ The runtime callback and unit/integration fixtures prove event-driven
 evaluation and zero price-history requests. A fresh production-session apply
 proof remains pending because region 19 readiness continued to flap during the
 2026-07-30 verifier attempts; last-good behavior remains the safe fallback.
+
+## Activity and structure history ownership
+
+The retained Activity and chart records now have event-driven Relay owners.
+Storage-log rows are copied durably from the bounded Relay tail; production
+lifecycle, completed-sale evidence, listing transitions, craft contributions,
+Empire membership, and settlement summary changes run after their normalized
+generation commits. None of these writers owns or delays current page data.
+
+The regional `construction` generation is an optional settlement-transition
+input. Once available, its claim-fenced `building_state` rows provide the
+structure count and immediately restore building-count change history. It is
+not one of the four required claim/member/inventory/market inputs, so an
+initial construction delay cannot hold supplies, treasury, membership, market
+history, or any browser response. Malformed, partial, stale, or cross-claim
+construction data preserves the last checkpoint instead of inventing a count.

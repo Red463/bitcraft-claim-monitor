@@ -203,10 +203,11 @@ the primary identity source plus the region being viewed. No Empire-specific
 current SQL table exists. Unproven siege participant roles remain explicitly
 unknown. The legacy six-hour Empire Hexite sweep and its five current/work
 tables are retired: each committed Empire generation now publishes the exact
-treasury amount immediately as a clearly labelled known minimum. Player and
-claim inventory joins plus completed Foundry output remain unavailable until
-bounded regional joins are proven; the app does not invent those amounts or
-make users wait for a scheduled crawl.
+treasury amount immediately, while the continuously subscribed global Foundry
+generation adds completed Capsules to the same clearly labelled known minimum
+as soon as either source changes. Player and claim inventory joins remain
+unavailable until bounded regional joins are proven; the app does not invent
+those amounts or make users wait for a scheduled crawl.
 
 Implementation is dependency-ordered:
 
