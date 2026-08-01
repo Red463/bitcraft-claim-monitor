@@ -2288,10 +2288,114 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(completedOnArrivalActivity.events.filter((event) => event.event_type === "production_started").length, 0);
   assert.equal(completedOnArrivalActivity.events.some((event) => event.event_type === "production_started" && event.summary.includes("Collected Station")), false);
   craftProgressOverride = null;
+  const confirmedSaleOccurredAt = new Date(Date.now() - 60_000).toISOString();
+  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (marketDb) => {
+    const snapshot = JSON.parse(marketDb.prepare(
+      "SELECT data_json FROM domain_payload_current WHERE claim_id = ? AND domain = 'regional-market'",
+    ).get(claimId).data_json);
+    snapshot.orders.push({
+      entityId: "buy-cargo-43",
+      claimEntityId: "4003",
+      claimName: "Cargo Market",
+      regionId: "19",
+      regionName: "Zephra",
+      ownerEntityId: "5006",
+      ownerUsername: "Cargo Buyer",
+      itemId: "43",
+      itemType: 1,
+      price: "25",
+      priceThreshold: "25",
+      quantity: "8",
+      storedCoins: "200",
+      timestamp: confirmedSaleOccurredAt,
+      side: "buy",
+    });
+    marketDb.prepare(
+      "UPDATE domain_payload_current SET data_json = ? WHERE claim_id = ? AND domain = 'regional-market'",
+    ).run(JSON.stringify(snapshot), claimId);
+    marketDb.prepare(`
+      INSERT OR REPLACE INTO game_catalog_entities (
+        catalog_key, kind, target_id, item_type, name, tag, tier, rarity,
+        icon_asset_name, item_list_id, updated_at
+      ) VALUES ('cargo:43', 'cargo', '43', 1, 'Leather', 'Leather Cargo', 2, 'Common',
+        NULL, NULL, ?)
+    `).run(confirmedSaleOccurredAt);
+    const insertConfirmedSale = marketDb.prepare(`
+      INSERT OR REPLACE INTO market_trades (
+        trade_id, claim_id, region_id, order_entity_id, seller_entity_id,
+        seller_username, purchaser_entity_id, purchaser_username, item_id,
+        item_type, item_name, quantity, unit_price, total_price, tier, rarity,
+        occurred_at, imported_at, raw_json
+      ) VALUES (?, ?, ?, ?, 'seller-43', 'Cargo Seller', NULL, 'Cargo Buyer', '43',
+        'cargo', 'Leather', '1', ?, ?, 2, 'Common', ?, ?, '{}')
+    `);
+    for (let sale = 1; sale <= 3; sale += 1) {
+      insertConfirmedSale.run(
+        `relay_closed_listing:19:cargo-43-sale-${sale}`,
+        claimId,
+        "19",
+        `cargo-43-order-${sale}`,
+        "20",
+        "20",
+        confirmedSaleOccurredAt,
+        confirmedSaleOccurredAt,
+      );
+    }
+    insertConfirmedSale.run(
+      "relay_closed_listing:9:cargo-43-sale-noise",
+      claimId,
+      "9",
+      "cargo-43-order-noise",
+      "999",
+      "999",
+      confirmedSaleOccurredAt,
+      confirmedSaleOccurredAt,
+    );
+  });
   const buyOrdersAfterSales = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=premium&direction=desc`).then((response) => response.json());
-  assert.equal(buyOrdersAfterSales.opportunities.length, 0);
-  assert.equal(buyOrdersAfterSales.rows[0].opportunityEligible, false);
-  assert.equal(buyOrdersAfterSales.rows[0].premiumPercent, null);
+  assert.equal(buyOrdersAfterSales.rows[0].salesCount, 3);
+  assert.equal(buyOrdersAfterSales.rows[0].itemType, "cargo");
+  assert.equal(buyOrdersAfterSales.rows[0].averageUnitPrice, "20");
+  assert.equal(buyOrdersAfterSales.rows[0].premiumPercent, "25");
+  assert.equal(buyOrdersAfterSales.rows[0].opportunityEligible, true);
+  assert.deepEqual(
+    buyOrdersAfterSales.opportunities.map((row) => row.orderKey),
+    [buyOrdersAfterSales.rows[0].orderKey],
+  );
+  assert.equal(buyOrdersAfterSales.baselineWindowDays, 7);
+  assert.equal(buyOrdersAfterSales.minimumSales, 3);
+
+  await writeDatabaseWithRetry(
+    path.join(dataDir, "bitcraft-local.sqlite"),
+    (marketDb) => marketDb.exec(
+      "ALTER TABLE market_trades RENAME TO market_trades_unavailable_for_test",
+    ),
+  );
+  try {
+    const buyOrdersWithoutHistory = await fetch(
+      `${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25`,
+    ).then((response) => response.json());
+    const cargoOrderWithoutHistory = buyOrdersWithoutHistory.rows.find(
+      (row) => row.orderKey === "buy-cargo-43",
+    );
+    assert.equal(cargoOrderWithoutHistory?.unitPrice, "25");
+    assert.equal(buyOrdersWithoutHistory.freshness, buyOrdersAfterSales.freshness);
+    assert.match(
+      buyOrdersWithoutHistory.warnings.join(" "),
+      /confirmed-sale history is temporarily unavailable/i,
+    );
+    assert.equal(
+      new Set(buyOrdersWithoutHistory.warnings).size,
+      buyOrdersWithoutHistory.warnings.length,
+    );
+  } finally {
+    await writeDatabaseWithRetry(
+      path.join(dataDir, "bitcraft-local.sqlite"),
+      (marketDb) => marketDb.exec(
+        "ALTER TABLE market_trades_unavailable_for_test RENAME TO market_trades",
+      ),
+    );
+  }
 
   const browserSnapshot = await fetch(`${origin}/api/local/snapshot`, {
     method: "POST",

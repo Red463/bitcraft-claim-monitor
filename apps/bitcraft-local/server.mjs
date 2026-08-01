@@ -24,6 +24,10 @@ import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAl
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { gameTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
 import { currentMarketListings, marketLeaderboardFromCurrent } from "./src/server/currentMarketViews.mjs";
+import {
+  buyOrderBaselineKey,
+  readBuyOrderSaleBaselines,
+} from "./src/server/buyOrderSaleBaselines.mjs";
 import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
@@ -5642,23 +5646,71 @@ function marketHistory(claimId, limit, owner = "") {
   return { liveListings, events, sales, topItems, daily, totals, pending };
 }
 
+function currentBuyOrderBaselineKeys(snapshot, regionId, allowedRegionIds) {
+  const allowed = new Set(allowedRegionIds.map(String));
+  const selected = String(regionId ?? "all").toLowerCase();
+  return new Set((Array.isArray(snapshot?.orders) ? snapshot.orders : [])
+    .filter((order) => String(order?.side ?? "buy").toLowerCase() !== "sell")
+    .filter((order) => {
+      const orderRegion = String(order?.regionId ?? "");
+      return (!allowed.size || allowed.has(orderRegion))
+        && (selected === "all" || orderRegion === selected);
+    })
+    .map((order) => buyOrderBaselineKey(
+      order.regionId,
+      order.itemType,
+      order.itemId,
+    )));
+}
+
 function marketBuyOrders(claimId, params = {}, allowedRegionIds = []) {
   const id = String(claimId ?? "").trim();
   const current = currentStateRepository.read(id, "regional-market");
   const runtimeHealth = relayRegionalMarketRuntime.health();
+  let history = {
+    baselines: new Map(),
+    historyObservedSince: null,
+    warnings: [],
+  };
+  try {
+    history = readBuyOrderSaleBaselines(db, {
+      claimId: id,
+      allowedRegionIds,
+      itemKeys: currentBuyOrderBaselineKeys(
+        current?.data,
+        params.regionId,
+        allowedRegionIds,
+      ),
+    });
+  } catch (error) {
+    history.warnings = [
+      `Confirmed-sale history is temporarily unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    ];
+  }
+  const view = regionalBuyOrdersView(current?.data, {
+    ...params,
+    allowedRegionIds,
+    observedAt: current?.provenance?.receivedAt ?? null,
+    getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    saleBaselines: history.baselines,
+    historyObservedSince: history.historyObservedSince,
+  });
+  const status = regionalMarketStatus(current, {
+    regionId: params.regionId,
+    allowedRegionIds,
+    runtimeHealth,
+    staleAfterMs: relayRegionalMarketStaleMs,
+  });
   return {
-    ...regionalBuyOrdersView(current?.data, {
-      ...params,
-      allowedRegionIds,
-      observedAt: current?.provenance?.receivedAt ?? null,
-      getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
-    }),
-    ...regionalMarketStatus(current, {
-      regionId: params.regionId,
-      allowedRegionIds,
-      runtimeHealth,
-      staleAfterMs: relayRegionalMarketStaleMs,
-    }),
+    ...view,
+    ...status,
+    warnings: [...new Set([
+      ...(view.warnings ?? []),
+      ...history.warnings,
+      ...(status.warnings ?? []),
+    ])],
     generatedAt: current?.provenance?.receivedAt ?? null,
     runtimeHealth,
   };
