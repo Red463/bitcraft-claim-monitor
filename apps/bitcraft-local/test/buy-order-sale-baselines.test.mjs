@@ -20,6 +20,8 @@ function database() {
       total_price TEXT NOT NULL,
       occurred_at TEXT NOT NULL
     );
+    CREATE INDEX idx_market_trades_claim_region_item_time
+      ON market_trades (claim_id, region_id, item_id, item_type, occurred_at DESC);
   `);
   return db;
 }
@@ -151,6 +153,12 @@ test("rejects zero and negative exact sale values before they count toward the b
 
 test("selects only requested typed item keys and regions from SQLite", () => {
   const sqlite = database();
+  sqlite.exec(`
+    CREATE INDEX idx_market_trades_claim_time
+      ON market_trades (claim_id, occurred_at DESC);
+    CREATE INDEX idx_market_trades_claim_item_time
+      ON market_trades (claim_id, item_id, item_type, occurred_at DESC);
+  `);
   const now = "2026-08-01T11:00:00.000Z";
   const common = { claimId: "claim", quantity: "1", totalPrice: "10", occurredAt: now };
   insert(sqlite, {
@@ -158,8 +166,16 @@ test("selects only requested typed item keys and regions from SQLite", () => {
     regionId: "19", itemId: "43", itemType: "cargo",
   });
   insert(sqlite, {
+    ...common, tradeId: "relay_closed_listing:19:requested-cargo-legacy",
+    regionId: "19", itemId: "43", itemType: "1",
+  });
+  insert(sqlite, {
     ...common, tradeId: "relay_closed_listing:19:wrong-type",
     regionId: "19", itemId: "43", itemType: "item",
+  });
+  insert(sqlite, {
+    ...common, tradeId: "relay_closed_listing:19:wrong-type-legacy",
+    regionId: "19", itemId: "43", itemType: "0",
   });
   insert(sqlite, {
     ...common, tradeId: "relay_closed_listing:19:wrong-item",
@@ -195,12 +211,22 @@ test("selects only requested typed item keys and regions from SQLite", () => {
 
   assert.deepEqual(selectedRows.map((row) => row.tradeId), [
     "relay_closed_listing:19:requested-cargo",
+    "relay_closed_listing:19:requested-cargo-legacy",
   ]);
   assert.match(selectedSql, /json_each\s*\(\s*\?\s*\)/);
   assert.ok(
     selectedArgs.some((arg) => String(arg).includes('"itemType":"cargo"')),
     "typed requested keys must be bound as data",
   );
+  const plan = sqlite.prepare(`EXPLAIN QUERY PLAN ${selectedSql}`)
+    .all(...selectedArgs)
+    .map((row) => row.detail)
+    .join("\n");
+  assert.match(
+    plan,
+    /idx_market_trades_claim_region_item_time \(claim_id=\? AND region_id=\? AND item_id=\? AND item_type=\?/,
+  );
+  assert.doesNotMatch(plan, /idx_market_trades_claim_time/);
 });
 
 test("binds large requested item-key sets without one SQLite parameter per key", () => {
