@@ -154,9 +154,18 @@ the provider name as evidence, but they are not executable dependencies.
   unavailable history leaves current orders visible. No legacy current-order,
   regional-average, price-snapshot, or scheduled-insight table/job was
   restored as a render prerequisite.
-- The remaining functional evidence gates are authoritative siege completion
-  semantics, production Relay operator confirmation, and the seven-day preview
-  soak/cutover drill.
+- The maintained 2026-08-01 siege verifier matched the checked-in global and
+  regional fingerprints, derived 24 exact Region 19 Empire IDs, and read 5,106
+  rows through one indexed equality subscription. Its 392 siege rows produced
+  22 exact paired starts, nine attacker wins, and 14 defender wins. Current
+  attacker/defender roles and successful/failed outcomes are implemented
+  without a siege SQL table or scheduler.
+- The remaining functional evidence gate inside Empire parity is cancellation:
+  Relay exposes no authoritative cancellation signal, so unmatched removals
+  remain `removed_or_unknown`. Empire parity stays in progress pending
+  controlled/operator evidence or explicit owner approval to retire cancelled
+  outcome parity. Production Relay operator confirmation and the seven-day
+  preview soak/cutover drill also remain required.
 
 ## Implemented foundation evidence
 

@@ -1083,16 +1083,49 @@ Mox/Shimmerscale Sanctuary, and Shurima Empire/Lunar Legion. This proves that
 the siege-row Empire is the marking/attacking participant in all three
 observed fixtures; it does not turn an inactive row into completion evidence.
 
-### Proven and still blocked
+### Maintained verifier confirmation
 
-The schema plus live pairs are sufficient to implement authoritative
-started, attacker-success/defender-failure, and
-attacker-failure/defender-success events for configured Empires. Runtime
-ingestion must use the indexed recipient IDs derived from the configured
-regional generation, durably copy new events because upstream retention is
-not contracted, and pair only exact timestamp plus exact replacement-array
-matches. A missing counterpart remains partial; it must not be guessed from a
-historical current owner.
+At `2026-08-01T18:58:28.197Z`, the maintained read-only verifier repeated the
+proof against the current Relay:
+
+```powershell
+node apps/bitcraft-local/scripts/verify-relay-siege-notifications-live.mjs
+```
+
+Topology discovery again returned `bitcraft-live-19` and
+`bitcraft-live-global` with the exact regional and global fingerprints in the
+checked-in schema manifest. Generated regional bindings reduced the live rows
+to 55 local settlements, 58 local nodes, and three local siege rows. Their
+settlement owners, node owners, and siege attackers produced an exact scope of
+24 Empire IDs. One indexed equality subscription for those IDs loaded 5,106
+notification rows; there was no unbounded notification-state query.
+
+The scoped rows contained 392 recognized siege notifications from
+`2026-02-28T09:14:09.000Z` through `2026-07-30T19:01:31.000Z`. Exact timestamp
+and replacement-tuple matching reproduced 22 paired starts, nine attacker-win
+outcomes, and 14 defender-win outcomes. Ninety-two terminal rows lacked an
+exact retained counterpart and remained warnings rather than being assigned
+an outcome. The verifier reported `cancellationSemantics: "unavailable"`.
+
+The maintained verifier rejects schema-fingerprint drift, an empty or
+unbounded Empire scope, malformed notification rows, ambiguous pairings, and
+a live window that no longer retains at least one of each proven pair. It
+prints topology identities, fingerprints, bounded counts, and exact Empire
+IDs only; it reads no application secrets and performs no mutation.
+
+### Proven and still gated
+
+The runtime now implements the proven mapping. Current regional siege rows
+identify `empire_node_siege_state.empire_entity_id` as the attacker and the
+joined node owner as the defender. The existing global connection subscribes
+to notification state only through indexed recipient IDs derived from
+complete configured regional generations. It publishes only exact
+timestamp-plus-replacement counterpart pairs, retains the last complete
+compact outcome projection across scope replacement or reconnect, and stores
+it only inside the generic atomic `empires` generation. No raw notification
+mirror, siege cache, work table, or scheduled acquisition job was added. A
+missing counterpart remains partial and is never guessed from a historical
+owner.
 
 Cancellation remains unproven. There is no cancellation notification variant,
 description template, or outcome field. A `MarkedForSiege` row without a
