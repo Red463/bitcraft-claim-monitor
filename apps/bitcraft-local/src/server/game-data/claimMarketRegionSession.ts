@@ -32,6 +32,7 @@ type BindingConnection = {
     sellOrderState: CachedTable;
     buyOrderState: CachedTable;
     marketplaceState: CachedTable;
+    closedListingState: CachedTable;
     playerUsernameState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
@@ -198,6 +199,7 @@ export class RelayClaimMarketRegionSession {
             `SELECT * FROM sell_order_state WHERE claim_entity_id = ${claimId}`,
             `SELECT * FROM buy_order_state WHERE claim_entity_id = ${claimId}`,
             `SELECT * FROM marketplace_state WHERE claim_entity_id = ${claimId}`,
+            `SELECT * FROM closed_listing_state WHERE claim_entity_id = ${claimId}`,
           ]);
       })
       .onConnectError((_context, error) => this.#recordError(error))
@@ -213,6 +215,7 @@ export class RelayClaimMarketRegionSession {
     const orders = [
       ...rows(connection.db.sellOrderState),
       ...rows(connection.db.buyOrderState),
+      ...rows(connection.db.closedListingState),
     ];
     if (orders.length > config.maxOrders) {
       throw new Error(
@@ -270,9 +273,10 @@ export class RelayClaimMarketRegionSession {
       const sellRows = rows(connection.db.sellOrderState);
       const buyRows = rows(connection.db.buyOrderState);
       const marketplaceRows = rows(connection.db.marketplaceState);
+      const closedRows = rows(connection.db.closedListingState);
       const usernameRows = rows(connection.db.playerUsernameState);
       const rowCount = sellRows.length + buyRows.length
-        + marketplaceRows.length + usernameRows.length;
+        + marketplaceRows.length + closedRows.length + usernameRows.length;
       if (rowCount > config.maxApplyRows) {
         throw new Error(
           `Relay market apply row budget ${config.maxApplyRows} exceeded by ${rowCount} rows`,
@@ -283,6 +287,7 @@ export class RelayClaimMarketRegionSession {
         regionId: config.regionId,
         sellRows,
         buyRows,
+        closedRows,
         marketplaceRows,
         usernameRows,
       });
@@ -347,6 +352,7 @@ export class RelayClaimMarketRegionSession {
       connection.db.sellOrderState,
       connection.db.buyOrderState,
       connection.db.marketplaceState,
+      connection.db.closedListingState,
     ]) {
       table.onInsert?.(this.#baseChanged);
       table.onUpdate?.(this.#baseChanged);
@@ -364,6 +370,7 @@ export class RelayClaimMarketRegionSession {
       this.#connection.db.sellOrderState,
       this.#connection.db.buyOrderState,
       this.#connection.db.marketplaceState,
+      this.#connection.db.closedListingState,
     ]) {
       table.removeOnInsert?.(this.#baseChanged);
       table.removeOnUpdate?.(this.#baseChanged);

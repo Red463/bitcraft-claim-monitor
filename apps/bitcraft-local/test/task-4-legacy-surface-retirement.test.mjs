@@ -84,21 +84,9 @@ test("legacy proxy and helper routes and their acquisition caches are absent", (
   }
 });
 
-test("only the two blocked evidence paths may call fetchBitjita", () => {
+test("server has no legacy upstream fetch transport", () => {
   const server = source("server.mjs");
-  const calls = server
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.includes("fetchBitjita(") && !line.startsWith("async function fetchBitjita("));
-
-  assert.ok(calls.length > 0);
-  for (const call of calls) {
-    assert.match(
-      call,
-      /\/crafts\/\$\{encodeURIComponent\(key\)\}\/contributions|\/market\/player\/\$\{playerId\}\/(?:trades|history)/,
-      `unexpected BitJita acquisition: ${call}`,
-    );
-  }
+  assert.doesNotMatch(server, /fetchBitjita|BITJITA_API_ORIGIN|BITJITA_FETCH_TIMEOUT_MS/);
 });
 
 test("Discord operational commands use committed Relay snapshots and local craft catalogs", () => {
@@ -126,14 +114,14 @@ test("Craft Plan save reconciles committed Relay buildings without an upstream r
   assert.match(server, /readRelayClaimBuildingsForPlanning/);
 });
 
-test("current-data copy names Relay while legal disclosure retains BitJita evidence processing", () => {
+test("current-data and legal copy identify Relay as the game-data provider", () => {
   const appShell = source("src/AppShell.tsx");
   const tour = source("src/tour/firstRunTour.ts");
   const health = source("src/components/admin/ServerHealthSection.tsx");
   const legal = source("src/components/main/LegalDialogs.tsx");
 
   assert.match(appShell, /Data: BitCraft Relay/);
-  assert.doesNotMatch(tour, /live BitJita data/);
-  assert.match(health, /BitJita evidence/i);
-  assert.match(legal, /BitJita API/);
+  assert.doesNotMatch(tour, /legacy game-data provider/i);
+  assert.doesNotMatch(health, /evidence requests/i);
+  assert.match(legal, /live craft-contribution events/i);
 });

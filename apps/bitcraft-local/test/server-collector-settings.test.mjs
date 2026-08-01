@@ -10,7 +10,7 @@ import {
   reconciliationHistoryTables,
 } from "../src/server/collectorSettings.mjs";
 
-test("collector settings discard retired current-domain settings while preserving evidence reconcilers", () => {
+test("collector settings discard every retired game-data acquisition setting", () => {
   const settings = normalizeCollectorSettings({
     claim: { enabled: false, intervalSeconds: "5" },
     members: { intervalMs: 45000 },
@@ -19,43 +19,28 @@ test("collector settings discard retired current-domain settings while preservin
     unknown: { enabled: false, intervalSeconds: 15 },
   });
 
-  assert.deepEqual(Object.keys(settings), ["productionContributions", "marketTrades"]);
+  assert.deepEqual(settings, {});
   assert.equal(Object.hasOwn(settings, "research"), false);
   assert.equal(Object.hasOwn(settings, "market"), false);
-  assert.deepEqual(settings.productionContributions, {
-    label: "Production contribution reconciliation (blocked upstream mapping)",
-    enabled: true,
-    intervalSeconds: 300,
-  });
   assert.equal(Object.hasOwn(settings, "unknown"), false);
 });
 
-test("collector configuration describes only reconciliation history rather than current data", () => {
+test("collector configuration has no scheduled game-data acquisition owner", () => {
   const browserDefaults = readFileSync(
     new URL("../src/settingsDefaults.ts", import.meta.url),
     "utf8",
   );
   const adminDisplay = readFileSync(new URL("../src/components/admin/adminDisplay.ts", import.meta.url), "utf8");
 
-  assert.deepEqual(Object.keys(domainCollectorDefaults), ["productionContributions", "marketTrades"]);
-  assert.deepEqual(reconciliationHistoryTables, {
-    productionContributions: ["production_jobs", "production_contributions"],
-    marketTrades: ["market_trades"],
-  });
+  assert.deepEqual(domainCollectorDefaults, {});
+  assert.deepEqual(reconciliationHistoryTables, {});
   assert.doesNotMatch(browserDefaults, /\b(?:claim|members|players|professions|production|inventory|mapCatalog|region|empireMembership)\s*:\s*\{\s*label:/);
   assert.doesNotMatch(adminDisplay, /\b(?:claim|members|players|professions|production|inventory|market|research|region|mapCatalog|empireMembership):\s*"/);
-});
-
-test("side-effect collector intervals do not monopolize production", () => {
-  assert.equal(domainCollectorDefaults.productionContributions.intervalSeconds, 300);
-  assert.equal(domainCollectorDefaults.marketTrades.intervalSeconds, 60);
 });
 
 test("reconciliation status and cadence exclude live commit side effects", () => {
   const settings = normalizeCollectorSettings({});
   const statuses = {
-    productionContributions: { nextRunAt: null },
-    marketTrades: { nextRunAt: null },
     production: { source: "relay-commits", nextRunAt: null },
     settlementTransitions: { source: "relay-commits", nextRunAt: null },
     empireMembership: { source: "relay-subscription", nextRunAt: null },
@@ -63,10 +48,8 @@ test("reconciliation status and cadence exclude live commit side effects", () =>
   const nextRunAt = "2026-07-31T12:05:00.000Z";
   const visible = reconciliationCollectorStatuses(settings, statuses);
 
-  assert.deepEqual(Object.keys(visible), ["productionContributions", "marketTrades"]);
+  assert.deepEqual(visible, {});
   applyReconciliationSchedule(settings, statuses, nextRunAt);
-  assert.equal(statuses.productionContributions.nextRunAt, nextRunAt);
-  assert.equal(statuses.marketTrades.nextRunAt, nextRunAt);
   assert.equal(statuses.production.nextRunAt, null);
   assert.equal(statuses.settlementTransitions.nextRunAt, null);
   assert.equal(statuses.empireMembership.nextRunAt, null);
@@ -146,13 +129,7 @@ test("empire membership history is subscription-driven without a scheduled colle
   assert.doesNotMatch(source, /fetchBitjita\([^\n]*\/empires/);
 });
 
-test("collector settings still clamp submitted intervals to the existing bounds", () => {
-  const normalized = normalizeCollectorSettings({ productionContributions: { intervalSeconds: 2 } });
-
-  assert.equal(normalized.productionContributions.intervalSeconds, 15);
-});
-
-test("only the two explicit evidence reconcilers retain a configurable polling cadence", () => {
+test("retired reconciliation keys are not restored from saved settings", () => {
   const normalized = normalizeCollectorSettings({
     claim: { enabled: false, intervalSeconds: 15 },
     members: { enabled: false, intervalSeconds: 15 },
@@ -162,18 +139,9 @@ test("only the two explicit evidence reconcilers retain a configurable polling c
     marketTrades: { enabled: true, intervalSeconds: 99999 },
   });
 
-  assert.deepEqual(Object.keys(domainCollectorDefaults), ["productionContributions", "marketTrades"]);
-  assert.deepEqual(Object.keys(normalized), ["productionContributions", "marketTrades"]);
-  assert.deepEqual(normalized.productionContributions, {
-    label: "Production contribution reconciliation (blocked upstream mapping)",
-    enabled: false,
-    intervalSeconds: 15,
-  });
-  assert.deepEqual(normalized.marketTrades, {
-    label: "Completed member-sale reconciliation (blocked upstream mapping)",
-    enabled: true,
-    intervalSeconds: 3600,
-  });
+  assert.deepEqual(domainCollectorDefaults, {});
+  assert.deepEqual(normalized, {});
+  assert.equal(Object.hasOwn(normalized, "marketTrades"), false);
 });
 
 test("periodic reconciliation has no legacy current-domain writer", () => {
@@ -189,17 +157,32 @@ test("periodic reconciliation has no legacy current-domain writer", () => {
   assert.doesNotMatch(prepared, /\b(?:domainPayloadsByClaim|domainPayload|upsertDomainPayload|updateDomainPayloadError)\b/);
   assert.doesNotMatch(polling, /(?:fetchBitjita|fetchAllClaimListings|settlementProductionCrafts|playerDetailSummaries|upsertDomainPayload)/);
 });
-test("production lifecycle follows committed Relay crafts while contribution sync keeps its cadence", () => {
+
+test("completed sales are Relay-native and have no BitJita reconciler or schedule", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const session = readFileSync(
+    new URL("../src/server/game-data/claimMarketRegionSession.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(session, /closed_listing_state/);
+  assert.doesNotMatch(source, /\/market\/player\//);
+  assert.doesNotMatch(source, /\b(?:runMarketTradeCollector|importMemberSellTrades|marketTradeBackfillKey)\b/);
+  assert.doesNotMatch(source, /\bmarketTrades\b/);
+});
+
+test("production lifecycle and contributions follow committed Relay state without a scheduled acquisition job", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const session = readFileSync(
+    new URL("../src/server/game-data/primaryRegionPlayerSession.ts", import.meta.url),
+    "utf8",
+  );
   const activityStart = source.indexOf("async function runProductionActivityCollector");
-  const contributionStart = source.indexOf("async function runProductionContributionCollector");
   const snapshotStart = source.indexOf("async function collectServerSnapshot");
-  const activityFunction = source.slice(activityStart, contributionStart);
-  const contributionFunction = source.slice(contributionStart, snapshotStart);
+  const activityFunction = source.slice(activityStart, snapshotStart);
 
   assert.ok(activityStart > -1);
-  assert.ok(contributionStart > activityStart);
-  assert.ok(snapshotStart > contributionStart);
+  assert.ok(snapshotStart > activityStart);
   assert.match(source, /productionRelayLifecycleCoordinator\?\.onCommit\(event\)/);
   assert.match(source, /settlementRelayTransitionCoordinator\?\.onCommit\(event\)/);
   assert.doesNotMatch(source.slice(snapshotStart), /await runProductionActivityCollector\(claimId, currentData\);/);
@@ -208,16 +191,16 @@ test("production lifecycle follows committed Relay crafts while contribution syn
   assert.doesNotMatch(source, /sideEffectCollectorDue\("snapshotHistory"/);
   assert.doesNotMatch(source, /collector(?:Attempt|Success|Failure)\("snapshotHistory"/);
   assert.match(activityFunction, /syncProductionJobActivityForSnapshot/);
-  assert.doesNotMatch(activityFunction, /sideEffectCollectorDue\("productionContributions"/);
-  assert.match(contributionFunction, /readRelayCraftsForContributionReconciliation/);
-  assert.match(contributionFunction, /fetchCraftContributionEvidence/);
-  assert.match(contributionFunction, /syncProductionContributionsForSnapshot/);
-  assert.match(source, /Live craft contributions were available but none could be persisted/);
+  assert.doesNotMatch(source, /runProductionContributionCollector|fetchCraftContributionEvidence|syncProductionContributionsForSnapshot/);
+  assert.match(session, /progressive_action_state/);
+  assert.match(session, /event\.tag !== "Transaction"/);
+  assert.match(session, /progressDelta <= 0n/);
+  assert.match(session, /domain:\s*"contributions"/);
+  assert.match(source, /relayCraftContributionTargets/);
   assert.match(source, /import \{[^}]*productionMetrics[^}]*\} from "\.\/src\/server\/productionActivity\.mjs"/);
   assert.match(source, /function craftPrimarySkill\(craft\) \{\s*return productionMetrics\(craft\)\.skillName;/);
   assert.doesNotMatch(source, /return skillId \? skillNames\[skillId\]/);
   assert.doesNotMatch(source, /catch \{\s*return \[\];\s*\}/);
-  assert.doesNotMatch(contributionFunction, /syncProductionJobActivityForSnapshot|deliverProductionNotifications|recordProductionJobs/);
 });
 
 test("market listing activity is subscription-driven rather than scheduled", () => {

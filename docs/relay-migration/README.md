@@ -61,7 +61,16 @@ Live-first data policy:
   accumulating requests behind a slow response;
 - a migrated feature is not accepted if disabling ingestion schedules makes
   its current data stop updating, even when a scheduled fallback could mask
-  the problem in production.
+  the problem in production;
+- each migrated page and tool must be usable from the latest committed local
+  generation immediately after navigation; no loading state may be extended
+  merely because a collector, cache rebuild, or materialization job has not
+  reached its next scheduled run;
+- table retirement is the default outcome when a table only duplicates current
+  Relay state. Retention requires a recorded benchmark showing that removing
+  the table would miss an interactive latency or restart-recovery budget, plus
+  proof that the retained projection is updated by the source generation
+  rather than a timer.
 
 SQL decisions are therefore locked as follows:
 
@@ -76,7 +85,8 @@ SQL decisions are therefore locked as follows:
 Every vertical milestone must update the SQL table inventory, remove obsolete
 schema and job definitions in the same delivery, and prove both that the
 feature updates without a scheduler tick and that its local read path meets
-the recorded latency budget.
+the recorded latency budget. A vertical is blocked from completion if its
+normal healthy-state data path includes “wait for the next scheduled run.”
 
 The first cross-region implementation of this policy is Public Craft Finder:
 configured regional sessions follow public markers through bounded typed
@@ -90,7 +100,13 @@ the generic `market` generation used by Local Market and Dashboard.
 `market_listings` has been retired rather than retained as a duplicate
 current-state mirror. Durable `market_events`/`market_trades` history,
 notifications, and any measured cross-region index remain separate side
-effects and must never delay publication of the live generation.
+effects and must never delay publication of the live generation. The same
+claim-scoped session includes `closed_listing_state`: exact Hex Coin proceeds
+confirm a sale only when they uniquely match one same-owner sell-order
+transition, while exact returned item/cargo stacks confirm a non-sale.
+Ambiguous closures remain unresolved. Confirmed transitions append immediately
+and idempotently with exact TEXT amounts; no completed-sale schedule or
+member-history crawl remains.
 
 Cross-region market orders use the adaptive regional-session pattern rather
 than the legacy scheduled crawl. Each configured region publishes a bounded

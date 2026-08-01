@@ -6,9 +6,154 @@ import {
   additiveColumnMigrations,
   applyAdditiveColumnMigrations,
   applyLegacySchemaCleanup,
+  applyMarketHistoryExactAmountMigration,
+  applyProductionContributionExactAmountMigration,
   applySchemaIndexStatements,
   schemaIndexStatements,
 } from "../src/server/schemaMigrations.mjs";
+
+test("production contribution migration stores live Relay totals as text", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE production_contributions (
+      contribution_key TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL,
+      craft_entity_id TEXT NOT NULL,
+      contributor_entity_id TEXT NOT NULL,
+      contributor_name TEXT NOT NULL,
+      profession TEXT,
+      craft_label TEXT,
+      structure_name TEXT,
+      item_tier TEXT,
+      contributed_progress REAL NOT NULL DEFAULT 0,
+      contributed_xp REAL NOT NULL DEFAULT 0,
+      contribution_count REAL NOT NULL DEFAULT 0,
+      first_contributed_at TEXT,
+      last_contributed_at TEXT,
+      first_seen TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      raw_json TEXT NOT NULL
+    );
+    INSERT INTO production_contributions VALUES (
+      '1:2:3', '1', '2', '3', 'Ada', 'Forestry', 'Timber', 'Forester',
+      '3', 24, 48, 1, '2026-08-01T09:00:00.000Z',
+      '2026-08-01T09:00:00.000Z', '2026-08-01T09:00:00.000Z',
+      '2026-08-01T09:00:00.000Z', '{}'
+    );
+  `);
+
+  applyProductionContributionExactAmountMigration(db);
+  applyProductionContributionExactAmountMigration(db);
+
+  const types = new Map(db.prepare("PRAGMA table_info(production_contributions)").all().map(
+    (column) => [String(column.name), String(column.type)],
+  ));
+  assert.equal(types.get("contributed_progress"), "TEXT");
+  assert.equal(types.get("contributed_xp"), "TEXT");
+  assert.equal(types.get("contribution_count"), "TEXT");
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT contributed_progress, contributed_xp, contribution_count
+      FROM production_contributions
+    `).get() },
+    {
+      contributed_progress: "24.0",
+      contributed_xp: "48.0",
+      contribution_count: "1.0",
+    },
+  );
+  db.close();
+});
+
+test("market history migration stores exact integer amounts as text", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE market_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      claim_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      listing_key TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      side TEXT,
+      owner TEXT,
+      owner_entity_id TEXT,
+      item_id TEXT,
+      item_type TEXT,
+      quantity REAL,
+      price REAL,
+      total_value REAL,
+      tier TEXT,
+      rarity TEXT,
+      occurred_at TEXT NOT NULL,
+      trade_id TEXT,
+      source_key TEXT,
+      raw_json TEXT NOT NULL
+    );
+    CREATE TABLE market_trades (
+      trade_id TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL,
+      order_entity_id TEXT,
+      seller_entity_id TEXT,
+      seller_username TEXT,
+      purchaser_entity_id TEXT,
+      purchaser_username TEXT,
+      item_id TEXT,
+      item_type TEXT,
+      item_name TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unit_price REAL NOT NULL,
+      total_price REAL NOT NULL,
+      tier TEXT,
+      rarity TEXT,
+      occurred_at TEXT NOT NULL,
+      imported_at TEXT NOT NULL,
+      raw_json TEXT NOT NULL
+    );
+    INSERT INTO market_events (
+      claim_id, event_type, listing_key, item_name, quantity, price,
+      total_value, occurred_at, source_key, raw_json
+    ) VALUES (
+      '100', 'sale_confirmed', '10', 'Timber', 3, 5, 15,
+      '2026-07-30T15:00:00.000Z', 'event:10', '{}'
+    );
+    INSERT INTO market_trades (
+      trade_id, claim_id, item_name, quantity, unit_price, total_price,
+      occurred_at, imported_at, raw_json
+    ) VALUES (
+      'trade:10', '100', 'Timber', 3, 5, 15,
+      '2026-07-30T15:00:00.000Z', '2026-07-30T15:00:01.000Z', '{}'
+    );
+  `);
+
+  applyMarketHistoryExactAmountMigration(db);
+  applyMarketHistoryExactAmountMigration(db);
+
+  const eventTypes = new Map(db.prepare("PRAGMA table_info(market_events)").all().map(
+    (column) => [String(column.name), String(column.type)],
+  ));
+  const tradeTypes = new Map(db.prepare("PRAGMA table_info(market_trades)").all().map(
+    (column) => [String(column.name), String(column.type)],
+  ));
+  assert.equal(eventTypes.get("quantity"), "TEXT");
+  assert.equal(eventTypes.get("price"), "TEXT");
+  assert.equal(eventTypes.get("total_value"), "TEXT");
+  assert.equal(tradeTypes.get("quantity"), "TEXT");
+  assert.equal(tradeTypes.get("unit_price"), "TEXT");
+  assert.equal(tradeTypes.get("total_price"), "TEXT");
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT quantity, price, total_value, source_key FROM market_events
+    `).get() },
+    { quantity: "3.0", price: "5.0", total_value: "15.0", source_key: "event:10" },
+  );
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT quantity, unit_price, total_price FROM market_trades
+    `).get() },
+    { quantity: "3.0", unit_price: "5.0", total_price: "15.0" },
+  );
+  db.close();
+});
 
 test("additiveColumnMigrations preserves bootstrap column migration order", () => {
   assert.deepEqual(additiveColumnMigrations, [
@@ -266,6 +411,8 @@ test("applyLegacySchemaCleanup drops legacy server-owned cache tables", () => {
   assert.match(executed[0], /DELETE FROM scheduled_jobs WHERE job_key = 'global_market_insights'/);
   assert.match(executed[0], /DELETE FROM scheduled_jobs WHERE job_key = 'empire_hexite_reserves_refresh'/);
   assert.match(executed[0], /DELETE FROM app_settings WHERE key = 'global_market_overview_json'/);
+  assert.match(executed[0], /key LIKE 'market_trade_backfill:%'/);
+  assert.match(executed[0], /key LIKE 'collector_resume:marketTrades:%'/);
   assert.match(executed[0], /DELETE FROM domain_payload_current WHERE domain = 'layout'/);
   assert.match(executed[0], /domain IN \('regionStatus', 'tradeVolume'\)/);
   assert.match(executed[0], /domain = 'region' AND json_type\(data_json, '\$\.claims'\) = 'array'/);

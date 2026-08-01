@@ -18,7 +18,7 @@ Primary users use the app to understand settlement status, production, inventori
 
 Claim Monitor gives a monitored settlement one local-first command surface for day-to-day operations. It combines current committed Relay generations, local SQLite history, Discord automation, browser notifications, and admin-managed planning into a dashboard that is fast to scan and practical during active play.
 
-Browser features read provider-neutral local routes. They do not wait for scheduled acquisition jobs: Relay HTTP refresh loops and typed SpacetimeDB subscriptions publish complete generations as soon as they validate, while last-good data remains available during outages. BitJita remains narrowly used by two evidence reconcilers for craft-contribution and completed-sale evidence until authoritative Relay mappings are proven.
+Browser features read provider-neutral local routes. They do not wait for scheduled acquisition jobs: Relay HTTP refresh loops and typed SpacetimeDB subscriptions publish complete generations as soon as they validate, while last-good data remains available during outages. Completed-sale evidence is derived immediately from Relay closed listings, and craft-contribution history is attributed from positive regional craft-progress transactions.
 
 Success means users can quickly answer:
 

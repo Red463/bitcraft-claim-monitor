@@ -176,10 +176,6 @@ test("server collection paginates listings and protects production mutations", a
     { entityId: "buy-listing-r3", claimEntityId: seasonalClaimId, claimName: "Seasonal Market", regionId: 3, regionName: "Region 3", ownerUsername: "Regional Buyer", ownerEntityId: "buyer-r3", itemId: 30, itemType: "0", itemName: "Leather", itemTier: 2, itemRarityStr: "Common", iconAssetName: "leather.png", quantity: 5, price: 12, storedCoins: 60, side: "buy", timestamp: "2026-05-20T12:00:00.000Z", inventoryPermission: true },
   ];
   let currentListings = listings;
-  const historicalTrade = { id: "historic-1", orderEntityId: "historic-order", itemId: 30, itemType: "0", itemName: "Leather", sellerEntityId: "player-1", sellerUsername: "Tester", purchaserUsername: "Buyer", quantity: 5, unitPrice: 10, totalPrice: 50, createdAt: "2026-05-20T12:00:00.000Z" };
-  let historicalTrades = [historicalTrade];
-  const foreignTrade = { ...historicalTrade, id: "foreign-1", orderEntityId: "foreign-order", totalPrice: 999, unitPrice: 999 };
-  let trades = [historicalTrade];
   let proxyCacheRequests = 0;
   let failCacheTest = false;
   let resourceCatalogRequests = 0;
@@ -188,7 +184,6 @@ test("server collection paginates listings and protects production mutations", a
   let regionListRequests = 0;
   let passiveCraftRequests = 0;
   let playerDetailRequests = 0;
-  let craftContributionRequests = 0;
   let playerCraftRequests = 0;
   let recipeDetailRequests = 0;
   let priceHistoryRequests = 0;
@@ -416,19 +411,6 @@ test("server collection paginates listings and protects production mutations", a
         ],
       });
     }
-    if (url.pathname === "/api/market/player/player-1/history" || url.pathname === "/api/market/player/1369094286777412591/history") return json(res, {
-      sellOrderHistory: [
-        { entityId: "historic-order", claimEntityId: claimId, status: "COMPLETED" },
-        { entityId: "foreign-order", claimEntityId: "other-claim", status: "COMPLETED" },
-      ],
-      totalSellOrders: 2,
-    });
-    if (url.pathname === "/api/market/player/player-1/trades" || url.pathname === "/api/market/player/1369094286777412591/trades") {
-      const orderId = url.searchParams.get("orderEntityId");
-      if (orderId === "historic-order") return json(res, { trades: historicalTrades });
-      if (orderId === "foreign-order") return json(res, { trades: [foreignTrade] });
-      return json(res, { trades });
-    }
     if (url.pathname === "/api/players/player-1/passive-crafts") {
       passiveCraftRequests += 1;
       return json(res, {
@@ -446,17 +428,6 @@ test("server collection paginates listings and protects production mutations", a
       items: [{ id: "craft-item-1", name: "Public Output", tier: 2, itemType: "0", rarityStr: "Common", iconAssetName: "public_output.png" }],
       cargos: [],
     });
-    if (url.pathname === "/api/crafts/public-craft-0/contributions" || url.pathname === "/api/crafts/public-craft-1/contributions" || url.pathname === "/api/crafts/public-craft-2/contributions" || url.pathname === "/api/crafts/public-craft-3/contributions" || /^\/api\/crafts\/136909428677741260[0-4]\/contributions$/.test(url.pathname)) {
-      craftContributionRequests += 1;
-      return json(res, { contributions: [{
-        contributorEntityId: "player-1",
-        contributorUsername: "Tester",
-        totalProgressContributed: 25 + craftEntityRevision,
-        contributionCount: 2 + craftEntityRevision,
-        firstContributedAt: "2026-05-20T12:00:00.000Z",
-        lastContributedAt: new Date().toISOString(),
-      }] });
-    }
     if (url.pathname === "/api/players/player-1/crafts") {
       playerCraftRequests += 1;
       return json(res, {
@@ -490,9 +461,6 @@ test("server collection paginates listings and protects production mutations", a
       APP_HOST: "127.0.0.1",
       APP_PORT: String(appPort),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
-      BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
-      BITJITA_PROXY_CACHE_MS: "100",
-      BITJITA_PROXY_STALE_IF_ERROR_MS: "5000",
       EMPIRE_SCOUT_CACHE_TTL_MS: "100",
       IPAPI_BASE_URL: `http://127.0.0.1:${upstreamPort}/ipapi`,
       DISCORD_API_ORIGIN: `http://127.0.0.1:${upstreamPort}/discord/api/v10`,
@@ -558,6 +526,41 @@ test("server collection paginates listings and protects production mutations", a
       for (const [domain, data] of payloads) {
         insert.run(claimId, domain, JSON.stringify(data), receivedAt, receivedAt, receivedAt, receivedAt, receivedAt, generation);
       }
+      relayStateDb.prepare(`
+        INSERT OR IGNORE INTO market_trades (
+          trade_id, claim_id, order_entity_id, seller_entity_id,
+          seller_username, purchaser_entity_id, purchaser_username, item_id,
+          item_type, item_name, quantity, unit_price, total_price, tier, rarity,
+          occurred_at, imported_at, raw_json
+        ) VALUES (
+          'relay_closed_listing:19:historic-1', ?, 'historic-order', 'player-1',
+          'Tester', NULL, 'Buyer', '30', 'item', 'Leather', '5', '10', '50',
+          NULL, NULL, '2026-05-20T12:00:00.000Z',
+          '2026-05-20T12:00:01.000Z', '{}'
+        )
+      `).run(claimId);
+      relayStateDb.prepare(`
+        INSERT OR REPLACE INTO production_contributions (
+          contribution_key, claim_id, craft_entity_id, contributor_entity_id,
+          contributor_name, profession, craft_label, structure_name, item_tier,
+          contributed_progress, contributed_xp, contribution_count,
+          first_contributed_at, last_contributed_at, first_seen, updated_at,
+          raw_json
+        ) VALUES (?, ?, ?, ?, 'Tester', 'Carpentry', 'Simple Plank', ?, '2',
+          ?, ?, ?, '2026-05-20T12:00:00.000Z', ?, ?, ?, '{}')
+      `).run(
+        `${claimId}:${craftId}:1369094286777412591`,
+        claimId,
+        craftId,
+        "1369094286777412591",
+        craftBuildingName,
+        String(25 + craftEntityRevision),
+        String(25 + craftEntityRevision),
+        String(2 + craftEntityRevision),
+        receivedAt,
+        receivedAt,
+        receivedAt,
+      );
     });
   };
   const health = await fetch(`${origin}/api/local/health`);
@@ -2012,8 +2015,8 @@ test("server collection paginates listings and protects production mutations", a
   const adminUserList = await fetch(`${origin}/api/local/admin/users`, { headers: { cookie: adminCookie, origin } });
   assert.equal(adminUserList.status, 200);
 
-  // The two retained evidence reconcilers deliberately consume committed Relay
-  // domains, not the legacy claim/member/craft collector.
+  // Current contribution attribution is subscription-driven, so a forced poll
+  // exposes no game-data acquisition reconciler.
   await seedCommittedRelayInputs();
 
   const poll = await fetch(`${origin}/api/local/admin/poll`, {
@@ -2024,11 +2027,8 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(poll.status, 200);
   const pollJson = await poll.json();
   const reconcilers = pollJson.collectorStatus.collectors;
-  assert.deepEqual(Object.keys(reconcilers).sort(), ["marketTrades", "productionContributions"]);
-  assert.equal(typeof reconcilers.productionContributions.intervalMs, "number");
-  assert.equal(typeof reconcilers.marketTrades.intervalMs, "number");
+  assert.deepEqual(reconcilers, {});
   assert.equal(reconcilers.production, undefined);
-  assert.equal(reconcilers.marketTrades.lastError, null, JSON.stringify(reconcilers.marketTrades));
   const baselineHistory = await fetch(`${origin}/api/local/market/history?claimId=${claimId}&owner=Tester`).then((response) => response.json());
   assert.ok(baselineHistory.totals, JSON.stringify(baselineHistory));
   assert.equal(baselineHistory.totals.confirmedSales, 1);
@@ -2139,11 +2139,6 @@ test("server collection paginates listings and protects production mutations", a
   currentListings = [{ ...listings[0], quantity: 9 }, listings[1]];
   craftEntityRevision = 1;
   await seedCommittedRelayInputs();
-  trades = [
-    historicalTrade,
-    { id: "fill-1", orderEntityId: "1001", itemId: 10, itemType: "item", sellerEntityId: "player-1", quantity: 1, price: 4, totalPrice: 4 },
-    { id: "fill-2", orderEntityId: "1001", itemId: 10, itemType: "item", sellerEntityId: "player-1", quantity: 2, price: 4, totalPrice: 8 },
-  ];
   const secondPoll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
@@ -2245,28 +2240,6 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(completedOnArrivalActivity.events.filter((event) => event.event_type === "production_started").length, 0);
   assert.equal(completedOnArrivalActivity.events.some((event) => event.event_type === "production_started" && event.summary.includes("Collected Station")), false);
   craftProgressOverride = null;
-  historicalTrades = [
-    ...historicalTrades,
-    { id: "history-new-1", orderEntityId: "historic-order", itemId: 40, itemType: "0", itemName: "Sturdy Leather Belt", sellerEntityId: "player-1", sellerUsername: "Tester", purchaserUsername: "Buyer", quantity: 1, unitPrice: 1, totalPrice: 1, createdAt: new Date(Date.now() - 60 * 1000).toISOString() },
-  ];
-  const missingBackfillKeyDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5000 });
-  missingBackfillKeyDb.prepare("DELETE FROM app_settings WHERE key = ?").run(`market_trade_backfill:${claimId}:player-1`);
-  missingBackfillKeyDb.close();
-  const historyOnlyPoll = await fetch(`${origin}/api/local/admin/poll`, {
-    method: "POST",
-    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
-    body: "{}",
-  });
-  assert.equal(historyOnlyPoll.status, 200);
-  const historyOnlyNotificationActivity = await fetch(`${origin}/api/local/notification-activity?claimId=${claimId}&limit=20`).then((response) => response.json());
-  const historyOnlySale = historyOnlyNotificationActivity.events.find((event) => event.source_key === "market_sale_confirmed:trade:history-new-1");
-  assert.ok(historyOnlySale);
-  assert.equal(historyOnlySale.event_type, "market_sale_confirmed");
-  assert.equal(historyOnlySale.summary, "Confirmed sale: Sturdy Leather Belt x1 at 1g");
-  const historyOnlySaleMetadata = JSON.parse(historyOnlySale.metadata_json);
-  assert.equal(historyOnlySaleMetadata.sellerEntityId, "player-1");
-  assert.equal(historyOnlySaleMetadata.totalValue, 1);
-
   const buyOrdersAfterSales = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=premium&direction=desc`).then((response) => response.json());
   assert.equal(buyOrdersAfterSales.opportunities.length, 0);
   assert.equal(buyOrdersAfterSales.rows[0].opportunityEligible, false);
@@ -2325,9 +2298,6 @@ test("background polling failures keep the server online", async (t) => {
       APP_HOST: "127.0.0.1",
       APP_PORT: String(appPort),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
-      BITJITA_API_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
-      BITJITA_PROXY_CACHE_MS: "100",
-      BITJITA_PROXY_STALE_IF_ERROR_MS: "5000",
       EMPIRE_SCOUT_CACHE_TTL_MS: "100",
     },
     stdio: "ignore",
@@ -2499,7 +2469,6 @@ test("regional market retirement cleanup runs after the older collector marker",
     WHERE key IN ('regional_buy_order_collector_retired_at', 'regional_buy_order_state_retired_at')
   `).get().count;
   migratedDatabase.close();
-  assert.deepEqual(Object.keys(collectorSettings).sort(), ["marketTrades", "productionContributions"]);
-  assert.equal(collectorSettings.marketTrades.enabled, true);
+  assert.deepEqual(collectorSettings, {});
   assert.equal(markerCount, 0);
 });

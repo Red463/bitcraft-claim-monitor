@@ -1,10 +1,7 @@
 import { toNumber, type AnyRecord } from "../../main-app-data.ts";
 import { formatNumber } from "../../utils/format.ts";
 
-export const COLLECTOR_PURPOSES: Record<string, string> = {
-  productionContributions: "Uses committed Relay crafts, then requests the still-unproven contributor evidence needed for contribution history.",
-  marketTrades: "Uses the committed Relay roster, then requests the still-unproven completed-sale evidence needed for market trade history.",
-};
+export const COLLECTOR_PURPOSES: Record<string, string> = {};
 
 export function bytesLabel(value: unknown) {
   const bytes = toNumber(value);

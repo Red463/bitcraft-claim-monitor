@@ -337,7 +337,7 @@ export function calculateCraftPlanEffortProgress({
         missingWeightKeys: missingWeightKeys.slice(0, MAX_MISSING_WEIGHT_KEYS),
       },
       warnings: missingWeightKeys.length
-        ? [`Effort progress uses a neutral one-action estimate for ${missingWeightKeys.length} required material${missingWeightKeys.length === 1 ? "" : "s"} because BitJita does not expose verified gathering yields for them.`]
+        ? [`Effort progress uses a neutral one-action estimate for ${missingWeightKeys.length} required material${missingWeightKeys.length === 1 ? "" : "s"} because verified gathering yields are unavailable for them.`]
         : [],
     };
   };

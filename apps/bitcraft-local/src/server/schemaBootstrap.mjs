@@ -18,9 +18,9 @@ export const schemaBootstrapSql = `
     item_name TEXT NOT NULL,
     side TEXT,
     owner TEXT,
-    quantity REAL,
-    price REAL,
-    total_value REAL,
+    quantity TEXT,
+    price TEXT,
+    total_value TEXT,
     tier TEXT,
     rarity TEXT,
     occurred_at TEXT NOT NULL,
@@ -38,9 +38,9 @@ export const schemaBootstrapSql = `
     item_id TEXT,
     item_type TEXT,
     item_name TEXT NOT NULL,
-    quantity REAL NOT NULL,
-    unit_price REAL NOT NULL,
-    total_price REAL NOT NULL,
+    quantity TEXT NOT NULL,
+    unit_price TEXT NOT NULL,
+    total_price TEXT NOT NULL,
     tier TEXT,
     rarity TEXT,
     occurred_at TEXT NOT NULL,
@@ -524,13 +524,25 @@ export const schemaBootstrapSql = `
     craft_label TEXT,
     structure_name TEXT,
     item_tier TEXT,
-    contributed_progress REAL NOT NULL DEFAULT 0,
-    contributed_xp REAL NOT NULL DEFAULT 0,
-    contribution_count REAL NOT NULL DEFAULT 0,
+    contributed_progress TEXT NOT NULL DEFAULT '0',
+    contributed_xp TEXT NOT NULL DEFAULT '0',
+    contribution_count TEXT NOT NULL DEFAULT '0',
     first_contributed_at TEXT,
     last_contributed_at TEXT,
     first_seen TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS production_contribution_events (
+    source_key TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL,
+    region_id TEXT NOT NULL,
+    craft_entity_id TEXT NOT NULL,
+    contributor_entity_id TEXT NOT NULL,
+    contributed_progress TEXT NOT NULL,
+    contributed_xp TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
     raw_json TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS admin_audit_log (
@@ -748,6 +760,8 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_production_claim_status ON production_jobs (claim_id, status, last_seen DESC);
   CREATE INDEX IF NOT EXISTS idx_production_contrib_claim ON production_contributions (claim_id, last_contributed_at DESC);
   CREATE INDEX IF NOT EXISTS idx_production_contrib_profession ON production_contributions (claim_id, profession, contributed_progress DESC);
+  CREATE INDEX IF NOT EXISTS idx_production_contrib_events_claim ON production_contribution_events (claim_id, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_production_contrib_events_craft ON production_contribution_events (claim_id, craft_entity_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_delivery_time ON discord_delivery_log (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_notification_outbox_status ON discord_notification_outbox (status, next_attempt_at, id);
   CREATE INDEX IF NOT EXISTS idx_discord_craft_plan_report_occurrences_time ON discord_craft_plan_report_occurrences (scheduled_at DESC);

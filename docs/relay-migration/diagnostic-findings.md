@@ -363,16 +363,25 @@ rendered consumer and was removed; no replacement cache or table was created.
 
 ## Craft contributors
 
-One active Relay HTTP craft was queried by its exact craft entity ID:
+Focused live observation on 2026-08-01 proved the regional transaction mapping
+for craft `1369094287428103662`:
 
-- `progressive_action_state.entity_id` returned the matching craft state;
-- `contribution_state.enemy_entity_id` returned no rows;
-- `contribution_state.entity_id` returned no rows.
+- three `progressive_action_state` transactions increased `progress` by exactly
+  `24`;
+- each current row carried owner entity `576460752388321942`;
+- the independently observed accumulated contribution identified that same
+  entity as Mosswick and matched the craft's accumulated progress;
+- preparation-only updates had a zero delta and are not contributions;
+- subscription initial-state inserts use `SubscribeApplied` and must establish
+  a baseline rather than append history.
 
-The `contribution_state` schema is combat-shaped
-(`player_entity_id`, `enemy_entity_id`, `contribution`) and is not evidence for
-craft contributors. Contributor parity remains blocked; no mapping should be
-invented.
+The primary regional session now subscribes only to current monitored-claim
+craft IDs. A positive `Transaction` progress delta is attributed to the current
+row owner and appended immediately with the transaction ID, region, craft ID,
+exact progress delta, and catalog metadata. Initial apply, zero/negative deltas,
+unknown crafts, and non-transaction callbacks fail closed. Durable event
+receipts deduplicate replays before the event-driven contribution aggregate is
+incremented.
 
 ## Global versus regional completeness
 
@@ -655,12 +664,33 @@ immediately without hiding that limitation or recreating a scheduled crawl.
 
 ## Remaining diagnostic blockers
 
-- authoritative evidence distinguishing a completed sale from removal or
-  cancellation;
-- craft contributor identity and amounts;
 - attacker/defender meaning and completion semantics for empire siege rows;
 - bounded multi-region player/claim inventory and Foundry joins for complete
   Hexite reserve aggregation.
+
+## Claim-market completed-sale evidence — 2026-08-01
+
+The regional `closed_listing_state` table is claim-filterable and contains the
+owner plus one exact typed item stack. Global catalog evidence proves regular
+Item `1` is Hex Coin. A live Timbersteel Trade fixture then showed:
+
+- a closed Hex Coin stack of quantity `10` for Jingle;
+- the corresponding completed sell order had sold `10` units at one Hex Coin
+  each; and
+- non-Hex-Coin closed rows contained returned listing inventory.
+
+The claim-market session now subscribes to closed listings in the same atomic
+generation as active buy/sell orders. A newly observed Hex Coin row confirms a
+sale only when its exact proceeds uniquely match one same-owner sell-order
+quantity transition. A returned row confirms a non-sale only when owner,
+typed item identity, and quantity uniquely match. Ambiguous evidence remains
+`removed_or_cancelled`; disappearance alone never becomes a sale.
+
+Confirmed rows append immediately and idempotently to `market_events`,
+`market_trades`, activity history, and the Discord outbox after current-state
+publication. The scheduled completed-sale reconciler, member-history crawl,
+resume state, admin control, and BitJita market calls are removed. Market
+amount columns use TEXT affinity so Relay decimal strings remain exact.
 
 ## Relay topology and schema drift — 2026-07-31
 

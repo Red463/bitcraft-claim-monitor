@@ -24,12 +24,6 @@ export function createPreparedStatements(db) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   resolveMarketEvent: db.prepare("UPDATE market_events SET event_type = ?, raw_json = ? WHERE id = ? AND claim_id = ?"),
-  insertMarketTrade: db.prepare(`
-    INSERT OR IGNORE INTO market_trades (
-      trade_id, claim_id, order_entity_id, seller_entity_id, seller_username, purchaser_entity_id, purchaser_username,
-      item_id, item_type, item_name, quantity, unit_price, total_price, tier, rarity, occurred_at, imported_at, raw_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `),
   insertActivity: db.prepare(`
     INSERT INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json)
     VALUES (?, ?, ?, ?, ?)
@@ -185,35 +179,6 @@ export function createPreparedStatements(db) {
       raw_json = excluded.raw_json
   `),
   completeProductionJob: db.prepare("UPDATE production_jobs SET status = 'completed', last_seen = ? WHERE job_key = ? AND status = 'active'"),
-  upsertProductionContribution: db.prepare(`
-    INSERT INTO production_contributions (
-      contribution_key, claim_id, craft_entity_id, contributor_entity_id, contributor_name, profession, craft_label, structure_name,
-      item_tier, contributed_progress, contributed_xp, contribution_count, first_contributed_at, last_contributed_at, first_seen, updated_at, raw_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(contribution_key) DO UPDATE SET
-      contributor_name = excluded.contributor_name,
-      profession = excluded.profession,
-      craft_label = excluded.craft_label,
-      structure_name = excluded.structure_name,
-      item_tier = excluded.item_tier,
-      contributed_progress = max(production_contributions.contributed_progress, excluded.contributed_progress),
-      contributed_xp = max(production_contributions.contributed_xp, excluded.contributed_xp),
-      contribution_count = max(production_contributions.contribution_count, excluded.contribution_count),
-      first_contributed_at = CASE
-        WHEN production_contributions.first_contributed_at IS NULL THEN excluded.first_contributed_at
-        WHEN excluded.first_contributed_at IS NULL THEN production_contributions.first_contributed_at
-        WHEN excluded.first_contributed_at < production_contributions.first_contributed_at THEN excluded.first_contributed_at
-        ELSE production_contributions.first_contributed_at
-      END,
-      last_contributed_at = CASE
-        WHEN production_contributions.last_contributed_at IS NULL THEN excluded.last_contributed_at
-        WHEN excluded.last_contributed_at IS NULL THEN production_contributions.last_contributed_at
-        WHEN excluded.last_contributed_at > production_contributions.last_contributed_at THEN excluded.last_contributed_at
-        ELSE production_contributions.last_contributed_at
-      END,
-      updated_at = excluded.updated_at,
-      raw_json = excluded.raw_json
-  `),
   getSetting: db.prepare("SELECT value FROM app_settings WHERE key = ?"),
   upsertSetting: db.prepare(`
     INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)

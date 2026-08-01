@@ -55,6 +55,18 @@ function fakeBindings() {
       claimEntityId: 100n,
       coordinates: { x: 10, z: 20, dimension: 1 },
     }],
+    closedListingState: [{
+      entityId: 600n,
+      ownerEntityId: 700n,
+      claimEntityId: 100n,
+      itemStack: {
+        itemId: 1,
+        itemType: { tag: "Item", value: undefined },
+        quantity: 120,
+        durability: null,
+      },
+      timestamp: { __timestamp_micros_since_unix_epoch__: 1785408120000000n },
+    }],
     playerUsernameState: [
       { entityId: 700n, username: "Seller" },
       { entityId: 701n, username: "Buyer" },
@@ -138,6 +150,7 @@ test("claim-market session stages claim orders and exact owner joins before publ
     "SELECT * FROM sell_order_state WHERE claim_entity_id = 100",
     "SELECT * FROM buy_order_state WHERE claim_entity_id = 100",
     "SELECT * FROM marketplace_state WHERE claim_entity_id = 100",
+    "SELECT * FROM closed_listing_state WHERE claim_entity_id = 100",
   ]);
 
   fake.state.subscriptions[0].onApplied({});
@@ -150,6 +163,18 @@ test("claim-market session stages claim orders and exact owner joins before publ
   await Promise.resolve();
   assert.equal(snapshots.length, 1);
   assert.equal(snapshots[0].data.listings.length, 2);
+  assert.deepEqual(snapshots[0].data.closedListings, [{
+    entityId: "600",
+    claimEntityId: "100",
+    regionId: "19",
+    ownerEntityId: "700",
+    ownerUsername: "Seller",
+    itemId: "1",
+    itemType: "item",
+    quantity: "120",
+    closureKind: "sale_proceeds",
+    timestamp: "2026-07-30T10:42:00.000Z",
+  }]);
   assert.deepEqual(
     snapshots[0].data.listings.map(({ side, ownerUsername }) => [side, ownerUsername]),
     [["sell", "Seller"], ["buy", "Buyer"]],

@@ -99,6 +99,7 @@ function fakeBindings() {
     rewardedItems: [],
     rewardedExperience: { skillId: 3, quantity: 125 },
   }]);
+  const progressiveActionState = cachedTable("progressive-action", []);
   const connection = {
     db: {
       playerState,
@@ -111,6 +112,7 @@ function fakeBindings() {
       claimRecruitmentState,
       travelerTaskState,
       travelerTaskDesc,
+      progressiveActionState,
     },
     subscriptionBuilder() {
       const builder = {
@@ -322,6 +324,88 @@ test("primary-region session filters member and settlement state and emits norma
   assert.equal(fake.state.unsubscribed, true);
   assert.equal(fake.state.disconnected, true);
   assert.equal(fake.state.callbacks.size, 0);
+});
+
+test("primary-region session emits positive craft progress transactions as exact contribution events", async () => {
+  assert.ok(sessionModule, "primary-region player session module must exist");
+  const fake = fakeBindings();
+  const contributions = [];
+  const session = new sessionModule.RelayPrimaryRegionPlayerSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: () => {},
+    onContribution: (event) => contributions.push(event),
+    now: () => new Date("2026-08-01T09:00:00.000Z"),
+  });
+  const target = {
+    craftEntityId: "1369094287428103662",
+    profession: "Forestry",
+    craftLabel: "Owl Feather",
+    structureName: "Forester",
+    itemTier: "3",
+    xpPerProgress: "2",
+  };
+
+  await session.start({
+    uri: "wss://relay.example:4000",
+    database: "bitcraft-live-19",
+    schemaFingerprint: "regional-v1",
+    manifest,
+    generation: 1,
+    regionId: "19",
+    claimId: "1369094286777412590",
+    members: [{ playerEntityId: "576460752388321942", userName: "Mosswick" }],
+    contributionTargets: [target],
+  });
+  fake.state.onConnect(fake.connection);
+  assert.ok(fake.state.queries.includes(
+    "SELECT * FROM progressive_action_state WHERE entity_id = 1369094287428103662",
+  ));
+  fake.state.onApplied({});
+
+  const update = fake.state.callbacks.get("progressive-action:update");
+  assert.equal(typeof update, "function");
+  update(
+    { event: { tag: "SubscribeApplied", id: "initial" } },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 0 },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16056 },
+  );
+  update(
+    { event: { tag: "Transaction", id: "transaction-12" } },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16056 },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16080 },
+  );
+  update(
+    { event: { tag: "Transaction", id: "transaction-13" } },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16080 },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16080 },
+  );
+
+  assert.deepEqual(contributions, [{
+    claimId: "1369094286777412590",
+    domain: "contributions",
+    sourceKey: "relay-craft-contribution:19:transaction-12:1369094287428103662",
+    occurredAt: "2026-08-01T09:00:00.000Z",
+    data: {
+      eventType: "craft_contribution",
+      regionId: "19",
+      database: "bitcraft-live-19",
+      schemaFingerprint: "regional-v1",
+      craftEntityId: "1369094287428103662",
+      contributorEntityId: "576460752388321942",
+      contributorName: "Mosswick",
+      profession: "Forestry",
+      craftLabel: "Owl Feather",
+      structureName: "Forester",
+      itemTier: "3",
+      contributedProgress: "24",
+      contributedXp: "48",
+      contributionCount: "1",
+      previousProgress: "16056",
+      currentProgress: "16080",
+    },
+  }]);
+
+  await session.stop();
 });
 
 test("primary-region player session rejects schema mismatch before loading bindings", async () => {

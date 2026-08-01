@@ -38,6 +38,32 @@ test("regional market normalization keeps claim-scoped item and cargo orders exa
       { entityId: 700n, username: "Seller" },
       { entityId: 701n, username: "Buyer" },
     ],
+    closedRows: [
+      {
+        entityId: 600n,
+        ownerEntityId: 700n,
+        claimEntityId: 1369094286777412590n,
+        itemStack: {
+          itemId: 1,
+          itemType: { tag: "Item", value: undefined },
+          quantity: 120,
+          durability: null,
+        },
+        timestamp: { __timestamp_micros_since_unix_epoch__: 1785408120000000n },
+      },
+      {
+        entityId: 601n,
+        ownerEntityId: 701n,
+        claimEntityId: 1369094286777412590n,
+        itemStack: {
+          itemId: 42,
+          itemType: { tag: "Cargo", value: undefined },
+          quantity: 2,
+          durability: null,
+        },
+        timestamp: { __timestamp_micros_since_unix_epoch__: 1785408180000000n },
+      },
+    ],
     marketplaceRows: [{
       buildingEntityId: 900n,
       claimEntityId: 1369094286777412590n,
@@ -92,6 +118,32 @@ test("regional market normalization keeps claim-scoped item and cargo orders exa
           locationZ: 456,
         },
       ],
+      closedListings: [
+        {
+          entityId: "600",
+          claimEntityId: "1369094286777412590",
+          regionId: "19",
+          ownerEntityId: "700",
+          ownerUsername: "Seller",
+          itemId: "1",
+          itemType: "item",
+          quantity: "120",
+          closureKind: "sale_proceeds",
+          timestamp: "2026-07-30T10:42:00.000Z",
+        },
+        {
+          entityId: "601",
+          claimEntityId: "1369094286777412590",
+          regionId: "19",
+          ownerEntityId: "701",
+          ownerUsername: "Buyer",
+          itemId: "42",
+          itemType: "cargo",
+          quantity: "2",
+          closureKind: "returned_item",
+          timestamp: "2026-07-30T10:43:00.000Z",
+        },
+      ],
     },
     warnings: [],
   });
@@ -127,14 +179,41 @@ test("regional market normalization rejects cross-claim rows and reports optiona
     ],
     buyRows: [],
     usernameRows: [],
+    closedRows: [
+      {
+        entityId: 10n,
+        ownerEntityId: 11n,
+        claimEntityId: 999n,
+        itemStack: {
+          itemId: 1,
+          itemType: { tag: "Item", value: undefined },
+          quantity: 5,
+        },
+        timestamp: { __timestamp_micros_since_unix_epoch__: 1785408000000000n },
+      },
+      {
+        entityId: 12n,
+        ownerEntityId: 11n,
+        claimEntityId: 100n,
+        itemStack: {
+          itemId: 1,
+          itemType: { tag: "Unknown", value: undefined },
+          quantity: 5,
+        },
+        timestamp: { __timestamp_micros_since_unix_epoch__: 1785408000000000n },
+      },
+    ],
     marketplaceRows: [],
   });
 
   assert.equal(result.data.listings.length, 1);
+  assert.equal(result.data.closedListings.length, 0);
   assert.equal(result.data.listings[0].ownerUsername, "");
   assert.deepEqual(result.warnings, [
     "Regional market order 1 has no player_username_state row for 2.",
     "Regional sell_order_state omitted cross-claim order 9 for claim 999.",
+    "Regional closed_listing_state omitted cross-claim row 10 for claim 999.",
+    "Regional closed_listing_state omitted row 1: Unsupported item kind: Unknown",
     "Regional market has no marketplace_state row for claim 100.",
   ]);
 });

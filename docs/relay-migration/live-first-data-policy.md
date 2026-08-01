@@ -366,7 +366,13 @@ the next vertical begins, the domain must pass all of these checks:
    budgets above under representative row counts;
 9. history, notification, report, outbox, and analytics writers can be delayed
    or failed in tests without delaying the current generation or its browser
-   visibility.
+   visibility;
+10. a fresh-schema test proves that every table classified `retire` is absent,
+    and every retained current/derived table has a domain-event or
+    subscription writer rather than a scheduled-ingestion writer;
+11. an interactive smoke test opens the page or tool immediately after a
+    source generation commits and proves that no collector-due timestamp,
+    refresh-run row, or scheduled materialization gates the result.
 
 History appenders, notification outboxes, backups, and integrity jobs may trail
 the current generation without delaying it. If one of those durable side
@@ -442,6 +448,8 @@ Add focused coverage proving:
 - derived planner and market projections update incrementally;
 - current-data API p95 latency remains within budget while a reconciliation or
   history-retention job is running;
+- every migrated page and interactive tool remains usable when all scheduled
+  ingestion and materialization jobs are disabled;
 - Craft Planner and other indexed tools are usable immediately after startup
   from the durable last-good generation, then observe the first healthy Relay
   generation without waiting for any scheduled catalog or ingestion job;

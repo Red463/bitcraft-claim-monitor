@@ -163,6 +163,198 @@ test("the first Relay market generation establishes a baseline without notificat
   }), []);
 });
 
+function sellOrder(overrides = {}) {
+  return {
+    entityId: "10",
+    itemId: "42",
+    itemType: "item",
+    itemName: "Timber",
+    ownerEntityId: "7",
+    ownerUsername: "Builder",
+    side: "sell",
+    quantity: "10",
+    price: "5",
+    timestamp: "2026-07-30T14:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function closedListing(overrides = {}) {
+  return {
+    entityId: "600",
+    claimEntityId: "100",
+    regionId: "19",
+    ownerEntityId: "7",
+    ownerUsername: "Builder",
+    itemId: "1",
+    itemType: "item",
+    quantity: "50",
+    closureKind: "sale_proceeds",
+    timestamp: "2026-07-30T14:59:00.000Z",
+    ...overrides,
+  };
+}
+
+test("a unique Hex Coin closure confirms an exact full or partial sell-order transition", () => {
+  assert.ok(transitionsModule, "Relay market transition module must exist");
+  const full = transitionsModule.deriveRelayMarketTransitions({
+    previous: {
+      claimId: "100",
+      regionId: "19",
+      listings: [sellOrder()],
+      closedListings: [],
+    },
+    current: {
+      claimId: "100",
+      regionId: "19",
+      listings: [],
+      closedListings: [closedListing()],
+    },
+    observedAt,
+  });
+  assert.equal(full.length, 1);
+  assert.deepEqual(full[0], {
+    eventType: "sale_confirmed",
+    activityType: "market_sale_confirmed",
+    occurredAt: "2026-07-30T14:59:00.000Z",
+    sourceKey: "relay_market_event:sale_confirmed:19:600",
+    activitySourceKey: "relay_market_activity:sale_confirmed:19:600",
+    summary: "Confirmed sale: Timber x10 at 5g",
+    listing: {
+      key: "10",
+      itemName: "Timber",
+      side: "sell",
+      owner: "Builder",
+      ownerEntityId: "7",
+      itemId: "42",
+      itemType: "item",
+      quantity: "10",
+      price: "5",
+      totalValue: "50",
+      tier: null,
+      rarity: null,
+      listedAt: "2026-07-30T14:00:00.000Z",
+      tradeId: "relay_closed_listing:19:600",
+      raw: sellOrder(),
+    },
+    evidence: closedListing(),
+  });
+
+  const partial = transitionsModule.deriveRelayMarketTransitions({
+    previous: {
+      claimId: "100",
+      regionId: "19",
+      listings: [sellOrder()],
+      closedListings: [],
+    },
+    current: {
+      claimId: "100",
+      regionId: "19",
+      listings: [sellOrder({ quantity: "6" })],
+      closedListings: [closedListing({ quantity: "20" })],
+    },
+    observedAt,
+  });
+  assert.equal(partial.length, 1);
+  assert.equal(partial[0].eventType, "sale_confirmed");
+  assert.equal(partial[0].listing.quantity, "4");
+  assert.equal(partial[0].listing.totalValue, "20");
+});
+
+test("returned item or cargo evidence confirms a non-sale without crossing item kinds", () => {
+  const cargoOrder = sellOrder({
+    entityId: "11",
+    itemId: "42",
+    itemType: "cargo",
+    itemName: "Timber Bundle",
+    quantity: "3",
+    price: "20",
+  });
+  const transitions = transitionsModule.deriveRelayMarketTransitions({
+    previous: {
+      claimId: "100",
+      regionId: "19",
+      listings: [sellOrder({ entityId: "12", quantity: "3" }), cargoOrder],
+      closedListings: [],
+    },
+    current: {
+      claimId: "100",
+      regionId: "19",
+      listings: [sellOrder({ entityId: "12", quantity: "3" })],
+      closedListings: [closedListing({
+        entityId: "601",
+        itemId: "42",
+        itemType: "cargo",
+        quantity: "3",
+        closureKind: "returned_item",
+      })],
+    },
+    observedAt,
+  });
+
+  assert.equal(transitions.length, 1);
+  assert.equal(transitions[0].eventType, "listing_returned");
+  assert.equal(transitions[0].activityType, "market_listing_returned");
+  assert.equal(transitions[0].listing.key, "11");
+  assert.equal(transitions[0].listing.tradeId, null);
+  assert.equal(transitions[0].evidence.entityId, "601");
+});
+
+test("ambiguous sale proceeds remain removed-or-cancelled instead of inventing trades", () => {
+  const transitions = transitionsModule.deriveRelayMarketTransitions({
+    previous: {
+      claimId: "100",
+      regionId: "19",
+      listings: [
+        sellOrder({ entityId: "20" }),
+        sellOrder({ entityId: "21" }),
+      ],
+      closedListings: [],
+    },
+    current: {
+      claimId: "100",
+      regionId: "19",
+      listings: [],
+      closedListings: [closedListing()],
+    },
+    observedAt,
+  });
+
+  assert.equal(transitions.length, 2);
+  assert.deepEqual(
+    transitions.map((entry) => entry.eventType),
+    ["removed_or_cancelled", "removed_or_cancelled"],
+  );
+  assert.equal(transitions.some((entry) => entry.listing.tradeId), false);
+});
+
+test("sale correlation uses exact BigInt arithmetic for values beyond Number precision", () => {
+  const hugePrice = "9007199254740993";
+  const transitions = transitionsModule.deriveRelayMarketTransitions({
+    previous: {
+      claimId: "100",
+      regionId: "19",
+      listings: [sellOrder({ entityId: "30", quantity: "3", price: hugePrice })],
+      closedListings: [],
+    },
+    current: {
+      claimId: "100",
+      regionId: "19",
+      listings: [],
+      closedListings: [closedListing({
+        entityId: "602",
+        quantity: (BigInt(hugePrice) * 3n).toString(),
+      })],
+    },
+    observedAt,
+  });
+
+  assert.equal(transitions.length, 1);
+  assert.equal(transitions[0].eventType, "sale_confirmed");
+  assert.equal(transitions[0].listing.price, hugePrice);
+  assert.equal(transitions[0].listing.totalValue, "27021597764222979");
+});
+
 test("Relay transition history is idempotent and needs no current-listing table", () => {
   assert.ok(transitionsModule, "Relay market transition module must exist");
   const db = new DatabaseSync(":memory:");
@@ -191,6 +383,26 @@ test("Relay transition history is idempotent and needs no current-listing table"
     CREATE UNIQUE INDEX idx_market_events_source
       ON market_events (claim_id, source_key)
       WHERE source_key IS NOT NULL;
+    CREATE TABLE market_trades (
+      trade_id TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL,
+      order_entity_id TEXT,
+      seller_entity_id TEXT,
+      seller_username TEXT,
+      purchaser_entity_id TEXT,
+      purchaser_username TEXT,
+      item_id TEXT,
+      item_type TEXT,
+      item_name TEXT NOT NULL,
+      quantity TEXT NOT NULL,
+      unit_price TEXT NOT NULL,
+      total_price TEXT NOT NULL,
+      tier TEXT,
+      rarity TEXT,
+      occurred_at TEXT NOT NULL,
+      imported_at TEXT NOT NULL,
+      raw_json TEXT NOT NULL
+    );
     CREATE TABLE activity_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       claim_id TEXT NOT NULL,
@@ -229,8 +441,8 @@ test("Relay transition history is idempotent and needs no current-listing table"
   const first = writer.apply({ claimId: "100", previous, current, observedAt });
   const duplicate = writer.apply({ claimId: "100", previous, current, observedAt });
 
-  assert.deepEqual(first, { derived: 3, inserted: 3, activities: 3 });
-  assert.deepEqual(duplicate, { derived: 3, inserted: 0, activities: 0 });
+  assert.deepEqual(first, { derived: 3, inserted: 3, trades: 0, activities: 3 });
+  assert.deepEqual(duplicate, { derived: 3, inserted: 0, trades: 0, activities: 0 });
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM market_events").get().count, 3);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count, 3);
   assert.equal(
@@ -242,4 +454,74 @@ test("Relay transition history is idempotent and needs no current-listing table"
     0,
   );
   assert.equal(outboxKicks, 1);
+
+  const soldPrevious = {
+    claimId: "100",
+    regionId: "19",
+    listings: [sellOrder({
+      entityId: "90",
+      quantity: "3",
+      price: "9007199254740993",
+    })],
+    closedListings: [],
+  };
+  const soldCurrent = {
+    claimId: "100",
+    regionId: "19",
+    listings: [],
+    closedListings: [closedListing({
+      entityId: "690",
+      quantity: "27021597764222979",
+    })],
+  };
+  const sold = writer.apply({
+    claimId: "100",
+    previous: soldPrevious,
+    current: soldCurrent,
+    observedAt,
+  });
+  const soldDuplicate = writer.apply({
+    claimId: "100",
+    previous: soldPrevious,
+    current: soldCurrent,
+    observedAt,
+  });
+  assert.deepEqual(sold, { derived: 1, inserted: 1, trades: 1, activities: 1 });
+  assert.deepEqual(
+    soldDuplicate,
+    { derived: 1, inserted: 0, trades: 0, activities: 0 },
+  );
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT trade_id, order_entity_id, seller_entity_id, item_id, item_type,
+             quantity, unit_price, total_price, occurred_at
+      FROM market_trades
+    `).get() },
+    {
+      trade_id: "relay_closed_listing:19:690",
+      order_entity_id: "90",
+      seller_entity_id: "7",
+      item_id: "42",
+      item_type: "item",
+      quantity: "3",
+      unit_price: "9007199254740993",
+      total_price: "27021597764222979",
+      occurred_at: "2026-07-30T14:59:00.000Z",
+    },
+  );
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT event_type, trade_id, quantity, price, total_value
+      FROM market_events
+      WHERE listing_key = '90'
+    `).get() },
+    {
+      event_type: "sale_confirmed",
+      trade_id: "relay_closed_listing:19:690",
+      quantity: "3",
+      price: "9007199254740993",
+      total_value: "27021597764222979",
+    },
+  );
+  assert.equal(outboxKicks, 2);
 });

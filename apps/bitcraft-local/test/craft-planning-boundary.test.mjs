@@ -373,7 +373,7 @@ test("Craft Planning reads the continuously projected Relay catalog without a sc
   assert.doesNotMatch(server, /\/api\/local\/admin\/craft-plan\/catalog-refresh/);
   assert.doesNotMatch(server, /fetchGameDataProbabilitySnapshot|GAME_CATALOG_REFRESH_/);
 
-  const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?const bitjitaProxyCache/)?.[0] ?? "";
+  const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?async function craftPlanDiscordReport/)?.[0] ?? "";
   assert.match(computedCraftPlan, /const catalogTargets = craftPlanCatalogTargets\(config\)/);
   assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\([\s\S]*?gameCatalogRepository,[\s\S]*?catalogTargets,[\s\S]*?config\.routeOverrides,[\s\S]*?64,[\s\S]*?\[\],[\s\S]*?requireValidatedProbabilities: true/);
   assert.match(computedCraftPlan, /enrichCraftPlanSourcesFromLocalCatalog\(gameCatalogRepository, sources\.inventory, catalogWarnings\)/);

@@ -22,7 +22,7 @@ import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySe
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
-import { bitjitaTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
+import { gameTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
 import { currentMarketListings, marketLeaderboardFromCurrent } from "./src/server/currentMarketViews.mjs";
 import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
@@ -54,7 +54,6 @@ import { craftDisplayName, normalizeProfessionKey, productionMetrics } from "./s
 import { createGameCatalogRepository } from "./src/server/gameCatalog.mjs";
 import { createProviderCatalogRepository } from "./src/server/catalogRepository.mjs";
 import { buildProbabilityWorkbookBuffer } from "./src/server/probabilityWorkbook.mjs";
-import { parseRetryAfterMs } from "./src/server/retryAfter.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
@@ -66,15 +65,11 @@ import {
   reconciliationCollectorStatuses,
 } from "./src/server/collectorSettings.mjs";
 import {
-  fetchCraftContributionEvidence,
   readRelayClaimBuildingsForPlanning,
   readRelayClaimForSupplyReport,
   readRelayCraftsForDiscord,
-  readRelayCraftsForContributionReconciliation,
-  readRelayMembersForTradeReconciliation,
   readRelayOnlineMembers,
   runIndependentReconciliation,
-  sideEffectCollectorIsDue,
 } from "./src/server/relayReconciliation.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
 import { evaluateLiveDealWatches, sameEnabledDealWatchRevision } from "./src/server/liveDealWatch.mjs";
@@ -103,12 +98,10 @@ import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailab
 import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
 import { buildWorkstationPresets, normalizeCatalogWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
 import { playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedRelayCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
-import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
 import {
   MANUAL_REFRESH_HEADER,
   createManualRefreshGuard,
 } from "./src/server/manualRefreshGuard.mjs";
-import { createRequestCoordinator } from "./src/server/requestCoordinator.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
 import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
 import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
@@ -120,7 +113,6 @@ import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSe
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
 import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
-import { jobBudgetAllowsMore, normalizeJobBudget, selectResumeBatch } from "./src/server/jobBudget.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import {
   createCurrentStateRepository,
@@ -162,7 +154,7 @@ import {
   relayEmpireMembershipObservation,
 } from "./src/server/empireMembership.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
-import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
+import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyProductionContributionExactAmountMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
@@ -241,8 +233,6 @@ const plannerTelemetry = {
   lastResponseBytes: 0,
   lastCompletedAt: null,
 };
-const bitjitaTelemetry = { requests: 0, failures: 0, timeouts: 0, rateLimits: 0, lastFailureAt: null };
-
 function applicationHealthTelemetry() {
   const recent = requestTelemetry.filter((entry) => Date.now() - entry.at <= 60 * 60 * 1000);
   const durations = recent.map((entry) => entry.durationMs).sort((a, b) => a - b);
@@ -253,7 +243,7 @@ function applicationHealthTelemetry() {
     current.count += 1; current.totalMs += entry.durationMs; current.maxMs = Math.max(current.maxMs, entry.durationMs); groups[entry.path] = current;
     return groups;
   }, {})).map((entry) => ({ ...entry, averageMs: Math.round(entry.totalMs / entry.count) })).sort((a, b) => b.maxMs - a.maxMs).slice(0, 20);
-  return { requests: recent.length, status5xx, status5xxRate: recent.length ? status5xx / recent.length : 0, p50Ms: percentile(.5), p95Ms: percentile(.95), p99Ms: percentile(.99), eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0, memory: process.memoryUsage(), uptimeSeconds: process.uptime(), slowEndpoints: slow, planner: { ...plannerTelemetry }, bitjita: { ...bitjitaTelemetry, coordinator: workerRequestCoordinator?.stats() ?? null } };
+  return { requests: recent.length, status5xx, status5xxRate: recent.length ? status5xx / recent.length : 0, p50Ms: percentile(.5), p95Ms: percentile(.95), p99Ms: percentile(.99), eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0, memory: process.memoryUsage(), uptimeSeconds: process.uptime(), slowEndpoints: slow, planner: { ...plannerTelemetry } };
 }
 
 async function serverHealthResponse(url, { includeDiagnosticBundle = false } = {}) {
@@ -318,8 +308,8 @@ async function evaluateServerHealthIncidents() {
 
 const rateLimit = createRateLimiter({ sendJson: send });
 
-// This server is the local app boundary: it serves the built frontend, proxies
-// BitJita requests, owns SQLite history/configuration, validates admin sessions,
+// This server is the local app boundary: it serves the built frontend, owns
+// SQLite history/configuration, validates admin sessions,
 // runs scheduled jobs, and delivers Discord notifications. Keep cross-cutting
 // concerns here small and explicit; route-specific UI shaping belongs in the
 // frontend or focused helper functions below.
@@ -339,19 +329,13 @@ const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const legacyAdminPasswordAuth = process.env.ENABLE_LEGACY_ADMIN_PASSWORD_AUTH === "true";
 const processRole = resolveProcessRole(process.env, { isProduction });
 const processRoleConfig = processRoleCapabilities(processRole);
-const workerRequestCoordinator = processRole === "worker" ? createRequestCoordinator({ concurrency: 8 }) : null;
 const serverPollingEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SERVER_POLLING !== "false";
 const discordStartupEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_DISCORD_STARTUP !== "false";
 const scheduledJobsEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SCHEDULED_JOBS !== "false";
 const discordNotificationOutboxIntervalMs = Math.max(Number(process.env.DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS ?? 5000), 1000);
 const discordNotificationMaxAttempts = Math.max(Number(process.env.DISCORD_NOTIFICATION_MAX_ATTEMPTS ?? 8), 1);
 let discordNotificationOutboxRunning = false;
-const marketTradeJobBudget = normalizeJobBudget({
-  maxRuntimeMs: process.env.MARKET_TRADES_MAX_RUNTIME_MS ?? 15000,
-  batchSize: process.env.MARKET_TRADES_BATCH_SIZE ?? 20,
-});
 const MARKET_DAILY_HISTORY_LIMIT = 365;
-const marketTradeNotificationRecoveryWindowMs = Math.max(1, toNumber(process.env.MARKET_TRADE_NOTIFICATION_RECOVERY_HOURS ?? 24)) * 60 * 60 * 1000;
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const relayHttpRefreshSetting = Number(process.env.RELAY_HTTP_REFRESH_MS ?? 15000);
 const relayHttpRefreshMs = Number.isFinite(relayHttpRefreshSetting)
@@ -414,6 +398,8 @@ applyLegacySchemaCleanup(db);
 
 
 applyAdditiveColumnMigrations(db);
+applyMarketHistoryExactAmountMigration(db);
+applyProductionContributionExactAmountMigration(db);
 applySchemaIndexStatements(db);
 
 const now = new Date().toISOString();
@@ -1368,12 +1354,6 @@ function audit(user, action, details = {}) {
 }
 
 const adminLoginAttempts = createAdminLoginAttemptStore();
-const craftContributionCache = new Map();
-const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
-const UPSTREAM_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.BITJITA_PROXY_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
-const UPSTREAM_CACHE_MAX_ENTRIES = Math.max(25, Number(process.env.BITJITA_PROXY_CACHE_MAX_ENTRIES ?? 300));
-const BITJITA_FETCH_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_FETCH_TIMEOUT_MS ?? 15000));
-const BITJITA_PROXY_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_TIMEOUT_MS ?? 12000));
 const SLOW_REQUEST_LOG_MS = Math.max(1000, Number(process.env.SLOW_REQUEST_LOG_MS ?? 8000));
 
 const CRAFT_PLAN_KEY = "active";
@@ -2122,13 +2102,6 @@ async function dispatchScheduledCraftPlanReports() {
     craftPlanReportDispatcherRunning = false;
   }
 }
-const bitjitaProxyCache = createBitjitaProxyCache({
-  appIdentifier,
-  defaultTtlMs: UPSTREAM_CACHE_TTL_MS,
-  staleIfErrorMs: UPSTREAM_STALE_IF_ERROR_MS,
-  maxEntries: UPSTREAM_CACHE_MAX_ENTRIES,
-  timeoutMs: BITJITA_PROXY_TIMEOUT_MS,
-});
 const manualRefreshGuard = createManualRefreshGuard();
 
 function visitorSecuritySettings(includeSecrets = false) {
@@ -3302,7 +3275,7 @@ function formatDaysAndHours(days) {
 function supplyRunwayMetadata(claim, supplies = toNumber(claim?.supplies)) {
   const hourlyUpkeep = toNumber(claim?.upkeepCost) || toNumber(claim?.tileCost) * toNumber(claim?.numTiles);
   const dailyUpkeep = hourlyUpkeep * 24;
-  const runOutDate = bitjitaTimestampIso(claim?.suppliesRunOut);
+  const runOutDate = gameTimestampIso(claim?.suppliesRunOut);
   const runwayDays = runOutDate && new Date(runOutDate).getTime() > Date.now()
     ? (new Date(runOutDate).getTime() - Date.now()) / (24 * 60 * 60 * 1000)
     : dailyUpkeep > 0 ? supplies / dailyUpkeep : 0;
@@ -3359,7 +3332,7 @@ function productionNotificationSkipReason(eventType, metadata = {}, settings = g
   const allowedUsers = String(settings.productionUsers ?? "").split(/[\n,]/).map((name) => name.trim().toLowerCase()).filter(Boolean);
   if (allowedUsers.length) {
     const crafter = String(metadata.crafterName ?? "").trim().toLowerCase();
-    if (!crafter) return `Allowed crafters are set, but BitJita did not provide a crafter name for this craft`;
+    if (!crafter) return "Allowed crafters are set, but the craft has no attributed crafter";
     if (!allowedUsers.includes(crafter)) return `Crafter "${metadata.crafterName}" is not in allowed crafters: ${settings.productionUsers}`;
   }
   return "";
@@ -4924,34 +4897,6 @@ function isDeployableStorage(building) {
 }
 
 
-function insertConfirmedMarketTrade(claimId, trade, listing = {}, importedAt = new Date().toISOString()) {
-  const tradeId = String(trade.id ?? "").trim();
-  if (!tradeId) return 0;
-  const quantity = toNumber(trade.quantity);
-  const unitPrice = toNumber(trade.unitPrice ?? trade.price ?? listing.price);
-  const totalPrice = toNumber(trade.totalPrice ?? trade.total_price) || quantity * unitPrice;
-  return Number(statements.insertMarketTrade.run(
-    tradeId,
-    claimId,
-    trade.orderEntityId == null ? String(listing.key ?? "") || null : String(trade.orderEntityId),
-    trade.sellerEntityId == null ? String(listing.ownerEntityId ?? "") || null : String(trade.sellerEntityId),
-    trade.sellerUsername ?? listing.owner ?? null,
-    trade.purchaserEntityId == null ? null : String(trade.purchaserEntityId),
-    trade.purchaserUsername ?? null,
-    trade.itemId == null ? (listing.itemId == null ? null : String(listing.itemId)) : String(trade.itemId),
-    trade.itemType == null ? (listing.itemType == null ? null : String(listing.itemType)) : String(trade.itemType),
-    String(trade.itemName ?? listing.itemName ?? "Unknown item"),
-    quantity,
-    unitPrice,
-    totalPrice,
-    trade.itemTier == null ? (listing.tier == null ? null : String(listing.tier)) : String(trade.itemTier),
-    trade.itemRarityStr ?? listing.rarity ?? null,
-    tradeOccurredAt(trade, importedAt),
-    importedAt,
-    JSON.stringify(trade),
-  ).changes);
-}
-
 function craftOutputCatalog(craftsPayload) {
   return new Map([...(craftsPayload?.items ?? []), ...(craftsPayload?.cargos ?? [])]
     .map((item) => {
@@ -4977,74 +4922,6 @@ function craftContributionOutputItem(craft, catalog) {
   const kind = String(output.itemType ?? output.item_type ?? "").toLowerCase() === "cargo" || Number(output.itemType ?? output.item_type) === 1 ? "cargo" : "items";
   const outputId = String(output.itemId ?? output.item_id ?? "").trim();
   return catalog.get(`${kind}:${outputId}`) ?? {};
-}
-
-function craftContributionRecord(claimId, craft, contribution, catalog, observedAt) {
-  const craftId = String(craft.entityId ?? "").trim();
-  const contributorId = String(contribution.contributorEntityId ?? contribution.playerEntityId ?? contribution.entityId ?? "").trim();
-  if (!craftId || !contributorId) return null;
-  const item = craftContributionOutputItem(craft, catalog);
-  const progress = toNumber(contribution.totalProgressContributed ?? contribution.contributedProgress ?? contribution.progress);
-  const xpPerProgress = craftExperiencePerProgress(craft);
-  return {
-    key: `${claimId}:${craftId}:${contributorId}`,
-    claimId,
-    craftId,
-    contributorId,
-    contributorName: String(contribution.contributorUsername ?? contribution.username ?? contribution.userName ?? contributorId),
-    profession: craftPrimarySkill(craft),
-    craftLabel: String(item.name ?? craft.recipeName ?? craft.craftedItemName ?? "Unknown craft"),
-    structureName: String(craft.buildingName ?? craft.structureName ?? "Unknown structure"),
-    itemTier: item.tier == null ? (craft.tier == null ? null : String(craft.tier)) : String(item.tier),
-    progress,
-    xp: progress * xpPerProgress,
-    count: toNumber(contribution.contributionCount),
-    firstAt: contribution.firstContributedAt ?? null,
-    lastAt: contribution.lastContributedAt ?? null,
-    observedAt,
-    raw: contribution,
-  };
-}
-
-async function collectProductionContributionRecords(claimId, craftsPayload, contributionsByCraft, observedAt) {
-  const crafts = unwrap(craftsPayload, "craftResults", []).filter((craft) => craft?.entityId);
-  const catalog = craftOutputCatalog(craftsPayload);
-  const entries = await mapWithConcurrency(crafts, 4, async (craft) => {
-    const craftId = String(craft.entityId);
-    if (!Object.prototype.hasOwnProperty.call(contributionsByCraft ?? {}, craftId)) {
-      throw new Error(`Craft ${craftId} contribution evidence is unavailable.`);
-    }
-    const contributions = contributionsByCraft[craftId];
-    if (!Array.isArray(contributions)) throw new Error(`Craft ${craftId} contribution evidence is malformed.`);
-    return contributions
-      .map((contribution) => craftContributionRecord(claimId, craft, contribution, catalog, observedAt))
-      .filter(Boolean);
-  });
-  return entries.flat();
-}
-
-function persistProductionContributions(records) {
-  for (const record of records) {
-    statements.upsertProductionContribution.run(
-      record.key,
-      record.claimId,
-      record.craftId,
-      record.contributorId,
-      record.contributorName,
-      record.profession || null,
-      record.craftLabel,
-      record.structureName,
-      record.itemTier,
-      record.progress,
-      record.xp,
-      record.count,
-      record.firstAt,
-      record.lastAt,
-      record.observedAt,
-      record.observedAt,
-      JSON.stringify(record.raw),
-    );
-  }
 }
 
 function recordSettlementState(summary, claim = {}) {
@@ -5082,74 +4959,6 @@ async function syncProductionJobActivityForSnapshot(claimId, craftsPayload, now)
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
-  }
-}
-
-async function syncProductionContributionsForSnapshot(claimId, craftsPayload, contributionsByCraft, now) {
-  if (!craftsPayload) return;
-  const liveContributionCount = Object.values(contributionsByCraft ?? {}).reduce((sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0), 0);
-  const productionContributionRecords = await collectProductionContributionRecords(claimId, craftsPayload, contributionsByCraft, now);
-  if (liveContributionCount > 0 && productionContributionRecords.length === 0) {
-    throw new Error("Live craft contributions were available but none could be persisted");
-  }
-  db.exec("BEGIN");
-  try {
-    persistProductionContributions(productionContributionRecords);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-}
-
-async function fetchBitjita(pathname, options = {}) {
-  if (!workerRequestCoordinator) return fetchBitjitaUncoordinated(pathname, options);
-  const cacheMode = options.cache === false ? "direct" : options.forceRefresh ? "forced" : "cached";
-  const key = `${cacheMode}:${Number(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS)}:${pathname}`;
-  return workerRequestCoordinator.run(key, () => fetchBitjitaUncoordinated(pathname, options));
-}
-
-async function fetchBitjitaUncoordinated(pathname, options = {}) {
-  // Central BitJita client used by collectors and local helper endpoints. Keep
-  // the identifying header here so upstream sees a consistent app identity, and
-  // prefer adding resilience here instead of duplicating fetch logic in callers.
-  const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api${pathname}`);
-  const timeoutMs = Math.max(0, toNumber(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS));
-  bitjitaTelemetry.requests += 1;
-  let response;
-  try {
-    if (options.cache === false) {
-      const fetchOptions = { headers: { accept: "application/json", "x-app-identifier": appIdentifier } };
-      if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
-      response = await fetch(url, fetchOptions);
-      if (!response.ok) {
-        const error = new Error(`${pathname}: HTTP ${response.status}`);
-        error.statusCode = response.status;
-        error.retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
-        throw error;
-      }
-      return response.json();
-    }
-    response = await bitjitaProxyCache.fetchUpstreamCached(url, { timeoutMs, forceRefresh: options.forceRefresh === true });
-  } catch (error) {
-    bitjitaTelemetry.failures += 1;
-    bitjitaTelemetry.lastFailureAt = new Date().toISOString();
-    if (Number(error?.statusCode) === 429) bitjitaTelemetry.rateLimits += 1;
-    if (timeoutMs > 0 && error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
-      bitjitaTelemetry.timeouts += 1;
-      throw new Error(`${pathname}: timed out after ${Math.round(timeoutMs / 1000)}s`);
-    }
-    if (error instanceof TypeError && String(error.message ?? "").toLowerCase().includes("fetch failed")) {
-      const cause = error.cause instanceof Error ? `: ${error.cause.message}` : "";
-      throw new Error(`${pathname}: BitJita network request failed${cause}`);
-    }
-    throw error;
-  }
-  if (response.status < 200 || response.status >= 300) throw new Error(`${pathname}: HTTP ${response.status}`);
-  try {
-    return JSON.parse(Buffer.from(response.body).toString("utf8"));
-  } catch {
-    throw new Error(`${pathname}: BitJita returned invalid JSON`);
   }
 }
 
@@ -5425,159 +5234,6 @@ async function runMarketDealWatchJob({ jobKey, claimId: requestedClaimId, snapsh
   };
 }
 
-function marketTradeBackfillKey(claimId, playerId) {
-  return `market_trade_backfill:${claimId}:${playerId}`;
-}
-
-function collectorResumeSettingKey(jobKey, claimId) {
-  return `collector_resume:${jobKey}:${claimId}`;
-}
-
-function readCollectorResume(jobKey, claimId) {
-  return safeJson(statements.getSetting.get(collectorResumeSettingKey(jobKey, claimId))?.value, {});
-}
-
-function writeCollectorResume(jobKey, claimId, metadata = {}) {
-  const updatedAt = new Date().toISOString();
-  statements.upsertSetting.run(collectorResumeSettingKey(jobKey, claimId), JSON.stringify({ ...metadata, updatedAt }), updatedAt);
-}
-
-async function fetchOrderTrades(playerId, orderEntityId) {
-  const trades = [];
-  let offset = 0;
-  while (true) {
-    const payload = await fetchBitjita(`/market/player/${playerId}/trades?type=sell&limit=200&offset=${offset}&orderEntityId=${encodeURIComponent(String(orderEntityId))}`, { cache: false });
-    const page = unwrap(payload, "trades", []);
-    trades.push(...page);
-    if (page.length < 200) break;
-    offset += page.length;
-  }
-  return trades;
-}
-
-async function fetchMemberSettlementSellTrades(claimId, member) {
-  const playerId = String(member.playerEntityId ?? member.entityId ?? "").trim();
-  if (!playerId) return null;
-  const key = marketTradeBackfillKey(claimId, playerId);
-  const isBackfilled = statements.getSetting.get(key)?.value === "complete";
-  const claimOrders = [];
-  let offset = 0;
-  while (true) {
-    const payload = await fetchBitjita(`/market/player/${playerId}/history?type=sell&status=COMPLETED&limit=200&offset=${offset}`, { cache: false });
-    const page = unwrap(payload, "sellOrderHistory", []);
-    claimOrders.push(...page.filter((order) => String(order.claimEntityId ?? "") === String(claimId)));
-    if (isBackfilled || page.length < 200 || offset + page.length >= toNumber(payload.totalSellOrders)) break;
-    offset += page.length;
-  }
-  const tradePages = await mapWithConcurrency(claimOrders, 3, (order) => fetchOrderTrades(playerId, order.entityId));
-  return { key, member, trades: tradePages.flat(), isBackfilled };
-}
-
-function tradeOccurredAt(trade, importedAt) {
-  const parsed = new Date(String(trade.createdAt ?? ""));
-  return Number.isNaN(parsed.getTime()) ? importedAt : parsed.toISOString();
-}
-
-function shouldNotifyImportedMarketTrade(importResult, trade, importedAt) {
-  if (importResult?.isBackfilled) return true;
-  const occurredMs = new Date(tradeOccurredAt(trade, importedAt)).getTime();
-  const importedMs = new Date(importedAt).getTime();
-  if (!Number.isFinite(occurredMs) || !Number.isFinite(importedMs)) return false;
-  return importedMs - occurredMs <= marketTradeNotificationRecoveryWindowMs;
-}
-
-function memberTradeImportKey(member) {
-  return String(member.playerEntityId ?? member.entityId ?? "").trim();
-}
-
-async function importMemberSellTrades(claimId, members, options = {}) {
-  const budget = normalizeJobBudget(options.budget ?? {}, marketTradeJobBudget);
-  const uniqueMembers = [...new Map(members
-    .filter((member) => memberTradeImportKey(member))
-    .map((member) => [memberTradeImportKey(member), member])).values()]
-    .sort((a, b) => memberTradeImportKey(a).localeCompare(memberTradeImportKey(b)));
-  const resume = readCollectorResume("marketTrades", claimId);
-  const batch = selectResumeBatch(uniqueMembers, {
-    cursor: resume.nextCursor,
-    batchSize: budget.batchSize,
-    getKey: memberTradeImportKey,
-  });
-  const startedAtMs = Date.now();
-  const imports = [];
-  const processedMembers = [];
-  for (const member of batch.items) {
-    if (!jobBudgetAllowsMore(startedAtMs, budget, processedMembers.length)) break;
-    processedMembers.push(member);
-    imports.push(await fetchMemberSettlementSellTrades(claimId, member));
-  }
-  const importedAt = new Date().toISOString();
-  let inserted = 0;
-  db.exec("BEGIN");
-  try {
-    for (const result of imports.filter(Boolean)) {
-      for (const trade of result.trades) {
-        const listing = { owner: result.member.userName ?? result.member.username, ownerEntityId: result.member.playerEntityId ?? result.member.entityId };
-        const changed = insertConfirmedMarketTrade(claimId, trade, listing, importedAt);
-        inserted += changed;
-        if (changed > 0 && shouldNotifyImportedMarketTrade(result, trade, importedAt)) {
-          const quantity = toNumber(trade.quantity);
-          const unitPrice = toNumber(trade.unitPrice ?? trade.price);
-          const occurredAt = tradeOccurredAt(trade, importedAt);
-          const itemName = String(trade.itemName ?? "Unknown item");
-          const metadata = {
-            itemName,
-            itemId: trade.itemId == null ? null : String(trade.itemId),
-            itemType: trade.itemType == null ? null : String(trade.itemType),
-            owner: trade.sellerUsername ?? listing.owner,
-            ownerEntityId: trade.sellerEntityId == null ? listing.ownerEntityId : String(trade.sellerEntityId),
-            sellerName: trade.sellerUsername ?? listing.owner,
-            sellerEntityId: trade.sellerEntityId == null ? listing.ownerEntityId : String(trade.sellerEntityId),
-            purchaserName: trade.purchaserUsername ?? null,
-            purchaserEntityId: trade.purchaserEntityId == null ? null : String(trade.purchaserEntityId),
-            quantity,
-            price: unitPrice,
-            unitPrice,
-            totalValue: toNumber(trade.totalPrice ?? trade.total_price) || quantity * unitPrice,
-            tradeId: String(trade.id ?? ""),
-            tier: trade.itemTier == null ? null : String(trade.itemTier),
-            rarity: trade.itemRarityStr ?? null,
-            raw: trade,
-          };
-          addActivity(
-            claimId,
-            "market_sale_confirmed",
-            `Confirmed sale: ${itemName} x${quantity.toLocaleString()} at ${unitPrice.toLocaleString()}g`,
-            occurredAt,
-            metadata,
-            `market_sale_confirmed:trade:${trade.id ?? ""}`,
-          );
-        }
-      }
-      statements.upsertSetting.run(result.key, "complete", importedAt);
-    }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-  const complete = batch.complete && processedMembers.length === batch.items.length;
-  const nextCursor = complete ? null : (processedMembers.length ? memberTradeImportKey(processedMembers[processedMembers.length - 1]) : (resume.nextCursor ?? null));
-  writeCollectorResume("marketTrades", claimId, {
-    nextCursor,
-    complete,
-    processed: processedMembers.length,
-    total: uniqueMembers.length,
-    inserted,
-    budget,
-  });
-  return {
-    inserted,
-    requested: uniqueMembers.length,
-    processed: processedMembers.length,
-    complete,
-    nextCursor,
-  };
-}
 async function mapWithConcurrency(values, concurrency, mapper) {
   const results = new Array(values.length);
   let next = 0;
@@ -5590,17 +5246,6 @@ async function mapWithConcurrency(values, concurrency, mapper) {
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
   return results;
-}
-
-async function fetchCachedCraftContributions(craftId, options = {}) {
-  const key = String(craftId);
-  const cached = craftContributionCache.get(key);
-  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
-  const payload = await fetchBitjita(`/crafts/${encodeURIComponent(key)}/contributions`, { forceRefresh: options.forceRefresh === true });
-  if (!Array.isArray(payload?.contributions)) throw new Error(`Craft ${key} contribution evidence is malformed.`);
-  const value = payload.contributions;
-  craftContributionCache.set(key, { value, expiresAt: Date.now() + 15 * 1000 });
-  return value;
 }
 
 function meaningfulItemName(value) {
@@ -5756,46 +5401,31 @@ function enrichRelayCraftsForSideEffects(crafts) {
   };
 }
 
-async function runProductionContributionCollector(claimId, force = false) {
-  if (!sideEffectCollectorDue("productionContributions", force)) return { skipped: true };
-  const startedAt = collectorAttempt("productionContributions");
-  try {
-    const crafts = enrichRelayCraftsForSideEffects(readRelayCraftsForContributionReconciliation(
-      (id, domain) => currentStateRepository.read(id, domain),
-      claimId,
-    ));
-    const contributions = await fetchCraftContributionEvidence({
-      craftsPayload: crafts,
-      fetchContribution: fetchCachedCraftContributions,
-      mapWithConcurrency,
+function relayCraftContributionTargets(craftsPayload) {
+  const catalog = craftOutputCatalog(craftsPayload);
+  return unwrap(craftsPayload, "craftResults", [])
+    .filter((craft) => craft?.entityId && craft.completed !== true)
+    .map((craft) => {
+      const craftEntityId = String(craft.entityId).trim();
+      if (!/^\d+$/.test(craftEntityId)) {
+        throw new Error("Relay craft contribution target has an invalid craft entity id");
+      }
+      const xpPerProgress = craftExperiencePerProgress(craft);
+      if (!Number.isSafeInteger(xpPerProgress) || xpPerProgress < 0) {
+        throw new Error(`Relay craft ${craftEntityId} has invalid experience per progress`);
+      }
+      const item = craftContributionOutputItem(craft, catalog);
+      return {
+        craftEntityId,
+        profession: craftPrimarySkill(craft) || null,
+        craftLabel: String(item.name ?? craft.recipeName ?? craft.craftedItemName ?? "Unknown craft"),
+        structureName: String(craft.buildingName ?? craft.structureName ?? "Unknown structure"),
+        itemTier: item.tier == null
+          ? (craft.tier == null ? null : String(craft.tier))
+          : String(item.tier),
+        xpPerProgress: String(xpPerProgress),
+      };
     });
-    await syncProductionContributionsForSnapshot(claimId, crafts, contributions, new Date().toISOString());
-    collectorSuccess("productionContributions", startedAt);
-    return { skipped: false };
-  } catch (error) {
-    collectorFailure("productionContributions", startedAt, error);
-    throw error;
-  }
-}
-
-async function runMarketTradeCollector(claimId, force = false) {
-  if (!sideEffectCollectorDue("marketTrades", force)) return { skipped: true };
-  const startedAt = collectorAttempt("marketTrades");
-  try {
-    const members = readRelayMembersForTradeReconciliation(
-      (id, domain) => currentStateRepository.read(id, domain),
-      claimId,
-    );
-    const result = await importMemberSellTrades(claimId, members, { budget: marketTradeJobBudget });
-    pollStatus.marketTradesProcessed = result.processed;
-    pollStatus.marketTradesInserted = result.inserted;
-    pollStatus.marketTradesComplete = result.complete;
-    collectorSuccess("marketTrades", startedAt);
-    return { ...result, skipped: false };
-  } catch (error) {
-    collectorFailure("marketTrades", startedAt, error);
-    throw error;
-  }
 }
 
 async function runScheduledSupplyReport(claimId) {
@@ -5806,8 +5436,8 @@ async function runScheduledSupplyReport(claimId) {
 }
 
 async function collectServerSnapshot(force = false) {
-  // Polling remains only for unresolved contribution and completed-sale
-  // imports. Committed Relay generations own live settlement transitions.
+  // Polling remains only for maintenance and scheduled reports. Committed Relay
+  // generations own all current game data and contribution/market transitions.
   if ((!serverPollingEnabled && !force) || pollStatus.running) return;
   pollStatus.running = true;
   pollStatus.intervalMs = serverRefreshIntervalMs();
@@ -5817,13 +5447,11 @@ async function collectServerSnapshot(force = false) {
     const reconciliation = await runIndependentReconciliation({
       runMaintenance: () => processDiscordTempBans(),
       runSupplyReport: () => runScheduledSupplyReport(claimId),
-      runContributions: () => runProductionContributionCollector(claimId, force),
-      runMarketTrades: () => runMarketTradeCollector(claimId, force),
     });
     if (reconciliation.maintenanceError) console.warn(`Discord maintenance skipped: ${reconciliation.maintenanceError}`);
     if (reconciliation.supplyError) console.warn(`Discord supply report skipped: ${reconciliation.supplyError}`);
     pollStatus.lastSuccessAt = new Date().toISOString();
-    pollStatus.lastError = [reconciliation.maintenanceError, reconciliation.supplyError, reconciliation.contributionError, reconciliation.marketError].filter(Boolean).join("; ") || null;
+    pollStatus.lastError = [reconciliation.maintenanceError, reconciliation.supplyError].filter(Boolean).join("; ") || null;
   } catch (error) {
     pollStatus.lastError = error instanceof Error ? error.message : String(error);
     console.error(`Relay reconciliation loop failed: ${pollStatus.lastError}`);
@@ -9529,16 +9157,35 @@ function startBackgroundTasks() {
       if (!Array.isArray(members) || members.length === 0) {
         return;
       }
+      let contributionTargets = [];
+      try {
+        const crafts = currentStateRepository.read(claimId, "crafts")?.data;
+        if (crafts) {
+          contributionTargets = relayCraftContributionTargets(
+            enrichRelayCraftsForSideEffects(crafts),
+          );
+        }
+      } catch (error) {
+        if (!isTestRuntime) {
+          console.warn(`Relay craft-contribution targets unavailable: ${errorMessage(error)}`);
+        }
+      }
       if (!relayPrimaryRegionStarted) {
         await relayPrimaryRegionRuntime.start({
           relayBaseUrl,
           claimId,
           regionId,
           members,
+          contributionTargets,
         });
         relayPrimaryRegionStarted = true;
       } else {
-        await relayPrimaryRegionRuntime.reconcile({ claimId, regionId, members });
+        await relayPrimaryRegionRuntime.reconcile({
+          claimId,
+          regionId,
+          members,
+          contributionTargets,
+        });
       }
     };
     const refreshRelay = async (reason = "scheduled") => {

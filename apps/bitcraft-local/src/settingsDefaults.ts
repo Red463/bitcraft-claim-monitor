@@ -136,12 +136,7 @@ export const DEFAULT_DISCORD_PRESENCE: DiscordPresence = {
 
 export const DISCORD_CHANNEL_FIELDS = Object.keys(DEFAULT_DISCORD_CHANNELS);
 
-export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {
-  // Current page data is committed by the Relay provider. Only the two
-  // unresolved evidence imports retain a periodic reconciliation cadence.
-  productionContributions: { label: "Production contribution reconciliation (blocked upstream mapping)", enabled: true, intervalSeconds: 300 },
-  marketTrades: { label: "Completed member-sale reconciliation (blocked upstream mapping)", enabled: true, intervalSeconds: 60 },
-};
+export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {};
 
 export const DEFAULT_SETTINGS: AppSettings = {
   claimId: DEFAULT_CLAIM_ID,

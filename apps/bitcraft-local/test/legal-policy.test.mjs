@@ -65,7 +65,7 @@ test("policy contains the approved legal subjects, providers, and retention rule
   }
   assert.deepEqual(
     policy.providers.map(({ key }) => key),
-    ["hostworld", "namecheap", "discord", "bitcraft-relay", "bitjita", "proton", "buy-me-a-coffee", "github"],
+    ["hostworld", "namecheap", "discord", "bitcraft-relay", "proton", "buy-me-a-coffee", "github"],
   );
   assert.ok(policy.retention.some(({ key, days }) => key === "full-ip" && days === 7));
   assert.ok(policy.retention.some(({ key, days }) => key === "analytics-events" && days === 90));
@@ -76,10 +76,9 @@ test("policy contains the approved legal subjects, providers, and retention rule
   assert.match(JSON.stringify(policy.privacy.sections), /separate administrator identity and Discord server membership/i);
 });
 
-test("policy accurately separates the current Relay provider from narrow BitJita evidence", () => {
+test("policy identifies Relay as the sole game-data provider", () => {
   const policy = legalPolicyForEnvironment({});
   const relay = policy.providers.find(({ key }) => key === "bitcraft-relay");
-  const bitjita = policy.providers.find(({ key }) => key === "bitjita");
   const terms = JSON.stringify(policy.terms.sections);
   const privacy = JSON.stringify(policy.privacy.sections);
 
@@ -90,17 +89,11 @@ test("policy accurately separates the current Relay provider from narrow BitJita
     data: "Public BitCraft game, character, settlement, inventory, market, and activity information requested by the app server.",
     location: "The Relay operator and infrastructure locations have not been published to this app; processing may occur outside the United Kingdom.",
   });
-  assert.deepEqual(bitjita, {
-    key: "bitjita",
-    name: "BitJita",
-    role: "Temporary evidence API for craft contributions and completed sales",
-    data: "Public craft-contribution records and completed-sale or trade records for monitored settlement members.",
-    location: "As described by BitJita; processing may occur outside the United Kingdom.",
-  });
+  assert.equal(policy.providers.some(({ key }) => key === "bitjita"), false);
   assert.match(terms, /BitCraft Relay.*current public game data/i);
-  assert.match(terms, /BitJita.*only.*craft-contribution.*completed-sale evidence/i);
+  assert.match(terms, /live craft-contribution events/i);
   assert.match(privacy, /BitCraft Relay.*current public game data/i);
-  assert.match(privacy, /BitJita.*only.*craft-contribution.*completed-sale evidence/i);
+  assert.match(privacy, /craft-contribution events/i);
   assert.match(privacy, /BitCraft Relay.*may process data internationally/i);
 });
 

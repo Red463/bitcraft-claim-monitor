@@ -342,7 +342,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
       </section>
       {currentView === "analytics" ? (
         <>
-          <p className="legend market-legend">Completed sales for orders listed at this settlement market, confirmed from BitJita trade records.</p>
+          <p className="legend market-legend">Completed sales for orders listed at this settlement market, confirmed from Relay closed-listing proceeds.</p>
           <div className="metric-grid market-analytics-metrics">
             <MiniStat icon={<CheckCircle2 />} label="Confirmed Sales" value={formatNumber(confirmedSales)} />
             <MiniStat icon={<Package />} label="Units Sold" value={formatNumber(unitsSold)} />
@@ -352,7 +352,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
           <div className="two-col market-analytics">
             <section>
               <h3><Star size={17} /> Best Sellers</h3>
-              <p className="legend">Top confirmed sellers from recorded BitJita trade history.</p>
+              <p className="legend">Top confirmed sellers from locally recorded Relay sale evidence.</p>
               <BestSellersLeaderboard rows={topItems} itemMeta={marketItemMeta} />
             </section>
             <section>

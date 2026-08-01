@@ -7,19 +7,16 @@ const source = (relativePath) => readFileSync(new URL(relativePath, import.meta.
 test("maintainer README describes live Relay ownership without the retired browser proxy", () => {
   const readme = source("../README.md");
 
-  assert.doesNotMatch(readme, /\/api\/bitjita\/\*/);
-  assert.doesNotMatch(readme, /normal browser pages refresh live data.*BitJita/i);
   assert.match(readme, /provider-neutral local routes/i);
   assert.match(readme, /committed Relay generations/i);
-  assert.match(readme, /craft-contribution.*completed-sale evidence reconcilers/is);
+  assert.match(readme, /regional craft-progress transactions/i);
+  assert.doesNotMatch(readme, /scheduled acquisition jobs/i);
 });
 
-test("product contract identifies Relay current data and narrow evidence reconciliation", () => {
+test("product contract identifies Relay current data and live contribution attribution", () => {
   const product = source("../PRODUCT.md");
 
-  assert.doesNotMatch(product, /combines BitJita public API data/i);
-  assert.doesNotMatch(product, /uncertain BitJita data/i);
   assert.match(product, /committed Relay generations/i);
   assert.match(product, /provider-neutral local routes/i);
-  assert.match(product, /BitJita.*craft-contribution.*completed-sale evidence/is);
+  assert.match(product, /positive regional craft-progress transactions/i);
 });

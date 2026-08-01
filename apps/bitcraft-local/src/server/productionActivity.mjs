@@ -28,7 +28,7 @@ export function craftJobKey(job) {
   const outputItem = stableCraftPart(output.item_id ?? output.itemId ?? output.id ?? job.outputItemId ?? job.itemId);
   const outputType = stableCraftPart(output.item_type ?? output.itemType ?? job.outputItemType ?? job.itemType);
   const visibility = job.isPublic === false ? "private" : "public";
-  // BitJita can report the same public craft with a different current/last crafter as work continues.
+  // A public craft can have a different current/last crafter as work continues.
   // Crafter is notification metadata, not stable craft identity, otherwise starts can fire again.
   if (structure && (recipe || outputItem)) return ["craft", claim, structure, recipe || "recipe", outputItem || "output", outputType || "item", visibility].join("|");
   return firstNonEmptyString(job.entityId, job.id, job.craftEntityId) ?? ["craft", claim, recipe || outputItem || "unknown", visibility].join("|");

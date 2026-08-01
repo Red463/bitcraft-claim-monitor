@@ -17,8 +17,10 @@ be observed.
   close production jobs.
 - SQLite remains for genuine lifecycle/history, deduplication, outbox, and the
   minimal restart-safe transition checkpoint.
-- Craft contributor and authoritative completed-sale mappings remain explicit
-  evidence blockers; this slice must not invent them.
+- Craft contributor identity and exact deltas are accepted only through the
+  proven positive regional progressive-action transaction mapping.
+  Completed-sale evidence is accepted only through the separately proven,
+  fail-closed closed-listing mapping.
 
 ## Task 1 — Production lifecycle from committed Relay crafts
 
@@ -37,8 +39,8 @@ be observed.
   current generation.
 - Remove production lifecycle execution from the periodic settlement snapshot
   loop so a craft generation is processed exactly once by one freshness owner.
-- Keep the separate contribution collector untouched until contributor
-  semantics are proven.
+- Replace the separate contribution collector once contributor semantics are
+  proven; current production lifecycle publication must remain independent.
 - Add focused tests that fail without the event-driven behavior, including
   coalescing, configured-claim fencing, non-blocking commit notification, and
   failure recovery.
@@ -69,19 +71,15 @@ be observed.
   statements, and writers. `domain_payload_current` remains the provider-owned
   normalized, atomic last-good boundary: a reconciliation task cannot overwrite
   its Relay provenance or freshness.
-- Keep only the two evidence reconcilers: craft contributions and completed
-  member-sale imports. Each has its own enabled/due/force decision and failure
-  status, reads a complete claim-fenced committed Relay `crafts` or `members`
-  input first, and cannot prevent the other reconciler, reports, maintenance,
-  or current-state publication from running.
-- Until the Relay contributor and authoritative sale-close mappings are proven,
-  these two reconcilers make only their narrow existing BitJita evidence calls.
-  This is not a claim/member/catalog/current-state fallback and does not make a
-  zero-BitJita claim for this stage.
-- Admin describes the remaining cadence as evidence reconciliation, not live
-  data collection. The parity matrix and SQL inventory record the split, and
-  focused tests prove current features remain usable with scheduled ingestion
-  disabled.
+- Subscribe only to progressive-action rows for active monitored-claim craft
+  IDs and append positive transaction deltas immediately.
+- Completed sales are derived immediately from uniquely correlated Relay
+  closed-listing evidence. Remove the former sale reconciler, its schedule,
+  resume state, admin control, and market API calls together.
+- Durable event receipts and the indexed contribution aggregate update in one
+  transaction without delaying current generation publication. Admin exposes
+  subscription health rather than an acquisition cadence. Focused tests prove
+  current features remain usable with scheduled ingestion disabled.
 
 ## Task 4 — Retire legacy browser, proxy, helper, and command acquisition
 
@@ -97,9 +95,8 @@ be observed.
 - Reconcile Craft Plan buildings from the committed construction generation.
   If that generation is unavailable, leave targets pending rather than
   guessing or delaying the save on an upstream fetch.
-- Keep only the narrow craft-contributor and completed-member-sale BitJita
-  evidence calls until their authoritative Relay mappings are proven. They are
-  not current-state fallbacks.
+- Remove the final craft-contributor evidence call, cache, telemetry, settings,
+  and reconciler after the authoritative Relay mapping is proven.
 - Add no replacement SQL current cache. Retain SQLite only where the table
   inventory records independent history, user, operational, restart, indexing,
   or process-sharing value.

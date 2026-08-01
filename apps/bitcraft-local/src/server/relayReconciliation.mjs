@@ -1,5 +1,3 @@
-export const relayContributionEvidenceWarning = "Craft contributor history is not available from the proven Relay mapping.";
-
 export function requiredDecimal(value, label) {
   const normalized = String(value ?? "").trim();
   if (!/^\d+$/.test(normalized)) throw new Error(`Relay ${label} is missing or malformed.`);
@@ -31,10 +29,8 @@ export function readRelayClaimForSupplyReport(readSnapshot, claimId) {
   return claim;
 }
 
-export function readRelayCraftsForContributionReconciliation(readSnapshot, claimId) {
-  const snapshot = committedRelaySnapshotForReconciliation(readSnapshot, claimId, "crafts", {
-    allowedWarnings: [relayContributionEvidenceWarning],
-  });
+function readRelayCrafts(readSnapshot, claimId) {
+  const snapshot = committedRelaySnapshotForReconciliation(readSnapshot, claimId, "crafts");
   const payload = snapshot.data;
   if (!payload || typeof payload !== "object" || Array.isArray(payload) || !Array.isArray(payload.craftResults)) {
     throw new Error("Relay crafts input is malformed.");
@@ -49,7 +45,7 @@ export function readRelayCraftsForContributionReconciliation(readSnapshot, claim
   return payload;
 }
 
-export function readRelayMembersForTradeReconciliation(readSnapshot, claimId) {
+function readRelayMembers(readSnapshot, claimId) {
   const snapshot = committedRelaySnapshotForReconciliation(readSnapshot, claimId, "members");
   if (!Array.isArray(snapshot.data)) throw new Error("Relay members input is malformed.");
   for (const member of snapshot.data) {
@@ -124,7 +120,7 @@ export function readRelayClaimBuildingsForPlanning(readSnapshot, claimId) {
 }
 
 export function readRelayOnlineMembers(readSnapshot, claimId) {
-  const members = readRelayMembersForTradeReconciliation(readSnapshot, claimId);
+  const members = readRelayMembers(readSnapshot, claimId);
   const playersSnapshot = committedRelaySnapshotForReconciliation(
     readSnapshot,
     claimId,
@@ -164,7 +160,7 @@ export function readRelayOnlineMembers(readSnapshot, claimId) {
 }
 
 export function readRelayCraftsForDiscord(readSnapshot, claimId) {
-  const payload = readRelayCraftsForContributionReconciliation(readSnapshot, claimId);
+  const payload = readRelayCrafts(readSnapshot, claimId);
   for (const craft of payload.craftResults) {
     if (typeof craft.completed !== "boolean") {
       throw new Error(`Relay craft ${craft.entityId} completion state is malformed.`);
@@ -176,26 +172,6 @@ export function readRelayCraftsForDiscord(readSnapshot, claimId) {
   };
 }
 
-export async function fetchCraftContributionEvidence({ craftsPayload, fetchContribution, mapWithConcurrency }) {
-  const crafts = Array.isArray(craftsPayload?.craftResults) ? craftsPayload.craftResults : [];
-  const entries = await mapWithConcurrency(crafts, 4, async (craft) => {
-    const craftId = requiredDecimal(craft?.entityId, "craft entity id");
-    const contributions = await fetchContribution(craftId);
-    if (!Array.isArray(contributions)) throw new Error(`Craft ${craftId} contribution evidence is malformed.`);
-    return [craftId, contributions];
-  });
-  return Object.fromEntries(entries);
-}
-
-export function sideEffectCollectorIsDue({ key, settings, statuses, force = false, now = Date.now() }) {
-  if (force) return true;
-  const setting = settings?.[key];
-  if (!setting || setting.enabled === false) return false;
-  const lastSuccessAt = statuses?.[key]?.lastSuccessAt;
-  if (!lastSuccessAt) return true;
-  return now - new Date(lastSuccessAt).getTime() >= Number(setting.intervalSeconds) * 1000;
-}
-
 async function capture(run) {
   try {
     return { value: await run(), error: null };
@@ -204,17 +180,11 @@ async function capture(run) {
   }
 }
 
-export async function runIndependentReconciliation({ runMaintenance, runSupplyReport, runContributions, runMarketTrades }) {
+export async function runIndependentReconciliation({ runMaintenance, runSupplyReport }) {
   const maintenance = await capture(runMaintenance);
   const supply = await capture(runSupplyReport);
-  const contributions = await capture(runContributions);
-  const marketTrades = await capture(runMarketTrades);
   return {
     maintenanceError: maintenance.error,
     supplyError: supply.error,
-    contributionError: contributions.error,
-    marketError: marketTrades.error,
-    contributions: contributions.value,
-    marketTrades: marketTrades.value,
   };
 }

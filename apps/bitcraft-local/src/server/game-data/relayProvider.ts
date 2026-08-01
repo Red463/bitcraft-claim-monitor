@@ -306,7 +306,7 @@ export class RelayBitCraftProvider implements GameDataProvider {
             sourceObservedAt: null,
             receivedAt,
           },
-          warnings: ["Craft contributor history is not available from the proven Relay mapping."],
+          warnings: [],
         };
       } catch (error) {
         const message = `Crafts: ${error instanceof Error ? error.message : String(error)}`;

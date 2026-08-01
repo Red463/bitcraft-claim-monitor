@@ -308,6 +308,57 @@ test("primary-region runtime preserves last-good data when the region source is 
   assert.equal(constructed, false);
 });
 
+test("primary-region runtime forwards live contribution events to durable provider storage", async () => {
+  const starts = [];
+  const appended = [];
+  let contributionHandler;
+  const target = {
+    craftEntityId: "1369094287428103662",
+    profession: "Forestry",
+    craftLabel: "Owl Feather",
+    structureName: "Forester",
+    itemTier: "3",
+    xpPerProgress: "2",
+  };
+  const runtime = new runtimeModule.RelayPrimaryRegionRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: (options) => {
+      contributionHandler = options.onContribution;
+      return {
+        start: async (config) => starts.push(config),
+        stop: async () => {},
+        health: () => ({ connected: true, applied: true, lastAppliedAt: null, lastError: null }),
+      };
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+      appendEvents: async (events) => appended.push(...events),
+    },
+  });
+
+  await runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    regionId: "19",
+    members: [{ playerEntityId: "576460752388321942", userName: "Mosswick" }],
+    contributionTargets: [target],
+  });
+  assert.deepEqual(starts[0].contributionTargets, [target]);
+
+  const event = {
+    claimId: "1369094286777412590",
+    domain: "contributions",
+    sourceKey: "relay-craft-contribution:19:transaction-12:1369094287428103662",
+    occurredAt: "2026-08-01T09:00:00.000Z",
+    data: { eventType: "craft_contribution" },
+  };
+  await contributionHandler(event);
+  await runtime.stop();
+  assert.deepEqual(appended, [event]);
+});
+
 test("healthy primary-region runtime replaces its session when the discovered source changes", async () => {
   let now = 0;
   let sourceRevision = 1;

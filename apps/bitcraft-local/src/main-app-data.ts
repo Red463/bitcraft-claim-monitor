@@ -1,9 +1,9 @@
 export type AnyRecord = Record<string, any>;
 
 /*
- * Shared data helpers for BitJita payloads.
+ * Shared data helpers for normalized game-data payloads.
  *
- * BitJita responses are not fully uniform: some endpoints wrap arrays in named
+ * Provider and persisted payloads are not fully uniform: some wrap arrays in named
  * properties, timestamps can arrive in several units, and construction projects
  * expose "required" and "already contributed" materials separately. These
  * helpers keep that domain knowledge out of page components.
@@ -32,7 +32,7 @@ export function parseDateValue(value: unknown): Date | null {
     const text = String(value).trim();
     const numeric = Number(text);
     if (!Number.isFinite(numeric) || numeric <= 0) return null;
-    // BitJita and local history have used seconds, milliseconds, and
+    // Provider data and local history have used seconds, milliseconds, and
     // microseconds. Length-based detection preserves old rows without forcing
     // every caller to know which source produced the timestamp.
     const millis = text.length >= 16 ? numeric / 1000 : text.length <= 10 ? numeric * 1000 : numeric;
@@ -150,7 +150,7 @@ export function buildConstructionProjects(construction: AnyRecord, inventories: 
     addConstructionContributions(contributions, project.items ?? [], "item");
     addConstructionContributions(contributions, project.cargos ?? [], "cargo");
 
-    // BitJita currently exposes full project requirements as consumed*Stacks, while
+    // Current project payloads expose full requirements as consumed*Stacks, while
     // project.items/cargos are the materials already added to that construction site.
     const requiredItems = project.consumedItemStacks?.length ? project.consumedItemStacks : project.items ?? [];
     const requiredCargos = project.consumedCargoStacks?.length ? project.consumedCargoStacks : project.cargos ?? [];

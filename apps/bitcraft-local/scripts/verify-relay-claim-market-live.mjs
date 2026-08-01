@@ -53,9 +53,17 @@ try {
   const crossClaimRows = snapshot.data.listings.filter(
     (listing) => listing.claimEntityId !== claimId || listing.regionId !== regionId,
   );
-  if (crossClaimRows.length || snapshot.data.marketplaces.length === 0) {
+  const crossClaimClosedRows = snapshot.data.closedListings.filter(
+    (listing) => listing.claimEntityId !== claimId || listing.regionId !== regionId,
+  );
+  if (
+    crossClaimRows.length
+    || crossClaimClosedRows.length
+    || snapshot.data.marketplaces.length === 0
+  ) {
     throw new Error(
       `Relay claim-market verification found ${crossClaimRows.length} cross-scope rows`
+      + `, ${crossClaimClosedRows.length} cross-scope closed rows`
       + ` and ${snapshot.data.marketplaces.length} marketplace rows`,
     );
   }
@@ -65,6 +73,12 @@ try {
     regionId,
     sellOrders: snapshot.data.listings.filter(({ side }) => side === "sell").length,
     buyOrders: snapshot.data.listings.filter(({ side }) => side === "buy").length,
+    saleProceeds: snapshot.data.closedListings.filter(
+      ({ closureKind }) => closureKind === "sale_proceeds",
+    ).length,
+    returnedListings: snapshot.data.closedListings.filter(
+      ({ closureKind }) => closureKind === "returned_item",
+    ).length,
     marketplaces: snapshot.data.marketplaces.length,
     warnings: snapshot.warnings.length,
     database: snapshot.database,

@@ -28,13 +28,14 @@ Disposition values:
 | `settlement_state_current` | keep-checkpoint | Minimal restart-safe settlement transition baseline | Retained only so committed Relay `claim`, `members`, `inventories`, and `market` generations can compare against the last transactionally applied summary after a restart. It is not a page/current-data cache: Relay generations remain authoritative, updates are queued immediately after commits, exact supplies/treasury are stored as TEXT, building count is nullable until a complete building projection exists, and no polling or browser writer owns this row. |
 | `market_listings` | retire | None | Removed from bootstrap and existing clone databases. Current Local Market, Dashboard, and leaderboard listing state is projected directly from the latest complete generic `market` generation. Listing transitions are derived from consecutive Relay generations and appended independently to history; they do not justify a duplicate current-state table. |
 | `market_buy_orders_current`, `market_regional_sale_averages_current` | retire | None | Removed from bootstrap and existing clone databases. Configured regional sessions merge exact buy-order generations into the generic `regional-market` last-good domain, and the local view filters, sorts, pages, and enriches that committed generation without a second SQL mirror. Regional sale averages are not retained because Relay has not yet proved an authoritative sold-versus-cancelled signal; the app returns no premium opportunity instead of persisting an invented baseline. |
-| `market_events`, `market_trades` | keep-history | Normalized listing/trade transitions; temporarily narrow completed-member-sale evidence reconciliation | Required for locally observed charts, sold-versus-removed evidence, deduplication, and notification history. They are not current order-book storage. Until an authoritative Relay close mapping is proven, only the independently due `marketTrades` reconciler may call its existing narrow BitJita sale-evidence route after validating committed Relay members. |
+| `market_events`, `market_trades` | keep-history | Immediate normalized Relay order/closed-listing transitions | Required for locally observed charts, sold-versus-returned evidence, exact deduplication, and notification history. They are not current order-book storage. New Hex Coin closed rows confirm a sale only through a unique same-owner proceeds match; returned typed stacks confirm non-sales; ambiguous closures remain unresolved. Both tables update immediately after the committed market generation, use TEXT amount affinity, and have no scheduled acquisition owner. |
 | `global_market_price_snapshots` | retire | None | Removed with the legacy `global_market_insights` scheduled job and cached overview setting. Market Browse, Overview, and Deals compose current orders directly from the committed `regional-market` generation plus the live catalog. Future truthful price history belongs in durable observed trade/event history after an authoritative close signal is proven, not in a scheduled current-price mirror. |
 | `activity_events` | keep-history | Normalized domain transitions; Relay storage-log events arrive from the 15-second live loop and deduplicate by region plus upstream log ID | Required for the Activity page and notification/audit history. Relay storage logs expire upstream, so this is durable history rather than a current-data cache. |
-| `production_jobs`, `production_contributions` | keep-history | Committed Relay craft lifecycle; temporarily narrow craft-contributor evidence reconciliation | Required for lifecycle notifications and locally observed contribution history. Current craft state stays in normalized domains and publishes immediately. Until contributor semantics are proven in Relay, only the independently due `productionContributions` reconciler may call its existing narrow BitJita contribution-evidence route after validating committed Relay crafts. |
+| `production_jobs`, `production_contributions` | keep-history / keep-derived-index | Committed Relay craft lifecycle and immediate regional craft-progress transactions | `production_jobs` preserves lifecycle/notification history. `production_contributions` is the indexed contributor/craft aggregate used by interactive leaderboard and production reports; it increments in the same transaction as a new durable event receipt and is never refreshed by a schedule. Current craft state remains in normalized domains. |
+| `production_contribution_events` | keep-history | Positive claim-scoped regional `progressive_action_state` transaction deltas | Minimal append-only evidence and replay-deduplication ledger keyed by Relay transaction, region, and craft. Exact progress/XP values use TEXT. This table is independently required to prevent reconnect/replay double counting and to support rebuilding the contribution aggregate; it is not a current-state cache. |
 | `empire_hexite_sweeps`, `empire_hexite_sweep_empires`, `empire_hexite_targets`, `empire_hexite_sources`, `empire_hexite_snapshots` | retire | None | Removed from bootstrap and existing clone databases with the six-hour acquisition job. The target rows were sweep-owned work records rather than user configuration, and the snapshot table overwrote one current row per Empire rather than preserving history. Current Hexite data must publish from the committed Empire generation and future bounded inventory joins; any future observation history must be an append-only domain-event design. |
 | `empire_membership_tracking`, `empire_membership_periods` | keep-history | Normalized empire membership transitions | Required for locally observed membership periods and analytics. Complete primary-region subscription generations update these rows immediately; the scheduled Empire membership acquisition job is retired. |
-| `scheduled_jobs` | keep-operations | Registered maintenance, reporting, backup, retention, and delivery work | Keep the registry, but remove retired current-data ingestion keys and controls. The separate reconciliation loop owns the independently due, forced, and failure-isolated `productionContributions` and `marketTrades` evidence jobs; current user-facing data remains live with both disabled. |
+| `scheduled_jobs` | keep-operations | Registered maintenance, reporting, backup, retention, and delivery work | Keep the registry, but remove all retired current-data and game-evidence ingestion keys and controls. Market sales and craft contributions are subscription-driven. Current user-facing data remains live with scheduled work disabled. |
 | `server_metric_buckets`, `server_health_incidents` | keep-operations | Runtime metric/health events | Required for soak evidence, lag/budget alerts, and operational diagnosis. |
 | `admin_users`, `admin_sessions`, `user_accounts`, `user_sessions`, `user_legal_acceptances` | keep-user | Authenticated local requests and privacy workflows | User-owned identity/session/legal data; independent of game-data provider. |
 | `app_settings`, `app_secrets` | keep-user | Authenticated admin configuration | Application configuration and secrets; independent of game-data provider. |
@@ -87,6 +88,15 @@ An implementation may retain or add a compact derived-current index only after
 recording measured query cost, row count, indexes, restart cost, all readers
 and writers, and the user-visible latency improvement. Its update trigger must
 be a committed domain event, not a scheduled ingestion sweep.
+
+For every remaining vertical, the implementation review starts by asking
+whether each legacy table can be deleted while still meeting the local API,
+restart, and outage budgets. If the answer is yes, the table and its schema,
+prepared statements, job controls, diagnostics, and tests are removed in that
+vertical. If the answer is no, the inventory must record the representative
+benchmark and the event-driven writer that keeps the projection current.
+“Waiting for the next scheduled run” is never an accepted reader or writer
+path for current user-facing data.
 
 ## Inventory vertical evidence
 
@@ -203,11 +213,13 @@ be a committed domain event, not a scheduled ingestion sweep.
   `game_catalog_entities` index. Recipe trees compose direct and probabilistic
   item-list producer routes from the current normalized generation on demand;
   there is no search cache, recipe-detail cache, or scheduled rebuild.
-- `production_jobs` and `production_contributions` remain history/event tables
-  for lifecycle and notification semantics; they are not the current page's
+- `production_jobs`, `production_contribution_events`, and the event-driven
+  `production_contributions` report index retain lifecycle, replay protection,
+  and locally observed contributor history; they are not the current page's
   source of truth.
-- Craft contributor parity and member Toolbelt eligibility remain explicitly
-  unavailable until their regional subscription mappings are delivered.
+- Craft contributor parity is supplied by positive regional progressive-action
+  transaction deltas. Member Toolbelt eligibility remains explicitly
+  unavailable until its regional subscription mapping is delivered.
 
 ## Member equipment and buff subscription evidence
 

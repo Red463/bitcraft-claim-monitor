@@ -23,6 +23,17 @@ function snapshotListings(snapshot, label) {
   return source.listings.map((value, index) => record(value, `${label}.listings[${index}]`));
 }
 
+function snapshotClosedListings(snapshot, label) {
+  const source = record(snapshot, label);
+  if (source.closedListings == null) return [];
+  if (!Array.isArray(source.closedListings)) {
+    throw new TypeError(`${label}.closedListings must be an array`);
+  }
+  return source.closedListings.map(
+    (value, index) => record(value, `${label}.closedListings[${index}]`),
+  );
+}
+
 function listingMap(rows, label) {
   const result = new Map();
   for (const [index, row] of rows.entries()) {
@@ -92,6 +103,110 @@ function transition({
     summary: `${summaryPrefix}: ${listing.itemName} x${BigInt(listing.quantity).toLocaleString("en-US")} at ${BigInt(listing.price).toLocaleString("en-US")}g`,
     listing,
   };
+}
+
+function evidenceTimestamp(evidence, fallback) {
+  const timestamp = String(evidence.timestamp ?? "");
+  return Number.isFinite(Date.parse(timestamp)) ? timestamp : fallback;
+}
+
+function correlateClosedListingEvidence({
+  transitions,
+  previousSnapshot,
+  currentSnapshot,
+  observedAt,
+}) {
+  const previousClosed = snapshotClosedListings(
+    previousSnapshot,
+    "previous Relay market snapshot",
+  );
+  const currentClosed = snapshotClosedListings(
+    currentSnapshot,
+    "current Relay market snapshot",
+  );
+  const previousById = listingMap(previousClosed, "previous Relay closed listings");
+  const regionId = decimalInteger(
+    currentSnapshot.regionId,
+    "current Relay market region id",
+  );
+  const claimedTransitions = new Set();
+
+  for (const evidence of currentClosed) {
+    const evidenceId = decimalInteger(
+      evidence.entityId,
+      "current Relay closed listing entity id",
+    );
+    if (previousById.has(evidenceId)) continue;
+    const ownerEntityId = decimalInteger(
+      evidence.ownerEntityId,
+      `closed listing ${evidenceId} owner id`,
+    );
+    const evidenceItemId = decimalInteger(
+      evidence.itemId,
+      `closed listing ${evidenceId} item id`,
+    );
+    const evidenceItemType = String(evidence.itemType ?? "").toLowerCase() === "cargo"
+      ? "cargo"
+      : "item";
+    const evidenceQuantity = decimalInteger(
+      evidence.quantity,
+      `closed listing ${evidenceId} quantity`,
+    );
+    const closureKind = String(evidence.closureKind ?? "");
+    const candidates = transitions.filter((candidate) => {
+      if (claimedTransitions.has(candidate)) return false;
+      const listing = candidate.listing;
+      if (listing.side !== "sell" || listing.ownerEntityId !== ownerEntityId) return false;
+      if (closureKind === "sale_proceeds") {
+        return evidenceItemType === "item"
+          && evidenceItemId === "1"
+          && (
+            candidate.eventType === "partial_quantity_drop"
+            || candidate.eventType === "removed_or_cancelled"
+          )
+          && listing.totalValue === evidenceQuantity;
+      }
+      if (closureKind === "returned_item") {
+        return candidate.eventType === "removed_or_cancelled"
+          && listing.itemId === evidenceItemId
+          && listing.itemType === evidenceItemType
+          && listing.quantity === evidenceQuantity;
+      }
+      return false;
+    });
+    if (candidates.length !== 1) continue;
+
+    const candidate = candidates[0];
+    claimedTransitions.add(candidate);
+    const listing = {
+      ...candidate.listing,
+      tradeId: closureKind === "sale_proceeds"
+        ? `relay_closed_listing:${regionId}:${evidenceId}`
+        : null,
+    };
+    const eventType = closureKind === "sale_proceeds"
+      ? "sale_confirmed"
+      : "listing_returned";
+    const activityType = closureKind === "sale_proceeds"
+      ? "market_sale_confirmed"
+      : "market_listing_returned";
+    const prefix = closureKind === "sale_proceeds"
+      ? "Confirmed sale"
+      : "Listing returned";
+    const evidenceAt = evidenceTimestamp(evidence, observedAt);
+    const index = transitions.indexOf(candidate);
+    transitions[index] = {
+      eventType,
+      activityType,
+      occurredAt: evidenceAt,
+      sourceKey: `relay_market_event:${eventType}:${regionId}:${evidenceId}`,
+      activitySourceKey: `relay_market_activity:${eventType}:${regionId}:${evidenceId}`,
+      summary: `${prefix}: ${listing.itemName} x${BigInt(listing.quantity).toLocaleString("en-US")} at ${BigInt(listing.price).toLocaleString("en-US")}g`,
+      listing,
+      evidence,
+    };
+  }
+  return transitions;
 }
 
 export function deriveRelayMarketTransitions({
@@ -181,7 +296,12 @@ export function deriveRelayMarketTransitions({
     }));
   }
 
-  return transitions;
+  return correlateClosedListingEvidence({
+    transitions,
+    previousSnapshot,
+    currentSnapshot,
+    observedAt,
+  });
 }
 
 export function createRelayMarketTransitionWriter(db, {
@@ -201,6 +321,14 @@ export function createRelayMarketTransitionWriter(db, {
       tier, rarity, occurred_at, trade_id, source_key, raw_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
+  const insertMarketTrade = db.prepare(`
+    INSERT OR IGNORE INTO market_trades (
+      trade_id, claim_id, order_entity_id, seller_entity_id, seller_username,
+      purchaser_entity_id, purchaser_username, item_id, item_type, item_name,
+      quantity, unit_price, total_price, tier, rarity, occurred_at, imported_at,
+      raw_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
 
   return {
     apply({ claimId, previous, current, observedAt }) {
@@ -211,11 +339,15 @@ export function createRelayMarketTransitionWriter(db, {
         observedAt,
       });
       let inserted = 0;
+      let trades = 0;
       let activities = 0;
       db.exec("BEGIN IMMEDIATE");
       try {
         for (const event of transitions) {
           const listing = event.listing;
+          const raw = event.evidence == null
+            ? listing.raw
+            : { listing: listing.raw, evidence: event.evidence };
           const result = insertMarketEvent.run(
             normalizedClaimId,
             event.eventType,
@@ -232,12 +364,34 @@ export function createRelayMarketTransitionWriter(db, {
             listing.tier == null ? null : String(listing.tier),
             listing.rarity,
             event.occurredAt,
-            null,
+            listing.tradeId,
             event.sourceKey,
-            JSON.stringify(listing.raw),
+            JSON.stringify(raw),
           );
           if (Number(result.changes) === 0) continue;
           inserted += 1;
+          if (event.eventType === "sale_confirmed" && listing.tradeId) {
+            trades += Number(insertMarketTrade.run(
+              listing.tradeId,
+              normalizedClaimId,
+              listing.key,
+              listing.ownerEntityId,
+              listing.owner,
+              null,
+              null,
+              listing.itemId,
+              listing.itemType,
+              listing.itemName,
+              listing.quantity,
+              listing.price,
+              listing.totalValue,
+              listing.tier == null ? null : String(listing.tier),
+              listing.rarity,
+              event.occurredAt,
+              observedAt,
+              JSON.stringify(raw),
+            ).changes);
+          }
           if (addActivity(
             normalizedClaimId,
             event.activityType,
@@ -256,7 +410,7 @@ export function createRelayMarketTransitionWriter(db, {
         throw error;
       }
       if (activities > 0) processOutbox();
-      return { derived: transitions.length, inserted, activities };
+      return { derived: transitions.length, inserted, trades, activities };
     },
   };
 }

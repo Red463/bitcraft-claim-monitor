@@ -2,21 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  bitjitaTimestampIso,
+  gameTimestampIso,
   listingKey,
   marketEventSourceKey,
   normalizeListing,
   tradeMatchesListing,
 } from "../src/server/marketActivity.mjs";
 
-test("market activity helpers normalize BitJita listing identity and timestamps", () => {
+test("market activity helpers normalize listing identity and timestamps", () => {
   assert.equal(listingKey({ entityId: "listing-1", itemName: "Ignored" }), "listing-1");
   assert.equal(listingKey({ itemName: "Bronze Ingot", ownerUsername: "Tester", quantity: 12, price: 4 }), "Bronze Ingot|Tester|sell|12|4");
 
-  assert.equal(bitjitaTimestampIso("2026-05-20T12:00:00.000Z"), "2026-05-20T12:00:00.000Z");
-  assert.equal(bitjitaTimestampIso("1716206400"), "2024-05-20T12:00:00.000Z");
-  assert.equal(bitjitaTimestampIso("1716206400000000"), "2024-05-20T12:00:00.000Z");
-  assert.equal(bitjitaTimestampIso("not-a-date"), null);
+  assert.equal(gameTimestampIso("2026-05-20T12:00:00.000Z"), "2026-05-20T12:00:00.000Z");
+  assert.equal(gameTimestampIso("1716206400"), "2024-05-20T12:00:00.000Z");
+  assert.equal(gameTimestampIso("1716206400000000"), "2024-05-20T12:00:00.000Z");
+  assert.equal(gameTimestampIso("not-a-date"), null);
 });
 
 test("market activity helpers normalize live listings defensively", () => {

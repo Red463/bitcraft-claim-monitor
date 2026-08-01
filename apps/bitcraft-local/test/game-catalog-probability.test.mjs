@@ -253,8 +253,8 @@ test("probability snapshot publication is atomic and rebuilds producer aggregate
     sourceUrl: "https://example.test/static",
     sourceRevision: "etag-1",
     sources: [
-      { sourceKind: "bitjita", sourceUrl: "https://bitjita.com/api", sourceRevision: "catalog-normalization-8" },
-      { sourceKind: "game_data", sourceUrl: "https://example.test/static", sourceRevision: "etag-1" },
+      { sourceKind: "relay-global", sourceUrl: "wss://relay.example.test/global", sourceRevision: "schema-8" },
+      { sourceKind: "relay-http", sourceUrl: "https://example.test/static", sourceRevision: "etag-1" },
     ],
     updatedAt: "2026-07-21T12:00:00.000Z",
   };
@@ -268,7 +268,7 @@ test("probability snapshot publication is atomic and rebuilds producer aggregate
     chance: row.chance,
   })), [{ producerKey: "items:1007577047", quantity: 1 / 1.02, chance: 1 / 1.02 }]);
   assert.equal(repository.getProbabilitySnapshot().sourceRevision, "etag-1");
-  assert.deepEqual(repository.getProbabilitySnapshot().sources.map((source) => source.sourceKind), ["bitjita", "game_data"]);
+  assert.deepEqual(repository.getProbabilitySnapshot().sources.map((source) => source.sourceKind), ["relay-global", "relay-http"]);
 
   assert.throws(() => repository.replaceProbabilitySnapshot({ ...snapshot, sourceRevision: "etag-2" }, () => {
     throw new Error("publish failed");

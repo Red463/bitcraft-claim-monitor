@@ -1,4 +1,4 @@
-import type { DomainSnapshotBatch } from "./contracts.ts";
+import type { DomainEvent, DomainSnapshotBatch } from "./contracts.ts";
 import { relayWebSocketUri } from "./globalCatalogRuntime.ts";
 import {
   RelayPrimaryRegionPlayerSession,
@@ -12,10 +12,14 @@ import {
 
 type BindingManifest = Parameters<RelayPrimaryRegionPlayerSession["start"]>[0]["manifest"];
 type Member = Parameters<RelayPrimaryRegionPlayerSession["start"]>[0]["members"][number];
+type ContributionTarget = NonNullable<
+  Parameters<RelayPrimaryRegionPlayerSession["start"]>[0]["contributionTargets"]
+>[number];
 
 type CurrentStateRepository = {
   nextGeneration(claimId: string): number;
   commitGeneration(batch: DomainSnapshotBatch): Promise<void> | void;
+  appendEvents?(events: DomainEvent[]): Promise<void> | void;
 };
 
 type RegionalSession = {
@@ -49,6 +53,25 @@ function membershipSignature(regionId: string, members: Member[]): string {
     `${memberId(member)}:${String(member.userName ?? member.user_name ?? "").trim()}`
   ));
   return `${regionId}:${[...new Set(identities)].sort().join(",")}`;
+}
+
+function contributionSignature(targets: ContributionTarget[]): string {
+  return targets.map((target) => [
+    target.craftEntityId,
+    target.profession ?? "",
+    target.craftLabel,
+    target.structureName,
+    target.itemTier ?? "",
+    target.xpPerProgress,
+  ].join(":")).sort().join(",");
+}
+
+function sessionSignature(
+  regionId: string,
+  members: Member[],
+  targets: ContributionTarget[],
+): string {
+  return `${membershipSignature(regionId, members)}|${contributionSignature(targets)}`;
 }
 
 function primaryRegionSource(
@@ -96,6 +119,7 @@ export class RelayPrimaryRegionRuntime {
   #signature: string | null = null;
   #sessionEpoch = 0;
   #commitTail: Promise<void> = Promise.resolve();
+  #eventTail: Promise<void> = Promise.resolve();
   #source: {
     sourceKey: `region:${number}`;
     regionId: string;
@@ -123,16 +147,31 @@ export class RelayPrimaryRegionRuntime {
     claimId: string;
     regionId: string;
     members: Member[];
+    contributionTargets?: ContributionTarget[];
   }): Promise<void> {
     if (this.#session) throw new Error("Relay primary-region runtime is already started");
     this.#relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
     this.#claimId = String(config.claimId).trim();
-    await this.#startSession(config.regionId, config.members);
+    await this.#startSession(
+      config.regionId,
+      config.members,
+      config.contributionTargets ?? [],
+    );
   }
 
-  reconcile(config: { claimId?: string; regionId: string; members: Member[] }): Promise<void> {
+  reconcile(config: {
+    claimId?: string;
+    regionId: string;
+    members: Member[];
+    contributionTargets?: ContributionTarget[];
+  }): Promise<void> {
     const claimId = String(config.claimId ?? this.#claimId ?? "").trim();
-    const nextSignature = membershipSignature(config.regionId, config.members);
+    const contributionTargets = config.contributionTargets ?? [];
+    const nextSignature = sessionSignature(
+      config.regionId,
+      config.members,
+      contributionTargets,
+    );
     const sameScope = this.#session
       && claimId === this.#claimId
       && nextSignature === this.#signature;
@@ -159,10 +198,11 @@ export class RelayPrimaryRegionRuntime {
       this.#sessionEpoch += 1;
       await this.#session?.stop();
       await this.#commitTail;
+      await this.#eventTail;
       this.#session = null;
       this.#signature = null;
       this.#claimId = claimId;
-      await this.#startSession(config.regionId, config.members);
+      await this.#startSession(config.regionId, config.members, contributionTargets);
     })();
     this.#reconcileInFlight = reconcile;
     return reconcile.finally(() => {
@@ -170,7 +210,11 @@ export class RelayPrimaryRegionRuntime {
     });
   }
 
-  async #startSession(regionIdValue: string, members: Member[]): Promise<void> {
+  async #startSession(
+    regionIdValue: string,
+    members: Member[],
+    contributionTargets: ContributionTarget[],
+  ): Promise<void> {
     const relayBaseUrl = this.#relayBaseUrl;
     if (!relayBaseUrl || !this.#claimId) {
       throw new Error("Relay primary-region runtime is not configured");
@@ -187,6 +231,7 @@ export class RelayPrimaryRegionRuntime {
       this.#sessionEpoch = sessionEpoch;
       openingSession = this.#createSession({
         onSnapshot: (snapshot) => this.#enqueueSnapshot(snapshot, sessionEpoch),
+        onContribution: (event) => this.#enqueueEvent(event, sessionEpoch),
       });
       await openingSession.start({
         uri: this.#source.uri,
@@ -197,9 +242,10 @@ export class RelayPrimaryRegionRuntime {
         regionId,
         claimId: this.#claimId,
         members,
+        ...(contributionTargets.length ? { contributionTargets } : {}),
       });
       this.#session = openingSession;
-      this.#signature = membershipSignature(regionId, members);
+      this.#signature = sessionSignature(regionId, members, contributionTargets);
       this.#lastError = null;
     } catch (error) {
       this.#lastError = error instanceof Error ? error.message : String(error);
@@ -211,6 +257,15 @@ export class RelayPrimaryRegionRuntime {
       this.#session = null;
       throw error;
     }
+  }
+
+  #enqueueEvent(event: DomainEvent, sessionEpoch: number): Promise<void> {
+    const append = this.#eventTail.then(async () => {
+      if (sessionEpoch !== this.#sessionEpoch) return;
+      await this.#currentStateRepository.appendEvents?.([event]);
+    });
+    this.#eventTail = append.catch(() => {});
+    return append;
   }
 
   #enqueueSnapshot(snapshot: RegionalPlayerSnapshot, sessionEpoch: number): Promise<void> {
@@ -329,6 +384,7 @@ export class RelayPrimaryRegionRuntime {
     this.#sessionEpoch += 1;
     await this.#session?.stop();
     await this.#commitTail;
+    await this.#eventTail;
     this.#session = null;
     this.#signature = null;
   }

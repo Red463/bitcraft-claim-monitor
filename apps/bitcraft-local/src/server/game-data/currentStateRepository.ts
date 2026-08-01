@@ -131,6 +131,37 @@ export function createCurrentStateRepository(
       claim_id, event_type, summary, occurred_at, metadata_json, source_key
     ) VALUES (?, ?, ?, ?, ?, ?)
   `);
+  const insertContributionEvent = db.prepare(`
+    INSERT OR IGNORE INTO production_contribution_events (
+      source_key, claim_id, region_id, craft_entity_id, contributor_entity_id,
+      contributed_progress, contributed_xp, occurred_at, received_at, raw_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const readContribution = db.prepare(`
+    SELECT contributed_progress, contributed_xp, contribution_count, first_seen
+    FROM production_contributions
+    WHERE contribution_key = ?
+  `);
+  const upsertContribution = db.prepare(`
+    INSERT INTO production_contributions (
+      contribution_key, claim_id, craft_entity_id, contributor_entity_id,
+      contributor_name, profession, craft_label, structure_name, item_tier,
+      contributed_progress, contributed_xp, contribution_count,
+      first_contributed_at, last_contributed_at, first_seen, updated_at, raw_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(contribution_key) DO UPDATE SET
+      contributor_name = excluded.contributor_name,
+      profession = excluded.profession,
+      craft_label = excluded.craft_label,
+      structure_name = excluded.structure_name,
+      item_tier = excluded.item_tier,
+      contributed_progress = excluded.contributed_progress,
+      contributed_xp = excluded.contributed_xp,
+      contribution_count = excluded.contribution_count,
+      last_contributed_at = excluded.last_contributed_at,
+      updated_at = excluded.updated_at,
+      raw_json = excluded.raw_json
+  `);
 
   return {
     async commitGeneration(batch: DomainSnapshotBatch) {
@@ -190,24 +221,92 @@ export function createCurrentStateRepository(
             throw new TypeError("Domain event data must be an object");
           }
           const payload = data as Record<string, unknown>;
-          if (event.domain !== "inventories" || payload.eventType !== "storage") {
-            throw new TypeError(`Unsupported durable domain event: ${event.domain}`);
+          if (event.domain === "inventories" && payload.eventType === "storage") {
+            if (typeof payload.summary !== "string" || !payload.summary.trim()) {
+              throw new TypeError("Durable storage event summary is required");
+            }
+            const metadata = payload.metadata;
+            if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+              throw new TypeError("Durable storage event metadata must be an object");
+            }
+            insertSourcedActivity.run(
+              event.claimId,
+              "storage",
+              payload.summary,
+              event.occurredAt,
+              JSON.stringify(metadata),
+              event.sourceKey,
+            );
+            continue;
           }
-          if (typeof payload.summary !== "string" || !payload.summary.trim()) {
-            throw new TypeError("Durable storage event summary is required");
+          if (event.domain === "contributions" && payload.eventType === "craft_contribution") {
+            const requiredDecimal = (key: string) => {
+              const value = String(payload[key] ?? "").trim();
+              if (!/^\d+$/.test(value)) {
+                throw new TypeError(`Durable craft contribution ${key} must be a decimal integer`);
+              }
+              return value;
+            };
+            const requiredText = (key: string) => {
+              const value = String(payload[key] ?? "").trim();
+              if (!value) throw new TypeError(`Durable craft contribution ${key} is required`);
+              return value;
+            };
+            const craftId = requiredDecimal("craftEntityId");
+            const contributorId = requiredDecimal("contributorEntityId");
+            const progress = requiredDecimal("contributedProgress");
+            const xp = requiredDecimal("contributedXp");
+            const count = requiredDecimal("contributionCount");
+            if (BigInt(progress) <= 0n || BigInt(count) <= 0n) {
+              throw new TypeError("Durable craft contribution deltas must be positive");
+            }
+            const receivedAt = new Date().toISOString();
+            const inserted = insertContributionEvent.run(
+              event.sourceKey,
+              event.claimId,
+              requiredDecimal("regionId"),
+              craftId,
+              contributorId,
+              progress,
+              xp,
+              event.occurredAt,
+              receivedAt,
+              JSON.stringify(payload),
+            );
+            if (Number(inserted.changes) === 0) continue;
+            const contributionKey = `${event.claimId}:${craftId}:${contributorId}`;
+            const previous = readContribution.get(contributionKey);
+            const totalProgress = (
+              BigInt(String(previous?.contributed_progress ?? "0")) + BigInt(progress)
+            ).toString();
+            const totalXp = (
+              BigInt(String(previous?.contributed_xp ?? "0")) + BigInt(xp)
+            ).toString();
+            const totalCount = (
+              BigInt(String(previous?.contribution_count ?? "0")) + BigInt(count)
+            ).toString();
+            upsertContribution.run(
+              contributionKey,
+              event.claimId,
+              craftId,
+              contributorId,
+              requiredText("contributorName"),
+              String(payload.profession ?? "").trim() || null,
+              requiredText("craftLabel"),
+              requiredText("structureName"),
+              String(payload.itemTier ?? "").trim() || null,
+              totalProgress,
+              totalXp,
+              totalCount,
+              event.occurredAt,
+              event.occurredAt,
+              String(previous?.first_seen ?? receivedAt),
+              receivedAt,
+              JSON.stringify(payload),
+            );
+            continue;
           }
-          const metadata = payload.metadata;
-          if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-            throw new TypeError("Durable storage event metadata must be an object");
-          }
-          insertSourcedActivity.run(
-            event.claimId,
-            "storage",
-            payload.summary,
-            event.occurredAt,
-            JSON.stringify(metadata),
-            event.sourceKey,
-          );
+          throw new TypeError(`Unsupported durable domain event: ${event.domain}`);
         }
         db.exec("COMMIT");
       } catch (error) {

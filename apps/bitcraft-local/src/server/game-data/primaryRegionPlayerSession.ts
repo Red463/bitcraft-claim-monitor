@@ -9,6 +9,8 @@ import {
   assertSchemaFingerprint,
   schemaBindingsReady,
 } from "./schemaManifest.ts";
+import type { DomainEvent } from "./contracts.ts";
+import { equalitySubscriptionQueries } from "./publicCraftRegionSession.ts";
 
 type BindingManifest = Parameters<typeof assertSchemaFingerprint>[0];
 
@@ -44,6 +46,7 @@ type BindingConnection = {
     claimRecruitmentState: CachedTable;
     travelerTaskState: CachedTable;
     travelerTaskDesc: CachedTable;
+    progressiveActionState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
@@ -67,7 +70,18 @@ type RegionalBindingModule = {
 type Member = {
   playerEntityId?: unknown;
   player_entity_id?: unknown;
+  userName?: unknown;
+  user_name?: unknown;
   [key: string]: unknown;
+};
+
+export type CraftContributionTarget = {
+  craftEntityId: string;
+  profession: string | null;
+  craftLabel: string;
+  structureName: string;
+  itemTier: string | null;
+  xpPerProgress: string;
 };
 
 type SessionConfig = {
@@ -79,11 +93,13 @@ type SessionConfig = {
   regionId: string;
   claimId: string;
   members: Member[];
+  contributionTargets?: CraftContributionTarget[];
 };
 
 type SessionDependencies = {
   loadBindings?: () => Promise<RegionalBindingModule>;
   onSnapshot: (snapshot: RegionalPlayerSnapshot) => void | Promise<void>;
+  onContribution?: (event: DomainEvent) => void | Promise<void>;
   now?: () => Date;
 };
 
@@ -117,6 +133,22 @@ function memberEntityId(member: Member, index: number): string {
     throw new TypeError(`regional member ${index} has an invalid player entity id`);
   }
   return id;
+}
+
+function decimalInteger(value: unknown, label: string): string {
+  const id = typeof value === "bigint" ? value.toString() : String(value ?? "").trim();
+  if (!/^\d+$/.test(id)) throw new TypeError(`${label} must be a decimal integer`);
+  return id;
+}
+
+function contributionQueries(targets: CraftContributionTarget[]): string[] {
+  return equalitySubscriptionQueries(
+    "progressive_action_state",
+    "entity_id",
+    targets.map((target, index) => (
+      decimalInteger(target.craftEntityId, `regional contribution target ${index}`)
+    )),
+  );
 }
 
 export function playerStateQueries(members: Member[]): string[] {
@@ -170,6 +202,7 @@ function recruitmentQuery(claimIdValue: string): string {
 export class RelayPrimaryRegionPlayerSession {
   readonly #loadBindings: () => Promise<RegionalBindingModule>;
   readonly #onSnapshot: SessionDependencies["onSnapshot"];
+  readonly #onContribution: SessionDependencies["onContribution"];
   readonly #now: () => Date;
   #connection: BindingConnection | null = null;
   #subscription: SubscriptionHandle | null = null;
@@ -180,6 +213,7 @@ export class RelayPrimaryRegionPlayerSession {
   #applyPending = false;
   #listenersAttached = false;
   readonly #tableChanged = () => this.#queueSnapshot();
+  readonly #contributionChanged = (...args: unknown[]) => this.#handleContributionUpdate(args);
   #health = {
     connected: false,
     applied: false,
@@ -190,6 +224,7 @@ export class RelayPrimaryRegionPlayerSession {
   constructor(dependencies: SessionDependencies) {
     this.#loadBindings = dependencies.loadBindings ?? loadBundledRegionalBindings;
     this.#onSnapshot = dependencies.onSnapshot;
+    this.#onContribution = dependencies.onContribution;
     this.#now = dependencies.now ?? (() => new Date());
   }
 
@@ -210,6 +245,7 @@ export class RelayPrimaryRegionPlayerSession {
       recruitmentQuery(config.claimId),
       travelerTaskQuery(config.members),
       "SELECT * FROM traveler_task_desc",
+      ...contributionQueries(config.contributionTargets ?? []),
     ];
     if (queries.length === 0) {
       throw new Error("Relay regional player session requires at least one claim member");
@@ -323,6 +359,7 @@ export class RelayPrimaryRegionPlayerSession {
       table.onUpdate?.(this.#tableChanged);
       table.onDelete?.(this.#tableChanged);
     }
+    connection.db.progressiveActionState.onUpdate?.(this.#contributionChanged);
     this.#listenersAttached = true;
   }
 
@@ -333,7 +370,89 @@ export class RelayPrimaryRegionPlayerSession {
       table.removeOnUpdate?.(this.#tableChanged);
       table.removeOnDelete?.(this.#tableChanged);
     }
+    this.#connection.db.progressiveActionState.removeOnUpdate?.(this.#contributionChanged);
     this.#listenersAttached = false;
+  }
+
+  #handleContributionUpdate(args: unknown[]): void {
+    if (!this.#onContribution || !this.#config) return;
+    try {
+      const [contextValue, previousValue, currentValue] = args;
+      const context = contextValue && typeof contextValue === "object"
+        ? contextValue as Record<string, unknown>
+        : {};
+      const event = context.event && typeof context.event === "object"
+        ? context.event as Record<string, unknown>
+        : {};
+      if (event.tag !== "Transaction") return;
+      const transactionId = String(event.id ?? "").trim();
+      if (!transactionId) throw new TypeError("Relay craft contribution transaction id is required");
+      const previous = previousValue && typeof previousValue === "object"
+        ? previousValue as Record<string, unknown>
+        : {};
+      const current = currentValue && typeof currentValue === "object"
+        ? currentValue as Record<string, unknown>
+        : {};
+      const craftId = decimalInteger(
+        current.entityId ?? current.entity_id,
+        "Relay craft contribution entity id",
+      );
+      const target = (this.#config.contributionTargets ?? []).find(
+        (candidate) => candidate.craftEntityId === craftId,
+      );
+      if (!target) return;
+      const previousProgress = decimalInteger(
+        previous.progress,
+        "Relay craft contribution previous progress",
+      );
+      const currentProgress = decimalInteger(
+        current.progress,
+        "Relay craft contribution current progress",
+      );
+      const progressDelta = BigInt(currentProgress) - BigInt(previousProgress);
+      if (progressDelta <= 0n) return;
+      const contributorId = decimalInteger(
+        current.ownerEntityId ?? current.owner_entity_id,
+        "Relay craft contribution owner entity id",
+      );
+      const member = this.#config.members.find(
+        (candidate, index) => memberEntityId(candidate, index) === contributorId,
+      );
+      const contributorName = String(member?.userName ?? member?.user_name ?? contributorId).trim()
+        || contributorId;
+      const xpPerProgress = decimalInteger(
+        target.xpPerProgress,
+        `Relay craft ${craftId} experience per progress`,
+      );
+      const occurredAt = this.#now().toISOString();
+      const result = this.#onContribution({
+        claimId: this.#config.claimId,
+        domain: "contributions",
+        sourceKey: `relay-craft-contribution:${this.#config.regionId}:${transactionId}:${craftId}`,
+        occurredAt,
+        data: {
+          eventType: "craft_contribution",
+          regionId: this.#config.regionId,
+          database: this.#config.database,
+          schemaFingerprint: this.#config.schemaFingerprint,
+          craftEntityId: craftId,
+          contributorEntityId: contributorId,
+          contributorName,
+          profession: target.profession,
+          craftLabel: target.craftLabel,
+          structureName: target.structureName,
+          itemTier: target.itemTier,
+          contributedProgress: progressDelta.toString(),
+          contributedXp: (progressDelta * BigInt(xpPerProgress)).toString(),
+          contributionCount: "1",
+          previousProgress,
+          currentProgress,
+        },
+      });
+      Promise.resolve(result).catch((error: unknown) => this.#recordError(error));
+    } catch (error) {
+      this.#recordError(error);
+    }
   }
 
   #tables(connection: BindingConnection): CachedTable[] {

@@ -444,6 +444,54 @@ test("repository durably deduplicates normalized Relay storage events", async ()
   db.close();
 });
 
+test("repository applies Relay craft contribution deltas exactly once", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  applySchemaIndexStatements(db);
+  const repository = createCurrentStateRepository(db);
+  const event = {
+    claimId: "1369094286777412590",
+    domain: "contributions",
+    sourceKey: "relay-craft-contribution:19:transaction-12:1369094287428103662",
+    occurredAt: "2026-08-01T09:00:00.000Z",
+    data: {
+      eventType: "craft_contribution",
+      regionId: "19",
+      database: "bitcraft-live-19",
+      schemaFingerprint: "regional-v1",
+      craftEntityId: "1369094287428103662",
+      contributorEntityId: "576460752388321942",
+      contributorName: "Mosswick",
+      profession: "Forestry",
+      craftLabel: "Owl Feather",
+      structureName: "Forester",
+      itemTier: "3",
+      contributedProgress: "24",
+      contributedXp: "48",
+      contributionCount: "1",
+      previousProgress: "16056",
+      currentProgress: "16080",
+    },
+  };
+
+  await repository.appendEvents([event, event]);
+  await repository.appendEvents([event]);
+
+  const eventRows = db.prepare("SELECT * FROM production_contribution_events").all();
+  assert.equal(eventRows.length, 1);
+  assert.equal(eventRows[0].source_key, event.sourceKey);
+  assert.equal(eventRows[0].contributed_progress, "24");
+
+  const contribution = db.prepare("SELECT * FROM production_contributions").get();
+  assert.equal(contribution.contributed_progress, "24");
+  assert.equal(contribution.contributed_xp, "48");
+  assert.equal(contribution.contribution_count, "1");
+  assert.equal(contribution.first_contributed_at, event.occurredAt);
+  assert.equal(contribution.last_contributed_at, event.occurredAt);
+  db.close();
+});
+
 test("game-data route rejects other claims and returns 503 before any requested domain has loaded", () => {
   const repository = { read: () => null };
   assert.deepEqual(gameDataResponse({

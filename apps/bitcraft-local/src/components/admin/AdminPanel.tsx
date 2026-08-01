@@ -1740,7 +1740,7 @@ export function AdminPanel({
               </div>
               <div>
                 <strong>Blocked imports</strong>
-                <span>Use validated Relay inputs, then request only the still-unproven contribution or completed-sale evidence.</span>
+                <span>Use validated Relay crafts, then request only the still-unproven contribution evidence.</span>
               </div>
               <div>
                 <strong>Disabling a job</strong>

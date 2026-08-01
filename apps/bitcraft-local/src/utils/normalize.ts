@@ -1,7 +1,7 @@
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data.ts";
 
 /*
- * Normalizers convert mixed BitJita/local helper payloads into the stable shape
+ * Normalizers convert mixed provider/local helper payloads into the stable shape
  * expected by page components. Keep these defensive: missing optional fields
  * should result in null/empty values rather than blanking a page.
  */
@@ -9,7 +9,7 @@ import { toNumber, unwrap, type AnyRecord } from "../main-app-data.ts";
 /**
  * Normalise player detail fields used for online/session displays.
  *
- * BitJita has exposed playtime and sign-in data under several field names over
+ * Upstream payloads have exposed playtime and sign-in data under several field names over
  * time, so this function preserves all known aliases and returns explicit nulls
  * when the API has not provided a usable value.
  */
@@ -75,7 +75,7 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
 }
 
 export function normalizeData(raw: AnyRecord | null) {
-  // Most BitJita endpoints return named wrappers, but local helper endpoints may
+  // Most provider endpoints return named wrappers, but local helper endpoints may
   // already return plain arrays/objects. unwrap keeps page components independent
   // from those transport details.
   const claim = raw?.claim?.claim ?? raw?.claim ?? {};

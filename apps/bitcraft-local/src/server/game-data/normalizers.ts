@@ -2057,6 +2057,7 @@ export function normalizeRegionalMarket(options: {
   regionId: string;
   sellRows: unknown[];
   buyRows: unknown[];
+  closedRows?: unknown[];
   usernameRows: unknown[];
   marketplaceRows: unknown[];
 }) {
@@ -2121,14 +2122,14 @@ export function normalizeRegionalMarket(options: {
   ));
   const location = marketplaces[0] ?? null;
 
-  function orderTimestamp(row: WireRecord, entityId: string): string {
-    const value = record(row.timestamp, `Regional market order ${entityId} timestamp`);
+  function marketTimestamp(row: WireRecord, label: string): string {
+    const value = record(row.timestamp, `${label} timestamp`);
     return normalizeTimestamp(
       decimalString(
         value.__timestamp_micros_since_unix_epoch__
           ?? value.microsSinceUnixEpoch
           ?? value.micros_since_unix_epoch,
-        `Regional market order ${entityId} timestamp micros`,
+        `${label} timestamp micros`,
       ),
       "microseconds",
     );
@@ -2198,7 +2199,7 @@ export function normalizeRegionalMarket(options: {
             `Regional market order ${entityId} stored coins`,
           ),
           side,
-          timestamp: orderTimestamp(row, entityId),
+          timestamp: marketTimestamp(row, `Regional market order ${entityId}`),
           locationX: location?.locationX ?? null,
           locationZ: location?.locationZ ?? null,
         });
@@ -2211,12 +2212,71 @@ export function normalizeRegionalMarket(options: {
   }
   appendOrders(options.sellRows, "sell");
   appendOrders(options.buyRows, "buy");
+
+  const closedListings: Array<Record<string, unknown>> = [];
+  for (const [index, value] of (options.closedRows ?? []).entries()) {
+    try {
+      const row = record(value, `Regional closed_listing_state row ${index}`);
+      const entityId = decimalString(
+        row.entityId ?? row.entity_id,
+        `Regional closed_listing_state row ${index} entity id`,
+      );
+      const rowClaimId = decimalString(
+        row.claimEntityId ?? row.claim_entity_id,
+        `Regional closed listing ${entityId} claim id`,
+      );
+      if (rowClaimId !== claimId) {
+        warnings.push(
+          `Regional closed_listing_state omitted cross-claim row ${entityId} for claim ${rowClaimId}.`,
+        );
+        continue;
+      }
+      const ownerEntityId = decimalString(
+        row.ownerEntityId ?? row.owner_entity_id,
+        `Regional closed listing ${entityId} owner id`,
+      );
+      const username = usernames.get(ownerEntityId);
+      const stack = record(
+        row.itemStack ?? row.item_stack,
+        `Regional closed listing ${entityId} item stack`,
+      );
+      const itemId = decimalString(
+        stack.itemId ?? stack.item_id,
+        `Regional closed listing ${entityId} item id`,
+      );
+      const itemType = normalizeItemKind(enumLabel(stack.itemType ?? stack.item_type));
+      closedListings.push({
+        entityId,
+        claimEntityId: rowClaimId,
+        regionId,
+        ownerEntityId,
+        ownerUsername: username ? String(username.username ?? "") : "",
+        itemId,
+        itemType,
+        quantity: decimalString(
+          stack.quantity,
+          `Regional closed listing ${entityId} quantity`,
+        ),
+        closureKind: itemType === "item" && itemId === "1"
+          ? "sale_proceeds"
+          : "returned_item",
+        timestamp: marketTimestamp(row, `Regional closed listing ${entityId}`),
+      });
+    } catch (error) {
+      warnings.push(
+        `Regional closed_listing_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  closedListings.sort((left, right) => (
+    String(left.entityId).localeCompare(String(right.entityId))
+  ));
   if (!marketplaces.length) {
     warnings.push(`Regional market has no marketplace_state row for claim ${claimId}.`);
   }
 
   return {
-    data: { claimId, regionId, marketplaces, listings },
+    data: { claimId, regionId, marketplaces, listings, closedListings },
     warnings,
   };
 }

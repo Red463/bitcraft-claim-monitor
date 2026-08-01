@@ -3,17 +3,9 @@ function toNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
-export const domainCollectorDefaults = {
-  productionContributions: { label: "Production contribution reconciliation (blocked upstream mapping)", intervalSeconds: 300 },
-  marketTrades: { label: "Completed member-sale reconciliation (blocked upstream mapping)", intervalSeconds: 60 },
-};
+export const domainCollectorDefaults = {};
 
-// These are append-only history/deduplication tables owned by the two explicit
-// evidence reconcilers. They are deliberately not a current-state cache.
-export const reconciliationHistoryTables = {
-  productionContributions: ["production_jobs", "production_contributions"],
-  marketTrades: ["market_trades"],
-};
+export const reconciliationHistoryTables = {};
 
 export function normalizeCollectorSettings(value = {}) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};

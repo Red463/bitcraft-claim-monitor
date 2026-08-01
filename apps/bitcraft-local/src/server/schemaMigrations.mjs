@@ -171,6 +171,172 @@ export function applyAdditiveColumnMigrations(db, migrations = additiveColumnMig
   }
 }
 
+export function applyMarketHistoryExactAmountMigration(db) {
+  const needsExactAmounts = (table, columns) => {
+    const types = new Map(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => [
+      String(column.name),
+      String(column.type ?? "").toUpperCase(),
+    ]));
+    return columns.some((column) => types.get(column) !== "TEXT");
+  };
+  const migrateEvents = needsExactAmounts(
+    "market_events",
+    ["quantity", "price", "total_value"],
+  );
+  const migrateTrades = needsExactAmounts(
+    "market_trades",
+    ["quantity", "unit_price", "total_price"],
+  );
+  if (!migrateEvents && !migrateTrades) return;
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    if (migrateEvents) {
+      db.exec(`
+        ALTER TABLE market_events RENAME TO market_events_legacy_amounts;
+        CREATE TABLE market_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          claim_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          listing_key TEXT NOT NULL,
+          item_name TEXT NOT NULL,
+          side TEXT,
+          owner TEXT,
+          owner_entity_id TEXT,
+          item_id TEXT,
+          item_type TEXT,
+          quantity TEXT,
+          price TEXT,
+          total_value TEXT,
+          tier TEXT,
+          rarity TEXT,
+          occurred_at TEXT NOT NULL,
+          trade_id TEXT,
+          source_key TEXT,
+          raw_json TEXT NOT NULL
+        );
+        INSERT INTO market_events (
+          id, claim_id, event_type, listing_key, item_name, side, owner,
+          owner_entity_id, item_id, item_type, quantity, price, total_value,
+          tier, rarity, occurred_at, trade_id, source_key, raw_json
+        )
+        SELECT
+          id, claim_id, event_type, listing_key, item_name, side, owner,
+          owner_entity_id, item_id, item_type,
+          CASE WHEN quantity IS NULL THEN NULL ELSE CAST(quantity AS TEXT) END,
+          CASE WHEN price IS NULL THEN NULL ELSE CAST(price AS TEXT) END,
+          CASE WHEN total_value IS NULL THEN NULL ELSE CAST(total_value AS TEXT) END,
+          tier, rarity, occurred_at, trade_id, source_key, raw_json
+        FROM market_events_legacy_amounts;
+        DROP TABLE market_events_legacy_amounts;
+      `);
+    }
+    if (migrateTrades) {
+      db.exec(`
+        ALTER TABLE market_trades RENAME TO market_trades_legacy_amounts;
+        CREATE TABLE market_trades (
+          trade_id TEXT PRIMARY KEY,
+          claim_id TEXT NOT NULL,
+          order_entity_id TEXT,
+          seller_entity_id TEXT,
+          seller_username TEXT,
+          purchaser_entity_id TEXT,
+          purchaser_username TEXT,
+          item_id TEXT,
+          item_type TEXT,
+          item_name TEXT NOT NULL,
+          quantity TEXT NOT NULL,
+          unit_price TEXT NOT NULL,
+          total_price TEXT NOT NULL,
+          tier TEXT,
+          rarity TEXT,
+          occurred_at TEXT NOT NULL,
+          imported_at TEXT NOT NULL,
+          raw_json TEXT NOT NULL
+        );
+        INSERT INTO market_trades (
+          trade_id, claim_id, order_entity_id, seller_entity_id,
+          seller_username, purchaser_entity_id, purchaser_username, item_id,
+          item_type, item_name, quantity, unit_price, total_price, tier,
+          rarity, occurred_at, imported_at, raw_json
+        )
+        SELECT
+          trade_id, claim_id, order_entity_id, seller_entity_id,
+          seller_username, purchaser_entity_id, purchaser_username, item_id,
+          item_type, item_name, CAST(quantity AS TEXT), CAST(unit_price AS TEXT),
+          CAST(total_price AS TEXT), tier, rarity, occurred_at, imported_at,
+          raw_json
+        FROM market_trades_legacy_amounts;
+        DROP TABLE market_trades_legacy_amounts;
+      `);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function applyProductionContributionExactAmountMigration(db) {
+  const columns = db.prepare("PRAGMA table_info(production_contributions)").all();
+  if (!columns.length) return;
+  const types = new Map(columns.map((column) => [
+    String(column.name),
+    String(column.type ?? "").toUpperCase(),
+  ]));
+  if (
+    types.get("contributed_progress") === "TEXT"
+    && types.get("contributed_xp") === "TEXT"
+    && types.get("contribution_count") === "TEXT"
+  ) return;
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(`
+      ALTER TABLE production_contributions
+        RENAME TO production_contributions_legacy_amounts;
+      CREATE TABLE production_contributions (
+        contribution_key TEXT PRIMARY KEY,
+        claim_id TEXT NOT NULL,
+        craft_entity_id TEXT NOT NULL,
+        contributor_entity_id TEXT NOT NULL,
+        contributor_name TEXT NOT NULL,
+        profession TEXT,
+        craft_label TEXT,
+        structure_name TEXT,
+        item_tier TEXT,
+        contributed_progress TEXT NOT NULL DEFAULT '0',
+        contributed_xp TEXT NOT NULL DEFAULT '0',
+        contribution_count TEXT NOT NULL DEFAULT '0',
+        first_contributed_at TEXT,
+        last_contributed_at TEXT,
+        first_seen TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        raw_json TEXT NOT NULL
+      );
+      INSERT INTO production_contributions (
+        contribution_key, claim_id, craft_entity_id, contributor_entity_id,
+        contributor_name, profession, craft_label, structure_name, item_tier,
+        contributed_progress, contributed_xp, contribution_count,
+        first_contributed_at, last_contributed_at, first_seen, updated_at,
+        raw_json
+      )
+      SELECT
+        contribution_key, claim_id, craft_entity_id, contributor_entity_id,
+        contributor_name, profession, craft_label, structure_name, item_tier,
+        CAST(contributed_progress AS TEXT), CAST(contributed_xp AS TEXT),
+        CAST(contribution_count AS TEXT), first_contributed_at,
+        last_contributed_at, first_seen, updated_at, raw_json
+      FROM production_contributions_legacy_amounts;
+      DROP TABLE production_contributions_legacy_amounts;
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function applySchemaIndexStatements(db, statements = schemaIndexStatements) {
   for (const statement of statements) db.exec(statement);
 }
@@ -193,6 +359,9 @@ export function applyLegacySchemaCleanup(db) {
     DELETE FROM scheduled_jobs WHERE job_key = 'global_market_insights';
     DELETE FROM scheduled_jobs WHERE job_key = 'empire_hexite_reserves_refresh';
     DELETE FROM app_settings WHERE key = 'global_market_overview_json';
+    DELETE FROM app_settings
+      WHERE key LIKE 'market_trade_backfill:%'
+         OR key LIKE 'collector_resume:marketTrades:%';
     DELETE FROM domain_payload_current WHERE domain = 'layout';
     DELETE FROM domain_payload_current
       WHERE domain IN ('regionStatus', 'tradeVolume')
