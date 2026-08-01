@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DATA_DIR="${DATA_DIR:-/var/lib/bitcraft-claim-monitor}"
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/bitcraft-claim-monitor}"
-BACKUP_LOCK_FILE="${BACKUP_LOCK_FILE:-/run/lock/bitcraft-claim-monitor-backup.lock}"
-DEPLOY_LOCK_FILE="${DEPLOY_LOCK_FILE:-/run/lock/bitcraft-claim-monitor-deploy.lock}"
+DATA_DIR="${DATA_DIR:-/var/lib/bitcraft-claim-monitor-relay}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/bitcraft-claim-monitor-relay}"
+BACKUP_LOCK_FILE="${BACKUP_LOCK_FILE:-/run/lock/bitcraft-claim-monitor-relay-backup.lock}"
+DEPLOY_LOCK_FILE="${DEPLOY_LOCK_FILE:-/run/lock/bitcraft-claim-monitor-relay-deploy.lock}"
 RUN_USER="${RUN_USER:-bitcraft}"
-WORKER_SERVICE="${WORKER_SERVICE:-bitcraft-claim-monitor-worker.service}"
-COLLECTOR_SERVICE="${COLLECTOR_SERVICE:-bitcraft-monitor-collector.service}"
-COLLECTOR_TIMER="${COLLECTOR_TIMER:-bitcraft-monitor-collector.timer}"
+WORKER_SERVICE="${WORKER_SERVICE:-bitcraft-claim-monitor-relay-worker.service}"
+COLLECTOR_SERVICE="${COLLECTOR_SERVICE:-bitcraft-claim-monitor-relay-collector.service}"
+COLLECTOR_TIMER="${COLLECTOR_TIMER:-bitcraft-claim-monitor-relay-collector.timer}"
 HEARTBEAT_SECONDS="${HEARTBEAT_SECONDS:-30}"
 DAILY_KEEP="${DAILY_KEEP:-7}"
 MIGRATION_KEEP="${MIGRATION_KEEP:-3}"
 MANUAL_KEEP="${MANUAL_KEEP:-3}"
 LEGACY_KEEP="${LEGACY_KEEP:-3}"
 DATABASE="$DATA_DIR/bitcraft-local.sqlite"
-BACKUP_ENCRYPTION_KEY_FILE="${BACKUP_ENCRYPTION_KEY_FILE:-/etc/bitcraft-claim-monitor/backup-encryption.key}"
-BACKUP_CRYPTO_HELPER="${BACKUP_CRYPTO_HELPER:-/usr/local/lib/bitcraft-claim-monitor/backup-crypto.mjs}"
+BACKUP_ENCRYPTION_KEY_FILE="${BACKUP_ENCRYPTION_KEY_FILE:-/etc/bitcraft-claim-monitor-relay/backup-encryption.key}"
+BACKUP_CRYPTO_HELPER="${BACKUP_CRYPTO_HELPER:-/usr/local/lib/bitcraft-claim-monitor-relay/backup-crypto.mjs}"
 
 MODE=""
 REVISION=""
@@ -31,11 +31,11 @@ validation_partial=""
 usage() {
   cat <<USAGE
 Usage:
-  backup-bitcraft-monitor daily
-  backup-bitcraft-monitor migration --revision <full-sha>
-  backup-bitcraft-monitor manual --revision <full-sha>
-  backup-bitcraft-monitor --dry-run-prune
-  backup-bitcraft-monitor --apply-prune
+  backup-bitcraft-claim-monitor-relay daily
+  backup-bitcraft-claim-monitor-relay migration --revision <full-sha>
+  backup-bitcraft-claim-monitor-relay manual --revision <full-sha>
+  backup-bitcraft-claim-monitor-relay --dry-run-prune
+  backup-bitcraft-claim-monitor-relay --apply-prune
 USAGE
 }
 

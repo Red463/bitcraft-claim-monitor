@@ -1,10 +1,10 @@
-name: Deploy production
+name: Deploy Relay preview
 
 on:
   workflow_dispatch:
     inputs:
       force_database_backup:
-        description: Create a manual database backup even when the schema is unchanged
+        description: Create a manual Relay database backup even when the schema is unchanged
         required: false
         type: boolean
         default: false
@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: production
+  group: relay-preview
   cancel-in-progress: false
 
 jobs:
@@ -39,37 +39,43 @@ jobs:
         run: corepack pnpm --filter @workspace/bitcraft-local run build
       - name: Test deployment contracts
         run: node --test scripts/test/deploy-*.test.mjs
-      - name: Validate systemd units
+      - name: Validate Relay systemd units
         run: |
           test -x /usr/bin/node || sudo ln -s "$(command -v node)" /usr/bin/node
           systemd-analyze verify \
-            deploy/bitcraft-claim-monitor.service \
-            deploy/bitcraft-claim-monitor-worker.service \
-            deploy/bitcraft-monitor-collector.service \
-            deploy/bitcraft-monitor-collector.timer \
-            deploy/bitcraft-claim-monitor-backup.service \
-            deploy/bitcraft-claim-monitor-backup.timer
+            deploy/bitcraft-claim-monitor-relay.service \
+            deploy/bitcraft-claim-monitor-relay-worker.service \
+            deploy/bitcraft-claim-monitor-relay-collector.service \
+            deploy/bitcraft-claim-monitor-relay-collector.timer \
+            deploy/bitcraft-claim-monitor-relay-backup.service \
+            deploy/bitcraft-claim-monitor-relay-backup.timer
+      - name: Install Caddy validator
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes caddy
+      - name: Validate coexistence Caddy example
+        run: caddy validate --config deploy/Caddyfile.example
 
   deploy:
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    environment: production
+    environment: relay-preview
     steps:
       - name: Configure pinned SSH identity
         env:
-          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
-          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          RELAY_VPS_SSH_PRIVATE_KEY: ${{ secrets.RELAY_VPS_SSH_PRIVATE_KEY }}
+          RELAY_VPS_KNOWN_HOSTS: ${{ secrets.RELAY_VPS_KNOWN_HOSTS }}
         run: |
           install -m 700 -d "$HOME/.ssh"
-          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$RELAY_VPS_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"
-          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          printf '%s\n' "$RELAY_VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
-      - name: Deploy verified revision
+      - name: Deploy verified Relay revision
         env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_DEPLOY_USER: ${{ secrets.VPS_DEPLOY_USER }}
+          RELAY_VPS_HOST: ${{ secrets.RELAY_VPS_HOST }}
+          RELAY_VPS_DEPLOY_USER: ${{ secrets.RELAY_VPS_DEPLOY_USER }}
           FORCE_DATABASE_BACKUP: ${{ inputs.force_database_backup }}
         run: |
           BACKUP_OPTION=""
@@ -84,18 +90,16 @@ jobs:
             -o ServerAliveCountMax=10 \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            -- "$VPS_DEPLOY_USER@$VPS_HOST" \
-            "sudo /usr/local/bin/update-bitcraft-monitor --revision '$GITHUB_SHA'$BACKUP_OPTION" 2>&1)"
+            -- "$RELAY_VPS_DEPLOY_USER@$RELAY_VPS_HOST" \
+            "sudo /usr/local/bin/update-bitcraft-claim-monitor-relay --revision '$GITHUB_SHA'$BACKUP_OPTION" 2>&1)"
           DEPLOY_STATUS=$?
           set -e
 
-          printf '%s\n' "$DEPLOY_OUTPUT"
           {
-            printf '## Production deployment\n\n'
+            printf '## Relay preview deployment\n\n'
             printf 'Revision: `%s`  \n' "$GITHUB_SHA"
-            printf 'Host: `%s`  \n' "$VPS_HOST"
             printf 'Result: `%s`\n\n' "$([[ "$DEPLOY_STATUS" -eq 0 ]] && printf success || printf failed)"
-            printf '```text\n%s\n```\n' "$DEPLOY_OUTPUT"
+            printf 'Remote diagnostics are retained on the VPS and are not copied into GitHub output.\n'
           } >> "$GITHUB_STEP_SUMMARY"
 
           exit "$DEPLOY_STATUS"

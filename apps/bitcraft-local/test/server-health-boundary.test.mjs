@@ -9,7 +9,7 @@ const defaultAppSettings = readFileSync(new URL("../src/server/defaultAppSetting
 const appSettingsPolicy = readFileSync(new URL("../src/server/appSettingsPolicy.mjs", import.meta.url), "utf8");
 const permissions = readFileSync(new URL("../src/server/adminPermissions.mjs", import.meta.url), "utf8");
 const collector = readFileSync(new URL("../../../deploy/collect-server-health.mjs", import.meta.url), "utf8");
-const deploy = readFileSync(new URL("../../../deploy/update-bitcraft-monitor", import.meta.url), "utf8");
+const deploy = readFileSync(new URL("../../../deploy/update-bitcraft-claim-monitor-relay", import.meta.url), "utf8");
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -40,10 +40,10 @@ test("deployment installs a root collector timer without granting Node sudo", ()
   assert.match(collector, /journalctl/);
   assert.match(collector, /systemctl/);
   assert.match(collector, /history\.jsonl/);
-  assert.match(deploy, /bitcraft-monitor-collector\.timer/);
-  assert.doesNotMatch(readFileSync(new URL("../../../deploy/bitcraft-claim-monitor.service", import.meta.url), "utf8"), /sudo|journalctl|systemctl/);
-  assert.match(readFileSync(new URL("../../../deploy/bitcraft-claim-monitor.service", import.meta.url), "utf8"), /Environment=MALLOC_TRIM_THRESHOLD_=131072/);
-  assert.match(readFileSync(new URL("../../../deploy/bitcraft-claim-monitor-worker.service", import.meta.url), "utf8"), /Environment=MALLOC_TRIM_THRESHOLD_=131072/);
+  assert.match(deploy, /bitcraft-claim-monitor-relay-collector\.timer/);
+  assert.doesNotMatch(readFileSync(new URL("../../../deploy/bitcraft-claim-monitor-relay.service", import.meta.url), "utf8"), /sudo|journalctl|systemctl/);
+  assert.match(readFileSync(new URL("../../../deploy/bitcraft-claim-monitor-relay.service", import.meta.url), "utf8"), /Environment=MALLOC_TRIM_THRESHOLD_=131072/);
+  assert.match(readFileSync(new URL("../../../deploy/bitcraft-claim-monitor-relay-worker.service", import.meta.url), "utf8"), /Environment=MALLOC_TRIM_THRESHOLD_=131072/);
 });
 
 test("server no longer exposes snapshot history configuration or routes", () => {

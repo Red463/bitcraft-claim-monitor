@@ -22,9 +22,9 @@ if (!databaseArg || !ledgerArg || !keyArg) {
 }
 
 try {
-  const database = regularPath(databaseArg, process.env.DATA_DIR ?? "/var/lib/bitcraft-claim-monitor");
-  const ledger = regularPath(ledgerArg, process.env.BACKUP_DIR ?? "/var/backups/bitcraft-claim-monitor");
-  const keyFile = regularPath(keyArg, process.env.CONFIG_DIR ?? "/etc/bitcraft-claim-monitor");
+  const database = regularPath(databaseArg, process.env.DATA_DIR ?? "/var/lib/bitcraft-claim-monitor-relay");
+  const ledger = regularPath(ledgerArg, process.env.BACKUP_DIR ?? "/var/backups/bitcraft-claim-monitor-relay");
+  const keyFile = regularPath(keyArg, process.env.CONFIG_DIR ?? "/etc/bitcraft-claim-monitor-relay");
   const key = readFileSync(keyFile, "utf8").trim();
   if (!key) throw new Error("Privacy ledger key file is empty");
   const records = readDeletionLedger(ledger, [key]);

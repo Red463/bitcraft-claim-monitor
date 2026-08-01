@@ -441,9 +441,9 @@ Supported application server environment variables:
 | `DISCORD_GUILD_ID` | Optional Discord guild ID override for command registration | admin setting |
 | `DISCORD_CHANNEL_ID` | Optional Discord notification channel ID override | admin setting |
 
-## VPS Deployment
+## Relay Preview Deployment
 
-The intended production setup is:
+The standalone preview setup is:
 
 - Ubuntu VPS.
 - Node.js 24.
@@ -452,11 +452,18 @@ The intended production setup is:
 - systemd running the web Node process on `127.0.0.1:19430` and a separate worker process for collectors and scheduled jobs.
 - Caddy serving the preview at `https://relay.timbersteeltrade.com`.
 
-Full bootstrap, migration, rollback and recovery instructions are in [`DEPLOYMENT.md`](./DEPLOYMENT.md).
+Full isolated bootstrap, protected configuration, Caddy merge, rollback, backup,
+privacy-ledger recovery, and diagnostic instructions are in
+[`DEPLOYMENT.md`](./DEPLOYMENT.md).
 
-For a normal release, merge the reviewed pull request, then manually run **Deploy production** from the `main` branch in GitHub Actions and approve the protected `production` environment deployment. The workflow verifies the exact commit before preparing an immutable VPS release; routine updates do not require an interactive SSH session.
+For a normal preview release, merge the reviewed pull request, manually run
+**Deploy Relay preview** from `main` in GitHub Actions, and approve the protected
+`relay-preview` environment deployment. The workflow verifies the exact commit
+before preparing an immutable Relay release. It does not deploy or restart the
+maintained application.
 
-The database directory is outside the Git checkout, so ordinary code updates do not erase accumulated market or activity history.
+The preview uses its own fresh database outside the Git checkout and forces
+Discord delivery to record-only mode while parity soaking is in progress.
 
 ## Repository Layout
 

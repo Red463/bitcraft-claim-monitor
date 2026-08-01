@@ -7,10 +7,10 @@ import { promisify } from "node:util";
 import { compactMonitoringHistory } from "./monitoring-history.mjs";
 
 const exec = promisify(execFile);
-const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR || "/var/lib/bitcraft-claim-monitor";
+const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR || "/var/lib/bitcraft-claim-monitor-relay";
 const outputDir = path.join(dataDir, "monitoring");
 const now = new Date();
-const services = String(process.env.BITCRAFT_MONITOR_SERVICES ?? "bitcraft-claim-monitor,bitcraft-claim-monitor-worker,caddy")
+const services = String(process.env.BITCRAFT_MONITOR_SERVICES ?? "bitcraft-claim-monitor-relay,bitcraft-claim-monitor-relay-worker,caddy")
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean)

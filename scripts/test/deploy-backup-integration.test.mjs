@@ -5,7 +5,7 @@ import { delimiter, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-const script = new URL("../../deploy/backup-bitcraft-monitor", import.meta.url);
+const script = new URL("../../deploy/backup-bitcraft-claim-monitor-relay", import.meta.url);
 const cryptoHelper = new URL("../../deploy/backup-crypto.mjs", import.meta.url);
 const hasBash = process.platform !== "win32" && spawnSync("bash", ["--version"]).status === 0;
 
@@ -197,7 +197,7 @@ grep -Fxq "$(basename "$path")" "$FIXTURE_OPEN"
 
 test("backup pauses active writers, validates, publishes, and restores them", { skip: !hasBash }, () => {
   const result = runBackupFixture({
-    activeUnits: ["bitcraft-claim-monitor-worker.service", "bitcraft-monitor-collector.timer"],
+    activeUnits: ["bitcraft-claim-monitor-relay-worker.service", "bitcraft-claim-monitor-relay-collector.timer"],
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(result.actions, ["stop:timer", "stop:worker", "backup", "quick_check", "quick_check", "start:worker", "start:timer"]);
@@ -207,7 +207,7 @@ test("backup pauses active writers, validates, publishes, and restores them", { 
 
 test("failed validation removes plaintext partials and restores prior states", { skip: !hasBash }, () => {
   const result = runBackupFixture({
-    activeUnits: ["bitcraft-claim-monitor-worker.service", "bitcraft-monitor-collector.timer"],
+    activeUnits: ["bitcraft-claim-monitor-relay-worker.service", "bitcraft-claim-monitor-relay-collector.timer"],
     quickCheck: "corrupt",
   });
   assert.notEqual(result.status, 0);

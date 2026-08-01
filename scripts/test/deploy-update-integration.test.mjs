@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-const script = new URL("../../deploy/update-bitcraft-monitor", import.meta.url);
+const script = new URL("../../deploy/update-bitcraft-claim-monitor-relay", import.meta.url);
 const hasBash = process.platform !== "win32" && spawnSync("bash", ["--version"]).status === 0;
 
 test("atomic switch and rollback restore the previous release", { skip: !hasBash }, () => {

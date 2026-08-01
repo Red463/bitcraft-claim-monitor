@@ -1,23 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_ROOT="${APP_ROOT:-/opt/bitcraft-claim-monitor}"
+APP_ROOT="${APP_ROOT:-/opt/bitcraft-claim-monitor-relay}"
 SOURCE_DIR="${SOURCE_DIR:-$APP_ROOT/source}"
 RELEASES_DIR="${RELEASES_DIR:-$APP_ROOT/releases}"
 CURRENT_LINK="${CURRENT_LINK:-$APP_ROOT/current}"
-DATA_DIR="${DATA_DIR:-/var/lib/bitcraft-claim-monitor}"
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/bitcraft-claim-monitor}"
-BACKUP_HELPER_PATH="${BACKUP_HELPER_PATH:-/usr/local/bin/backup-bitcraft-monitor}"
-BACKUP_CRYPTO_HELPER_PATH="${BACKUP_CRYPTO_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor/backup-crypto.mjs}"
-PRIVACY_REPLAY_HELPER_PATH="${PRIVACY_REPLAY_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor/replay-privacy-deletions.mjs}"
-LOCK_FILE="${LOCK_FILE:-/run/lock/bitcraft-claim-monitor-deploy.lock}"
+DATA_DIR="${DATA_DIR:-/var/lib/bitcraft-claim-monitor-relay}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/bitcraft-claim-monitor-relay}"
+CONFIG_DIR="${CONFIG_DIR:-/etc/bitcraft-claim-monitor-relay}"
+BACKUP_HELPER_PATH="${BACKUP_HELPER_PATH:-/usr/local/bin/backup-bitcraft-claim-monitor-relay}"
+BACKUP_CRYPTO_HELPER_PATH="${BACKUP_CRYPTO_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor-relay/backup-crypto.mjs}"
+PRIVACY_REPLAY_HELPER_PATH="${PRIVACY_REPLAY_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor-relay/replay-privacy-deletions.mjs}"
+LOCK_FILE="${LOCK_FILE:-/run/lock/bitcraft-claim-monitor-relay-deploy.lock}"
 KEEP_RELEASES="${KEEP_RELEASES:-3}"
 RUN_USER="${RUN_USER:-bitcraft}"
-WEB_SERVICE="${WEB_SERVICE:-bitcraft-claim-monitor}"
-WORKER_SERVICE="${WORKER_SERVICE:-bitcraft-claim-monitor-worker}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:18430/api/local/health}"
-PUBLIC_URL="${PUBLIC_URL:-https://app.timbersteeltrade.com}"
-LOG_FILE="${LOG_FILE:-/tmp/bitcraft-claim-monitor-update-$(date +%Y%m%d-%H%M%S).log}"
+WEB_SERVICE="${WEB_SERVICE:-bitcraft-claim-monitor-relay.service}"
+WORKER_SERVICE="${WORKER_SERVICE:-bitcraft-claim-monitor-relay-worker.service}"
+COLLECTOR_TIMER="${COLLECTOR_TIMER:-bitcraft-claim-monitor-relay-collector.timer}"
+BACKUP_TIMER="${BACKUP_TIMER:-bitcraft-claim-monitor-relay-backup.timer}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:19430/api/local/health}"
+PUBLIC_URL="${PUBLIC_URL:-https://relay.timbersteeltrade.com}"
+LOG_FILE="${LOG_FILE:-/tmp/bitcraft-claim-monitor-relay-update-$(date +%Y%m%d-%H%M%S).log}"
 VERBOSE=0
 SKIP_PUBLIC_CHECK=0
 FORCE_BACKUP=0
@@ -27,10 +30,12 @@ PUBLIC_SUMMARY="Public: skipped"
 deployment_succeeded=0
 backup_helper_staged=0
 backup_helper_snapshot=""
+backup_crypto_helper_snapshot=""
+privacy_replay_helper_snapshot=""
 
 usage() {
   cat <<USAGE
-Usage: update-bitcraft-monitor --revision <full-sha> [--verbose] [--no-public-check] [--force-backup]
+Usage: update-bitcraft-claim-monitor-relay --revision <full-sha> [--verbose] [--no-public-check] [--force-backup]
 
   --revision <sha>  Deploy this full lowercase commit SHA from origin/main.
   --verbose         Stream install/build output while also logging it.
@@ -258,7 +263,7 @@ prepare_release() {
 
 stage_backup_helper() {
   local release_dir="$1"
-  local candidate="$release_dir/deploy/backup-bitcraft-monitor"
+  local candidate="$release_dir/deploy/backup-bitcraft-claim-monitor-relay"
   local crypto_candidate="$release_dir/deploy/backup-crypto.mjs"
   local replay_candidate="$release_dir/deploy/replay-privacy-deletions.mjs"
   [[ -f "$candidate" ]] || {
@@ -277,35 +282,56 @@ stage_backup_helper() {
   run_logged "Validating database backup crypto helper" node --check "$crypto_candidate"
   run_logged "Validating privacy replay helper" node --check "$replay_candidate"
   if [[ -e "$BACKUP_HELPER_PATH" ]]; then
-    backup_helper_snapshot="$(mktemp "${TMPDIR:-/tmp}/bitcraft-backup-helper.XXXXXX")"
+    backup_helper_snapshot="$(mktemp "${TMPDIR:-/tmp}/bitcraft-claim-monitor-relay-backup-helper.XXXXXX")"
     install -m 0755 "$BACKUP_HELPER_PATH" "$backup_helper_snapshot"
   fi
+  if [[ -e "$BACKUP_CRYPTO_HELPER_PATH" ]]; then
+    backup_crypto_helper_snapshot="$(mktemp "${TMPDIR:-/tmp}/bitcraft-claim-monitor-relay-backup-crypto.XXXXXX")"
+    install -m 0755 "$BACKUP_CRYPTO_HELPER_PATH" "$backup_crypto_helper_snapshot"
+  fi
+  if [[ -e "$PRIVACY_REPLAY_HELPER_PATH" ]]; then
+    privacy_replay_helper_snapshot="$(mktemp "${TMPDIR:-/tmp}/bitcraft-claim-monitor-relay-privacy-replay.XXXXXX")"
+    install -m 0755 "$PRIVACY_REPLAY_HELPER_PATH" "$privacy_replay_helper_snapshot"
+  fi
+  backup_helper_staged=1
   install -d -o root -g root -m 0755 "$(dirname "$BACKUP_CRYPTO_HELPER_PATH")"
   install -m 0755 "$crypto_candidate" "$BACKUP_CRYPTO_HELPER_PATH"
   install -m 0755 "$replay_candidate" "$PRIVACY_REPLAY_HELPER_PATH"
   install -m 0755 "$candidate" "$BACKUP_HELPER_PATH"
-  backup_helper_staged=1
+}
+
+restore_installed_helper() {
+  local snapshot="$1"
+  local installed_path="$2"
+  if [[ -n "$snapshot" && -f "$snapshot" ]]; then
+    install -m 0755 "$snapshot" "$installed_path"
+  else
+    rm -f "$installed_path"
+  fi
 }
 
 restore_staged_backup_helper() {
   [[ "$backup_helper_staged" == "1" ]] || return 0
-  if [[ -n "$backup_helper_snapshot" && -f "$backup_helper_snapshot" ]]; then
-    install -m 0755 "$backup_helper_snapshot" "$BACKUP_HELPER_PATH"
-  else
-    rm -f "$BACKUP_HELPER_PATH"
-  fi
+  local status=0
+  restore_installed_helper "$backup_helper_snapshot" "$BACKUP_HELPER_PATH" || status=1
+  restore_installed_helper "$backup_crypto_helper_snapshot" "$BACKUP_CRYPTO_HELPER_PATH" || status=1
+  restore_installed_helper "$privacy_replay_helper_snapshot" "$PRIVACY_REPLAY_HELPER_PATH" || status=1
   backup_helper_staged=0
+  return "$status"
 }
 
 cleanup_staged_backup_helper() {
   local status=$?
+  local snapshot
   if [[ "$deployment_succeeded" != "1" ]]; then
     restore_staged_backup_helper || true
   fi
-  if [[ -n "$backup_helper_snapshot" ]]; then
-    rm -f "$backup_helper_snapshot"
-    backup_helper_snapshot=""
-  fi
+  for snapshot in "$backup_helper_snapshot" "$backup_crypto_helper_snapshot" "$privacy_replay_helper_snapshot"; do
+    [[ -z "$snapshot" ]] || rm -f "$snapshot"
+  done
+  backup_helper_snapshot=""
+  backup_crypto_helper_snapshot=""
+  privacy_replay_helper_snapshot=""
   return "$status"
 }
 
@@ -359,16 +385,16 @@ create_required_backup() {
 validate_release_config() {
   local release_dir="$1"
   local -a units=(
-    "$release_dir/deploy/bitcraft-claim-monitor.service"
-    "$release_dir/deploy/bitcraft-claim-monitor-worker.service"
-    "$release_dir/deploy/bitcraft-monitor-collector.service"
-    "$release_dir/deploy/bitcraft-monitor-collector.timer"
+    "$release_dir/deploy/bitcraft-claim-monitor-relay.service"
+    "$release_dir/deploy/bitcraft-claim-monitor-relay-worker.service"
+    "$release_dir/deploy/bitcraft-claim-monitor-relay-collector.service"
+    "$release_dir/deploy/bitcraft-claim-monitor-relay-collector.timer"
   )
-  if [[ -f "$release_dir/deploy/bitcraft-claim-monitor-backup.service" \
-    && -f "$release_dir/deploy/bitcraft-claim-monitor-backup.timer" ]]; then
+  if [[ -f "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.service" \
+    && -f "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.timer" ]]; then
     units+=(
-      "$release_dir/deploy/bitcraft-claim-monitor-backup.service"
-      "$release_dir/deploy/bitcraft-claim-monitor-backup.timer"
+      "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.service"
+      "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.timer"
     )
   fi
   run_logged "Validating systemd units" systemd-analyze verify \
@@ -380,26 +406,25 @@ validate_release_config() {
 install_release_config() {
   local release_dir="$1"
   install -d -o "$RUN_USER" -g "$RUN_USER" -m 0700 "$BACKUP_DIR"
-  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor.service" \
-    /etc/systemd/system/bitcraft-claim-monitor.service
-  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-worker.service" \
-    /etc/systemd/system/bitcraft-claim-monitor-worker.service
-  install -m 0644 "$release_dir/deploy/bitcraft-monitor-collector.service" \
-    /etc/systemd/system/bitcraft-monitor-collector.service
-  install -m 0644 "$release_dir/deploy/bitcraft-monitor-collector.timer" \
-    /etc/systemd/system/bitcraft-monitor-collector.timer
-  if [[ -f "$release_dir/deploy/bitcraft-claim-monitor-backup.service" \
-    && -f "$release_dir/deploy/bitcraft-claim-monitor-backup.timer" ]]; then
-    install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-backup.service" \
-      /etc/systemd/system/bitcraft-claim-monitor-backup.service
-    install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-backup.timer" \
-      /etc/systemd/system/bitcraft-claim-monitor-backup.timer
+  install -d -o root -g "$RUN_USER" -m 0750 "$CONFIG_DIR"
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay.service" \
+    /etc/systemd/system/bitcraft-claim-monitor-relay.service
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-worker.service" \
+    /etc/systemd/system/bitcraft-claim-monitor-relay-worker.service
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-collector.service" \
+    /etc/systemd/system/bitcraft-claim-monitor-relay-collector.service
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-collector.timer" \
+    /etc/systemd/system/bitcraft-claim-monitor-relay-collector.timer
+  if [[ -f "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.service" \
+    && -f "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.timer" ]]; then
+    install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.service" \
+      /etc/systemd/system/bitcraft-claim-monitor-relay-backup.service
+    install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.timer" \
+      /etc/systemd/system/bitcraft-claim-monitor-relay-backup.timer
   fi
-  install -m 0644 "$release_dir/deploy/Caddyfile.example" /etc/caddy/Caddyfile
   install -d -o root -g "$RUN_USER" -m 0750 "$DATA_DIR/monitoring"
   systemctl daemon-reload
-  systemctl enable "$WEB_SERVICE" "$WORKER_SERVICE" bitcraft-monitor-collector.timer >>"$LOG_FILE" 2>&1
-  systemctl reload caddy
+  systemctl enable "$WEB_SERVICE" "$WORKER_SERVICE" "$COLLECTOR_TIMER" >>"$LOG_FILE" 2>&1
 }
 
 rollback_release() {
@@ -546,8 +571,9 @@ main() {
 
   deployment_succeeded=1
   cutover_finished="$(date +%s)"
-  install -m 0755 "$release_dir/deploy/update-bitcraft-monitor" /usr/local/bin/update-bitcraft-monitor
-  systemctl enable --now bitcraft-claim-monitor-backup.timer >>"$LOG_FILE" 2>&1
+  install -m 0755 "$release_dir/deploy/update-bitcraft-claim-monitor-relay" \
+    /usr/local/bin/update-bitcraft-claim-monitor-relay
+  systemctl enable --now "$BACKUP_TIMER" >>"$LOG_FILE" 2>&1
   prune_releases "$release_dir"
   print_summary "$previous_release" "$release_dir" "$expected_version" \
     "$((prepare_finished - deploy_started))" "$((cutover_finished - cutover_started))"

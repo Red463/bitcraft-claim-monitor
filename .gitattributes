@@ -1,3 +1,3 @@
 *.pdf binary
-deploy/update-bitcraft-monitor text eol=lf
-deploy/backup-bitcraft-monitor text eol=lf
+deploy/update-bitcraft-claim-monitor-relay text eol=lf
+deploy/backup-bitcraft-claim-monitor-relay text eol=lf

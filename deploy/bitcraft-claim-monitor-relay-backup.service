@@ -14,7 +14,7 @@ Environment=COLLECTOR_SERVICE=bitcraft-claim-monitor-relay-collector.service
 Environment=COLLECTOR_TIMER=bitcraft-claim-monitor-relay-collector.timer
 Environment=BACKUP_ENCRYPTION_KEY_FILE=/etc/bitcraft-claim-monitor-relay/backup-encryption.key
 Environment=BACKUP_CRYPTO_HELPER=/usr/local/lib/bitcraft-claim-monitor-relay/backup-crypto.mjs
-ExecStart=/bin/bash /opt/bitcraft-claim-monitor-relay/current/deploy/backup-bitcraft-monitor daily
+ExecStart=/bin/bash /opt/bitcraft-claim-monitor-relay/current/deploy/backup-bitcraft-claim-monitor-relay daily
 UMask=0077
 Nice=10
 IOSchedulingClass=best-effort
