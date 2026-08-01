@@ -256,11 +256,17 @@ did not subscribe to the whole regional table.
 | Signed-in members at observation | 2 |
 | Normalization warnings | 0 |
 
-An end-to-end worker run against a fresh temporary SQLite database also stored
-`citizens` from Relay HTTP, `players` from `region:19`, and `skills` from the
-global typed subscription as independent generation-safe current domains.
-Dashboard, Members, Professions, and Leaderboard now compose those local
-domains without using their legacy BitJita page routes.
+An end-to-end worker run on 2026-08-01 against a fresh temporary SQLite
+database, with scheduled jobs and browser activity disabled, published fresh
+joined `claim`, `members`, `citizens`, `inventories`, `crafts`, and `deposits`
+generations from the Relay cache. It independently published authoritative
+`players`, `equipment`, `construction`, `research`, `recruitment`, and Town
+Bank generations from `region:19`, plus global `catalogs`, `skills`, and
+`region`, all within the bounded startup window. Dashboard, Members,
+Professions, and Leaderboard therefore do not depend on a scheduled
+acquisition job or an open browser. Route tests separately prove `503` before
+any requested domain has loaded and a `200` stale envelope with age and cause
+when last-good data exists.
 
 ## Claim craft cache proof
 
