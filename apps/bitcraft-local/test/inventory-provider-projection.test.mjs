@@ -7,9 +7,41 @@ const {
   enrichInventoryWithCatalog,
   formatDecimalQuantity,
   inventoryStackKey,
+  mergeClaimInventoryWithBanks,
 } = await import(
   new URL("../src/server/game-data/inventoryProjection.ts", import.meta.url).href,
 );
+
+test("claim inventory composition adds live Town Bank containers without duplicating shared storage", () => {
+  const shared = {
+    claim: { entityId: "1369094286777412590", regionId: "19" },
+    dimensions: [{
+      dimensionId: "77",
+      kind: "Claim",
+      buildings: [{ entityId: "100", name: "Chest", inventory: [] }],
+    }],
+    buildings: [{ entityId: "100", name: "Chest", inventory: [] }],
+  };
+  const banks = {
+    buildings: [
+      { entityId: "8001", name: "Town Bank — Ada", inventory: [] },
+      { entityId: "100", name: "Impossible duplicate", inventory: [] },
+    ],
+  };
+
+  assert.deepEqual(mergeClaimInventoryWithBanks(shared, banks), {
+    claim: { entityId: "1369094286777412590", regionId: "19" },
+    dimensions: [{
+      dimensionId: "77",
+      kind: "Claim",
+      buildings: [{ entityId: "100", name: "Chest", inventory: [] }],
+    }],
+    buildings: [
+      { entityId: "100", name: "Chest", inventory: [] },
+      { entityId: "8001", name: "Town Bank — Ada", inventory: [] },
+    ],
+  });
+});
 
 test("inventory catalog enrichment preserves item/cargo collisions and exact quantities", () => {
   const entities = new Map([

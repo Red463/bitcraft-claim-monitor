@@ -13,6 +13,26 @@ export function parseDomainKeys(value: string | null): DomainKey[] {
   return [...new Set(value.split(",").map((entry) => entry.trim()).filter((entry): entry is DomainKey => allowed.has(entry)))];
 }
 
+export function browserVisibleChangedDomains(domains: DomainKey[]): DomainKey[] {
+  const visible: DomainKey[] = [];
+  const seen = new Set<DomainKey>();
+  for (const domain of domains) {
+    const exposed = domain === "inventory-banks" ? "inventories" : domain;
+    if (seen.has(exposed)) continue;
+    seen.add(exposed);
+    visible.push(exposed);
+  }
+  return visible;
+}
+
+export function generationSourceDomains(domains: DomainKey[]): DomainKey[] {
+  const sources = [...domains];
+  if (domains.includes("inventories") && !sources.includes("inventory-banks")) {
+    sources.push("inventory-banks");
+  }
+  return sources;
+}
+
 export function gameDataResponse(options: {
   configuredClaimId: EntityId;
   claimId: EntityId;

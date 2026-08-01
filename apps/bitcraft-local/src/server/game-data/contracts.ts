@@ -11,6 +11,7 @@ export const DOMAIN_KEYS = [
   "skills",
   "buildings",
   "inventories",
+  "inventory-banks",
   "crafts",
   "public-crafts",
   "contributions",

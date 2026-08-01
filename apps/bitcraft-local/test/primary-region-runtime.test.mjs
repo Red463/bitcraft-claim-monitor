@@ -110,6 +110,16 @@ test("primary-region runtime publishes players and restarts only when membership
       }],
     },
     recruitmentWarnings: [],
+    bankInventories: {
+      buildings: [{
+        entityId: "8001",
+        buildingEntityId: "7002",
+        playerOwnerEntityId: "101",
+        name: "Town Bank — Ada",
+        inventory: [],
+      }],
+    },
+    bankInventoryWarnings: [],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",
@@ -223,6 +233,28 @@ test("primary-region runtime publishes players and restarts only when membership
         },
         warnings: [],
       },
+      "inventory-banks": {
+        data: {
+          buildings: [{
+            entityId: "8001",
+            buildingEntityId: "7002",
+            playerOwnerEntityId: "101",
+            name: "Town Bank — Ada",
+            inventory: [],
+          }],
+        },
+        confidence: "authoritative",
+        provenance: {
+          provider: "relay",
+          sourceKey: "region:19",
+          regionId: "19",
+          database: "relay-region-19",
+          schemaFingerprint: "regional-v1",
+          sourceObservedAt: null,
+          receivedAt: "2026-07-29T20:41:00.000Z",
+        },
+        warnings: [],
+      },
     },
   });
 
@@ -255,6 +287,8 @@ test("primary-region runtime publishes players and restarts only when membership
       recruitment: [],
     },
     recruitmentWarnings: [],
+    bankInventories: { buildings: [] },
+    bankInventoryWarnings: [],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",

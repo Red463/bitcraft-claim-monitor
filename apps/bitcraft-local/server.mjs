@@ -118,6 +118,7 @@ import {
   createCurrentStateRepository,
   buildCatalogItemDetail,
   buildResearchTierPresets,
+  browserVisibleChangedDomains,
   enrichConstructionWithCatalog,
   enrichCraftsForPlanning,
   enrichCraftsWithCatalog,
@@ -128,6 +129,8 @@ import {
   enrichRecruitmentWithCatalog,
   enrichResearchWithCatalog,
   gameDataResponse,
+  generationSourceDomains,
+  mergeClaimInventoryWithBanks,
   normalizeClaimInventory,
   parseDomainKeys,
   RelayHttpClient,
@@ -412,9 +415,10 @@ let settlementRelayTransitionCoordinator = null;
 function publishGameDataGeneration(event) {
   productionRelayLifecycleCoordinator?.onCommit(event);
   settlementRelayTransitionCoordinator?.onCommit(event);
+  const publicChangedDomains = browserVisibleChangedDomains(event.changedDomains);
   for (const listener of gameDataGenerationListeners) {
     if (listener.claimId !== event.claimId) continue;
-    const changedDomains = event.changedDomains.filter((domain) => listener.domains.has(domain));
+    const changedDomains = publicChangedDomains.filter((domain) => listener.domains.has(domain));
     if (!changedDomains.length) continue;
     try {
       listener.response.write(`data: ${JSON.stringify({ ...event, changedDomains })}\n\n`);
@@ -5660,9 +5664,10 @@ function globalCatalogReadStatus() {
 }
 
 function currentGameDataGenerationEvent(claimId, domains) {
-  const snapshots = domains
+  const snapshots = generationSourceDomains(domains)
     .map((domain) => [domain, currentStateRepository.read(claimId, domain)])
     .filter(([, snapshot]) => snapshot);
+  const availableDomains = new Set(snapshots.map(([domain]) => domain));
   return {
     generation: snapshots.reduce(
       (generation, [, snapshot]) => Math.max(generation, Number(snapshot.generation ?? 0)),
@@ -5672,7 +5677,10 @@ function currentGameDataGenerationEvent(claimId, domains) {
       const receivedAt = String(snapshot.provenance?.receivedAt ?? "");
       return receivedAt > latest ? receivedAt : latest;
     }, "") || null,
-    changedDomains: snapshots.map(([domain]) => domain),
+    changedDomains: domains.filter((domain) => (
+      availableDomains.has(domain)
+      || (domain === "inventories" && availableDomains.has("inventory-banks"))
+    )),
   };
 }
 
@@ -7019,11 +7027,22 @@ const server = createServer(async (req, res) => {
         repository: currentStateRepository,
         transformDomain: (domain, data) => {
           if (domain === "inventories") {
+            const bankSnapshot = currentStateRepository.read(claimId, "inventory-banks");
+            const bankWarnings = bankSnapshot
+              ? [
+                  ...bankSnapshot.warnings,
+                  ...(bankSnapshot.lastError ? [`Town Bank inventories: ${bankSnapshot.lastError}`] : []),
+                ]
+              : ["Town Bank inventories have not loaded yet."];
             return {
               data: enrichInventoryWithCatalog(
-                data,
+                mergeClaimInventoryWithBanks(data, bankSnapshot?.data),
                 (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
               ),
+              ...(bankWarnings.length ? {
+                confidence: "partial",
+                warnings: bankWarnings,
+              } : {}),
             };
           }
           if (domain === "crafts") {

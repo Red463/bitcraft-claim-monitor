@@ -48,6 +48,32 @@ export function inventoryStackKey(stack: CatalogStack): string {
   return `${catalogKind(stack.itemType ?? stack.item_type ?? stack.kind)}:${id}`;
 }
 
+export function mergeClaimInventoryWithBanks(
+  claimInventory: unknown,
+  bankInventories: unknown,
+): Record<string, unknown> {
+  const shared = claimInventory && typeof claimInventory === "object" && !Array.isArray(claimInventory)
+    ? claimInventory as Record<string, unknown>
+    : {};
+  const banks = bankInventories && typeof bankInventories === "object" && !Array.isArray(bankInventories)
+    ? bankInventories as Record<string, unknown>
+    : {};
+  const buildings = Array.isArray(shared.buildings) ? [...shared.buildings] : [];
+  const knownIds = new Set(buildings.flatMap((building) => (
+    building && typeof building === "object" && !Array.isArray(building)
+      ? [String((building as Record<string, unknown>).entityId ?? "")]
+      : []
+  )).filter(Boolean));
+  for (const building of Array.isArray(banks.buildings) ? banks.buildings : []) {
+    if (!building || typeof building !== "object" || Array.isArray(building)) continue;
+    const id = String((building as Record<string, unknown>).entityId ?? "").trim();
+    if (!id || knownIds.has(id)) continue;
+    knownIds.add(id);
+    buildings.push(building);
+  }
+  return { ...shared, buildings };
+}
+
 function inventoryStacks(inventory: unknown): CatalogStack[] {
   if (!inventory || typeof inventory !== "object" || Array.isArray(inventory)) return [];
   const source = inventory as Record<string, unknown>;

@@ -1691,6 +1691,120 @@ function normalizeStack(value: unknown, label: string) {
   };
 }
 
+export function normalizeRegionalBankInventories(options: {
+  claimId: string;
+  members: unknown[];
+  bankRows: unknown[];
+  inventoryRows: unknown[];
+}) {
+  const claimId = decimalString(options.claimId, "regional Town Bank claim id");
+  const warnings: string[] = [];
+  const bankBuildingIds = new Set<string>();
+  for (const [index, value] of records(options.bankRows).entries()) {
+    try {
+      const buildingId = decimalString(
+        value.buildingEntityId ?? value.building_entity_id,
+        `regional bank row ${index} building id`,
+      );
+      const rowClaimId = decimalString(
+        value.claimEntityId ?? value.claim_entity_id,
+        `regional bank row ${index} claim id`,
+      );
+      if (rowClaimId !== claimId) {
+        warnings.push(
+          `Regional bank_state omitted cross-claim bank ${buildingId} for claim ${rowClaimId}.`,
+        );
+        continue;
+      }
+      bankBuildingIds.add(buildingId);
+    } catch (error) {
+      warnings.push(
+        `Regional bank_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  const memberNames = new Map(records(options.members).flatMap((member, index) => {
+    try {
+      const playerId = decimalString(
+        member.playerEntityId ?? member.player_entity_id,
+        `regional bank member ${index} player id`,
+      );
+      const name = String(member.userName ?? member.user_name ?? "").trim();
+      return [[playerId, name]];
+    } catch {
+      return [];
+    }
+  }));
+  const buildings = [];
+  for (const [inventoryIndex, value] of records(options.inventoryRows).entries()) {
+    try {
+      const ownerEntityId = decimalString(
+        value.ownerEntityId ?? value.owner_entity_id,
+        `regional bank inventory ${inventoryIndex} owner id`,
+      );
+      if (!bankBuildingIds.has(ownerEntityId)) continue;
+      const entityId = decimalString(
+        value.entityId ?? value.entity_id,
+        `regional bank inventory ${inventoryIndex} entity id`,
+      );
+      const playerOwnerEntityId = decimalString(
+        value.playerOwnerEntityId ?? value.player_owner_entity_id,
+        `regional bank inventory ${inventoryIndex} player owner id`,
+      );
+      const playerOwnerName = memberNames.get(playerOwnerEntityId)
+        || `Player #${playerOwnerEntityId}`;
+      const inventory = records(value.pockets).flatMap((pocket, pocketIndex) => {
+        if (pocket.contents == null) return [];
+        const contents = record(
+          pocket.contents,
+          `regional bank inventory ${entityId} pocket ${pocketIndex} contents`,
+        );
+        const stack = {
+          itemId: decimalString(
+            contents.itemId ?? contents.item_id,
+            `regional bank inventory ${entityId} pocket ${pocketIndex} item id`,
+          ),
+          itemType: normalizeItemKind(enumLabel(contents.itemType ?? contents.item_type)),
+          quantity: decimalString(
+            contents.quantity,
+            `regional bank inventory ${entityId} pocket ${pocketIndex} quantity`,
+          ),
+        };
+        return [{
+          slot: pocketIndex,
+          locked: pocket.locked === true,
+          contents: stack,
+        }];
+      });
+      const label = `Town Bank — ${playerOwnerName}`;
+      buildings.push({
+        entityId,
+        buildingEntityId: ownerEntityId,
+        playerOwnerEntityId,
+        playerOwnerName,
+        name: label,
+        nickname: label,
+        category: "town-bank",
+        inventoryIndex: integer(
+          value.inventoryIndex ?? value.inventory_index,
+          `regional bank inventory ${entityId} inventory index`,
+        ),
+        cargoIndex: integer(
+          value.cargoIndex ?? value.cargo_index,
+          `regional bank inventory ${entityId} cargo index`,
+        ),
+        items: inventory.map((slot) => slot.contents),
+        inventory,
+      });
+    } catch (error) {
+      warnings.push(
+        `Regional bank inventory omitted row ${inventoryIndex}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return { data: { buildings }, warnings };
+}
+
 export function normalizeClaimInventory(value: unknown) {
   const payload = record(value, "Relay claim inventory payload");
   const claim = record(payload.claim, "Relay claim inventory claim");

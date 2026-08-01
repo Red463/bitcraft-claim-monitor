@@ -70,11 +70,19 @@ payload, so the migration intentionally retires that request and persisted
 payload instead of recreating an unused Relay join. Future in-app coordinate
 features still require bounded entity-filtered evidence before implementation.
 
-Bounded diagnostics have now proven the Town Bank
-`bank_state.building_entity_id -> inventory_state.owner_entity_id` join,
-member-filtered equipment/preset/buff rows, and that global rows are not a
-complete market source. Exact observations are recorded in
+Bounded diagnostics have now proven member-filtered
+equipment/preset/buff rows and that global rows are not a complete market
+source. Exact observations are recorded in
 [diagnostic-findings.md](./diagnostic-findings.md).
+
+The Town Bank
+`bank_state.building_entity_id -> inventory_state.owner_entity_id` join is
+also proven, and the production primary-region session now owns that
+two-stage filtered subscription. The 2026-08-01 live verifier loaded 25
+personal Town Bank inventories and 863 occupied stacks with exact player
+ownership and zero warnings. The generic `inventory-banks` last-good
+generation is composed into the provider-neutral Inventory route without a
+dedicated SQL table or scheduled job.
 
 Regional claim rankings now use the region-scoped claim/local/tier tables and
 bounded exact-owner username subscriptions. The live Region surface does not

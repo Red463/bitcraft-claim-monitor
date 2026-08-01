@@ -8,11 +8,12 @@ try {
   // The first TDD run proves the regional player session is absent.
 }
 
-function fakeBindings() {
+function fakeBindings({ bankRows = [], inventoryRows = [] } = {}) {
   const state = {
     connectConfig: {},
     queries: null,
     onApplied: null,
+    subscriptions: [],
     callbacks: new Map(),
     disconnected: false,
     unsubscribed: false,
@@ -99,6 +100,8 @@ function fakeBindings() {
     rewardedItems: [],
     rewardedExperience: { skillId: 3, quantity: 125 },
   }]);
+  const bankState = cachedTable("bank", bankRows);
+  const inventoryState = cachedTable("inventory", inventoryRows);
   const progressiveActionState = cachedTable("progressive-action", []);
   const connection = {
     db: {
@@ -112,20 +115,37 @@ function fakeBindings() {
       claimRecruitmentState,
       travelerTaskState,
       travelerTaskDesc,
+      bankState,
+      inventoryState,
       progressiveActionState,
     },
     subscriptionBuilder() {
+      const subscriptionState = {
+        onApplied: null,
+        onError: null,
+        queries: null,
+        unsubscribed: false,
+      };
       const builder = {
         onApplied(callback) {
-          state.onApplied = callback;
+          subscriptionState.onApplied = callback;
           return builder;
         },
-        onError() {
+        onError(callback) {
+          subscriptionState.onError = callback;
           return builder;
         },
         subscribe(queries) {
-          state.queries = queries;
-          return { unsubscribe: () => { state.unsubscribed = true; } };
+          subscriptionState.queries = queries;
+          state.subscriptions.push(subscriptionState);
+          if (state.subscriptions.length === 1) {
+            state.queries = queries;
+            state.onApplied = subscriptionState.onApplied;
+          }
+          return { unsubscribe: () => {
+            subscriptionState.unsubscribed = true;
+            if (state.subscriptions[0] === subscriptionState) state.unsubscribed = true;
+          } };
         },
       };
       return builder;
@@ -175,9 +195,32 @@ const members = [
   { playerEntityId: "202", userName: "Grace" },
 ];
 
-test("primary-region session filters member and settlement state and emits normalized snapshots", async () => {
+test("primary-region session filters member, settlement, and Town Bank state before emitting snapshots", async () => {
   assert.ok(sessionModule, "primary-region player session module must exist");
-  const fake = fakeBindings();
+  const fake = fakeBindings({
+    bankRows: [{
+      buildingEntityId: 7002n,
+      claimEntityId: 1369094286777412590n,
+      coordinates: { q: 1, r: 2 },
+    }],
+    inventoryRows: [{
+      entityId: 8001n,
+      ownerEntityId: 7002n,
+      playerOwnerEntityId: 101n,
+      inventoryIndex: 4,
+      cargoIndex: 5,
+      pockets: [{
+        volume: 10,
+        contents: {
+          itemId: 42,
+          quantity: 7,
+          itemType: { tag: "Item", value: {} },
+          durability: null,
+        },
+        locked: false,
+      }],
+    }],
+  });
   const snapshots = [];
   const session = new sessionModule.RelayPrimaryRegionPlayerSession({
     loadBindings: async () => fake.module,
@@ -207,9 +250,15 @@ test("primary-region session filters member and settlement state and emits norma
     "SELECT * FROM claim_recruitment_state WHERE claim_entity_id = 1369094286777412590",
     "SELECT * FROM traveler_task_state WHERE player_entity_id = 101 OR player_entity_id = 202",
     "SELECT * FROM traveler_task_desc",
+    "SELECT * FROM bank_state WHERE claim_entity_id = 1369094286777412590",
   ]);
 
   fake.state.onApplied({});
+  assert.equal(snapshots.length, 0);
+  assert.deepEqual(fake.state.subscriptions[1].queries, [
+    "SELECT * FROM inventory_state WHERE owner_entity_id = 7002",
+  ]);
+  fake.state.subscriptions[1].onApplied({});
   await Promise.resolve();
   assert.deepEqual(snapshots[0], {
     players: [
@@ -307,6 +356,26 @@ test("primary-region session filters member and settlement state and emits norma
       }],
     },
     recruitmentWarnings: [],
+    bankInventories: {
+      buildings: [{
+        entityId: "8001",
+        buildingEntityId: "7002",
+        playerOwnerEntityId: "101",
+        playerOwnerName: "Ada",
+        name: "Town Bank — Ada",
+        nickname: "Town Bank — Ada",
+        category: "town-bank",
+        inventoryIndex: 4,
+        cargoIndex: 5,
+        items: [{ itemId: "42", itemType: "item", quantity: "7" }],
+        inventory: [{
+          slot: 0,
+          locked: false,
+          contents: { itemId: "42", itemType: "item", quantity: "7" },
+        }],
+      }],
+    },
+    bankInventoryWarnings: [],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",
@@ -322,6 +391,7 @@ test("primary-region session filters member and settlement state and emits norma
 
   await session.stop();
   assert.equal(fake.state.unsubscribed, true);
+  assert.equal(fake.state.subscriptions.every(({ unsubscribed }) => unsubscribed), true);
   assert.equal(fake.state.disconnected, true);
   assert.equal(fake.state.callbacks.size, 0);
 });

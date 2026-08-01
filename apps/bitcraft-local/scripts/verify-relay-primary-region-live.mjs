@@ -126,6 +126,18 @@ try {
       + ` and ${snapshot.recruitmentWarnings.length} warnings`,
     );
   }
+  if (
+    snapshot.bankInventories.buildings.length === 0
+    || snapshot.bankInventoryWarnings.length
+    || snapshot.bankInventories.buildings.some(
+      ({ buildingEntityId, playerOwnerEntityId }) => !buildingEntityId || !playerOwnerEntityId,
+    )
+  ) {
+    throw new Error(
+      `Regional Town Bank verification found ${snapshot.bankInventories.buildings.length} personal inventories`
+      + ` with ${snapshot.bankInventoryWarnings.length} warnings`,
+    );
+  }
   console.log(JSON.stringify({
     ok: true,
     sourceKey: source.sourceKey,
@@ -166,12 +178,18 @@ try {
     recruitmentRequiresApproval: snapshot.recruitment.recruitment.some(
       ({ requiredApproval }) => requiredApproval,
     ),
+    townBankInventoryCount: snapshot.bankInventories.buildings.length,
+    townBankStackCount: snapshot.bankInventories.buildings.reduce(
+      (total, inventory) => total + inventory.inventory.length,
+      0,
+    ),
     regionalRowsFound,
     warningCount: snapshot.warnings.length
       + snapshot.equipmentWarnings.length
       + snapshot.constructionWarnings.length
       + snapshot.researchWarnings.length
-      + snapshot.recruitmentWarnings.length,
+      + snapshot.recruitmentWarnings.length
+      + snapshot.bankInventoryWarnings.length,
   }, null, 2));
 } finally {
   clearTimeout(timeout);

@@ -2337,12 +2337,27 @@ test("background polling failures keep the server online", async (t) => {
   insertFallbackPayload("claim", { entityId: claimId, supplies: 111, treasury: 222, regionName: "Cached Region" });
   insertFallbackPayload("members", [{ playerEntityId: "player-1", userName: "Cached Tester" }]);
   insertFallbackPayload("construction", { buildings: [{ entityId: "building-1" }] });
+  insertFallbackPayload("inventories", {
+    claim: { entityId: claimId, regionId: "19" },
+    dimensions: [],
+    buildings: [{ entityId: "100", name: "Shared Chest", inventory: [] }],
+  });
+  insertFallbackPayload("inventory-banks", {
+    buildings: [{ entityId: "8001", name: "Town Bank — Cached Tester", inventory: [] }],
+  });
   fallbackDb.close();
   const lastGoodGameDataResponse = await fetch(`${origin}/api/local/game-data?claimId=${claimId}&domains=claim,members`);
   assert.equal(lastGoodGameDataResponse.status, 200);
   const lastGoodGameData = await lastGoodGameDataResponse.json();
   assert.equal(lastGoodGameData.domains.claim.freshness, "stale");
   assert.equal(lastGoodGameData.domains.members.data[0].userName, "Cached Tester");
+  const lastGoodInventoryResponse = await fetch(`${origin}/api/local/game-data?claimId=${claimId}&domains=inventories`);
+  assert.equal(lastGoodInventoryResponse.status, 200);
+  const lastGoodInventory = await lastGoodInventoryResponse.json();
+  assert.deepEqual(
+    lastGoodInventory.domains.inventories.data.buildings.map(({ name }) => name),
+    ["Shared Chest", "Town Bank — Cached Tester"],
+  );
   assert.equal((await fetch(`${origin}/api/local/game-data?claimId=99999999&domains=claim`)).status, 403);
   const fallbackDashboardResponse = await fetch(`${origin}/api/local/dashboard-data?claimId=${claimId}`);
   assert.equal(fallbackDashboardResponse.status, 404);

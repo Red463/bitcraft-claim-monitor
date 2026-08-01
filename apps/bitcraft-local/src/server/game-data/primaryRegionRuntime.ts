@@ -356,6 +356,20 @@ export class RelayPrimaryRegionRuntime {
             },
             warnings: snapshot.recruitmentWarnings,
           },
+          "inventory-banks": {
+            data: snapshot.bankInventories,
+            confidence: snapshot.bankInventoryWarnings.length ? "partial" : "authoritative",
+            provenance: {
+              provider: "relay",
+              sourceKey,
+              regionId: snapshot.regionId,
+              database: snapshot.database,
+              schemaFingerprint: snapshot.schemaFingerprint,
+              sourceObservedAt: null,
+              receivedAt: snapshot.receivedAt,
+            },
+            warnings: snapshot.bankInventoryWarnings,
+          },
         },
       });
       this.#lastError = null;

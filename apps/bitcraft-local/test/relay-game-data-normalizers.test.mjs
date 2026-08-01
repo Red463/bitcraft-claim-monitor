@@ -18,6 +18,7 @@ const {
   normalizePlayerInventory,
   normalizeCitizensPayload,
   normalizeRegionalEquipment,
+  normalizeRegionalBankInventories,
   normalizeRegionalEmpires,
   normalizeRegionalConstruction,
   normalizeRegionalClaims,
@@ -28,6 +29,88 @@ const {
   normalizeStorageLogs,
   normalizeTimestamp,
 } = await import(new URL("../src/server/game-data/normalizers.ts", import.meta.url).href);
+
+test("regional Town Bank inventories join through the bank building and preserve personal item identities", () => {
+  assert.deepEqual(normalizeRegionalBankInventories({
+    claimId: "1369094286777412590",
+    members: [
+      { playerEntityId: "101", userName: "Ada" },
+      { playerEntityId: "202", userName: "Grace" },
+    ],
+    bankRows: [
+      { buildingEntityId: 7001n, claimEntityId: 1369094286777412590n },
+      { buildingEntityId: 7999n, claimEntityId: 999n },
+    ],
+    inventoryRows: [{
+      entityId: 8001n,
+      ownerEntityId: 7001n,
+      playerOwnerEntityId: 101n,
+      inventoryIndex: 4,
+      cargoIndex: 5,
+      pockets: [
+        { volume: 1, contents: null, locked: false },
+        {
+          volume: 10,
+          contents: {
+            itemId: 42,
+            quantity: 7,
+            itemType: { tag: "Item", value: {} },
+            durability: null,
+          },
+          locked: false,
+        },
+        {
+          volume: 20,
+          contents: {
+            itemId: 42,
+            quantity: 3,
+            itemType: { tag: "Cargo", value: {} },
+            durability: null,
+          },
+          locked: true,
+        },
+      ],
+    }, {
+      entityId: 8999n,
+      ownerEntityId: 7999n,
+      playerOwnerEntityId: 202n,
+      inventoryIndex: 1,
+      cargoIndex: 2,
+      pockets: [],
+    }],
+  }), {
+    data: {
+      buildings: [{
+        entityId: "8001",
+        buildingEntityId: "7001",
+        playerOwnerEntityId: "101",
+        playerOwnerName: "Ada",
+        name: "Town Bank — Ada",
+        nickname: "Town Bank — Ada",
+        category: "town-bank",
+        inventoryIndex: 4,
+        cargoIndex: 5,
+        items: [
+          { itemId: "42", itemType: "item", quantity: "7" },
+          { itemId: "42", itemType: "cargo", quantity: "3" },
+        ],
+        inventory: [
+          {
+            slot: 1,
+            locked: false,
+            contents: { itemId: "42", itemType: "item", quantity: "7" },
+          },
+          {
+            slot: 2,
+            locked: true,
+            contents: { itemId: "42", itemType: "cargo", quantity: "3" },
+          },
+        ],
+      }],
+    },
+    warnings: ["Regional bank_state omitted cross-claim bank 7999 for claim 999."],
+  });
+});
 
 test("regional empires retain exact identities and join members, settlements, nodes, chunks, and unresolved siege roles", () => {
   assert.deepEqual(normalizeRegionalEmpires({

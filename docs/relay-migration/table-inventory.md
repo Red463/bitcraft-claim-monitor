@@ -42,6 +42,7 @@ Disposition values:
 | `craft_plan_settings` | keep-user | Authenticated plan edits | Saved plan targets, sources, and overrides. |
 | `craft_plan_progress_audit_snapshots`, `craft_plan_progress_audit_events`, `craft_plan_progress_audit_state` | keep-history | Normalized planner state transitions | Required for progress audit and restart continuity. |
 | Selected-player inventory and housing state | no table | Bounded Relay entity-detail service; request with 15-second memory last-good | Members, Craft Planner, and its admin manager share the provider-neutral player-data service. Inventory and housing load only for a selected monitored member. No SQL current/cache table or scheduled refresh job is justified. |
+| Current Town Bank personal inventories | no dedicated table | Two-stage primary-region typed subscription; generic `inventory-banks` last-good generation composed into the public `inventories` response | `bank_state` is claim-filtered before bounded `inventory_state.owner_entity_id` subscriptions open. Exact player/building ownership and Item/Cargo stacks publish immediately and invalidate the public Inventory page. The 2026-08-01 live proof loaded 25 personal inventories and 863 occupied stacks with zero warnings. |
 | Browser page-navigation state | no table | In-memory last-rendered snapshot plus immediate provider-neutral local re-read | Domain pages reuse visible data only to avoid a blank transition; the browser snapshot never suppresses a current-generation read. Focused-route pages make no unused central request. The legacy endpoint map and response throttle are removed and do not justify SQL persistence. |
 | Legacy browser proxy and dashboard/player/passive-craft/production helper responses | retire / no table | None | `/api/bitjita/*` and the four broad helper routes are removed with their in-process response caches and dead acquisition functions. Current pages compose from committed provider domains or focused provider-neutral local routes. No replacement SQL cache exists. |
 | Discord supplies, online members, and active crafts | no table | Claim-fenced committed Relay claim/member/player/craft generations plus the local catalog | Operational commands read the latest complete generation immediately and preserve exact decimal-string IDs. Unavailable or partial inputs produce an explicit error rather than a zero, offline, or empty answer. Delivery history remains in the existing outbox tables; current command data is not copied into SQL. |
@@ -110,8 +111,16 @@ path for current user-facing data.
 - Item detail is composed locally from `game_catalog_descriptions`; it does not
   fetch a BitJita detail route.
 - No SQL table was added for the Inventory cutover.
-- Town Bank and player-bank parity remain incomplete and block marking the
-  whole inventory domain ready for soak.
+- Town Bank ownership follows the proven
+  `bank_state.building_entity_id -> inventory_state.owner_entity_id` edge in a
+  two-stage primary-region subscription. The resulting generic
+  `inventory-banks` generation is composed into the public Inventory response
+  without changing settlement-stock or Craft Planner source semantics.
+- The 2026-08-01 live verifier loaded 25 personal Town Bank inventories and
+  863 occupied stacks with zero warnings. Selected-player claim-bank
+  categories remain available through the bounded player-data service.
+- No Town Bank, player-bank, crawl, refresh-ledger, or scheduled-ingestion SQL
+  table was added.
 
 ## Settlement market current-state evidence
 

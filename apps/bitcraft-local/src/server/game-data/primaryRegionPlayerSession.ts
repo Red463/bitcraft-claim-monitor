@@ -1,4 +1,5 @@
 import {
+  normalizeRegionalBankInventories,
   normalizeRegionalConstruction,
   normalizeRegionalEquipment,
   normalizeRegionalPlayers,
@@ -46,6 +47,8 @@ type BindingConnection = {
     claimRecruitmentState: CachedTable;
     travelerTaskState: CachedTable;
     travelerTaskDesc: CachedTable;
+    bankState: CachedTable;
+    inventoryState: CachedTable;
     progressiveActionState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
@@ -114,6 +117,8 @@ export type RegionalPlayerSnapshot = {
   researchWarnings: string[];
   recruitment: ReturnType<typeof normalizeRegionalRecruitment>["data"];
   recruitmentWarnings: string[];
+  bankInventories: ReturnType<typeof normalizeRegionalBankInventories>["data"];
+  bankInventoryWarnings: string[];
   database: string;
   regionId: string;
   schemaFingerprint: string;
@@ -199,20 +204,33 @@ function recruitmentQuery(claimIdValue: string): string {
   return `SELECT * FROM claim_recruitment_state WHERE claim_entity_id = ${claimId}`;
 }
 
+function bankQuery(claimIdValue: string): string {
+  const claimId = String(claimIdValue ?? "").trim();
+  if (!/^\d+$/.test(claimId)) {
+    throw new TypeError("regional Town Bank claim id is invalid");
+  }
+  return `SELECT * FROM bank_state WHERE claim_entity_id = ${claimId}`;
+}
+
 export class RelayPrimaryRegionPlayerSession {
   readonly #loadBindings: () => Promise<RegionalBindingModule>;
   readonly #onSnapshot: SessionDependencies["onSnapshot"];
   readonly #onContribution: SessionDependencies["onContribution"];
   readonly #now: () => Date;
   #connection: BindingConnection | null = null;
-  #subscription: SubscriptionHandle | null = null;
+  #baseSubscription: SubscriptionHandle | null = null;
+  #bankInventorySubscriptions: SubscriptionHandle[] = [];
   #config: SessionConfig | null = null;
   #nextGeneration = 0;
   #snapshotQueued = false;
   #applyInFlight = false;
   #applyPending = false;
   #listenersAttached = false;
+  #bankRefreshEpoch = 0;
+  #bankRefreshQueued = false;
+  #refreshingBankInventories = false;
   readonly #tableChanged = () => this.#queueSnapshot();
+  readonly #bankChanged = () => this.#queueBankInventoryRefresh();
   readonly #contributionChanged = (...args: unknown[]) => this.#handleContributionUpdate(args);
   #health = {
     connected: false,
@@ -245,6 +263,7 @@ export class RelayPrimaryRegionPlayerSession {
       recruitmentQuery(config.claimId),
       travelerTaskQuery(config.members),
       "SELECT * FROM traveler_task_desc",
+      bankQuery(config.claimId),
       ...contributionQueries(config.contributionTargets ?? []),
     ];
     if (queries.length === 0) {
@@ -259,10 +278,10 @@ export class RelayPrimaryRegionPlayerSession {
       .onConnect((connection) => {
         this.#health.connected = true;
         this.#health.lastError = null;
-        this.#subscription = connection.subscriptionBuilder()
+        this.#baseSubscription = connection.subscriptionBuilder()
           .onApplied(() => {
-            this.#applySnapshot(connection);
             this.#attachTableListeners(connection);
+            this.#beginBankInventoryRefresh(connection);
           })
           .onError((_context, error) => this.#recordError(error))
           .subscribe(queries);
@@ -277,7 +296,7 @@ export class RelayPrimaryRegionPlayerSession {
 
   #applySnapshot(connection: BindingConnection): void {
     const config = this.#config;
-    if (!config) return;
+    if (!config || this.#refreshingBankInventories) return;
     if (this.#applyInFlight) {
       this.#applyPending = true;
       return;
@@ -310,6 +329,12 @@ export class RelayPrimaryRegionPlayerSession {
         claimId: config.claimId,
         stateRows: [...connection.db.claimRecruitmentState.iter()],
       });
+      const bankInventories = normalizeRegionalBankInventories({
+        claimId: config.claimId,
+        members: config.members,
+        bankRows: [...connection.db.bankState.iter()],
+        inventoryRows: [...connection.db.inventoryState.iter()],
+      });
       const generation = this.#nextGeneration;
       this.#nextGeneration += 1;
       this.#applyInFlight = true;
@@ -324,6 +349,8 @@ export class RelayPrimaryRegionPlayerSession {
         researchWarnings: research.warnings,
         recruitment: recruitment.data,
         recruitmentWarnings: recruitment.warnings,
+        bankInventories: bankInventories.data,
+        bankInventoryWarnings: bankInventories.warnings,
         database: config.database,
         regionId: config.regionId,
         schemaFingerprint: config.schemaFingerprint,
@@ -359,6 +386,12 @@ export class RelayPrimaryRegionPlayerSession {
       table.onUpdate?.(this.#tableChanged);
       table.onDelete?.(this.#tableChanged);
     }
+    connection.db.bankState.onInsert?.(this.#bankChanged);
+    connection.db.bankState.onUpdate?.(this.#bankChanged);
+    connection.db.bankState.onDelete?.(this.#bankChanged);
+    connection.db.inventoryState.onInsert?.(this.#tableChanged);
+    connection.db.inventoryState.onUpdate?.(this.#tableChanged);
+    connection.db.inventoryState.onDelete?.(this.#tableChanged);
     connection.db.progressiveActionState.onUpdate?.(this.#contributionChanged);
     this.#listenersAttached = true;
   }
@@ -370,6 +403,12 @@ export class RelayPrimaryRegionPlayerSession {
       table.removeOnUpdate?.(this.#tableChanged);
       table.removeOnDelete?.(this.#tableChanged);
     }
+    this.#connection.db.bankState.removeOnInsert?.(this.#bankChanged);
+    this.#connection.db.bankState.removeOnUpdate?.(this.#bankChanged);
+    this.#connection.db.bankState.removeOnDelete?.(this.#bankChanged);
+    this.#connection.db.inventoryState.removeOnInsert?.(this.#tableChanged);
+    this.#connection.db.inventoryState.removeOnUpdate?.(this.#tableChanged);
+    this.#connection.db.inventoryState.removeOnDelete?.(this.#tableChanged);
     this.#connection.db.progressiveActionState.removeOnUpdate?.(this.#contributionChanged);
     this.#listenersAttached = false;
   }
@@ -470,6 +509,65 @@ export class RelayPrimaryRegionPlayerSession {
     ];
   }
 
+  #beginBankInventoryRefresh(connection: BindingConnection): void {
+    if (!this.#config) return;
+    this.#refreshingBankInventories = true;
+    this.#bankRefreshEpoch += 1;
+    const epoch = this.#bankRefreshEpoch;
+    this.#clearBankInventorySubscriptions();
+    const buildingIds = [...connection.db.bankState.iter()].map((value, index) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new TypeError(`regional bank row ${index} must be an object`);
+      }
+      const row = value as Record<string, unknown>;
+      return decimalInteger(
+        row.buildingEntityId ?? row.building_entity_id,
+        `regional bank row ${index} building id`,
+      );
+    });
+    const queries = equalitySubscriptionQueries(
+      "inventory_state",
+      "owner_entity_id",
+      buildingIds,
+    );
+    if (!queries.length) {
+      this.#refreshingBankInventories = false;
+      this.#applySnapshot(connection);
+      return;
+    }
+    this.#bankInventorySubscriptions.push(
+      connection.subscriptionBuilder()
+        .onApplied(() => {
+          if (epoch !== this.#bankRefreshEpoch) return;
+          this.#refreshingBankInventories = false;
+          this.#applySnapshot(connection);
+        })
+        .onError((_context, error) => this.#recordError(error))
+        .subscribe(queries),
+    );
+  }
+
+  #queueBankInventoryRefresh(): void {
+    if (this.#bankRefreshQueued || !this.#connection) return;
+    this.#bankRefreshQueued = true;
+    queueMicrotask(() => {
+      this.#bankRefreshQueued = false;
+      if (!this.#connection) return;
+      try {
+        this.#beginBankInventoryRefresh(this.#connection);
+      } catch (error) {
+        this.#recordError(error);
+      }
+    });
+  }
+
+  #clearBankInventorySubscriptions(): void {
+    for (const subscription of this.#bankInventorySubscriptions) {
+      subscription.unsubscribe();
+    }
+    this.#bankInventorySubscriptions = [];
+  }
+
   #queueSnapshot(): void {
     if (this.#snapshotQueued || !this.#connection) return;
     this.#snapshotQueued = true;
@@ -488,9 +586,11 @@ export class RelayPrimaryRegionPlayerSession {
   }
 
   async stop(): Promise<void> {
+    this.#bankRefreshEpoch += 1;
     this.#removeTableListeners();
-    this.#subscription?.unsubscribe();
-    this.#subscription = null;
+    this.#clearBankInventorySubscriptions();
+    this.#baseSubscription?.unsubscribe();
+    this.#baseSubscription = null;
     this.#connection?.disconnect();
     this.#connection = null;
     this.#config = null;
@@ -498,6 +598,8 @@ export class RelayPrimaryRegionPlayerSession {
     this.#snapshotQueued = false;
     this.#applyInFlight = false;
     this.#applyPending = false;
+    this.#bankRefreshQueued = false;
+    this.#refreshingBankInventories = false;
     this.#health.connected = false;
   }
 }

@@ -14,9 +14,27 @@ const { applySchemaIndexStatements } = await import(
 const { createCurrentStateRepository } = await import(
   new URL("../src/server/game-data/currentStateRepository.ts", import.meta.url).href,
 );
-const { gameDataResponse } = await import(
+const {
+  browserVisibleChangedDomains,
+  gameDataResponse,
+  generationSourceDomains,
+} = await import(
   new URL("../src/server/game-data/gameDataRoute.ts", import.meta.url).href,
 );
+
+test("Town Bank commits invalidate the public inventories domain immediately", () => {
+  assert.deepEqual(
+    browserVisibleChangedDomains(["players", "inventory-banks", "inventory-banks"]),
+    ["players", "inventories"],
+  );
+});
+
+test("inventory generation polling includes the internal Town Bank source", () => {
+  assert.deepEqual(
+    generationSourceDomains(["claim", "inventories"]),
+    ["claim", "inventories", "inventory-banks"],
+  );
+});
 const { parseDomainKeys } = await import(
   new URL("../src/server/game-data/gameDataRoute.ts", import.meta.url).href,
 );

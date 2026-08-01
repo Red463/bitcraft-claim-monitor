@@ -314,6 +314,29 @@ It returned 25 inventory rows. Each row also carried
 personal Town Bank inventories. Querying `inventory_state.entity_id` with the
 bank building ID returned no rows; `owner_entity_id` is the required edge.
 
+The primary-region typed session now performs this as a two-stage bounded
+subscription. It first follows only `bank_state` rows for the monitored claim,
+then opens equality-filtered `inventory_state.owner_entity_id` subscriptions
+for the discovered Town Bank building IDs. A complete bank generation is
+normalized into the generic `inventory-banks` last-good domain and composed
+with Relay HTTP shared storage only at the provider-neutral Inventory route.
+The shared-storage generation remains independently useful while the regional
+session reconnects, and a missing bank generation is surfaced as partial
+rather than silently presented as complete.
+
+The 2026-08-01 live verifier applied the current `bitcraft-live-19` schema and
+observed 25 personal Town Bank inventories containing 863 occupied stacks,
+with exact building/player ownership, all 18 monitored member player rows,
+and zero normalization warnings. Item and Cargo identities remain distinct.
+Town Bank changes invalidate the public `inventories` generation immediately;
+open pages do not wait for an HTTP refresh or scheduled job.
+
+No Town Bank, player-bank, crawl, or refresh-ledger SQL table was added.
+`domain_payload_current` remains the sole durable last-good boundary. Selected
+member inventory and housing continue to use the bounded 15-second
+provider-neutral Relay HTTP service, which already exposes claim-bank
+categories for Craft Planner source selection.
+
 ## Equipment and buffs
 
 For one member ID obtained from Relay HTTP:
