@@ -492,6 +492,7 @@ test("retired table authorizer rejects post-cleanup access while permitting reta
     "UPDATE market_listings SET id = 2",
     "DELETE FROM market_listings",
     "PRAGMA table_info(market_listings)",
+    "PRAGMA table_info(MARKET_LISTINGS)",
     "DROP TABLE market_listings",
   ]) {
     assert.throws(
