@@ -630,6 +630,22 @@ present in these authoritative current rows. Their cards and payloads are
 retired rather than relabelled. They can return only after a completed-trade
 signal is proven.
 
+## Adaptive region-session pool — 2026-08-01
+
+The bounded read-only verifier
+`apps/bitcraft-local/scripts/verify-relay-region-pool-live.mjs` exercised the
+real pool with a hard two-session cap and topology-discovered regional
+sources. Region 19 remained pinned and published 558 public crafts. Region 3
+then published 265 crafts; while its lease was held, an attempt to open region
+7 was rejected at capacity. After release, the idle sweep closed region 3
+without touching the primary session, and region 7 published 699 crafts.
+
+The final open set was exactly regions 19 and 7. No third simultaneous
+connection, unconfigured source, database-name assumption, SQL session table,
+or scheduled acquisition job was involved. The generated SDK reported its
+known hot-row cache-update warnings for a few changing craft rows, but every
+bounded generation applied and pool lifecycle behavior remained correct.
+
 ## Empire global-versus-regional completeness — 2026-07-30
 
 The read-only production verifier
