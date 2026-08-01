@@ -147,7 +147,7 @@ export function Market({
       {currentView === "buy-orders" ? <MarketBrowse {...marketRefresh} claimId={claimId} mode="buy" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
       {currentView === "deal-watch" ? <DealWatchlist {...marketRefresh} claimId={claimId} monitoredRegionId={regionId || fallbackRegionId} onDiscordLogin={onDiscordLogin} /> : null}
       {currentView === "stalls" ? <MarketStalls {...marketRefresh} claimId={claimId} regionId={regionId} onShowMap={onShowMap} /> : null}
-      <footer className="global-market-source"><CircleDollarSign size={14} /><span>Browse, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data. Completed-sale history remains unavailable until an authoritative Relay trade signal is proven.</span></footer>
+      <footer className="global-market-source"><CircleDollarSign size={14} /><span>Browse, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data. Confirmed-sale charts contain only authoritative closures observed locally and mature progressively.</span></footer>
     </div>
   );
 }

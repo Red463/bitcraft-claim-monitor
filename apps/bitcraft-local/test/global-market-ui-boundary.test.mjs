@@ -69,7 +69,9 @@ test("Deals sorts exact current-order values and omits unproven map data", () =>
   assert.match(deals, /<DataTable[\s\S]*rows=\{rows\}[\s\S]*rowLimit=\{250\}/);
   assert.match(deals, /\["Available",[\s\S]*\(deal\) => deal\.buyQuantity/);
   assert.match(deals, /\["Wanted",[\s\S]*\(deal\) => deal\.sellQuantity/);
+  assert.match(deals, /\["Distance",[\s\S]*deal\.distance == null/);
   assert.match(deals, /\["Gain",[\s\S]*profitPercent/);
+  assert.doesNotMatch(deals, /Route distance and map coordinates will appear/);
   assert.doesNotMatch(deals, /\["Map"/);
   assert.doesNotMatch(deals, /<span>Sort<\/span>/);
 });
@@ -111,9 +113,12 @@ test("Overview and Deals use generation-invalidated local Relay projections", ()
   assert.match(deals, /search\.set\("regions", regions\.join\(","\)\)/);
   assert.match(deals, /marketFreshnessNotice/);
   assert.match(deals, /Best Route Potential/);
+  assert.match(deals, /\["Distance"/);
+  assert.match(deals, /deal\.distance == null/);
   assert.doesNotMatch(deals, /Visible Potential/);
   assert.doesNotMatch(deals, /Live order generation updated/);
   assert.doesNotMatch(deals, /Maximum distance/);
+  assert.doesNotMatch(deals, /Route distance and map coordinates will appear/);
 });
 
 test("Browse invalidates on regional-market generation events and keeps history non-blocking", () => {

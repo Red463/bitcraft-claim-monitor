@@ -150,8 +150,11 @@ before useful rows arrive. Per-region receive ages and connection state prevent
 a disconnected or delayed region from being reported as fresh. Browse
 freshness also includes the global catalog subscription, so current orders
 cannot hide a stale or disconnected enrichment source. Order books publish
-independently of trade-history reads. Location distance/map actions remain
-unavailable until the bounded location join is proven.
+independently of trade-history reads. The naturally bounded
+`marketplace_state` table is part of the live base generation, so order-book
+map actions and same-region/same-dimension Manhattan route distances update
+with the orders and never wait for a scheduled job. Cross-region coordinate
+spaces are not compared.
 
 Barter Stalls shares those same regional sessions and the generic
 `regional-market` generation. The provider keeps the complete stall marker

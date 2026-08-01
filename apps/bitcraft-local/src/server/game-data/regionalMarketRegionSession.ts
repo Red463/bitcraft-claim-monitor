@@ -37,6 +37,7 @@ type BindingConnection = {
     sellOrderState: CachedTable;
     closedListingState: CachedTable;
     barterStallState: CachedTable;
+    marketplaceState: CachedTable;
     tradeOrderState: CachedTable;
     buildingState: CachedTable;
     buildingNicknameState: CachedTable;
@@ -275,6 +276,7 @@ export class RelayRegionalMarketRegionSession {
             "SELECT * FROM sell_order_state",
             "SELECT * FROM closed_listing_state",
             "SELECT * FROM barter_stall_state",
+            "SELECT * FROM marketplace_state",
           ]);
       })
       .onConnectError((_context, error) => {
@@ -531,6 +533,7 @@ export class RelayRegionalMarketRegionSession {
       const sellRows = rows(connection.db.sellOrderState);
       const closedRows = rows(connection.db.closedListingState);
       const allStallRows = rows(connection.db.barterStallState);
+      const marketplaceRows = rows(connection.db.marketplaceState);
       const stallRows = baseOnly
         ? []
         : allStallRows.filter((value, index) => {
@@ -558,6 +561,7 @@ export class RelayRegionalMarketRegionSession {
         + sellRows.length
         + closedRows.length
         + allStallRows.length
+        + marketplaceRows.length
         + tradeOrderRows.length
         + buildingRows.length
         + buildingNicknameRows.length
@@ -575,6 +579,7 @@ export class RelayRegionalMarketRegionSession {
         buyRows,
         claimRows,
         usernameRows,
+        marketplaceRows,
         warnOnMissingJoins: !baseOnly,
         warnOnMissingUsernames: false,
       });
@@ -738,6 +743,7 @@ export class RelayRegionalMarketRegionSession {
       connection.db.sellOrderState,
       connection.db.closedListingState,
       connection.db.barterStallState,
+      connection.db.marketplaceState,
     ]) {
       table.onInsert?.(this.#baseChanged);
       table.onUpdate?.(this.#baseChanged);
@@ -760,6 +766,7 @@ export class RelayRegionalMarketRegionSession {
       connection.db.sellOrderState,
       connection.db.closedListingState,
       connection.db.barterStallState,
+      connection.db.marketplaceState,
     ]) {
       table.removeOnInsert?.(this.#baseChanged);
       table.removeOnUpdate?.(this.#baseChanged);

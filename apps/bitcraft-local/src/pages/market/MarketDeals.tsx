@@ -142,6 +142,7 @@ export function MarketDeals({
           ["Available", (deal) => formatNumber(deal.buyQuantity), (deal) => deal.buyQuantity],
           ["Wanted", (deal) => formatNumber(deal.sellQuantity), (deal) => deal.sellQuantity],
           ["Max trade", (deal) => formatNumber(deal.maxQuantity), (deal) => deal.maxQuantity],
+          ["Distance", (deal) => deal.distance == null ? "—" : `${formatNumber(deal.distance)} tiles`, (deal) => deal.distance ?? Number.MAX_SAFE_INTEGER],
           ["Unit profit", (deal) => <span className="positive">{formatGoldAmount(deal.profit)}</span>, (deal) => deal.profit],
           ["Gain", (deal) => <span className="positive">{formatNumber(deal.profitPercent)}%</span>, (deal) => toNumber(deal.profitPercent)],
         ]}
@@ -149,7 +150,7 @@ export function MarketDeals({
         emptyKind="no-match"
         scrollLabel="Global market deals table"
       />
-      {state.updatedAt ? <p className="legend">{state.freshness === "fresh" ? "Current" : "Last-good"} order generation received {new Date(state.updatedAt).toLocaleTimeString()}. Route distance and map coordinates will appear after the bounded location join is migrated.</p> : null}
+      {state.updatedAt ? <p className="legend">{state.freshness === "fresh" ? "Current" : "Last-good"} order generation received {new Date(state.updatedAt).toLocaleTimeString()}. Same-region distance uses live marketplace coordinates; cross-region routes remain unmeasured.</p> : null}
     </section>
   );
 }

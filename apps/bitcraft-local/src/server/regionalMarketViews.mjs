@@ -748,6 +748,31 @@ function marketItemForOrder(order, getEntity) {
   };
 }
 
+function marketCoordinates(order) {
+  const locationX = Number(order.locationX);
+  const locationZ = Number(order.locationZ);
+  const dimension = String(order.dimension ?? "").trim();
+  if (
+    !Number.isSafeInteger(locationX)
+    || !Number.isSafeInteger(locationZ)
+    || !/^\d+$/.test(dimension)
+  ) return null;
+  return { locationX, locationZ, dimension };
+}
+
+function sameRegionRouteDistance(source, destination) {
+  if (decimal(source.regionId) !== decimal(destination.regionId)) return null;
+  const sourceCoordinates = marketCoordinates(source);
+  const destinationCoordinates = marketCoordinates(destination);
+  if (
+    !sourceCoordinates
+    || !destinationCoordinates
+    || sourceCoordinates.dimension !== destinationCoordinates.dimension
+  ) return null;
+  return Math.abs(sourceCoordinates.locationX - destinationCoordinates.locationX)
+    + Math.abs(sourceCoordinates.locationZ - destinationCoordinates.locationZ);
+}
+
 export function regionalMarketDealsView(snapshot, options = {}) {
   const getEntity = typeof options.getEntity === "function" ? options.getEntity : () => null;
   const limit = Math.max(1, Math.min(500, Math.floor(Number(options.limit) || 250)));
@@ -771,6 +796,8 @@ export function regionalMarketDealsView(snapshot, options = {}) {
         const maxQuantity = minimumDecimal(sell.quantity, buy.quantity);
         const item = marketItemForOrder(sell, getEntity);
         const basisPoints = buyPrice > 0n ? (profit * 10_000n) / buyPrice : 0n;
+        const buyCoordinates = marketCoordinates(sell);
+        const sellCoordinates = marketCoordinates(buy);
         deals.push({
           routeKey: `${decimal(sell.entityId)}:${decimal(buy.entityId)}`,
           ...item,
@@ -790,7 +817,9 @@ export function regionalMarketDealsView(snapshot, options = {}) {
           sellClaimId: decimal(buy.claimEntityId),
           sellLocation: String(buy.claimName ?? ""),
           sellRegionId: decimal(buy.regionId),
-          distance: null,
+          buyCoordinates,
+          sellCoordinates,
+          distance: sameRegionRouteDistance(sell, buy),
         });
       }
     }

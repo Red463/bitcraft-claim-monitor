@@ -28,9 +28,9 @@ Disposition values:
 | `game_catalog_refresh_runs`, `game_catalog_refresh_targets` | retire | None | Removed with the catalog crawl job, admin route, UI controls, recovery queue, repository methods, and prepared statements. Subscription generation/source health now owns catalog ingestion and restart recovery. |
 | `settlement_state_current` | keep-checkpoint | Minimal restart-safe settlement transition baseline | Retained only so committed Relay `claim`, `members`, `inventories`, `market`, and optional `construction` generations can compare against the last transactionally applied summary after a restart. It is not a page/current-data cache: Relay generations remain authoritative, updates are queued immediately after commits, exact supplies/treasury are stored as TEXT, and no polling or browser writer owns this row. Building count remains nullable only until the first complete construction generation, which then drives structure transitions without blocking the four required settlement sources. |
 | `market_listings` | retire | None | Removed from bootstrap and existing clone databases. Current Local Market, Dashboard, and leaderboard listing state is projected directly from the latest complete generic `market` generation. Listing transitions are derived from consecutive Relay generations and appended independently to history; they do not justify a duplicate current-state table. |
-| `market_buy_orders_current`, `market_regional_sale_averages_current` | retire | None | Removed from bootstrap and existing clone databases. Configured regional sessions merge exact buy-order generations into the generic `regional-market` last-good domain, and the local view filters, sorts, pages, and enriches that committed generation without a second SQL mirror. Regional sale averages are not retained because Relay has not yet proved an authoritative sold-versus-cancelled signal; the app returns no premium opportunity instead of persisting an invented baseline. |
+| `market_buy_orders_current`, `market_regional_sale_averages_current` | retire | None | Removed from bootstrap and existing clone databases. Configured regional sessions merge exact buy-order generations into the generic `regional-market` last-good domain, and the local view filters, sorts, pages, and enriches that committed generation without a second SQL mirror. Confirmed-sale averages and chart buckets derive on demand from durable `market_trades` within the explicit local observation window; no current average materialization is justified. Premium opportunities remain unavailable until their required comparison semantics are proven. |
 | `market_events`, `market_trades` | keep-history | Immediate normalized Relay order/closed-listing transitions | Required for locally observed charts, sold-versus-returned evidence, exact deduplication, and notification history. They are not current order-book storage. New Hex Coin closed rows confirm a sale only through a unique same-region, same-market, same-owner proceeds match; returned typed stacks confirm non-sales; ambiguous closures remain unresolved. Claim and regional sessions update both tables immediately after current publication, use TEXT amount affinity, and have no scheduled acquisition owner. The compact `provider_transition_outbox` is committed atomically with a changed current generation so a failed history write survives restart and replays idempotently. Overview movers query bounded recent history; selected-item price history uses the `(claim_id, item_id, item_type, occurred_at)` index before its row limit and exposes the progressive observation window instead of materializing another current/analytics table. |
-| `global_market_price_snapshots` | retire | None | Removed with the legacy `global_market_insights` scheduled job and cached overview setting. Market Browse, Overview, and Deals compose current orders directly from the committed `regional-market` generation plus the live catalog. Future truthful price history belongs in durable observed trade/event history after an authoritative close signal is proven, not in a scheduled current-price mirror. |
+| `global_market_price_snapshots` | retire | None | Removed with the legacy `global_market_insights` scheduled job and cached overview setting. Market Browse, Overview, and Deals compose current orders directly from the committed `regional-market` generation plus the live catalog. Truthful price history derives on demand from durable, authoritatively confirmed local trade events and exposes its progressive observation window instead of maintaining a scheduled current-price mirror. |
 | `activity_events` | keep-history | Normalized domain transitions; Relay storage-log events arrive from the 15-second live loop and deduplicate by region plus upstream log ID | Required for the Activity page and notification/audit history. Relay storage logs expire upstream, so this is durable history rather than a current-data cache. |
 | `production_jobs`, `production_contributions` | keep-history / keep-derived-index | Committed Relay craft lifecycle and immediate regional craft-progress transactions | `production_jobs` preserves lifecycle/notification history. `production_contributions` is the indexed contributor/craft aggregate used by interactive leaderboard and production reports; it increments in the same transaction as a new durable event receipt and is never refreshed by a schedule. Current craft state remains in normalized domains. |
 | `production_contribution_events` | keep-history | Positive claim-scoped regional `progressive_action_state` transaction deltas | Minimal append-only evidence and replay-deduplication ledger keyed by Relay transaction, region, and craft. Exact progress/XP values use TEXT. This table is independently required to prevent reconnect/replay double counting and to support rebuilding the contribution aggregate; it is not a current-state cache. |
@@ -146,10 +146,12 @@ path for current user-facing data.
 - Event/history/outbox persistence is queued after the current generation
   commits. A persistence failure is reported through provider health but does
   not hold back or roll back live page data.
-- Configured regional market sessions subscribe to `buy_order_state` and
-  `sell_order_state`, derive bounded claim and owner equality joins, and merge
-  independently complete regions into the generic `regional-market`
-  generation.
+- Configured regional market sessions subscribe to `buy_order_state`,
+  `sell_order_state`, and the naturally bounded `marketplace_state`, derive
+  bounded claim and owner equality joins, and merge independently complete
+  regions into the generic `regional-market` generation. Marketplace
+  coordinates stay in that current generation rather than a duplicate SQL
+  table.
 - The regional buy-order view and Market Browse order books perform
   exact-decimal filtering, sorting, paging, and catalog enrichment directly
   over that generation. Market catalog search uses the continuously maintained
@@ -175,8 +177,9 @@ path for current user-facing data.
   route rather than adding overlapping order capacity.
 - Movers, price history, completed volume, and recent trades use only uniquely
   confirmed local sale events and explicitly expose their progressive
-  observation window. Distance/map actions remain unavailable until bounded
-  location joins are proven. Current order state is not relabelled as
+  observation window. Order-book map actions use live marketplace coordinates;
+  Deals calculate same-region/same-dimension Manhattan distance and leave
+  cross-region distance unknown. Current order state is not relabelled as
   historical activity, and no scheduled analytics table is introduced.
 - The provider-neutral generation event stream invalidates an open Market
   Browse view immediately after commit, with a 750-millisecond local poll only

@@ -74,6 +74,15 @@ function fakeBindings({ includeStall = false, stallActive = true } = {}) {
       },
       timestamp: { __timestamp_micros_since_unix_epoch__: 1785408180000000n },
     }],
+    marketplaceState: [{
+      buildingEntityId: 9001n,
+      claimEntityId: 100n,
+      coordinates: { x: 10, z: 20, dimension: 19n },
+    }, {
+      buildingEntityId: 9002n,
+      claimEntityId: 101n,
+      coordinates: { x: 40, z: 55, dimension: 19n },
+    }],
     claimState: [
       { entityId: 100n, name: "Timbersteel Trade" },
       { entityId: 101n, name: "Other Market" },
@@ -210,6 +219,7 @@ test("regional market session publishes all buy and sell orders after bounded cl
     "SELECT * FROM sell_order_state",
     "SELECT * FROM closed_listing_state",
     "SELECT * FROM barter_stall_state",
+    "SELECT * FROM marketplace_state",
   ]);
 
   fake.state.subscriptions[0].onApplied({});
@@ -220,6 +230,9 @@ test("regional market session publishes all buy and sell orders after bounded cl
   assert.equal(snapshots.length, 1);
   assert.equal(snapshots[0].generation, 4);
   assert.equal(snapshots[0].data.orders[0].claimName, "");
+  assert.equal(snapshots[0].data.orders[0].locationX, 10);
+  assert.equal(snapshots[0].data.orders[0].locationZ, 20);
+  assert.equal(snapshots[0].data.orders[0].dimension, "19");
   assert.deepEqual(snapshots[0].data.stalls, []);
 
   fake.state.subscriptions[1].onApplied({});

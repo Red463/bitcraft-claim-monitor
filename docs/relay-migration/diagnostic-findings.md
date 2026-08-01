@@ -841,6 +841,16 @@ so unrelated volume cannot truncate it. Both
 expose the progressive observation window; no regional history crawl,
 current-sale table, price snapshot, or scheduled analytics build was added.
 
+`marketplace_state` is now included in the same base subscription as regional
+orders. Its claim-keyed coordinates normalize directly onto current order
+rows, so map links and same-region/same-dimension Manhattan route distances
+change with the live generation. The 2026-08-01 live diagnostic received
+coordinates for all 4,057 Region 19 orders across 36 market claims, with zero
+normalization warnings. The full apply took 75 ms and optional enrichment
+followed the first base publication after 656 ms. No marketplace cache table or
+scheduled location job was added. Cross-region distances remain unknown
+because regional coordinate spaces have not been proven comparable.
+
 ## Relay topology and schema drift — 2026-07-31
 
 The public Relay health contract changed from the earlier mirror-oriented

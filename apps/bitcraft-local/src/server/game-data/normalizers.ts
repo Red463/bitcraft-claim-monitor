@@ -2615,6 +2615,7 @@ export function normalizeRegionalOrders(options: {
   buyRows: unknown[];
   claimRows: unknown[];
   usernameRows: unknown[];
+  marketplaceRows?: unknown[];
   warnOnMissingJoins?: boolean;
   warnOnMissingUsernames?: boolean;
 }) {
@@ -2642,6 +2643,44 @@ export function normalizeRegionalOrders(options: {
 
   const claims = indexRows(options.claimRows, "Regional claim_state");
   const usernames = indexRows(options.usernameRows, "Regional player_username_state");
+  const marketplaces = new Map<string, {
+    locationX: number;
+    locationZ: number;
+    dimension: string;
+  }>();
+  for (const [index, value] of (options.marketplaceRows ?? []).entries()) {
+    try {
+      const row = record(value, `Regional marketplace_state row ${index}`);
+      const claimEntityId = decimalString(
+        row.claimEntityId ?? row.claim_entity_id,
+        `Regional marketplace_state row ${index} claim id`,
+      );
+      const coordinates = record(
+        row.coordinates,
+        `Regional marketplace_state row ${index} coordinates`,
+      );
+      if (!marketplaces.has(claimEntityId)) {
+        marketplaces.set(claimEntityId, {
+          locationX: integer(
+            coordinates.x,
+            `Regional marketplace_state row ${index} coordinate x`,
+          ),
+          locationZ: integer(
+            coordinates.z,
+            `Regional marketplace_state row ${index} coordinate z`,
+          ),
+          dimension: decimalString(
+            coordinates.dimension,
+            `Regional marketplace_state row ${index} dimension`,
+          ),
+        });
+      }
+    } catch (error) {
+      warnings.push(
+        `Regional marketplace_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   const orders: Array<Record<string, unknown>> = [];
   function appendOrders(values: unknown[], side: "sell" | "buy") {
     for (const [index, value] of values.entries()) {
@@ -2674,6 +2713,7 @@ export function normalizeRegionalOrders(options: {
         );
         const claim = claims.get(claimEntityId);
         const username = usernames.get(ownerEntityId);
+        const marketplace = marketplaces.get(claimEntityId);
         if (!claim && options.warnOnMissingJoins !== false) {
           warnings.push(
             `Regional ${side} order ${entityId} has no claim_state row for ${claimEntityId}.`,
@@ -2699,6 +2739,9 @@ export function normalizeRegionalOrders(options: {
           regionId,
           ownerEntityId,
           ownerUsername: username ? String(username.username ?? "") : "",
+          locationX: marketplace?.locationX ?? null,
+          locationZ: marketplace?.locationZ ?? null,
+          dimension: marketplace?.dimension ?? null,
           itemId: decimalString(
             row.itemId ?? row.item_id,
             `Regional ${side} order ${entityId} item id`,

@@ -78,6 +78,11 @@ const closedKinds = { item: 0, cargo: 0, unknown: 0 };
 for (const row of normalizedSnapshot.data.closedListings) {
   closedKinds[String(row.itemType)] += 1;
 }
+const ordersWithLocation = normalizedSnapshot.data.orders.filter((row) => (
+  Number.isSafeInteger(row.locationX)
+  && Number.isSafeInteger(row.locationZ)
+  && /^\d+$/.test(String(row.dimension ?? ""))
+));
 console.log(JSON.stringify({
   observedAt: new Date().toISOString(),
   regionId,
@@ -85,6 +90,10 @@ console.log(JSON.stringify({
   schemaFingerprint: source.schemaFingerprint,
   counts: {
     orders: normalizedSnapshot.data.orders.length,
+    ordersWithLocation: ordersWithLocation.length,
+    marketClaimsWithLocation: new Set(
+      ordersWithLocation.map((row) => String(row.claimEntityId)),
+    ).size,
     closedListings: normalizedSnapshot.data.closedListings.length,
     stalls: normalizedSnapshot.data.stalls.length,
     closedClaims: new Set(

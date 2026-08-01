@@ -256,6 +256,15 @@ test("cross-region market normalization preserves both sell and buy order sides"
       { entityId: 801n, username: "Seller One" },
       { entityId: 802n, username: "Buyer One" },
     ],
+    marketplaceRows: [{
+      buildingEntityId: 9001n,
+      claimEntityId: 100n,
+      coordinates: { x: -12, z: 34, dimension: 19n },
+    }, {
+      buildingEntityId: 9002n,
+      claimEntityId: 101n,
+      coordinates: { x: 45, z: -67, dimension: 19n },
+    }],
   });
 
   assert.deepEqual(
@@ -267,6 +276,9 @@ test("cross-region market normalization preserves both sell and buy order sides"
       ownerUsername: order.ownerUsername,
       price: order.price,
       quantity: order.quantity,
+      locationX: order.locationX,
+      locationZ: order.locationZ,
+      dimension: order.dimension,
     })),
     [{
       entityId: "601",
@@ -276,6 +288,9 @@ test("cross-region market normalization preserves both sell and buy order sides"
       ownerUsername: "Seller One",
       price: "31",
       quantity: "5",
+      locationX: -12,
+      locationZ: 34,
+      dimension: "19",
     }, {
       entityId: "602",
       side: "buy",
@@ -284,6 +299,9 @@ test("cross-region market normalization preserves both sell and buy order sides"
       ownerUsername: "Buyer One",
       price: "25",
       quantity: "8",
+      locationX: 45,
+      locationZ: -67,
+      dimension: "19",
     }],
   );
   assert.deepEqual(result.warnings, []);

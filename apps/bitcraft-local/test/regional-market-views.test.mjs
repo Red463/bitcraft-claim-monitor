@@ -737,10 +737,62 @@ test("regional market deals derive truthful live arbitrage without trade history
     sellClaimId: "101",
     sellLocation: "High Market",
     sellRegionId: "7",
+    buyCoordinates: null,
+    sellCoordinates: null,
     distance: null,
   }]);
   assert.equal(result.coverage, "current-orders");
   assert.deepEqual(result.historyUnavailable, ["movers", "trade-volume", "completed-sales"]);
+});
+
+test("regional market deals calculate bounded same-region route distance", () => {
+  const result = views.regionalMarketDealsView({
+    activeRegionIds: ["19"],
+    orders: [{
+      entityId: "901",
+      side: "sell",
+      claimEntityId: "100",
+      claimName: "Low Market",
+      regionId: "19",
+      ownerEntityId: "701",
+      itemId: "44",
+      itemType: "item",
+      price: "10",
+      quantity: "5",
+      locationX: -10,
+      locationZ: 20,
+      dimension: "19",
+    }, {
+      entityId: "902",
+      side: "buy",
+      claimEntityId: "101",
+      claimName: "High Market",
+      regionId: "19",
+      ownerEntityId: "702",
+      itemId: "44",
+      itemType: "item",
+      price: "15",
+      quantity: "3",
+      locationX: 15,
+      locationZ: 45,
+      dimension: "19",
+    }],
+  }, {
+    allowedRegionIds: ["19"],
+    getEntity: () => ({ name: "Iron Nail" }),
+  });
+
+  assert.equal(result.deals[0].distance, 50);
+  assert.deepEqual(result.deals[0].buyCoordinates, {
+    locationX: -10,
+    locationZ: 20,
+    dimension: "19",
+  });
+  assert.deepEqual(result.deals[0].sellCoordinates, {
+    locationX: 15,
+    locationZ: 45,
+    dimension: "19",
+  });
 });
 
 test("regional market overview derives liquidity, hubs, and open-order activity", () => {
