@@ -347,6 +347,23 @@ function normalizeSiegeDiagnostics(value: unknown): SiegeNotificationDiagnostics
   })) as SiegeNotificationDiagnostics;
 }
 
+function assertUsableSiegeNotificationSnapshot(
+  diagnostics: SiegeNotificationDiagnostics,
+): void {
+  const failures = [
+    [diagnostics.invalidDescriptionRowCount, "invalid description row"],
+    [diagnostics.invalidNotificationRowCount, "invalid notification row"],
+    [diagnostics.duplicateNotificationIdCount, "duplicate notification id"],
+    [diagnostics.ambiguousTerminalGroupCount, "ambiguous terminal group"],
+  ] as const;
+  const summary = failures
+    .filter(([count]) => count > 0)
+    .map(([count, label]) => `${count} ${label}${count === 1 ? "" : "s"}`);
+  if (summary.length) {
+    throw new TypeError(`Relay siege notification snapshot rejected: ${summary.join(", ")}.`);
+  }
+}
+
 export class RelayEmpireRuntime {
   readonly #manifest: BindingManifest;
   readonly #currentStateRepository: CurrentStateRepository;
@@ -528,8 +545,9 @@ export class RelayEmpireRuntime {
   }): Promise<boolean> {
     const appliedScope = normalizedNotificationScope(snapshot.notificationScopeEmpireIds);
     if (!sameDecimalIds(appliedScope, this.#notificationScopeRequested)) return false;
-    const outcomes = normalizeSiegeOutcomes(snapshot.siegeNotifications.outcomes);
     const diagnostics = normalizeSiegeDiagnostics(snapshot.siegeNotifications.diagnostics);
+    assertUsableSiegeNotificationSnapshot(diagnostics);
+    const outcomes = normalizeSiegeOutcomes(snapshot.siegeNotifications.outcomes);
     const warnings = snapshot.siegeNotifications.warnings.map(String);
     this.#globalSiegeOutcomes = outcomes;
     this.#globalSiegeDiagnostics = diagnostics;

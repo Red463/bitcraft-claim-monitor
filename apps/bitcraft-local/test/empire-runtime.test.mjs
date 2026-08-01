@@ -478,6 +478,50 @@ test("Empire runtime atomically retains compact last-good siege outcomes and rec
     stored.warnings.filter((warning) => /terminal notification groups/.test(warning)).length,
     1,
   );
+  const lastGoodSiegeProjection = structuredClone({
+    outcomes: stored.data.siegeOutcomes,
+    diagnostics: stored.data.siegeOutcomeDiagnostics,
+    warnings: stored.warnings,
+  });
+
+  for (const [diagnosticKey, expectedError] of [
+    ["invalidDescriptionRowCount", /1 invalid description row/i],
+    ["invalidNotificationRowCount", /1 invalid notification row/i],
+    ["ambiguousTerminalGroupCount", /1 ambiguous terminal group/i],
+    ["duplicateNotificationIdCount", /1 duplicate notification id/i],
+  ]) {
+    await assert.rejects(
+      runtime.updateGlobalSiegeNotifications({
+        siegeNotifications: {
+          notifications: [],
+          outcomes: [],
+          warnings: [
+            "row-level warning one",
+            "row-level warning two",
+          ],
+          diagnostics: {
+            invalidDescriptionRowCount: 0,
+            invalidNotificationRowCount: 0,
+            duplicateNotificationIdCount: 0,
+            unmatchedTerminalGroupCount: 0,
+            ambiguousTerminalGroupCount: 0,
+            [diagnosticKey]: 1,
+          },
+        },
+        notificationScopeEmpireIds: ["190", "800"],
+        database: "relay-global",
+        schemaFingerprint: "global-v1",
+        generation: 3,
+        receivedAt: "2026-07-30T18:03:00.000Z",
+      }),
+      expectedError,
+    );
+    assert.deepEqual({
+      outcomes: stored.data.siegeOutcomes,
+      diagnostics: stored.data.siegeOutcomeDiagnostics,
+      warnings: stored.warnings,
+    }, lastGoodSiegeProjection);
+  }
 
   await assert.rejects(
     runtime.updateGlobalSiegeNotifications({
