@@ -2,13 +2,20 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-test("global Buy Orders uses the item-first live market browser", () => {
+test("global Buy Orders renders the dedicated live Relay finder", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
-  const marketBrowse = readFileSync(new URL("../src/pages/market/MarketBrowse.tsx", import.meta.url), "utf8");
+  const finder = readFileSync(new URL("../src/pages/market/BuyOrderFinder.tsx", import.meta.url), "utf8");
 
-  assert.doesNotMatch(marketPage, /from "\.\/market\/BuyOrderFinder"/);
-  assert.match(marketPage, /<MarketBrowse[^>]*mode="buy"/);
-  assert.match(marketBrowse, /Find an item with buy orders/);
-  assert.match(marketBrowse, /no monitored-settlement cache is used/);
-  assert.doesNotMatch(marketBrowse, /\/api\/local\/market\/buy-orders/);
+  assert.match(marketPage, /from "\.\/market\/BuyOrderFinder"/);
+  assert.match(marketPage, /currentView === "buy-orders"[\s\S]*<BuyOrderFinder/);
+  assert.doesNotMatch(marketPage, /currentView === "buy-orders"[\s\S]{0,300}<MarketBrowse/);
+  assert.match(finder, /\/api\/local\/market\/buy-orders/);
+  assert.match(finder, /useGameDataGeneration\(\s*claimId,\s*\["catalogs",\s*"regional-market"\]\s*,?\s*\)/);
+  assert.match(finder, /Best Opportunities/);
+  assert.match(finder, /locally observed confirmed sales/i);
+  assert.match(finder, /setState\(\(current\) => \(\{\s*\.\.\.current,[\s\S]*?error:/);
+  assert.match(finder, /refreshSequence/);
+  assert.match(finder, /refreshHeaders/);
+  assert.match(finder, /trackRefresh/);
+  assert.doesNotMatch(finder, /cached orders|collector may not have populated|BitJita/i);
 });

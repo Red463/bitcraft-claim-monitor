@@ -12,6 +12,7 @@ import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import "../styles/market.css";
 import type { ActivePanel } from "../types/app";
 import type { MapFocus } from "./map/mapUtils";
+import { BuyOrderFinder } from "./market/BuyOrderFinder";
 import { DealWatchlist } from "./market/DealWatchlist";
 import { MarketBrowse } from "./market/MarketBrowse";
 import { MarketDeals } from "./market/MarketDeals";
@@ -144,7 +145,7 @@ export function Market({
       {currentView === "overview" ? <MarketOverview {...marketRefresh} claimId={claimId} regionId={regionId} favorites={favorites} onOpenItem={openItem} /> : null}
       {currentView === "browse" ? <MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
       {currentView === "deals" ? <MarketDeals {...marketRefresh} claimId={claimId} sharedRegionId={regionId} activeRegions={activeRegions} /> : null}
-      {currentView === "buy-orders" ? <MarketBrowse {...marketRefresh} claimId={claimId} mode="buy" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
+      {currentView === "buy-orders" ? <BuyOrderFinder {...marketRefresh} claimId={claimId} regionId={regionId} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
       {currentView === "deal-watch" ? <DealWatchlist {...marketRefresh} claimId={claimId} monitoredRegionId={regionId || fallbackRegionId} onDiscordLogin={onDiscordLogin} /> : null}
       {currentView === "stalls" ? <MarketStalls {...marketRefresh} claimId={claimId} regionId={regionId} onShowMap={onShowMap} /> : null}
       <footer className="global-market-source"><CircleDollarSign size={14} /><span>Browse, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data. Confirmed-sale charts contain only authoritative closures observed locally and mature progressively.</span></footer>
