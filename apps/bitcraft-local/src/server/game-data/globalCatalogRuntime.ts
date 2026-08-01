@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { DomainSnapshotBatch } from "./contracts.ts";
 import {
   normalizeEmpireNotificationScope,
@@ -131,6 +132,8 @@ export class RelayGlobalCatalogRuntime {
   #reconcileInFlight: Promise<boolean> | null = null;
   #lastTopologyCheckedAt = 0;
   #lifecycleGeneration = 0;
+  readonly #notificationPublicationContext = new AsyncLocalStorage<boolean>();
+  readonly #inFlightNotificationPublications = new Set<Promise<void>>();
 
   constructor(dependencies: RuntimeDependencies) {
     this.#manifest = dependencies.manifest;
@@ -148,6 +151,13 @@ export class RelayGlobalCatalogRuntime {
 
   async start(config: { relayBaseUrl: string; claimId: string }): Promise<void> {
     if (this.#session) throw new Error("Relay global catalog runtime is already started");
+    if (
+      this.#notificationPublicationContext.getStore() === true
+      && this.#inFlightNotificationPublications.size
+    ) {
+      throw new Error("Cannot start Relay global catalog runtime from an active notification publication");
+    }
+    await this.#drainNotificationPublications();
     const lifecycleGeneration = ++this.#lifecycleGeneration;
     this.#relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
     this.#claimId = String(config.claimId).trim();
@@ -252,7 +262,7 @@ export class RelayGlobalCatalogRuntime {
       (group) => group !== "empire-notifications",
     );
     if (snapshot.changed.includes("empire-notifications")) {
-      try {
+      const publication = this.#notificationPublicationContext.run(true, async () => {
         await this.#onEmpireNotifications?.({
           siegeNotifications: snapshot.siegeNotifications,
           database: snapshot.database,
@@ -260,6 +270,10 @@ export class RelayGlobalCatalogRuntime {
           generation: snapshot.generation,
           receivedAt: snapshot.receivedAt,
         });
+      });
+      this.#inFlightNotificationPublications.add(publication);
+      try {
+        await publication;
         if (
           lifecycleGeneration !== this.#lifecycleGeneration
           || this.#session == null
@@ -271,6 +285,8 @@ export class RelayGlobalCatalogRuntime {
           || this.#session == null
         ) return;
         this.#notificationLastError = error instanceof Error ? error.message : String(error);
+      } finally {
+        this.#inFlightNotificationPublications.delete(publication);
       }
     }
     if (!hasCatalogChanges) return;
@@ -394,7 +410,7 @@ export class RelayGlobalCatalogRuntime {
         lastAppliedAt: null,
         lastError: null,
         notifications: {
-          applied: true,
+          applied: this.#empireNotificationScope.length === 0,
           requestedEmpireIds: [...this.#empireNotificationScope],
           appliedEmpireIds: [],
           lastAppliedAt: null,
@@ -407,12 +423,20 @@ export class RelayGlobalCatalogRuntime {
   }
 
   async stop(): Promise<void> {
+    const reentrantPublication = this.#notificationPublicationContext.getStore() === true;
     this.#lifecycleGeneration += 1;
     await this.#session?.stop();
+    if (!reentrantPublication) await this.#drainNotificationPublications();
     this.#session = null;
     this.#relayBaseUrl = null;
     this.#claimId = null;
     this.#source = null;
+  }
+
+  async #drainNotificationPublications(): Promise<void> {
+    while (this.#inFlightNotificationPublications.size) {
+      await Promise.allSettled([...this.#inFlightNotificationPublications]);
+    }
   }
 }
 

@@ -658,6 +658,14 @@ test("global catalog runtime always exposes notification health and notification
     lastAppliedAt: null,
     lastError: null,
   });
+  assert.equal(await runtime.setEmpireNotificationScope(["3"]), true);
+  assert.deepEqual(runtime.health().subscription.notifications, {
+    applied: false,
+    requestedEmpireIds: ["3"],
+    appliedEmpireIds: [],
+    lastAppliedAt: null,
+    lastError: null,
+  });
   await runtime.start({ relayBaseUrl: "https://relay.example", claimId: "1" });
   await assert.rejects(snapshotHandler({
     entities: [],
@@ -693,7 +701,7 @@ test("global catalog runtime always exposes notification health and notification
 test("global catalog runtime fences late and deferred notification snapshots from a replaced session", async () => {
   const sessions = [];
   const notificationSnapshots = [];
-  const healthWrites = [];
+  const lifecycleEvents = [];
   let releaseNotification;
   const deferredNotification = new Promise((resolve) => {
     releaseNotification = resolve;
@@ -717,6 +725,7 @@ test("global catalog runtime fences late and deferred notification snapshots fro
       };
     },
     createSession: (options) => {
+      const sessionNumber = sessions.length + 1;
       const state = {
         connected: true,
         applied: true,
@@ -733,7 +742,9 @@ test("global catalog runtime fences late and deferred notification snapshots fro
       const session = {
         options,
         state,
-        async start() {},
+        async start() {
+          lifecycleEvents.push(`session-${sessionNumber}-live`);
+        },
         async setEmpireNotificationScope() { return true; },
         health: () => structuredClone(state),
         async stop() {},
@@ -748,11 +759,14 @@ test("global catalog runtime fences late and deferred notification snapshots fro
     currentStateRepository: {
       nextGeneration: () => 1,
       commitGeneration: () => {},
-      recordSubscriptionHealth: (health) => healthWrites.push(health),
+      recordSubscriptionHealth: () => {},
     },
     onEmpireNotifications: async (snapshot) => {
       notificationSnapshots.push(snapshot);
-      if (notificationSnapshots.length === 1) await deferredNotification;
+      if (notificationSnapshots.length === 1) {
+        await deferredNotification;
+        lifecycleEvents.push("old-notification-committed");
+      }
     },
   });
   await runtime.start({ relayBaseUrl: "https://relay.example", claimId: "1" });
@@ -772,10 +786,26 @@ test("global catalog runtime fences late and deferred notification snapshots fro
   const deferredCommit = sessions[0].options.onSnapshot(oldSnapshot);
   sessions[0].state.connected = false;
   sessions[0].state.lastError = "socket closed";
-  await runtime.reconcile({ relayBaseUrl: "https://relay.example", claimId: "1" });
+  let reconcileCompleted = false;
+  const reconcile = runtime.reconcile({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1",
+  }).then((result) => {
+    reconcileCompleted = true;
+    return result;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reconcileCompleted, false);
+  assert.equal(sessions.length, 1, "replacement session must wait for the old publication");
+  assert.deepEqual(lifecycleEvents, ["session-1-live"]);
+
   releaseNotification();
-  await deferredCommit;
-  assert.equal(healthWrites.length, 0, "a deferred old-session commit cannot mutate health");
+  await Promise.all([deferredCommit, reconcile]);
+  assert.deepEqual(lifecycleEvents, [
+    "session-1-live",
+    "old-notification-committed",
+    "session-2-live",
+  ]);
 
   await sessions[0].options.onSnapshot({
     ...oldSnapshot,
