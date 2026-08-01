@@ -1149,6 +1149,38 @@ test("server collection paginates listings and protects production mutations", a
       source_key, provider, database_name, schema_fingerprint, generation, received_at, row_count
     ) VALUES ('global', 'relay', 'relay-global', 'global-v1', 1, ?, 1)
   `).run(legacyBuyOrderNow);
+  staleRegionalDb.prepare(`
+    INSERT OR IGNORE INTO market_trades (
+      trade_id, claim_id, order_entity_id, seller_entity_id,
+      seller_username, purchaser_entity_id, purchaser_username, item_id,
+      item_type, item_name, quantity, unit_price, total_price, tier, rarity,
+      occurred_at, imported_at, raw_json
+    ) VALUES (
+      'relay_closed_listing:19:historic-1', ?, 'historic-order', 'player-1',
+      'Tester', NULL, 'Buyer', '30', 'item', 'Leather', '5', '10', '50',
+      NULL, NULL, '2026-05-20T12:00:00.000Z',
+      '2026-05-20T12:00:01.000Z', '{}'
+    )
+  `).run(claimId);
+  staleRegionalDb.prepare(`
+    WITH RECURSIVE sequence(value) AS (
+      SELECT 1
+      UNION ALL
+      SELECT value + 1 FROM sequence WHERE value < 5001
+    )
+    INSERT INTO market_trades (
+      trade_id, claim_id, order_entity_id, seller_entity_id,
+      seller_username, purchaser_entity_id, purchaser_username, item_id,
+      item_type, item_name, quantity, unit_price, total_price, tier, rarity,
+      occurred_at, imported_at, raw_json
+    )
+    SELECT
+      'relay_closed_listing:19:noise-' || value, ?, 'noise-order-' || value,
+      'noise-player', 'Noise', NULL, NULL, '31', 'item', 'Noise', '1', '1',
+      '1', NULL, NULL, '2026-06-01T12:00:00.000Z',
+      '2026-06-01T12:00:01.000Z', '{}'
+    FROM sequence
+  `).run(claimId);
   staleRegionalDb.close();
   const buyOrdersBeforeSales = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=19&search=Leather&pageSize=25&sort=unitPrice&direction=desc`).then((response) => response.json());
   assert.equal(buyOrdersBeforeSales.total, 1);
@@ -1189,17 +1221,33 @@ test("server collection paginates listings and protects production mutations", a
   const foreignClaimStalls = await fetch(`${origin}/api/local/market/stalls?claimId=999999999&regionId=19`);
   assert.equal(foreignClaimStalls.status, 403);
   const marketPriceHistory = await fetch(`${origin}/api/local/market/price-history?claimId=${claimId}&regionId=19&itemType=item&itemId=30`).then((response) => response.json());
-  assert.equal(marketPriceHistory.coverage, "unavailable");
-  assert.equal(marketPriceHistory.observedSince, null);
+  assert.equal(marketPriceHistory.coverage, "locally-observed");
+  assert.equal(marketPriceHistory.observedSince, "2026-05-20T12:00:00.000Z");
   assert.equal(marketPriceHistory.currentAsOf, legacyBuyOrderNow);
-  assert.deepEqual(marketPriceHistory.priceData, []);
-  assert.deepEqual(marketPriceHistory.recentTrades, []);
+  assert.deepEqual(marketPriceHistory.priceData, [{
+    bucket: "2026-05-20",
+    quantity: "5",
+    tradeCount: 1,
+    totalValue: "50",
+    vwap: "10",
+    low: "10",
+    high: "10",
+  }]);
+  assert.deepEqual(marketPriceHistory.recentTrades.map((trade) => trade.id), [
+    "relay_closed_listing:19:historic-1",
+  ]);
+  assert.equal(marketPriceHistory.priceStats.totalVolume, "5");
   assert.equal(priceHistoryRequests, 0);
+  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (marketDb) => {
+    marketDb.prepare(
+      "DELETE FROM market_trades WHERE claim_id = ? AND item_id = '31' AND item_name = 'Noise'",
+    ).run(claimId);
+  });
   const marketOverview = await fetch(`${origin}/api/local/market/overview?claimId=${claimId}&regionId=19`).then((response) => response.json());
   assert.equal(marketOverview.topDeals[0].profit, "5");
   assert.equal(marketOverview.mostLiquid[0].itemName, "Leather");
   assert.equal(marketOverview.movers.length, 0);
-  assert.equal(marketOverview.moverBaseline, "unavailable");
+  assert.equal(marketOverview.moverBaseline, "collecting");
   const marketRegions = await fetch(`${origin}/api/local/market/regions?claimId=${claimId}`).then((response) => response.json());
   assert.deepEqual(marketRegions.regions.map((region) => region.regionId), ["19"]);
   const liveDeals = await fetch(`${origin}/api/local/market/deals?claimId=${claimId}`).then((response) => response.json());

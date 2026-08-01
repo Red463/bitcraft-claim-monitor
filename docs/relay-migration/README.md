@@ -110,18 +110,36 @@ member-history crawl remains.
 
 Cross-region market orders use the adaptive regional-session pattern rather
 than the legacy scheduled crawl. Each configured region publishes a bounded
-typed buy/sell-order snapshot, and the runtime combines those snapshots into
-the generic `regional-market` last-good domain. Market Browse search and order
+typed buy/sell/closed-listing snapshot before optional identity and active
+barter-stall joins finish, and the runtime combines those snapshots into the
+generic `regional-market` last-good domain. Market Browse search and order
 books, Overview liquidity/hubs/open-order activity, and Deals arbitrage join
 that generation to the continuously maintained local catalog on request; they
-do not wait for a scheduled insight job. Local
+do not wait for a scheduled insight job. Initial applies and every later base
+table change publish before optional enrichment reapplies. Failed transition
+side effects are written as changed-region order/closure deltas to a compact
+durable outbox in the same SQLite transaction as the current generation, then
+retry idempotently across process restarts without rolling back or delaying
+later live publication. Deal Watch
+evaluation runs on a separate best-effort current-publication path, so a watch
+failure cannot hold the ordered market-history writer. Local
 filtering and catalog enrichment are fast enough without
 `market_buy_orders_current`; the table and the unproven
 `market_regional_sale_averages_current` projection are retired. The obsolete
 `global_market_price_snapshots` table, cached overview setting, and
-`global_market_insights` job are also retired. Completed
-trade charts remain explicitly unavailable until Relay proves an authoritative
-close/trade signal, rather than deriving sales from disappearing orders. Premium
+`global_market_insights` job are also retired. Exact regional Hex Coin proceeds
+now confirm sales only when they uniquely match a same-region, same-market,
+same-owner sell-order transition. Confirmed transitions append immediately to
+the existing exact `market_events`/`market_trades` history, and Overview movers
+use only the locally observed rolling 24-hour windows with an explicit
+`observedSince`; they never wait for a history job or treat disappearing orders
+as sales. Market Browse price history reads those durable confirmed events on
+demand, calculates daily volume/value and progressive 24-hour, 7-day, and
+30-day views in memory, and labels the local observation start. Item/type
+filtering uses the indexed durable history before its bounded response limit,
+so unrelated high-volume items cannot hide a selected item. No price
+snapshot, analytics materialization table, or scheduled chart rebuild exists.
+Longer chart windows mature during the soak. Premium
 opportunities remain unavailable until Relay exposes or proves an
 authoritative same-region sale signal. The primary region remains pinned;
 additional configured regions rotate within the connection cap on a
@@ -136,11 +154,13 @@ independently of trade-history reads. Location distance/map actions remain
 unavailable until the bounded location join is proven.
 
 Barter Stalls shares those same regional sessions and the generic
-`regional-market` generation. The provider begins with the bounded stall set,
-follows only exact stall IDs into trade orders, buildings, nicknames, and
-locations, then follows only the resulting claim and owner IDs. The local
-route performs search, active-order filtering, pagination, and catalog
-enrichment on demand. No stall SQL table or scheduled stall collector exists.
+`regional-market` generation. The provider keeps the complete stall marker
+table bounded but follows only currently enabled stall IDs into trade orders,
+buildings, nicknames, and locations, then follows only the resulting claim and
+owner IDs. Inactive markers never delay order-book publication or appear as
+actionable stalls. The local route performs search, active-order filtering,
+pagination, and catalog enrichment on demand. No stall SQL table or scheduled
+stall collector exists.
 
 Deal Watch is also a live consumer of the generic `regional-market`
 generation. Every complete generation is evaluated immediately against the

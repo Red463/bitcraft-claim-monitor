@@ -314,7 +314,7 @@ Initial candidates requiring explicit dependency proof are:
 | `recipe_catalog_entries` | Retired. Planner and recipe-detail readers now use the normalized `game_catalog_*` projection. |
 | `game_catalog_refresh_runs`, `game_catalog_refresh_targets` | Retired. Continuous global subscription health and generation state replace catalog refresh orchestration. |
 | `settlement_state_current` | Merge or retire if `domain_payload_current` and typed projections become its only source and cover every reader. |
-| `market_buy_orders_current`, `market_regional_sale_averages_current` | Retired. The generic `regional-market` generation supports local buy-order queries without a duplicate current table, and no authoritative regional sale signal exists to justify a current sale-average projection. |
+| `market_buy_orders_current`, `market_regional_sale_averages_current` | Retired. The generic `regional-market` generation supports local buy-order queries without a duplicate current table. Uniquely corroborated regional sale events append immediately to `market_trades`; price history and rolling averages derive from that durable event history on demand, so no current sale-average projection or scheduled materialization is justified. |
 | `scheduled_jobs` | Keep for legitimate maintenance and delivery work; delete retired ingestion-job definitions and UI controls. |
 | `domain_payload_current`, `provider_source_health`, `provider_subscription_health` | Keep as the atomic last-good and operational boundary unless a typed projection demonstrably replaces the same responsibility. |
 | `game_catalog_*` normalized entity/recipe tables | Keep as the durable catalog read model; remove refresh bookkeeping that no longer applies. |

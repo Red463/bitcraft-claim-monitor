@@ -337,6 +337,108 @@ test("repository resumes generations after a process restart", async () => {
   db.close();
 });
 
+test("repository commits current state and a retryable transition edge atomically", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const repository = createCurrentStateRepository(db);
+  const transition = {
+    transitionKey: "regional-market:1369094286777412590:42",
+    claimId: "1369094286777412590",
+    domain: "regional-market",
+    observedAt: "2026-07-30T12:00:00.000Z",
+    payload: {
+      claimId: "1369094286777412590",
+      previousData: { orders: [{ entityId: "1" }] },
+      currentData: { orders: [] },
+      isRegionBaseline: false,
+      observedAt: "2026-07-30T12:00:00.000Z",
+    },
+  };
+  await repository.commitGenerationWithTransition({
+    claimId: transition.claimId,
+    generation: 42,
+    domains: {
+      "regional-market": {
+        data: transition.payload.currentData,
+        confidence: "authoritative",
+        provenance: relayProvenance(transition.observedAt),
+        warnings: [],
+      },
+    },
+  }, transition);
+
+  const restartedProcess = createCurrentStateRepository(db);
+  assert.equal(
+    restartedProcess.read(transition.claimId, "regional-market").generation,
+    42,
+  );
+  assert.deepEqual(
+    restartedProcess.listPendingTransitions(transition.claimId, "regional-market"),
+    [{
+      ...transition,
+      attempts: 0,
+      lastError: null,
+      createdAt: transition.observedAt,
+      updatedAt: transition.observedAt,
+    }],
+  );
+
+  await restartedProcess.recordTransitionError(
+    transition.transitionKey,
+    "history disk temporarily unavailable",
+    "2026-07-30T12:00:01.000Z",
+  );
+  assert.equal(
+    restartedProcess.listPendingTransitions(transition.claimId, "regional-market")[0].attempts,
+    1,
+  );
+  await restartedProcess.ackTransition(transition.transitionKey);
+  assert.deepEqual(
+    restartedProcess.listPendingTransitions(transition.claimId, "regional-market"),
+    [],
+  );
+  db.close();
+});
+
+test("repository rolls back current state when its transition outbox insert fails", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  db.exec(`
+    CREATE TRIGGER reject_provider_transition
+    BEFORE INSERT ON provider_transition_outbox
+    BEGIN
+      SELECT RAISE(ABORT, 'forced transition failure');
+    END
+  `);
+  const repository = createCurrentStateRepository(db);
+  const claimId = "1369094286777412590";
+  await assert.rejects(
+    repository.commitGenerationWithTransition({
+      claimId,
+      generation: 1,
+      domains: {
+        "regional-market": {
+          data: { orders: [] },
+          confidence: "authoritative",
+          provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+          warnings: [],
+        },
+      },
+    }, {
+      transitionKey: `regional-market:${claimId}:1`,
+      claimId,
+      domain: "regional-market",
+      observedAt: "2026-07-30T12:00:00.000Z",
+      payload: { claimId, currentData: { orders: [] } },
+    }),
+    /forced transition failure/,
+  );
+  assert.equal(repository.read(claimId, "regional-market"), null);
+  db.close();
+});
+
 test("repository persists provider health for the separate web process", async () => {
   const db = new DatabaseSync(":memory:");
   applySchemaBootstrap(db);

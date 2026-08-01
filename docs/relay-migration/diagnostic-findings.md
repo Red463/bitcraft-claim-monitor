@@ -763,7 +763,21 @@ waiting for the retired six-hour crawl or being coerced to zero.
 
 ## Remaining diagnostic blockers
 
-- attacker/defender meaning and completion semantics for empire siege rows;
+- successful/failed/cancelled completion semantics for Empire siege rows. A
+  current-row join proves the siege participant differs from the Watchtower
+  owner, but no active transition was observable and completion is not
+  inferred.
+
+## Empire siege participant ownership evidence — 2026-08-01
+
+The bounded Empire completeness verifier now joins every regional
+`empire_node_siege_state.building_entity_id` to
+`empire_node_state.entity_id`. All 11 current Region 19 siege rows named an
+Empire different from the Watchtower-owning Empire. The evidence therefore
+preserves both exact identities, but all 11 rows were inactive with zero
+energy and no start timestamp. It cannot prove successful, failed, or
+cancelled completion semantics, so those outcomes remain blocked rather than
+being reconstructed from an inactive row.
 
 ## Claim-market completed-sale evidence — 2026-08-01
 
@@ -788,6 +802,44 @@ Confirmed rows append immediately and idempotently to `market_events`,
 publication. The scheduled completed-sale reconciler, member-history crawl,
 resume state, admin control, and BitJita market calls are removed. Market
 amount columns use TEXT affinity so Relay decimal strings remain exact.
+
+## Regional-market closed-listing scale and live-first publication — 2026-08-01
+
+The production typed-session verifier observed Region 19 with 4,059 current
+buy/sell orders and 6,591 closed-listing rows across 31 market claims and 828
+owners. The closed rows contained 6,494 Item stacks and 97 Cargo stacks; every
+row normalized without an unknown kind or warning.
+
+The regional session now publishes those exact orders and closed rows as its
+base generation before optional identity and active-stall enrichment. The same
+base-first path runs for later insert/update/delete events, so a changing order
+or closed row cannot wait behind a detail subscription. The
+latest complete apply took 70 ms. At the observation time, all 313 barter
+stall markers were inactive, so none was treated as an actionable stall or
+allowed to delay the order book. Optional claim/current-owner enrichment
+published 662 ms after the first base generation.
+
+Regional sale correlation is additionally fenced by exact region and market
+claim IDs. A new Hex Coin proceeds row can confirm only one matching
+same-region, same-market, same-owner sell transition; ambiguous matches remain
+removed or cancelled. Confirmed rows flow immediately into the existing
+durable market history. Overview movers are calculated from locally observed
+confirmed sales only. Market Browse derives daily buckets and rolling
+24-hour/7-day/30-day statistics from the same exact history on demand. Weighted
+averages and percentage changes use exact rational cross-products rather than
+rounded intermediate VWAPs. Failed transition edges are committed to
+`provider_transition_outbox` atomically with their current generation as
+changed-region order and new-closure deltas rather than duplicate full
+multi-region snapshots. They remain insertion-ordered across a process
+restart, retry idempotently, and are reported through runtime health;
+malformed retained rows are counted and marked with an error instead of being
+silently skipped. Deal Watch evaluation is independent of that ordered history
+path, so a watch failure cannot head-of-line block sale-history persistence.
+Selected-item
+history is filtered through a claim/item/type/time index before its row cap,
+so unrelated volume cannot truncate it. Both
+expose the progressive observation window; no regional history crawl,
+current-sale table, price snapshot, or scheduled analytics build was added.
 
 ## Relay topology and schema drift — 2026-07-31
 

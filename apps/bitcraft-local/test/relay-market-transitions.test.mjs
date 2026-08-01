@@ -328,6 +328,32 @@ test("ambiguous sale proceeds remain removed-or-cancelled instead of inventing t
   assert.equal(transitions.some((entry) => entry.listing.tradeId), false);
 });
 
+test("closed-listing evidence never confirms an equal-value order from another market", () => {
+  const transitions = transitionsModule.deriveRelayMarketTransitions({
+    previous: {
+      claimId: "1369094286777412590",
+      regionId: "19",
+      listings: [
+        sellOrder({ entityId: "22", claimEntityId: "100", regionId: "19" }),
+        sellOrder({ entityId: "23", claimEntityId: "101", regionId: "19" }),
+      ],
+      closedListings: [],
+    },
+    current: {
+      claimId: "1369094286777412590",
+      regionId: "19",
+      listings: [],
+      closedListings: [closedListing({ claimEntityId: "100" })],
+    },
+    observedAt,
+  });
+
+  assert.deepEqual(
+    transitions.map((entry) => [entry.listing.key, entry.eventType]),
+    [["22", "sale_confirmed"], ["23", "removed_or_cancelled"]],
+  );
+});
+
 test("sale correlation uses exact BigInt arithmetic for values beyond Number precision", () => {
   const hugePrice = "9007199254740993";
   const transitions = transitionsModule.deriveRelayMarketTransitions({

@@ -132,6 +132,16 @@ test("Browse invalidates on regional-market generation events and keeps history 
   assert.match(generationHook, /finally \{\s*pollInFlight = false/);
 });
 
+test("Browse labels progressive locally observed history without blocking live orders", () => {
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+
+  assert.match(browse, /coverage === "collecting"/);
+  assert.match(browse, /Collecting confirmed local sales/);
+  assert.match(browse, /coverage === "locally-observed"/);
+  assert.match(browse, /Local observation window began/);
+  assert.doesNotMatch(browse, /not yet authoritative from Relay/);
+});
+
 test("Market source copy identifies every migrated live Relay workspace", () => {
   const marketPage = source("../src/pages/MarketPage.tsx");
 

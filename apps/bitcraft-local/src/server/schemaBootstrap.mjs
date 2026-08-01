@@ -158,6 +158,19 @@ export const schemaBootstrapSql = `
     updated_at TEXT NOT NULL,
     PRIMARY KEY (provider, source_key, domain)
   );
+  CREATE TABLE IF NOT EXISTS provider_transition_outbox (
+    transition_key TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_provider_transition_pending
+    ON provider_transition_outbox (claim_id, domain, created_at, transition_key);
   CREATE TABLE IF NOT EXISTS app_secrets (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -741,6 +754,8 @@ export const schemaBootstrapSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_market_events_claim_time ON market_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_trades_claim_time ON market_trades (claim_id, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_market_trades_claim_item_time
+    ON market_trades (claim_id, item_id, item_type, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_craft_plan_settings_updated ON craft_plan_settings (updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_craft_plan_progress_snapshots_claim_time
     ON craft_plan_progress_audit_snapshots (claim_id, captured_at DESC);

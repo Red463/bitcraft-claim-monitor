@@ -582,6 +582,156 @@ export function regionalMarketStallsView(snapshot, options = {}) {
   };
 }
 
+function decimalRatio(numerator, denominator, precision = 6) {
+  const divisor = BigInt(denominator);
+  if (divisor <= 0n) return null;
+  const value = BigInt(numerator);
+  const negative = value < 0n;
+  const absolute = negative ? -value : value;
+  const whole = absolute / divisor;
+  const remainder = absolute % divisor;
+  if (remainder === 0n || precision <= 0) {
+    return `${negative ? "-" : ""}${whole}`;
+  }
+  const scale = 10n ** BigInt(precision);
+  const fractional = ((remainder * scale) / divisor)
+    .toString()
+    .padStart(precision, "0")
+    .replace(/0+$/, "");
+  return `${negative ? "-" : ""}${whole}${fractional ? `.${fractional}` : ""}`;
+}
+
+function weightedTradeSummary(trades) {
+  let quantity = 0n;
+  let totalValue = 0n;
+  for (const trade of trades) {
+    quantity += BigInt(decimal(trade.quantity));
+    totalValue += BigInt(decimal(
+      trade.totalPrice
+      ?? (BigInt(decimal(trade.unitPrice)) * BigInt(decimal(trade.quantity))),
+    ));
+  }
+  return {
+    quantity,
+    totalValue,
+    average: decimalRatio(totalValue, quantity),
+  };
+}
+
+export function regionalMarketPriceHistoryView(observedTrades, options = {}) {
+  const requestedItemId = decimal(options.itemId);
+  const requestedItemType = itemType(options.itemType);
+  const requestedRegion = String(options.regionId ?? "all").trim().toLowerCase() || "all";
+  const allowed = new Set(regionIds(options.allowedRegionIds));
+  const now = typeof options.now === "function" ? Number(options.now()) : Date.now();
+  const range = ["24h", "7d", "30d", "all"].includes(String(options.range))
+    ? String(options.range)
+    : "all";
+  const rangeMs = {
+    "24h": 86_400_000,
+    "7d": 7 * 86_400_000,
+    "30d": 30 * 86_400_000,
+  }[range] ?? null;
+  const trades = (Array.isArray(observedTrades) ? observedTrades : [])
+    .map(record)
+    .filter((trade) => {
+      const regionId = decimal(trade.regionId);
+      const occurredAtMs = Date.parse(String(trade.occurredAt ?? ""));
+      return decimal(trade.itemId) === requestedItemId
+        && itemType(trade.itemType) === requestedItemType
+        && (!allowed.size || allowed.has(regionId))
+        && (requestedRegion === "all" || requestedRegion === regionId)
+        && Number.isFinite(occurredAtMs)
+        && occurredAtMs <= now;
+    })
+    .sort((left, right) => (
+      Date.parse(String(right.occurredAt)) - Date.parse(String(left.occurredAt))
+      || compareText(String(right.tradeId), String(left.tradeId))
+    ));
+  const observedSince = trades.length
+    ? String(trades.at(-1).occurredAt)
+    : null;
+  const selectedTrades = rangeMs == null
+    ? trades
+    : trades.filter((trade) => Date.parse(String(trade.occurredAt)) >= now - rangeMs);
+  const buckets = new Map();
+  for (const trade of selectedTrades) {
+    const bucket = String(trade.occurredAt).slice(0, 10);
+    const current = buckets.get(bucket) ?? [];
+    current.push(trade);
+    buckets.set(bucket, current);
+  }
+  const priceData = [...buckets.entries()]
+    .sort(([left], [right]) => compareText(left, right))
+    .map(([bucket, bucketTrades]) => {
+      const summary = weightedTradeSummary(bucketTrades);
+      const prices = bucketTrades.map((trade) => decimal(trade.unitPrice)).sort(compareBigInt);
+      return {
+        bucket,
+        quantity: summary.quantity.toString(),
+        tradeCount: bucketTrades.length,
+        totalValue: summary.totalValue.toString(),
+        vwap: summary.average,
+        low: prices[0],
+        high: prices.at(-1),
+      };
+    });
+  const rollingSummary = (durationMs, offsetMs = 0) => weightedTradeSummary(
+    trades.filter((trade) => {
+      const occurredAtMs = Date.parse(String(trade.occurredAt));
+      return occurredAtMs >= now - offsetMs - durationMs
+        && occurredAtMs < now - offsetMs;
+    }),
+  );
+  const last24h = rollingSummary(86_400_000);
+  const previous24h = rollingSummary(86_400_000, 86_400_000);
+  const last7d = rollingSummary(7 * 86_400_000);
+  const last30d = rollingSummary(30 * 86_400_000);
+  const all = weightedTradeSummary(trades);
+  const prices = trades.map((trade) => decimal(trade.unitPrice)).sort(compareBigInt);
+  const priceChange24h = last24h.average != null && previous24h.average != null
+    ? decimalRatio(
+      (
+        BigInt(last24h.totalValue) * previous24h.quantity
+        - BigInt(previous24h.totalValue) * last24h.quantity
+      ) * 100n,
+      BigInt(previous24h.totalValue) * last24h.quantity,
+    )
+    : null;
+  return {
+    coverage: trades.length ? "locally-observed" : "collecting",
+    observedSince,
+    itemType: requestedItemType,
+    itemId: requestedItemId,
+    regionId: requestedRegion,
+    range,
+    priceStats: {
+      avg24h: last24h.average,
+      avg7d: last7d.average,
+      avg30d: last30d.average,
+      allTimeHigh: prices.at(-1) ?? null,
+      allTimeLow: prices[0] ?? null,
+      totalVolume: all.quantity.toString(),
+      priceChange24h,
+    },
+    priceData,
+    recentTrades: selectedTrades.slice(0, 20).map((trade) => ({
+      id: String(trade.tradeId ?? ""),
+      quantity: decimal(trade.quantity),
+      unitPrice: decimal(trade.unitPrice),
+      totalPrice: decimal(trade.totalPrice),
+      timestamp: String(trade.occurredAt),
+      createdAt: String(trade.occurredAt),
+      regionId: decimal(trade.regionId),
+      regionName: `R${decimal(trade.regionId)}`,
+      claimId: String(trade.claimEntityId ?? ""),
+    })),
+    warnings: observedSince
+      ? [`Price history contains only sales observed locally since ${observedSince}.`]
+      : ["No confirmed local sales have been observed for this selection yet."],
+  };
+}
+
 function minimumDecimal(left, right) {
   return compareBigInt(left, right) <= 0 ? decimal(left) : decimal(right);
 }
@@ -657,6 +807,92 @@ export function regionalMarketDealsView(snapshot, options = {}) {
   };
 }
 
+function observedMarketMoverView(options, getEntity) {
+  const now = typeof options.now === "function" ? Number(options.now()) : Date.now();
+  const currentStart = now - 86_400_000;
+  const previousStart = currentStart - 86_400_000;
+  const requestedRegion = String(options.regionId ?? "all");
+  const allowed = new Set(regionIds(options.allowedRegionIds));
+  const groups = new Map();
+  let observedSince = null;
+  let confirmedSales = 0;
+  for (const value of (Array.isArray(options.observedTrades) ? options.observedTrades : [])) {
+    const trade = record(value);
+    const regionId = decimal(trade.regionId);
+    if (allowed.size && !allowed.has(regionId)) continue;
+    if (requestedRegion !== "all" && regionId !== requestedRegion) continue;
+    const occurredAt = String(trade.occurredAt ?? "");
+    const occurredAtMs = Date.parse(occurredAt);
+    if (!Number.isFinite(occurredAtMs)) continue;
+    observedSince = observedSince == null || occurredAt < observedSince
+      ? occurredAt
+      : observedSince;
+    confirmedSales += 1;
+    if (occurredAtMs < previousStart || occurredAtMs > now) continue;
+    const itemId = decimal(trade.itemId);
+    const type = itemType(trade.itemType);
+    const quantity = BigInt(decimal(trade.quantity));
+    const totalPrice = BigInt(decimal(
+      trade.totalPrice ?? (BigInt(decimal(trade.unitPrice)) * quantity),
+    ));
+    if (quantity <= 0n) continue;
+    const key = `${type}:${itemId}`;
+    const group = groups.get(key) ?? {
+      itemId,
+      itemType: type,
+      currentQuantity: 0n,
+      currentValue: 0n,
+      previousQuantity: 0n,
+      previousValue: 0n,
+      salesCount: 0,
+      unitsSold: 0n,
+    };
+    const period = occurredAtMs >= currentStart ? "current" : "previous";
+    group[`${period}Quantity`] += quantity;
+    group[`${period}Value`] += totalPrice;
+    group.salesCount += 1;
+    group.unitsSold += quantity;
+    groups.set(key, group);
+  }
+  const movers = [...groups.values()].flatMap((group) => {
+    if (group.currentQuantity <= 0n || group.previousQuantity <= 0n) return [];
+    if (group.previousValue <= 0n) return [];
+    const currentAverage = decimalRatio(group.currentValue, group.currentQuantity);
+    const previousAverage = decimalRatio(group.previousValue, group.previousQuantity);
+    const changeBasisPoints = (
+      (
+        group.currentValue * group.previousQuantity
+        - group.previousValue * group.currentQuantity
+      ) * 10_000n
+    ) / (group.previousValue * group.currentQuantity);
+    const entity = record(getEntity?.(
+      `${group.itemType === "cargo" ? "cargo" : "items"}:${group.itemId}`,
+    ));
+    return [{
+      itemId: group.itemId,
+      itemType: group.itemType,
+      itemName: String(
+        entity.name ?? `${group.itemType === "cargo" ? "Cargo" : "Item"} #${group.itemId}`,
+      ),
+      itemIconAssetName: entity.iconAssetName ?? null,
+      previousAverage,
+      currentAverage,
+      changePercent: Number(changeBasisPoints) / 100,
+      salesCount: group.salesCount,
+      unitsSold: group.unitsSold.toString(),
+    }];
+  }).sort((left, right) => (
+    Math.abs(right.changePercent) - Math.abs(left.changePercent)
+    || compareText(left.itemName, right.itemName)
+  ));
+  return {
+    movers: movers.slice(0, 20),
+    moverBaseline: movers.length ? "locally-observed-24h" : "collecting",
+    observedSince,
+    confirmedSales,
+  };
+}
+
 export function regionalMarketOverviewView(snapshot, options = {}) {
   const getEntity = typeof options.getEntity === "function" ? options.getEntity : () => null;
   const orders = scopedOrders(snapshot, options);
@@ -700,10 +936,10 @@ export function regionalMarketOverviewView(snapshot, options = {}) {
     getEntity,
     limit: 50,
   });
+  const observed = observedMarketMoverView(options, getEntity);
   return {
     topDeals: deals.deals,
-    movers: [],
-    moverBaseline: "unavailable",
+    ...observed,
     mostLiquid: [...liquidity.values()]
       .sort((left, right) => (
         right.orderCount - left.orderCount

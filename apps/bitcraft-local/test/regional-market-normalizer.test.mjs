@@ -288,3 +288,74 @@ test("cross-region market normalization preserves both sell and buy order sides"
   );
   assert.deepEqual(result.warnings, []);
 });
+
+test("cross-region market normalization preserves exact closed-listing evidence", () => {
+  assert.equal(
+    typeof normalizers.normalizeRegionalClosedListings,
+    "function",
+    "cross-region closed-listing normalizer must exist",
+  );
+  const result = normalizers.normalizeRegionalClosedListings({
+    regionId: "19",
+    closedRows: [{
+      entityId: 700n,
+      ownerEntityId: 801n,
+      claimEntityId: 100n,
+      itemStack: {
+        itemId: 1,
+        itemType: { tag: "Item", value: undefined },
+        quantity: 155,
+      },
+      timestamp: { __timestamp_micros_since_unix_epoch__: 1785408300000000n },
+    }, {
+      entityId: 701n,
+      ownerEntityId: 802n,
+      claimEntityId: 101n,
+      itemStack: {
+        itemId: 43,
+        itemType: { tag: "Cargo", value: undefined },
+        quantity: 4,
+      },
+      timestamp: { __timestamp_micros_since_unix_epoch__: 1785408360000000n },
+    }],
+    claimRows: [
+      { entityId: 100n, name: "Timbersteel Trade" },
+      { entityId: 101n, name: "Other Market" },
+    ],
+    usernameRows: [
+      { entityId: 801n, username: "Seller One" },
+      { entityId: 802n, username: "Seller Two" },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    data: {
+      closedListings: [{
+        entityId: "700",
+        claimEntityId: "100",
+        claimName: "Timbersteel Trade",
+        regionId: "19",
+        ownerEntityId: "801",
+        ownerUsername: "Seller One",
+        itemId: "1",
+        itemType: "item",
+        quantity: "155",
+        closureKind: "sale_proceeds",
+        timestamp: "2026-07-30T10:45:00.000Z",
+      }, {
+        entityId: "701",
+        claimEntityId: "101",
+        claimName: "Other Market",
+        regionId: "19",
+        ownerEntityId: "802",
+        ownerUsername: "Seller Two",
+        itemId: "43",
+        itemType: "cargo",
+        quantity: "4",
+        closureKind: "returned_item",
+        timestamp: "2026-07-30T10:46:00.000Z",
+      }],
+    },
+    warnings: [],
+  });
+});

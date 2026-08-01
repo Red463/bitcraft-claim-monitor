@@ -16,6 +16,26 @@ type CurrentStateRepository = {
   read?(claimId: string, domain: "regional-market"): StoredDomainSnapshot | null;
   nextGeneration(claimId: string): number;
   commitGeneration(batch: DomainSnapshotBatch): Promise<void> | void;
+  commitGenerationWithTransition?(
+    batch: DomainSnapshotBatch,
+    transition: {
+      transitionKey: string;
+      claimId: string;
+      domain: "regional-market";
+      observedAt: string;
+      payload: TransitionInput;
+    },
+  ): Promise<void> | void;
+  listPendingTransitions?(claimId: string, domain: "regional-market"): Array<{
+    transitionKey: string;
+    payload: unknown;
+  }>;
+  recordTransitionError?(
+    transitionKey: string,
+    error: string,
+    updatedAt: string,
+  ): Promise<void> | void;
+  ackTransition?(transitionKey: string): Promise<void> | void;
 };
 
 type RegionalMarketSession = {
@@ -40,6 +60,19 @@ type RuntimeConfig = {
   activeRegionIds: string[];
 };
 
+type TransitionInput = {
+  claimId: string;
+  previousData: RegionalMarketCombinedData | null;
+  currentData: RegionalMarketCombinedData;
+  isRegionBaseline: boolean;
+  observedAt: string;
+};
+
+type QueuedTransition = {
+  transitionKey: string | null;
+  input: TransitionInput;
+};
+
 type RuntimeDependencies = {
   manifest: BindingManifest;
   currentStateRepository: CurrentStateRepository;
@@ -50,11 +83,10 @@ type RuntimeDependencies = {
   applyTimeoutMs?: number;
   now?: () => number;
   scheduleRotation?: (callback: () => void, intervalMs: number) => () => void;
-  onSnapshotCommitted?: (input: {
-    claimId: string;
-    currentData: RegionalMarketCombinedData;
-    observedAt: string;
-  }) => Promise<void> | void;
+  transitionRetryMs?: number;
+  scheduleTransitionRetry?: (callback: () => void, delayMs: number) => () => void;
+  onSnapshotCommitted?: (input: TransitionInput) => Promise<void> | void;
+  onCurrentPublished?: (input: TransitionInput) => Promise<void> | void;
 };
 
 type RegionalOrder = Record<string, unknown> & {
@@ -67,8 +99,14 @@ type RegionalStall = Record<string, unknown> & {
   regionId: string;
 };
 
+type RegionalClosedListing = Record<string, unknown> & {
+  entityId: string;
+  regionId: string;
+};
+
 type RegionSnapshotState = {
   orders: RegionalOrder[];
+  closedListings: RegionalClosedListing[];
   stalls: RegionalStall[];
   warnings: string[];
   database: string;
@@ -79,10 +117,12 @@ type RegionSnapshotState = {
 type RegionalMarketCombinedData = {
   activeRegionIds: string[];
   orders: RegionalOrder[];
+  closedListings: RegionalClosedListing[];
   stalls: RegionalStall[];
   regions: Array<{
     regionId: string;
     count: number;
+    closedListingCount: number;
     stallCount: number;
     database: string;
     schemaFingerprint: string;
@@ -123,6 +163,16 @@ function normalizedStall(value: unknown, regionId: string): RegionalStall | null
   return { ...row, entityId, regionId };
 }
 
+function normalizedClosedListing(
+  value: unknown,
+  regionId: string,
+): RegionalClosedListing | null {
+  const row = asRecord(value);
+  const entityId = String(row.entityId ?? "").trim();
+  if (!/^\d+$/.test(entityId) || String(row.regionId ?? "") !== regionId) return null;
+  return { ...row, entityId, regionId };
+}
+
 export class RelayRegionalMarketRuntime {
   readonly #manifest: BindingManifest;
   readonly #currentStateRepository: CurrentStateRepository;
@@ -133,7 +183,10 @@ export class RelayRegionalMarketRuntime {
   readonly #applyTimeoutMs: number;
   readonly #now: () => number;
   readonly #scheduleRotation: NonNullable<RuntimeDependencies["scheduleRotation"]>;
+  readonly #transitionRetryMs: number;
+  readonly #scheduleTransitionRetry: NonNullable<RuntimeDependencies["scheduleTransitionRetry"]>;
   readonly #onSnapshotCommitted: RuntimeDependencies["onSnapshotCommitted"];
+  readonly #onCurrentPublished: RuntimeDependencies["onCurrentPublished"];
   readonly #regions = new Map<string, RegionSnapshotState>();
   readonly #activeSessionIds = new Map<string, number>();
   #pool: AdaptiveRegionSessionPool | null = null;
@@ -145,10 +198,15 @@ export class RelayRegionalMarketRuntime {
   #rotationCursor = 0;
   #commitTail: Promise<void> = Promise.resolve();
   #transitionTail: Promise<void> = Promise.resolve();
+  #transitionQueue: QueuedTransition[] = [];
+  #transitionDrainInFlight = false;
   #warmPromise: Promise<void> | null = null;
   #cancelRotation: (() => void) | null = null;
+  #cancelTransitionRetry: (() => void) | null = null;
   #lastError: string | null = null;
   #transitionLastError: string | null = null;
+  #poisonedTransitionCount = 0;
+  #currentPublishedLastError: string | null = null;
   #started = false;
 
   constructor(dependencies: RuntimeDependencies) {
@@ -174,7 +232,19 @@ export class RelayRegionalMarketRuntime {
       timer.unref?.();
       return () => clearInterval(timer);
     });
+    const transitionRetryMs = dependencies.transitionRetryMs ?? 1_000;
+    if (!Number.isSafeInteger(transitionRetryMs) || transitionRetryMs < 100) {
+      throw new TypeError("Relay regional market transition retry must be at least 100ms");
+    }
+    this.#transitionRetryMs = transitionRetryMs;
+    this.#scheduleTransitionRetry = dependencies.scheduleTransitionRetry
+      ?? ((callback, delayMs) => {
+        const timer = setTimeout(callback, delayMs);
+        timer.unref?.();
+        return () => clearTimeout(timer);
+    });
     this.#onSnapshotCommitted = dependencies.onSnapshotCommitted;
+    this.#onCurrentPublished = dependencies.onCurrentPublished;
   }
 
   #normalizeConfig(config: RuntimeConfig): RuntimeConfig {
@@ -205,6 +275,7 @@ export class RelayRegionalMarketRuntime {
     this.#activeRegionIds = normalized.activeRegionIds;
     this.#rotationCursor = 0;
     this.#hydrateLastGood();
+    this.#hydratePendingTransitions();
     this.#pool = new AdaptiveRegionSessionPool({
       ...this.#poolOptions,
       createSession: (regionId) => this.#pooledSession(regionId),
@@ -380,14 +451,20 @@ export class RelayRegionalMarketRuntime {
     const stalls = (snapshot.data.stalls ?? [])
       .map((stall) => normalizedStall(stall, snapshot.regionId))
       .filter((stall): stall is RegionalStall => stall != null);
+    const closedListings = (snapshot.data.closedListings ?? [])
+      .map((listing) => normalizedClosedListing(listing, snapshot.regionId))
+      .filter((listing): listing is RegionalClosedListing => listing != null);
     const nextRegion = {
       orders,
+      closedListings,
       stalls,
       warnings: [...snapshot.warnings],
       database: snapshot.database,
       schemaFingerprint: snapshot.schemaFingerprint,
       receivedAt: snapshot.receivedAt,
     };
+    const previousData = this.#regions.size ? this.#combinedData(this.#regions) : null;
+    const isRegionBaseline = !this.#regions.has(snapshot.regionId);
     const nextRegions = new Map(this.#regions);
     nextRegions.set(snapshot.regionId, nextRegion);
 
@@ -400,83 +477,241 @@ export class RelayRegionalMarketRuntime {
         (nextRegions.get(regionId)?.warnings ?? []).map((warning) => `Region ${regionId}: ${warning}`)
       )),
     ];
-    const combinedOrders = this.#activeRegionIds.flatMap((regionId) => (
-      nextRegions.get(regionId)?.orders ?? []
-    )).sort((left, right) => (
-      numericStringOrder(left.regionId, right.regionId)
-      || numericStringOrder(left.entityId, right.entityId)
-    ));
-    const combinedStalls = this.#activeRegionIds.flatMap((regionId) => (
-      nextRegions.get(regionId)?.stalls ?? []
-    )).sort((left, right) => (
-      numericStringOrder(left.regionId, right.regionId)
-      || numericStringOrder(left.entityId, right.entityId)
-    ));
-    const regions = this.#activeRegionIds.flatMap((regionId) => {
-      const region = nextRegions.get(regionId);
-      return region ? [{
-        regionId,
-        count: region.orders.length,
-        stallCount: region.stalls.length,
-        database: region.database,
-        schemaFingerprint: region.schemaFingerprint,
-        receivedAt: region.receivedAt,
-        warnings: region.warnings,
-      }] : [];
-    });
-    const currentData: RegionalMarketCombinedData = {
-      activeRegionIds: [...this.#activeRegionIds],
-      orders: combinedOrders,
-      stalls: combinedStalls,
-      regions,
+    const currentData = this.#combinedData(nextRegions);
+    const generation = this.#currentStateRepository.nextGeneration(claimId);
+    const publishedInput = {
+      claimId,
+      previousData,
+      currentData,
+      isRegionBaseline,
+      observedAt: snapshot.receivedAt,
+    };
+    const transitionInput = isRegionBaseline
+      ? publishedInput
+      : this.#transitionDelta(
+          claimId,
+          snapshot.regionId,
+          this.#regions.get(snapshot.regionId) ?? null,
+          nextRegion,
+          snapshot.receivedAt,
+        );
+    const hasTransitionDelta = !isRegionBaseline && (
+      transitionInput.previousData?.orders.length
+      || transitionInput.currentData.orders.length
+      || transitionInput.currentData.closedListings.length
+    );
+    const transitionKey = `regional-market:${claimId}:${generation}`;
+    const batch: DomainSnapshotBatch = {
+      claimId,
+      generation,
+      domains: {
+        "regional-market": {
+          data: currentData,
+          confidence: warnings.length ? "partial" : "authoritative",
+          provenance: {
+            provider: "relay",
+            sourceKey: `region:${snapshot.regionId}` as `region:${number}`,
+            regionId: snapshot.regionId,
+            database: snapshot.database,
+            schemaFingerprint: snapshot.schemaFingerprint,
+            sourceObservedAt: null,
+            receivedAt: snapshot.receivedAt,
+          },
+          warnings,
+        },
+      },
     };
     try {
-      await this.#currentStateRepository.commitGeneration({
-        claimId,
-        generation: this.#currentStateRepository.nextGeneration(claimId),
-        domains: {
-          "regional-market": {
-            data: currentData,
-            confidence: warnings.length ? "partial" : "authoritative",
-            provenance: {
-              provider: "relay",
-              sourceKey: `region:${snapshot.regionId}` as `region:${number}`,
-              regionId: snapshot.regionId,
-              database: snapshot.database,
-              schemaFingerprint: snapshot.schemaFingerprint,
-              sourceObservedAt: null,
-              receivedAt: snapshot.receivedAt,
-            },
-            warnings,
-          },
-        },
-      });
+      const durableTransition = hasTransitionDelta
+        && this.#onSnapshotCommitted
+        && this.#currentStateRepository.commitGenerationWithTransition;
+      if (durableTransition) {
+        await durableTransition.call(this.#currentStateRepository, batch, {
+          transitionKey,
+          claimId,
+          domain: "regional-market",
+          observedAt: snapshot.receivedAt,
+          payload: transitionInput,
+        });
+      } else {
+        await this.#currentStateRepository.commitGeneration(batch);
+      }
       this.#regions.set(snapshot.regionId, nextRegion);
       this.#lastError = null;
-      this.#enqueueTransition({
-        claimId,
-        currentData,
-        observedAt: snapshot.receivedAt,
-      });
+      if (hasTransitionDelta) {
+        this.#enqueueTransition(
+          transitionInput,
+          durableTransition ? transitionKey : null,
+        );
+      }
+      this.#publishCurrent(publishedInput);
     } catch (error) {
       this.#lastError = error instanceof Error ? error.message : String(error);
       throw error;
     }
   }
 
-  #enqueueTransition(input: {
-    claimId: string;
-    currentData: RegionalMarketCombinedData;
-    observedAt: string;
-  }): void {
+  #enqueueTransition(input: TransitionInput, transitionKey: string | null): void {
     if (!this.#onSnapshotCommitted) return;
-    const transition = this.#transitionTail.then(async () => {
-      await this.#onSnapshotCommitted?.(input);
-      this.#transitionLastError = null;
+    if (
+      transitionKey
+      && this.#transitionQueue.some((entry) => entry.transitionKey === transitionKey)
+    ) return;
+    this.#transitionQueue.push({ transitionKey, input });
+    this.#drainTransitions();
+  }
+
+  #publishCurrent(input: TransitionInput): void {
+    if (!this.#onCurrentPublished) return;
+    void Promise.resolve().then(() => this.#onCurrentPublished?.(input)).then(() => {
+      this.#currentPublishedLastError = null;
+    }).catch((error) => {
+      this.#currentPublishedLastError = error instanceof Error ? error.message : String(error);
     });
-    this.#transitionTail = transition.catch((error) => {
-      this.#transitionLastError = error instanceof Error ? error.message : String(error);
+  }
+
+  #drainTransitions(): void {
+    if (
+      this.#transitionDrainInFlight
+      || this.#cancelTransitionRetry
+      || !this.#transitionQueue.length
+      || !this.#onSnapshotCommitted
+    ) return;
+    this.#transitionDrainInFlight = true;
+    const operation = (async () => {
+      while (this.#transitionQueue.length) {
+        const queued = this.#transitionQueue[0];
+        try {
+          await this.#onSnapshotCommitted?.(queued.input);
+          if (queued.transitionKey) {
+            await this.#currentStateRepository.ackTransition?.(queued.transitionKey);
+          }
+          this.#transitionQueue.shift();
+          this.#transitionLastError = null;
+        } catch (error) {
+          this.#transitionLastError = error instanceof Error ? error.message : String(error);
+          if (queued.transitionKey) {
+            await Promise.resolve(this.#currentStateRepository.recordTransitionError?.(
+              queued.transitionKey,
+              this.#transitionLastError,
+              new Date(this.#now()).toISOString(),
+            )).catch(() => {});
+          }
+          if (!this.#cancelTransitionRetry) {
+            this.#cancelTransitionRetry = this.#scheduleTransitionRetry(() => {
+              this.#cancelTransitionRetry = null;
+              this.#drainTransitions();
+            }, this.#transitionRetryMs);
+          }
+          return;
+        }
+      }
+    })().finally(() => {
+      this.#transitionDrainInFlight = false;
     });
+    this.#transitionTail = operation;
+  }
+
+  #hydratePendingTransitions(): void {
+    this.#transitionQueue = [];
+    this.#poisonedTransitionCount = 0;
+    const claimId = this.#claimId;
+    if (
+      !claimId
+      || !this.#onSnapshotCommitted
+      || !this.#currentStateRepository.listPendingTransitions
+    ) return;
+    for (const transition of this.#currentStateRepository.listPendingTransitions(
+      claimId,
+      "regional-market",
+    )) {
+      const payload = asRecord(transition.payload);
+      const currentData = payload.currentData;
+      if (
+        String(payload.claimId ?? "") !== claimId
+        || !currentData
+        || typeof currentData !== "object"
+        || Array.isArray(currentData)
+      ) {
+        this.#poisonedTransitionCount += 1;
+        const error = `Invalid persisted regional-market transition ${transition.transitionKey}`;
+        this.#transitionLastError = error;
+        void Promise.resolve(this.#currentStateRepository.recordTransitionError?.(
+          transition.transitionKey,
+          error,
+          new Date(this.#now()).toISOString(),
+        )).catch(() => {});
+        continue;
+      }
+      this.#enqueueTransition(
+        payload as TransitionInput,
+        transition.transitionKey,
+      );
+    }
+  }
+
+  #transitionDelta(
+    claimId: string,
+    regionId: string,
+    previousRegion: RegionSnapshotState | null,
+    currentRegion: RegionSnapshotState,
+    observedAt: string,
+  ): TransitionInput {
+    const previousOrders = previousRegion?.orders ?? [];
+    const previousOrdersById = new Map(previousOrders.map((order) => [
+      order.entityId,
+      order,
+    ]));
+    const currentOrdersById = new Map(currentRegion.orders.map((order) => [
+      order.entityId,
+      order,
+    ]));
+    const quantityChanged = (
+      previous: RegionalOrder | undefined,
+      current: RegionalOrder | undefined,
+    ) => (
+      !previous
+      || !current
+      || String(previous.quantity ?? "") !== String(current.quantity ?? "")
+    );
+    const previousChangedOrders = previousOrders.filter((order) => (
+      quantityChanged(order, currentOrdersById.get(order.entityId))
+    ));
+    const currentChangedOrders = currentRegion.orders.filter((order) => (
+      quantityChanged(previousOrdersById.get(order.entityId), order)
+    ));
+    const previousClosedIds = new Set(
+      (previousRegion?.closedListings ?? []).map((listing) => listing.entityId),
+    );
+    const newClosedListings = currentRegion.closedListings.filter((listing) => (
+      !previousClosedIds.has(listing.entityId)
+    ));
+    const regionalData = (
+      orders: RegionalOrder[],
+      closedListings: RegionalClosedListing[],
+    ): RegionalMarketCombinedData => ({
+      activeRegionIds: [regionId],
+      orders,
+      closedListings,
+      stalls: [],
+      regions: [{
+        regionId,
+        count: orders.length,
+        closedListingCount: closedListings.length,
+        stallCount: 0,
+        database: currentRegion.database,
+        schemaFingerprint: currentRegion.schemaFingerprint,
+        receivedAt: currentRegion.receivedAt,
+        warnings: [],
+      }],
+    });
+    return {
+      claimId,
+      previousData: regionalData(previousChangedOrders, []),
+      currentData: regionalData(currentChangedOrders, newClosedListings),
+      isRegionBaseline: false,
+      observedAt,
+    };
   }
 
   #hydrateLastGood(): void {
@@ -486,6 +721,7 @@ export class RelayRegionalMarketRuntime {
     const stored = this.#currentStateRepository.read(claimId, "regional-market");
     const data = asRecord(stored?.data);
     const orders = Array.isArray(data.orders) ? data.orders : [];
+    const closedListings = Array.isArray(data.closedListings) ? data.closedListings : [];
     const stalls = Array.isArray(data.stalls) ? data.stalls : [];
     const metadata = Array.isArray(data.regions) ? data.regions : [];
     for (const value of metadata) {
@@ -498,8 +734,12 @@ export class RelayRegionalMarketRuntime {
       const regionalStalls = stalls
         .map((stall) => normalizedStall(stall, regionId))
         .filter((stall): stall is RegionalStall => stall != null);
+      const regionalClosedListings = closedListings
+        .map((listing) => normalizedClosedListing(listing, regionId))
+        .filter((listing): listing is RegionalClosedListing => listing != null);
       this.#regions.set(regionId, {
         orders: regionalOrders,
+        closedListings: regionalClosedListings,
         stalls: regionalStalls,
         warnings: Array.isArray(row.warnings) ? row.warnings.map(String) : [],
         database: String(row.database ?? ""),
@@ -507,6 +747,40 @@ export class RelayRegionalMarketRuntime {
         receivedAt: String(row.receivedAt ?? stored?.provenance.receivedAt ?? ""),
       });
     }
+  }
+
+  #combinedData(regionsById: Map<string, RegionSnapshotState>): RegionalMarketCombinedData {
+    const sortRegionalEntities = <
+      T extends { regionId: string; entityId: string },
+    >(rows: T[]): T[] => rows.sort((left, right) => (
+      numericStringOrder(left.regionId, right.regionId)
+      || numericStringOrder(left.entityId, right.entityId)
+    ));
+    return {
+      activeRegionIds: [...this.#activeRegionIds],
+      orders: sortRegionalEntities(this.#activeRegionIds.flatMap((regionId) => (
+        regionsById.get(regionId)?.orders ?? []
+      ))),
+      closedListings: sortRegionalEntities(this.#activeRegionIds.flatMap((regionId) => (
+        regionsById.get(regionId)?.closedListings ?? []
+      ))),
+      stalls: sortRegionalEntities(this.#activeRegionIds.flatMap((regionId) => (
+        regionsById.get(regionId)?.stalls ?? []
+      ))),
+      regions: this.#activeRegionIds.flatMap((regionId) => {
+        const region = regionsById.get(regionId);
+        return region ? [{
+          regionId,
+          count: region.orders.length,
+          closedListingCount: region.closedListings.length,
+          stallCount: region.stalls.length,
+          database: region.database,
+          schemaFingerprint: region.schemaFingerprint,
+          receivedAt: region.receivedAt,
+          warnings: region.warnings,
+        }] : [];
+      }),
+    };
   }
 
   health() {
@@ -518,6 +792,11 @@ export class RelayRegionalMarketRuntime {
       lastError: this.#lastError,
       transition: {
         lastError: this.#transitionLastError,
+        pending: this.#transitionQueue.length + this.#poisonedTransitionCount,
+        poisoned: this.#poisonedTransitionCount,
+      },
+      currentPublished: {
+        lastError: this.#currentPublishedLastError,
       },
       pool: this.#pool?.health() ?? null,
     };
@@ -527,6 +806,8 @@ export class RelayRegionalMarketRuntime {
     this.#started = false;
     this.#cancelRotation?.();
     this.#cancelRotation = null;
+    this.#cancelTransitionRetry?.();
+    this.#cancelTransitionRetry = null;
     await this.#warmPromise?.catch(() => {});
     this.#warmPromise = null;
     await this.#pool?.stop();
@@ -540,5 +821,7 @@ export class RelayRegionalMarketRuntime {
     this.#activeRegionIds = [];
     this.#rotationCursor = 0;
     this.#regions.clear();
+    this.#transitionQueue = [];
+    this.#poisonedTransitionCount = 0;
   }
 }

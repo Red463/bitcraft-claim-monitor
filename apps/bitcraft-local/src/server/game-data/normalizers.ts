@@ -2615,6 +2615,8 @@ export function normalizeRegionalOrders(options: {
   buyRows: unknown[];
   claimRows: unknown[];
   usernameRows: unknown[];
+  warnOnMissingJoins?: boolean;
+  warnOnMissingUsernames?: boolean;
 }) {
   const regionId = decimalString(options.regionId, "regional buy-order region id");
   const warnings: string[] = [];
@@ -2672,12 +2674,16 @@ export function normalizeRegionalOrders(options: {
         );
         const claim = claims.get(claimEntityId);
         const username = usernames.get(ownerEntityId);
-        if (!claim) {
+        if (!claim && options.warnOnMissingJoins !== false) {
           warnings.push(
             `Regional ${side} order ${entityId} has no claim_state row for ${claimEntityId}.`,
           );
         }
-        if (!username) {
+        if (
+          !username
+          && options.warnOnMissingJoins !== false
+          && options.warnOnMissingUsernames !== false
+        ) {
           warnings.push(
             `Regional ${side} order ${entityId} has no player_username_state row for ${ownerEntityId}.`,
           );
@@ -2734,6 +2740,126 @@ export function normalizeRegionalOrders(options: {
     return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
   });
   return { data: { orders }, warnings };
+}
+
+export function normalizeRegionalClosedListings(options: {
+  regionId: string;
+  closedRows: unknown[];
+  claimRows: unknown[];
+  usernameRows: unknown[];
+  warnOnMissingJoins?: boolean;
+  warnOnMissingUsernames?: boolean;
+}) {
+  const regionId = decimalString(options.regionId, "regional closed-listing region id");
+  const warnings: string[] = [];
+
+  function indexRows(values: unknown[], label: string): Map<string, WireRecord> {
+    const indexed = new Map<string, WireRecord>();
+    for (const [index, value] of values.entries()) {
+      try {
+        const row = record(value, `${label} row ${index}`);
+        const entityId = decimalString(
+          row.entityId ?? row.entity_id,
+          `${label} row ${index} entity id`,
+        );
+        if (!indexed.has(entityId)) indexed.set(entityId, row);
+      } catch (error) {
+        warnings.push(
+          `${label} omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return indexed;
+  }
+
+  const claims = indexRows(options.claimRows, "Regional closed-listing claim_state");
+  const usernames = indexRows(
+    options.usernameRows,
+    "Regional closed-listing player_username_state",
+  );
+  const closedListings: Array<Record<string, unknown>> = [];
+  for (const [index, value] of options.closedRows.entries()) {
+    try {
+      const row = record(value, `Regional closed_listing_state row ${index}`);
+      const entityId = decimalString(
+        row.entityId ?? row.entity_id,
+        `Regional closed_listing_state row ${index} entity id`,
+      );
+      const claimEntityId = decimalString(
+        row.claimEntityId ?? row.claim_entity_id,
+        `Regional closed listing ${entityId} claim id`,
+      );
+      const ownerEntityId = decimalString(
+        row.ownerEntityId ?? row.owner_entity_id,
+        `Regional closed listing ${entityId} owner id`,
+      );
+      const stack = record(
+        row.itemStack ?? row.item_stack,
+        `Regional closed listing ${entityId} item stack`,
+      );
+      const itemId = decimalString(
+        stack.itemId ?? stack.item_id,
+        `Regional closed listing ${entityId} item id`,
+      );
+      const itemType = normalizeItemKind(enumLabel(stack.itemType ?? stack.item_type));
+      const timestamp = record(
+        row.timestamp,
+        `Regional closed listing ${entityId} timestamp`,
+      );
+      const claim = claims.get(claimEntityId);
+      const username = usernames.get(ownerEntityId);
+      if (!claim && options.warnOnMissingJoins !== false) {
+        warnings.push(
+          `Regional closed listing ${entityId} has no claim_state row for ${claimEntityId}.`,
+        );
+      }
+      if (
+        !username
+        && options.warnOnMissingJoins !== false
+        && options.warnOnMissingUsernames !== false
+      ) {
+        warnings.push(
+          `Regional closed listing ${entityId} has no player_username_state row for ${ownerEntityId}.`,
+        );
+      }
+      closedListings.push({
+        entityId,
+        claimEntityId,
+        claimName: claim ? String(claim.name ?? "") : "",
+        regionId,
+        ownerEntityId,
+        ownerUsername: username ? String(username.username ?? "") : "",
+        itemId,
+        itemType,
+        quantity: decimalString(
+          stack.quantity,
+          `Regional closed listing ${entityId} quantity`,
+        ),
+        closureKind: itemType === "item" && itemId === "1"
+          ? "sale_proceeds"
+          : "returned_item",
+        timestamp: normalizeTimestamp(
+          decimalString(
+            timestamp.__timestamp_micros_since_unix_epoch__
+              ?? timestamp.microsSinceUnixEpoch
+              ?? timestamp.micros_since_unix_epoch,
+            `Regional closed listing ${entityId} timestamp micros`,
+          ),
+          "microseconds",
+        ),
+      });
+    } catch (error) {
+      warnings.push(
+        `Regional closed_listing_state omitted row ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  closedListings.sort((left, right) => {
+    const leftId = BigInt(String(left.entityId));
+    const rightId = BigInt(String(right.entityId));
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+  });
+  return { data: { closedListings }, warnings };
 }
 
 export function normalizeRegionalStalls(options: {

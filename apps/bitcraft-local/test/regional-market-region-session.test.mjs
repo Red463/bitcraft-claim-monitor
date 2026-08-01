@@ -20,7 +20,7 @@ function cachedTable(state, name, rows) {
   };
 }
 
-function fakeBindings({ includeStall = false } = {}) {
+function fakeBindings({ includeStall = false, stallActive = true } = {}) {
   const state = {
     onConnect: null,
     onConnectError: null,
@@ -63,6 +63,17 @@ function fakeBindings({ includeStall = false } = {}) {
       timestamp: { __timestamp_micros_since_unix_epoch__: 1785408120000000n },
       storedCoins: 36,
     }],
+    closedListingState: [{
+      entityId: 600n,
+      ownerEntityId: 700n,
+      claimEntityId: 100n,
+      itemStack: {
+        itemId: 1,
+        itemType: { tag: "Item", value: undefined },
+        quantity: 124,
+      },
+      timestamp: { __timestamp_micros_since_unix_epoch__: 1785408180000000n },
+    }],
     claimState: [
       { entityId: 100n, name: "Timbersteel Trade" },
       { entityId: 101n, name: "Other Market" },
@@ -73,7 +84,7 @@ function fakeBindings({ includeStall = false } = {}) {
       ...(includeStall ? [{ entityId: 703n, username: "Stall Keeper" }] : []),
     ],
     barterStallState: includeStall
-      ? [{ entityId: 9007199254740993n, marketModeEnabled: false }]
+      ? [{ entityId: 9007199254740993n, marketModeEnabled: stallActive }]
       : [],
     tradeOrderState: includeStall
       ? [{
@@ -197,6 +208,7 @@ test("regional market session publishes all buy and sell orders after bounded cl
   assert.deepEqual(fake.state.subscriptions[0].queries, [
     "SELECT * FROM buy_order_state",
     "SELECT * FROM sell_order_state",
+    "SELECT * FROM closed_listing_state",
     "SELECT * FROM barter_stall_state",
   ]);
 
@@ -205,12 +217,16 @@ test("regional market session publishes all buy and sell orders after bounded cl
     "SELECT * FROM claim_state WHERE entity_id = 100 OR entity_id = 101",
     "SELECT * FROM player_username_state WHERE entity_id = 700 OR entity_id = 701 OR entity_id = 702",
   ]);
-  assert.equal(snapshots.length, 0);
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].generation, 4);
+  assert.equal(snapshots[0].data.orders[0].claimName, "");
+  assert.deepEqual(snapshots[0].data.stalls, []);
 
   fake.state.subscriptions[1].onApplied({});
   await Promise.resolve();
-  assert.equal(snapshots.length, 1);
-  assert.deepEqual(snapshots[0].data.orders.map((order) => ({
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 2);
+  assert.deepEqual(snapshots[1].data.orders.map((order) => ({
     entityId: order.entityId,
     side: order.side,
     claimName: order.claimName,
@@ -235,19 +251,42 @@ test("regional market session publishes all buy and sell orders after bounded cl
     ownerUsername: "Buyer Two",
     itemType: "item",
   }]);
-  assert.equal(snapshots[0].generation, 4);
+  assert.equal(snapshots[1].generation, 5);
+  assert.deepEqual(snapshots[1].data.closedListings, [{
+    entityId: "600",
+    claimEntityId: "100",
+    claimName: "Timbersteel Trade",
+    regionId: "19",
+    ownerEntityId: "700",
+    ownerUsername: "",
+    itemId: "1",
+    itemType: "item",
+    quantity: "124",
+    closureKind: "sale_proceeds",
+    timestamp: "2026-07-30T10:43:00.000Z",
+  }]);
 
   fake.rows.buyOrderState[0].quantity = 7;
   fake.state.callbacks.get("buyOrderState:update")({}, {}, {});
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    snapshots[2].data.orders.find((order) => order.entityId === "501").quantity,
+    "7",
+  );
+  assert.equal(snapshots[2].data.orders[0].claimName, "Timbersteel Trade");
+  assert.match(snapshots[2].warnings.join(" "), /enrichment is refreshing/i);
+  assert.equal(snapshots[2].generation, 6);
+
   fake.state.subscriptions[2].onApplied({});
   await Promise.resolve();
   await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(
-    snapshots[1].data.orders.find((order) => order.entityId === "501").quantity,
+    snapshots[3].data.orders.find((order) => order.entityId === "501").quantity,
     "7",
   );
-  assert.equal(snapshots[1].generation, 5);
+  assert.equal(snapshots[3].data.orders[0].claimName, "Timbersteel Trade");
+  assert.equal(snapshots[3].generation, 7);
 
   await session.stop();
   assert.equal(fake.state.subscriptions.every((request) => request.unsubscribed), true);
@@ -292,12 +331,13 @@ test("regional market session publishes bounded non-traveller stall joins withou
     "SELECT * FROM claim_state WHERE entity_id = 100 OR entity_id = 101 OR entity_id = 102",
     "SELECT * FROM player_username_state WHERE entity_id = 700 OR entity_id = 701 OR entity_id = 702 OR entity_id = 703",
   ]);
-  assert.equal(snapshots.length, 0);
+  assert.equal(snapshots.length, 1);
 
   fake.state.subscriptions[2].onApplied({});
   await Promise.resolve();
-  assert.equal(snapshots.length, 1);
-  assert.deepEqual(snapshots[0].data.stalls, [{
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 2);
+  assert.deepEqual(snapshots[1].data.stalls, [{
     entityId: "9007199254740993",
     regionId: "19",
     claimEntityId: "102",
@@ -305,7 +345,7 @@ test("regional market session publishes bounded non-traveller stall joins withou
     ownerEntityId: "703",
     ownerName: "Stall Keeper",
     nickname: "Exact Exchange",
-    marketModeEnabled: false,
+    marketModeEnabled: true,
     locationX: -123,
     locationZ: 456,
     locationDimension: "19",
@@ -322,6 +362,44 @@ test("regional market session publishes bounded non-traveller stall joins withou
       ],
     }],
   }]);
+
+  fake.rows.buyOrderState[0].quantity = 7;
+  fake.state.callbacks.get("buyOrderState:update")({}, {}, {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(
+    snapshots.at(-1).data.stalls.map((stall) => stall.entityId),
+    ["9007199254740993"],
+  );
+  assert.match(snapshots.at(-1).warnings.join(" "), /enrichment is refreshing/i);
+  await session.stop();
+});
+
+test("regional market session omits inactive barter stalls without delaying live orders", async () => {
+  const fake = fakeBindings({ includeStall: true, stallActive: false });
+  const snapshots = [];
+  const session = new sessionModule.RelayRegionalMarketRegionSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+  });
+  await session.start({
+    uri: "wss://relay.example:4019",
+    database: "relay-region-19",
+    schemaFingerprint: "regional-v1",
+    manifest,
+    generation: 1,
+    regionId: "19",
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.subscriptions[0].onApplied({});
+  assert.equal(snapshots.length, 1);
+  assert.deepEqual(snapshots[0].data.stalls, []);
+  assert.deepEqual(fake.state.subscriptions[1].queries, [
+    "SELECT * FROM claim_state WHERE entity_id = 100 OR entity_id = 101 OR entity_id = 102",
+    "SELECT * FROM player_username_state WHERE entity_id = 700 OR entity_id = 701 OR entity_id = 702 OR entity_id = 703",
+  ]);
+  fake.state.subscriptions[1].onApplied({});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(snapshots.at(-1).data.stalls, []);
   await session.stop();
 });
 
@@ -345,7 +423,7 @@ test("regional market session defers a stall inserted during staged apply before
   fake.state.subscriptions[0].onApplied({});
   fake.rows.barterStallState.push({
     entityId: 9007199254740994n,
-    marketModeEnabled: false,
+    marketModeEnabled: true,
   });
   fake.state.callbacks.get("barterStallState:insert")(
     {},
@@ -355,7 +433,9 @@ test("regional market session defers a stall inserted during staged apply before
   fake.state.subscriptions[1].onApplied({});
   fake.state.subscriptions[2].onApplied({});
   await Promise.resolve();
-  assert.equal(snapshots.length, 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 2);
+  assert.deepEqual(snapshots.at(-1).data.stalls, []);
   assert.deepEqual(fake.state.subscriptions[3].queries, [
     "SELECT * FROM trade_order_state WHERE shop_entity_id = 9007199254740993 OR shop_entity_id = 9007199254740994",
     "SELECT * FROM building_state WHERE entity_id = 9007199254740993 OR entity_id = 9007199254740994",
@@ -365,8 +445,9 @@ test("regional market session defers a stall inserted during staged apply before
   fake.state.subscriptions[3].onApplied({});
   fake.state.subscriptions[4].onApplied({});
   await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(
-    snapshots[0].data.stalls.map((stall) => stall.entityId),
+    snapshots.at(-1).data.stalls.map((stall) => stall.entityId),
     ["9007199254740993", "9007199254740994"],
   );
   await session.stop();
@@ -401,7 +482,9 @@ test("regional market session redoes staged identities when a building changes d
 
   fake.state.subscriptions[2].onApplied({});
   await Promise.resolve();
-  assert.equal(snapshots.length, 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 2);
+  assert.deepEqual(snapshots.at(-1).data.stalls, []);
   assert.deepEqual(fake.state.subscriptions[3].queries, [
     "SELECT * FROM trade_order_state WHERE shop_entity_id = 9007199254740993",
     "SELECT * FROM building_state WHERE entity_id = 9007199254740993",
@@ -416,7 +499,8 @@ test("regional market session redoes staged identities when a building changes d
   );
   fake.state.subscriptions[4].onApplied({});
   await Promise.resolve();
-  assert.equal(snapshots[0].data.stalls[0].ownerName, "New Keeper");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.at(-1).data.stalls[0].ownerName, "New Keeper");
   await session.stop();
 });
 
@@ -441,6 +525,33 @@ test("regional market session rejects an order set above its explicit row budget
   fake.state.subscriptions[0].onApplied({});
   assert.equal(published, false);
   assert.match(session.health().lastError, /order budget 2 exceeded by 3/i);
+  await session.stop();
+});
+
+test("regional market session rejects closed evidence above its explicit row budget", async () => {
+  const fake = fakeBindings();
+  fake.rows.closedListingState.push({
+    ...fake.rows.closedListingState[0],
+    entityId: 601n,
+  });
+  let published = false;
+  const session = new sessionModule.RelayRegionalMarketRegionSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: () => { published = true; },
+  });
+  await session.start({
+    uri: "wss://relay.example:4019",
+    database: "relay-region-19",
+    schemaFingerprint: "regional-v1",
+    manifest,
+    generation: 1,
+    regionId: "19",
+    maxClosedListings: 1,
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.subscriptions[0].onApplied({});
+  assert.equal(published, false);
+  assert.match(session.health().lastError, /closed-listing budget 1 exceeded by 2/i);
   await session.stop();
 });
 
@@ -511,14 +622,15 @@ test("regional market session retries a failed detail subscription and publishes
   assert.equal(fake.state.subscriptions[1].unsubscribed, true);
   assert.equal(scheduled.length, 1);
   assert.equal(scheduled[0].delayMs, 1000);
-  assert.equal(snapshots.length, 0);
+  assert.equal(snapshots.length, 1);
 
   scheduled[0].callback();
   await Promise.resolve();
   assert.equal(fake.state.subscriptions.length, 3);
   fake.state.subscriptions[2].onApplied({});
   await Promise.resolve();
-  assert.equal(snapshots.length, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 2);
   assert.equal(session.health().lastError, null);
   await session.stop();
 });

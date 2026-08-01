@@ -560,6 +560,125 @@ test("regional market price quote derives exact live order statistics without sa
   });
 });
 
+test("regional market price history derives progressive daily buckets from confirmed local sales", () => {
+  assert.equal(
+    typeof views.regionalMarketPriceHistoryView,
+    "function",
+    "regional market price-history view must exist",
+  );
+  const result = views.regionalMarketPriceHistoryView([{
+    tradeId: "relay_closed_listing:19:1",
+    regionId: "19",
+    claimEntityId: "100",
+    itemId: "44",
+    itemType: "item",
+    quantity: "2",
+    unitPrice: "10",
+    totalPrice: "20",
+    occurredAt: "2026-07-29T06:00:00.000Z",
+  }, {
+    tradeId: "relay_closed_listing:19:2",
+    regionId: "19",
+    claimEntityId: "100",
+    itemId: "44",
+    itemType: "item",
+    quantity: "3",
+    unitPrice: "20",
+    totalPrice: "60",
+    occurredAt: "2026-07-29T18:00:00.000Z",
+  }, {
+    tradeId: "relay_closed_listing:19:3",
+    regionId: "19",
+    claimEntityId: "101",
+    itemId: "44",
+    itemType: "item",
+    quantity: "1",
+    unitPrice: "30",
+    totalPrice: "30",
+    occurredAt: "2026-07-30T06:00:00.000Z",
+  }, {
+    tradeId: "relay_closed_listing:7:4",
+    regionId: "7",
+    claimEntityId: "102",
+    itemId: "44",
+    itemType: "item",
+    quantity: "99",
+    unitPrice: "999",
+    totalPrice: "98901",
+    occurredAt: "2026-07-30T06:00:00.000Z",
+  }, {
+    tradeId: "relay_closed_listing:19:5",
+    regionId: "19",
+    claimEntityId: "100",
+    itemId: "44",
+    itemType: "cargo",
+    quantity: "99",
+    unitPrice: "999",
+    totalPrice: "98901",
+    occurredAt: "2026-07-30T06:00:00.000Z",
+  }], {
+    itemId: "44",
+    itemType: "item",
+    regionId: "19",
+    allowedRegionIds: ["7", "19"],
+    range: "7d",
+    now: () => Date.parse("2026-07-30T12:00:00.000Z"),
+  });
+
+  assert.equal(result.coverage, "locally-observed");
+  assert.equal(result.observedSince, "2026-07-29T06:00:00.000Z");
+  assert.deepEqual(result.priceData, [{
+    bucket: "2026-07-29",
+    quantity: "5",
+    tradeCount: 2,
+    totalValue: "80",
+    vwap: "16",
+    low: "10",
+    high: "20",
+  }, {
+    bucket: "2026-07-30",
+    quantity: "1",
+    tradeCount: 1,
+    totalValue: "30",
+    vwap: "30",
+    low: "30",
+    high: "30",
+  }]);
+  assert.equal(result.priceStats.avg24h, "22.5");
+  assert.equal(result.priceStats.avg7d, "18.333333");
+  assert.equal(result.priceStats.avg30d, "18.333333");
+  assert.equal(result.priceStats.allTimeHigh, "30");
+  assert.equal(result.priceStats.allTimeLow, "10");
+  assert.equal(result.priceStats.totalVolume, "6");
+  assert.equal(result.priceStats.priceChange24h, "125");
+  assert.deepEqual(
+    result.recentTrades.map((trade) => trade.id),
+    ["relay_closed_listing:19:3", "relay_closed_listing:19:2", "relay_closed_listing:19:1"],
+  );
+  assert.deepEqual(result.warnings, [
+    "Price history contains only sales observed locally since 2026-07-29T06:00:00.000Z.",
+  ]);
+});
+
+test("regional market price history reports collecting without inventing observations", () => {
+  const result = views.regionalMarketPriceHistoryView([], {
+    itemId: "44",
+    itemType: "item",
+    regionId: "19",
+    allowedRegionIds: ["19"],
+    range: "30d",
+    now: () => Date.parse("2026-07-30T12:00:00.000Z"),
+  });
+
+  assert.equal(result.coverage, "collecting");
+  assert.equal(result.observedSince, null);
+  assert.deepEqual(result.priceData, []);
+  assert.deepEqual(result.recentTrades, []);
+  assert.deepEqual(result.warnings, [
+    "No confirmed local sales have been observed for this selection yet.",
+  ]);
+});
+
 test("regional market deals derive truthful live arbitrage without trade history", () => {
   const result = views.regionalMarketDealsView({
     activeRegionIds: ["7", "19"],
@@ -682,7 +801,118 @@ test("regional market overview derives liquidity, hubs, and open-order activity"
   }]);
   assert.deepEqual(result.recentActivity.map((row) => row.id), ["802", "801"]);
   assert.deepEqual(result.movers, []);
-  assert.equal(result.moverBaseline, "unavailable");
+  assert.equal(result.moverBaseline, "collecting");
+});
+
+test("regional market overview derives movers only from locally confirmed sales", () => {
+  const result = views.regionalMarketOverviewView({
+    activeRegionIds: ["19"],
+    orders: [],
+  }, {
+    regionId: "19",
+    allowedRegionIds: ["19"],
+    now: () => Date.parse("2026-07-30T12:00:00.000Z"),
+    getEntity: () => ({ name: "Leather Strap", iconAssetName: "leather.png" }),
+    observedTrades: [{
+      tradeId: "relay_closed_listing:19:1",
+      regionId: "19",
+      claimEntityId: "100",
+      itemId: "44",
+      itemType: "item",
+      quantity: "2",
+      unitPrice: "10",
+      totalPrice: "20",
+      occurredAt: "2026-07-29T00:00:00.000Z",
+    }, {
+      tradeId: "relay_closed_listing:19:2",
+      regionId: "19",
+      claimEntityId: "100",
+      itemId: "44",
+      itemType: "item",
+      quantity: "3",
+      unitPrice: "15",
+      totalPrice: "45",
+      occurredAt: "2026-07-30T06:00:00.000Z",
+    }],
+  });
+
+  assert.deepEqual(result.movers, [{
+    itemId: "44",
+    itemType: "item",
+    itemName: "Leather Strap",
+    itemIconAssetName: "leather.png",
+    previousAverage: "10",
+    currentAverage: "15",
+    changePercent: 50,
+    salesCount: 2,
+    unitsSold: "5",
+  }]);
+  assert.equal(result.moverBaseline, "locally-observed-24h");
+  assert.equal(result.observedSince, "2026-07-29T00:00:00.000Z");
+  assert.equal(result.confirmedSales, 2);
+});
+
+test("regional market overview calculates mover changes from exact weighted ratios", () => {
+  const result = views.regionalMarketOverviewView({
+    activeRegionIds: ["19"],
+    orders: [],
+  }, {
+    regionId: "19",
+    allowedRegionIds: ["19"],
+    now: () => Date.parse("2026-07-30T12:00:00.000Z"),
+    getEntity: () => ({ name: "Leather Strap" }),
+    observedTrades: [{
+      tradeId: "relay_closed_listing:19:previous",
+      regionId: "19",
+      itemId: "44",
+      itemType: "item",
+      quantity: "10",
+      unitPrice: "1",
+      totalPrice: "19",
+      occurredAt: "2026-07-29T00:00:00.000Z",
+    }, {
+      tradeId: "relay_closed_listing:19:current",
+      regionId: "19",
+      itemId: "44",
+      itemType: "item",
+      quantity: "10",
+      unitPrice: "2",
+      totalPrice: "20",
+      occurredAt: "2026-07-30T06:00:00.000Z",
+    }],
+  });
+
+  assert.equal(result.movers[0].previousAverage, "1.9");
+  assert.equal(result.movers[0].currentAverage, "2");
+  assert.equal(result.movers[0].changePercent, 5.26);
+});
+
+test("regional market overview keeps the mover baseline collecting until both windows have sales", () => {
+  const result = views.regionalMarketOverviewView({
+    activeRegionIds: ["19"],
+    orders: [],
+  }, {
+    regionId: "19",
+    allowedRegionIds: ["19"],
+    now: () => Date.parse("2026-07-30T12:00:00.000Z"),
+    getEntity: () => ({ name: "Leather Strap" }),
+    observedTrades: [{
+      tradeId: "relay_closed_listing:19:historic",
+      regionId: "19",
+      claimEntityId: "100",
+      itemId: "44",
+      itemType: "item",
+      quantity: "2",
+      unitPrice: "10",
+      totalPrice: "20",
+      occurredAt: "2026-07-01T00:00:00.000Z",
+    }],
+  });
+
+  assert.deepEqual(result.movers, []);
+  assert.equal(result.moverBaseline, "collecting");
+  assert.equal(result.observedSince, "2026-07-01T00:00:00.000Z");
+  assert.equal(result.confirmedSales, 1);
 });
 
 test("regional market stalls view scopes, enriches, searches, and pages the live generation", () => {

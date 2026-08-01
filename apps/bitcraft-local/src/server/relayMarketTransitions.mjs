@@ -110,6 +110,11 @@ function evidenceTimestamp(evidence, fallback) {
   return Number.isFinite(Date.parse(timestamp)) ? timestamp : fallback;
 }
 
+function optionalDecimalInteger(value, label) {
+  if (value == null || String(value).trim() === "") return null;
+  return decimalInteger(value, label);
+}
+
 function correlateClosedListingEvidence({
   transitions,
   previousSnapshot,
@@ -125,7 +130,7 @@ function correlateClosedListingEvidence({
     "current Relay market snapshot",
   );
   const previousById = listingMap(previousClosed, "previous Relay closed listings");
-  const regionId = decimalInteger(
+  const snapshotRegionId = optionalDecimalInteger(
     currentSnapshot.regionId,
     "current Relay market region id",
   );
@@ -152,11 +157,37 @@ function correlateClosedListingEvidence({
       evidence.quantity,
       `closed listing ${evidenceId} quantity`,
     );
+    const evidenceClaimId = optionalDecimalInteger(
+      evidence.claimEntityId,
+      `closed listing ${evidenceId} claim id`,
+    );
+    const evidenceRegionId = optionalDecimalInteger(
+      evidence.regionId,
+      `closed listing ${evidenceId} region id`,
+    ) ?? snapshotRegionId;
     const closureKind = String(evidence.closureKind ?? "");
     const candidates = transitions.filter((candidate) => {
       if (claimedTransitions.has(candidate)) return false;
       const listing = candidate.listing;
       if (listing.side !== "sell" || listing.ownerEntityId !== ownerEntityId) return false;
+      const listingClaimId = optionalDecimalInteger(
+        listing.raw.claimEntityId,
+        `market order ${listing.key} claim id`,
+      );
+      const listingRegionId = optionalDecimalInteger(
+        listing.raw.regionId,
+        `market order ${listing.key} region id`,
+      ) ?? snapshotRegionId;
+      if (
+        evidenceClaimId != null
+        && listingClaimId != null
+        && evidenceClaimId !== listingClaimId
+      ) return false;
+      if (
+        evidenceRegionId != null
+        && listingRegionId != null
+        && evidenceRegionId !== listingRegionId
+      ) return false;
       if (closureKind === "sale_proceeds") {
         return evidenceItemType === "item"
           && evidenceItemId === "1"
@@ -181,7 +212,7 @@ function correlateClosedListingEvidence({
     const listing = {
       ...candidate.listing,
       tradeId: closureKind === "sale_proceeds"
-        ? `relay_closed_listing:${regionId}:${evidenceId}`
+        ? `relay_closed_listing:${evidenceRegionId ?? "unknown"}:${evidenceId}`
         : null,
     };
     const eventType = closureKind === "sale_proceeds"
@@ -199,8 +230,8 @@ function correlateClosedListingEvidence({
       eventType,
       activityType,
       occurredAt: evidenceAt,
-      sourceKey: `relay_market_event:${eventType}:${regionId}:${evidenceId}`,
-      activitySourceKey: `relay_market_activity:${eventType}:${regionId}:${evidenceId}`,
+      sourceKey: `relay_market_event:${eventType}:${evidenceRegionId ?? "unknown"}:${evidenceId}`,
+      activitySourceKey: `relay_market_activity:${eventType}:${evidenceRegionId ?? "unknown"}:${evidenceId}`,
       summary: `${prefix}: ${listing.itemName} x${BigInt(listing.quantity).toLocaleString("en-US")} at ${BigInt(listing.price).toLocaleString("en-US")}g`,
       listing,
       evidence,

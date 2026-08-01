@@ -164,8 +164,18 @@ test("completed sales are Relay-native and have no BitJita reconciler or schedul
     new URL("../src/server/game-data/claimMarketRegionSession.ts", import.meta.url),
     "utf8",
   );
+  const regionalSession = readFileSync(
+    new URL("../src/server/game-data/regionalMarketRegionSession.ts", import.meta.url),
+    "utf8",
+  );
 
   assert.match(session, /closed_listing_state/);
+  assert.match(regionalSession, /closed_listing_state/);
+  assert.match(regionalSession, /this\.#applySnapshot\(connection, true\)/);
+  assert.match(source, /regionalMarketTransitionSnapshot/);
+  assert.match(source, /onSnapshotCommitted:[\s\S]*relayMarketTransitionWriter\.apply/);
+  assert.match(source, /onCurrentPublished:[\s\S]*queueMarketDealWatchEvaluation/);
+  assert.match(source, /previous:\s*previousData == null[\s\S]*regionalMarketTransitionSnapshot/);
   assert.doesNotMatch(source, /\/market\/player\//);
   assert.doesNotMatch(source, /\b(?:runMarketTradeCollector|importMemberSellTrades|marketTradeBackfillKey)\b/);
   assert.doesNotMatch(source, /\bmarketTrades\b/);

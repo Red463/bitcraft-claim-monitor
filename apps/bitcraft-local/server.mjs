@@ -46,6 +46,7 @@ import {
   regionalMarketDealsView,
   regionalMarketOverviewView,
   regionalMarketOrderBookView,
+  regionalMarketPriceHistoryView,
   regionalMarketPriceQuote,
   regionalMarketStallsView,
   regionalMarketStatus,
@@ -538,13 +539,28 @@ const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
 const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
-  onSnapshotCommitted: ({ claimId, currentData, observedAt }) => {
-    void queueMarketDealWatchEvaluation({
+  onSnapshotCommitted: ({
+    claimId,
+    previousData,
+    currentData,
+    observedAt,
+  }) => relayMarketTransitionWriter.apply({
+    claimId,
+    previous: previousData == null
+      ? null
+      : regionalMarketTransitionSnapshot(claimId, previousData),
+    current: regionalMarketTransitionSnapshot(claimId, currentData),
+    observedAt,
+  }),
+  onCurrentPublished: ({
+    claimId,
+    currentData,
+    observedAt,
+  }) => queueMarketDealWatchEvaluation({
       claimId,
       snapshot: currentData,
       observedAt,
-    }).catch(() => {});
-  },
+    }),
   rotationMs: Math.max(1_000, Number(process.env.RELAY_MARKET_REGION_ROTATION_MS ?? 15_000)),
   poolOptions: {
     maxSessions: Math.max(1, Number(process.env.RELAY_MARKET_REGION_MAX_SESSIONS ?? 4)),
@@ -1522,6 +1538,36 @@ function enrichMarketSnapshot(claimId, data) {
     getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
     claim,
   }).data;
+}
+
+function regionalMarketTransitionSnapshot(claimId, data) {
+  const source = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const listings = (Array.isArray(source.orders) ? source.orders : []).map((order) => {
+    const itemType = String(order?.itemType ?? "").toLowerCase() === "cargo"
+      ? "cargo"
+      : "item";
+    const itemId = String(order?.itemId ?? "").trim();
+    const entity = providerCatalogRepository.getEntity(
+      `${itemType === "cargo" ? "cargo" : "items"}:${itemId}`,
+    );
+    return {
+      ...order,
+      itemType,
+      itemId,
+      itemName: String(entity?.name ?? `${itemType === "cargo" ? "Cargo" : "Item"} #${itemId}`),
+      itemTier: entity?.tier ?? null,
+      itemRarityStr: entity?.rarity ?? entity?.rarityStr ?? null,
+    };
+  });
+  const activeRegionIds = Array.isArray(source.activeRegionIds)
+    ? source.activeRegionIds.map(String).filter((regionId) => /^\d+$/.test(regionId))
+    : [];
+  return {
+    claimId: String(claimId),
+    regionId: activeRegionIds[0] ?? String(getSettings().defaultRegion ?? "0"),
+    listings,
+    closedListings: Array.isArray(source.closedListings) ? source.closedListings : [],
+  };
 }
 
 function currentMarketProjection(claimId) {
@@ -5716,6 +5762,57 @@ function regionalMarketResponseStatus(current, regionId, allowedRegionIds) {
   );
 }
 
+function regionalMarketObservedTrades(claimId, regionId, allowedRegionIds, options = {}) {
+  const allowed = new Set(allowedRegionIds.map(String));
+  const requestedItemId = String(options.itemId ?? "").trim();
+  const requestedItemType = String(options.itemType ?? "").trim().toLowerCase();
+  const itemScoped = /^\d+$/.test(requestedItemId)
+    && (requestedItemType === "item" || requestedItemType === "cargo");
+  const query = itemScoped ? `
+    SELECT trade_id, item_id, item_type, quantity, unit_price, total_price,
+      occurred_at, raw_json
+    FROM market_trades
+    WHERE claim_id = ? AND item_id = ? AND item_type = ?
+    ORDER BY occurred_at DESC, trade_id DESC
+    LIMIT 5000
+  ` : `
+    SELECT trade_id, item_id, item_type, quantity, unit_price, total_price,
+      occurred_at, raw_json
+    FROM market_trades
+    WHERE claim_id = ?
+    ORDER BY occurred_at DESC, trade_id DESC
+    LIMIT 5000
+  `;
+  const queryArgs = itemScoped
+    ? [claimId, requestedItemId, requestedItemType]
+    : [claimId];
+  return db.prepare(query).all(...queryArgs).flatMap((row) => {
+    const raw = safeJson(row.raw_json, {});
+    const listing = raw?.listing && typeof raw.listing === "object"
+      ? raw.listing
+      : {};
+    const tradeParts = String(row.trade_id ?? "").split(":");
+    const observedRegionId = String(
+      listing.regionId
+      ?? (/^\d+$/.test(tradeParts[1] ?? "") ? tradeParts[1] : ""),
+    ).trim();
+    if (!/^\d+$/.test(observedRegionId)) return [];
+    if (allowed.size && !allowed.has(observedRegionId)) return [];
+    if (regionId !== "all" && observedRegionId !== regionId) return [];
+    return [{
+      tradeId: String(row.trade_id),
+      regionId: observedRegionId,
+      claimEntityId: String(listing.claimEntityId ?? ""),
+      itemId: String(row.item_id),
+      itemType: String(row.item_type) === "cargo" ? "cargo" : "item",
+      quantity: String(row.quantity),
+      unitPrice: String(row.unit_price),
+      totalPrice: String(row.total_price),
+      occurredAt: String(row.occurred_at),
+    }];
+  });
+}
+
 function globalCatalogReadStatus() {
   const source = providerCatalogRepository.getSourceState();
   const runtime = relayGlobalCatalogRuntime.health();
@@ -8712,6 +8809,7 @@ const server = createServer(async (req, res) => {
           regionId,
           allowedRegionIds,
           getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+          observedTrades: regionalMarketObservedTrades(claimId, regionId, allowedRegionIds),
         }),
         ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
         generatedAt: current?.provenance?.receivedAt ?? null,
@@ -8910,27 +9008,25 @@ const server = createServer(async (req, res) => {
       if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
         return send(res, 403, { error: "Region is outside the configured active-region scope" });
       }
+      const range = String(url.searchParams.get("range") ?? "all").trim().toLowerCase();
+      if (!["24h", "7d", "30d", "all"].includes(range)) {
+        return send(res, 400, { error: "Range must be 24h, 7d, 30d, or all" });
+      }
       return send(res, 200, {
-        coverage: "unavailable",
-        observedSince: null,
+        ...regionalMarketPriceHistoryView(
+          regionalMarketObservedTrades(claimId, regionId, allowedRegionIds, {
+            itemType: requestedItemType,
+            itemId,
+          }),
+          {
+            itemType: requestedItemType,
+            itemId,
+            regionId,
+            allowedRegionIds,
+            range,
+          },
+        ),
         currentAsOf: current?.provenance?.receivedAt ?? null,
-        itemType: requestedItemType,
-        itemId,
-        regionId,
-        priceStats: {
-          avg24h: null,
-          avg7d: null,
-          avg30d: null,
-          allTimeHigh: null,
-          allTimeLow: null,
-          totalVolume: 0,
-          priceChange24h: null,
-        },
-        priceData: [],
-        recentTrades: [],
-        warnings: [
-          "Relay has not exposed an authoritative completed-trade signal for this market history.",
-        ],
       });
     }
     if (req.method === "GET" && url.pathname === "/api/local/leaderboard") {

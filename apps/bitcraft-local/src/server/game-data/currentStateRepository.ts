@@ -18,6 +18,21 @@ type SqliteDatabase = {
   prepare(sql: string): Statement;
 };
 
+type ProviderTransition = {
+  transitionKey: string;
+  claimId: string;
+  domain: DomainKey;
+  observedAt: string;
+  payload: unknown;
+};
+
+type StoredProviderTransition = ProviderTransition & {
+  attempts: number;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export function createCurrentStateRepository(
   db: SqliteDatabase,
   options: {
@@ -55,6 +70,17 @@ export function createCurrentStateRepository(
     updatedAt: string;
   } | null;
   nextGeneration(claimId: string): number;
+  commitGenerationWithTransition(
+    batch: DomainSnapshotBatch,
+    transition: ProviderTransition,
+  ): Promise<void>;
+  listPendingTransitions(claimId: string, domain: DomainKey): StoredProviderTransition[];
+  recordTransitionError(
+    transitionKey: string,
+    error: string,
+    updatedAt: string,
+  ): Promise<void>;
+  ackTransition(transitionKey: string): Promise<void>;
 } {
   const upsert = db.prepare(`
     INSERT INTO domain_payload_current (
@@ -126,6 +152,27 @@ export function createCurrentStateRepository(
     SELECT * FROM provider_subscription_health
     WHERE provider = 'relay' AND source_key = ? AND domain = ?
   `);
+  const insertTransition = db.prepare(`
+    INSERT INTO provider_transition_outbox (
+      transition_key, claim_id, domain, observed_at, payload_json,
+      attempts, last_error, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?)
+    ON CONFLICT(transition_key) DO NOTHING
+  `);
+  const listPendingTransitions = db.prepare(`
+    SELECT *
+    FROM provider_transition_outbox
+    WHERE claim_id = ? AND domain = ?
+    ORDER BY rowid
+  `);
+  const recordTransitionError = db.prepare(`
+    UPDATE provider_transition_outbox
+    SET attempts = attempts + 1, last_error = ?, updated_at = ?
+    WHERE transition_key = ?
+  `);
+  const ackTransition = db.prepare(
+    "DELETE FROM provider_transition_outbox WHERE transition_key = ?",
+  );
   const insertSourcedActivity = db.prepare(`
     INSERT OR IGNORE INTO activity_events (
       claim_id, event_type, summary, occurred_at, metadata_json, source_key
@@ -163,8 +210,10 @@ export function createCurrentStateRepository(
       raw_json = excluded.raw_json
   `);
 
-  return {
-    async commitGeneration(batch: DomainSnapshotBatch) {
+  const commitBatch = (
+    batch: DomainSnapshotBatch,
+    transition: ProviderTransition | null,
+  ) => {
       const changedDomains: DomainKey[] = [];
       let generatedAt = "";
       db.exec("BEGIN IMMEDIATE");
@@ -197,6 +246,25 @@ export function createCurrentStateRepository(
             if (!generatedAt || receivedAt > generatedAt) generatedAt = receivedAt;
           }
         }
+        if (transition) {
+          if (
+            transition.claimId !== batch.claimId
+            || !batch.domains[transition.domain]
+          ) {
+            throw new TypeError(
+              "Provider transition must match a domain in the committed generation",
+            );
+          }
+          insertTransition.run(
+            transition.transitionKey,
+            transition.claimId,
+            transition.domain,
+            transition.observedAt,
+            JSON.stringify(transition.payload),
+            transition.observedAt,
+            transition.observedAt,
+          );
+        }
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
@@ -210,6 +278,33 @@ export function createCurrentStateRepository(
           changedDomains,
         });
       }
+  };
+
+  return {
+    async commitGeneration(batch: DomainSnapshotBatch) {
+      commitBatch(batch, null);
+    },
+    async commitGenerationWithTransition(batch, transition) {
+      commitBatch(batch, transition);
+    },
+    listPendingTransitions(claimId, domain) {
+      return listPendingTransitions.all(claimId, domain).map((row) => ({
+        transitionKey: String(row.transition_key),
+        claimId: String(row.claim_id),
+        domain: String(row.domain) as DomainKey,
+        observedAt: String(row.observed_at),
+        payload: JSON.parse(String(row.payload_json)),
+        attempts: Number(row.attempts ?? 0),
+        lastError: row.last_error == null ? null : String(row.last_error),
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      }));
+    },
+    async recordTransitionError(transitionKey, error, updatedAt) {
+      recordTransitionError.run(error, updatedAt, transitionKey);
+    },
+    async ackTransition(transitionKey) {
+      ackTransition.run(transitionKey);
     },
     async appendEvents(events: DomainEvent[]) {
       if (!events.length) return;

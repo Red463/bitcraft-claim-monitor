@@ -183,6 +183,39 @@ try {
       mismatchedKeys,
     }];
   }));
+  const empireNames = new Map(
+    regionalSnapshot.rows.empireState.map((row) => [
+      decimalString(row.entityId),
+      String(row.name ?? ""),
+    ]),
+  );
+  const nodeOwners = new Map(
+    regionalSnapshot.rows.empireNodeState.map((row) => [
+      decimalString(row.entityId),
+      decimalString(row.empireEntityId),
+    ]),
+  );
+  const siegeRelations = regionalSnapshot.rows.empireNodeSiegeState.map((row) => {
+    const buildingEntityId = decimalString(row.buildingEntityId);
+    const siegeEmpireEntityId = decimalString(row.empireEntityId);
+    const nodeOwnerEmpireEntityId = nodeOwners.get(buildingEntityId) ?? null;
+    return {
+      entityId: decimalString(row.entityId),
+      buildingEntityId,
+      active: row.active === true,
+      startTimestamp: canonical(row.startTimestamp ?? null),
+      energy: row.energy,
+      siegeEmpireEntityId,
+      siegeEmpireName: empireNames.get(siegeEmpireEntityId) ?? null,
+      nodeOwnerEmpireEntityId,
+      nodeOwnerEmpireName: nodeOwnerEmpireEntityId
+        ? empireNames.get(nodeOwnerEmpireEntityId) ?? null
+        : null,
+      participantDiffersFromNodeOwner: nodeOwnerEmpireEntityId
+        ? siegeEmpireEntityId !== nodeOwnerEmpireEntityId
+        : null,
+    };
+  });
 
   console.log(JSON.stringify({
     ok: Object.values(comparisons).every(
@@ -199,6 +232,7 @@ try {
       schemaFingerprint: globalSource.schemaFingerprint,
     },
     comparisons,
+    siegeRelations,
     samples: Object.fromEntries(tableSpecs.map((spec) => [
       spec.sql,
       regionalSnapshot.rows[spec.accessor].slice(0, 3).map(canonical),

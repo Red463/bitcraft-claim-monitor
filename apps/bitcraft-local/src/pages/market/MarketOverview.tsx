@@ -133,6 +133,7 @@ export function MarketOverview({
     ? data.recentActivity.slice(0, 12)
     : [];
   const generatedAt = data.generatedAt ? new Date(data.generatedAt) : null;
+  const observedSince = data.observedSince ? String(data.observedSince) : null;
   const freshnessNotice = marketFreshnessNotice(data);
 
   return (
@@ -169,9 +170,9 @@ export function MarketOverview({
           />
         </section>
         <section className="market-overview-section">
-          <h3><TrendingUp size={16} /> Biggest movers <small>Observed completed trades</small></h3>
+          <h3><TrendingUp size={16} /> Biggest movers <small>{observedSince ? `Locally observed since ${new Date(observedSince).toLocaleDateString()}` : "Collecting confirmed sales"}</small></h3>
           <div className="market-ranking-list">{movers.slice(0, 8).map((row) => <button key={`${row.itemType}:${row.itemId}`} onClick={() => onOpenItem(itemShape(row))}><ItemLabel item={itemShape(row)} /><b>{formatNumber(row.changePercent)}%</b></button>)}</div>
-          {!movers.length ? <div className="empty-state compact">Unavailable until Relay exposes an authoritative completed-trade signal.</div> : null}
+          {!movers.length ? <div className="empty-state compact">Collecting locally confirmed sales. Movers appear once both rolling 24-hour windows contain observations.</div> : null}
         </section>
         <section className="market-overview-section">
           <h3><Activity size={16} /> Current liquidity <small>Open orders</small></h3>
