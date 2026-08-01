@@ -26,7 +26,9 @@ export function readBuyOrderSaleBaselines(db, options = {}) {
   if (!claimId || !regionIds.length || !itemKeys.size) {
     return { baselines: new Map(), historyObservedSince: null, warnings: [] };
   }
-  const cutoff = new Date((options.nowMs ?? Date.now()) - 7 * DAY_MS).toISOString();
+  const nowMs = options.nowMs ?? Date.now();
+  const cutoff = new Date(nowMs - 7 * DAY_MS).toISOString();
+  const now = new Date(nowMs).toISOString();
   const placeholders = regionIds.map(() => "?").join(", ");
   const rows = db.prepare(`
     SELECT trade_id AS tradeId, region_id AS regionId, item_id AS itemId,
@@ -36,16 +38,28 @@ export function readBuyOrderSaleBaselines(db, options = {}) {
     WHERE claim_id = ?
       AND region_id IN (${placeholders})
       AND occurred_at >= ?
+      AND occurred_at <= ?
+      AND trade_id LIKE 'relay_closed_listing:' || region_id || ':%'
     ORDER BY occurred_at ASC, trade_id ASC
-  `).all(claimId, ...regionIds, cutoff);
+  `).all(claimId, ...regionIds, cutoff, now);
   const baselines = new Map();
   const warnings = [];
   for (const row of rows) {
     const key = buyOrderBaselineKey(row.regionId, row.itemType, row.itemId);
     if (!itemKeys.has(key)) continue;
+    const occurredAt = String(row.occurredAt);
+    const occurredAtMs = Date.parse(occurredAt);
     const quantity = decimal(row.quantity);
     const totalPrice = decimal(row.totalPrice);
-    if (!quantity || quantity === "0" || !totalPrice) {
+    if (
+      !Number.isFinite(occurredAtMs)
+      || new Date(occurredAtMs).toISOString() !== occurredAt
+      || occurredAtMs < nowMs - 7 * DAY_MS
+      || occurredAtMs > nowMs
+      || !quantity
+      || quantity === "0"
+      || !totalPrice
+    ) {
       warnings.push(`Ignored malformed confirmed trade ${String(row.tradeId)}.`);
       continue;
     }
@@ -56,13 +70,13 @@ export function readBuyOrderSaleBaselines(db, options = {}) {
       salesCount: 0,
       unitsSold: "0",
       totalValue: "0",
-      observedSince: String(row.occurredAt),
-      lastSoldAt: String(row.occurredAt),
+      observedSince: occurredAt,
+      lastSoldAt: occurredAt,
     };
     current.salesCount += 1;
     current.unitsSold = (BigInt(current.unitsSold) + BigInt(quantity)).toString();
     current.totalValue = (BigInt(current.totalValue) + BigInt(totalPrice)).toString();
-    current.lastSoldAt = String(row.occurredAt);
+    current.lastSoldAt = occurredAt;
     baselines.set(key, current);
   }
   const observed = [...baselines.values()].map((row) => row.observedSince).sort();

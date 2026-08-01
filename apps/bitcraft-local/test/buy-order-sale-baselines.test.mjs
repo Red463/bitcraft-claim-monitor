@@ -39,17 +39,17 @@ function insert(db, row) {
 test("aggregates exact same-region typed seven-day baselines", () => {
   const db = database();
   insert(db, {
-    tradeId: "a", claimId: "claim", regionId: "19", itemId: "43",
+    tradeId: "relay_closed_listing:19:a", claimId: "claim", regionId: "19", itemId: "43",
     itemType: "cargo", quantity: "9007199254740993",
     totalPrice: "180143985094819860", occurredAt: "2026-07-31T12:00:00.000Z",
   });
   insert(db, {
-    tradeId: "b", claimId: "claim", regionId: "19", itemId: "43",
+    tradeId: "relay_closed_listing:19:b", claimId: "claim", regionId: "19", itemId: "43",
     itemType: "cargo", quantity: "7", totalPrice: "147",
     occurredAt: "2026-08-01T11:00:00.000Z",
   });
   insert(db, {
-    tradeId: "wrong-type", claimId: "claim", regionId: "19", itemId: "43",
+    tradeId: "relay_closed_listing:19:wrong-type", claimId: "claim", regionId: "19", itemId: "43",
     itemType: "item", quantity: "1", totalPrice: "999",
     occurredAt: "2026-08-01T11:00:00.000Z",
   });
@@ -81,12 +81,12 @@ test("excludes rows outside the bounded requested sale scope", () => {
     claimId: "claim", regionId: "19", itemId: "43", itemType: "cargo",
     quantity: "2", totalPrice: "20", occurredAt: "2026-08-01T11:00:00.000Z",
   };
-  insert(db, { ...valid, tradeId: "valid" });
-  insert(db, { ...valid, tradeId: "old", occurredAt: "2026-07-24T11:59:59.999Z" });
-  insert(db, { ...valid, tradeId: "other-claim", claimId: "other" });
-  insert(db, { ...valid, tradeId: "other-region", regionId: "20" });
-  insert(db, { ...valid, tradeId: "unrequested", itemId: "44" });
-  insert(db, { ...valid, tradeId: "no-region", regionId: null });
+  insert(db, { ...valid, tradeId: "relay_closed_listing:19:valid" });
+  insert(db, { ...valid, tradeId: "relay_closed_listing:19:old", occurredAt: "2026-07-24T11:59:59.999Z" });
+  insert(db, { ...valid, tradeId: "relay_closed_listing:19:other-claim", claimId: "other" });
+  insert(db, { ...valid, tradeId: "relay_closed_listing:20:other-region", regionId: "20" });
+  insert(db, { ...valid, tradeId: "relay_closed_listing:19:unrequested", itemId: "44" });
+  insert(db, { ...valid, tradeId: "relay_closed_listing:unknown:no-region", regionId: null });
 
   const result = readBuyOrderSaleBaselines(db, {
     claimId: "claim",
@@ -110,8 +110,8 @@ test("skips malformed quantities and totals with a warning", () => {
     claimId: "claim", regionId: "19", itemId: "43", itemType: "cargo",
     occurredAt: "2026-08-01T11:00:00.000Z",
   };
-  insert(db, { ...sale, tradeId: "valid", quantity: "2", totalPrice: "20" });
-  insert(db, { ...sale, tradeId: "malformed", quantity: "not-a-number", totalPrice: "30" });
+  insert(db, { ...sale, tradeId: "relay_closed_listing:19:valid", quantity: "2", totalPrice: "20" });
+  insert(db, { ...sale, tradeId: "relay_closed_listing:19:malformed", quantity: "not-a-number", totalPrice: "30" });
 
   const result = readBuyOrderSaleBaselines(db, {
     claimId: "claim",
@@ -121,5 +121,57 @@ test("skips malformed quantities and totals with a warning", () => {
   });
 
   assert.equal(result.baselines.get("19:cargo:43").salesCount, 1);
-  assert.deepEqual(result.warnings, ["Ignored malformed confirmed trade malformed."]);
+  assert.deepEqual(result.warnings, ["Ignored malformed confirmed trade relay_closed_listing:19:malformed."]);
+});
+
+test("uses only authoritative Relay sale closure trades", () => {
+  const db = database();
+  const sale = {
+    claimId: "claim", regionId: "19", itemId: "43", itemType: "cargo",
+    quantity: "2", totalPrice: "20", occurredAt: "2026-08-01T11:00:00.000Z",
+  };
+  insert(db, { ...sale, tradeId: "relay_closed_listing:19:authoritative" });
+  insert(db, { ...sale, tradeId: "legacy-market-trade", quantity: "99", totalPrice: "990" });
+
+  const result = readBuyOrderSaleBaselines(db, {
+    claimId: "claim",
+    allowedRegionIds: ["19"],
+    itemKeys: new Set([buyOrderBaselineKey("19", "cargo", "43")]),
+    nowMs: Date.parse("2026-08-01T12:00:00.000Z"),
+  });
+
+  assert.equal(result.baselines.get("19:cargo:43").unitsSold, "2");
+  assert.equal(result.baselines.get("19:cargo:43").totalValue, "20");
+});
+
+test("excludes future sales and warns on non-canonical timestamps", () => {
+  const db = database();
+  const sale = {
+    claimId: "claim", regionId: "19", itemId: "43", itemType: "cargo",
+    quantity: "2", totalPrice: "20",
+  };
+  insert(db, {
+    ...sale, tradeId: "relay_closed_listing:19:valid",
+    occurredAt: "2026-08-01T11:00:00.000Z",
+  });
+  insert(db, {
+    ...sale, tradeId: "relay_closed_listing:19:future",
+    occurredAt: "2026-08-01T12:00:00.001Z",
+  });
+  insert(db, {
+    ...sale, tradeId: "relay_closed_listing:19:bad-time",
+    occurredAt: "2026-08-01T11:00:00.000Y",
+  });
+
+  const result = readBuyOrderSaleBaselines(db, {
+    claimId: "claim",
+    allowedRegionIds: ["19"],
+    itemKeys: new Set([buyOrderBaselineKey("19", "cargo", "43")]),
+    nowMs: Date.parse("2026-08-01T12:00:00.000Z"),
+  });
+
+  assert.equal(result.baselines.get("19:cargo:43").salesCount, 1);
+  assert.deepEqual(result.warnings, [
+    "Ignored malformed confirmed trade relay_closed_listing:19:bad-time.",
+  ]);
 });
