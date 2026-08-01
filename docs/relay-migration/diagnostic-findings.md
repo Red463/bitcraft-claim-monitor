@@ -958,3 +958,157 @@ not one of the four required claim/member/inventory/market inputs, so an
 initial construction delay cannot hold supplies, treasury, membership, market
 history, or any browser response. Malformed, partial, stale, or cross-claim
 construction data preserves the last checkpoint instead of inventing a count.
+
+## Empire siege notification semantics — 2026-08-01
+
+### First-party schema capability
+
+The current official generated global bindings expose an
+`EmpireNotificationType` union with `MarkedForSiege`, `StartedSiege`,
+`StartedDefense`, `SuccessfulSiege`, `SuccessfulDefense`, `FailedSiege`, and
+`FailedDefense`. They do not expose a cancelled variant. The generated source
+is `apps/bitcraft-local/src/server/game-data/bindings/global/types.ts:1966-1975`.
+
+`empire_notification_state` gives each event a primary-key entity ID, recipient
+Empire ID, notification type, string replacement array, and `i32` timestamp
+(`bindings/global/empire_notification_state_table.ts:18-24`). The generated
+table registration has a B-tree index on `empire_entity_id`
+(`bindings/global/index.ts:2004-2010`), so configured Empire histories can be
+subscribed without reading the complete table. `empire_notification_desc`
+owns the matching type, priority, login-display flag, and text template
+(`bindings/global/empire_notification_desc_table.ts:18-24`).
+
+The regional `empire_node_siege_state` schema has only siege entity ID,
+building entity ID, Empire entity ID, energy, active state, and optional start
+timestamp (`bindings/regional/empire_node_siege_state_table.ts:14-19`). It has
+no completion-reason or outcome field. A generated
+`cheat_empire_siege_cancel` reducer exists, but its complete generated input is
+only `siegeNodeEntityId` (`bindings/global/cheat_empire_siege_cancel_reducer.ts:14`);
+that input signature does not identify any emitted cancellation event.
+
+### Bounded live observation
+
+At `2026-08-01T16:33:37.829Z`, a one-off read-only diagnostic used the official
+generated TypeScript bindings and topology discovery. It ran with:
+
+```powershell
+node apps/bitcraft-local/scripts/diagnose-relay-empire-notifications-live.mjs
+```
+
+The diagnostic was evidence-only and was removed after capture. It discovered
+`bitcraft-live-19` at regional fingerprint
+`762aeaa1449c53d5f400d72bb82f71a049997d34e28c6844ce8f3899d1cb6312`
+and `bitcraft-live-global` at global fingerprint
+`5e44626f1c24e9f8392ebce8bdc9de135f76a58747b208d5e4aa455dd411036a`,
+matching `bindings/schema-manifest.json:6-15`.
+
+The regional stage subscribed only to `world_region_state`,
+`empire_settlement_state`, `empire_node_state`, and
+`empire_node_siege_state`. Region 19 geometry reduced 606 settlements to 55
+local settlements, 555 nodes to 58 local nodes, and 11 siege rows to three
+local siege rows. Those rows derived 24 exact Empire IDs, of which 23 had
+current names. The global stage then used equality predicates on the generated
+`empire_entity_id` index for only those IDs, plus the small 14-row notification
+description catalog.
+
+The bounded result contained 5,106 notifications across the observed recipient
+Empires. The table's observed timestamps decoded as Unix seconds and spanned
+`2026-02-28T03:16:34Z` through `2026-08-01T15:45:04Z` (13,350,510 seconds).
+This is an observed available window, not a Relay retention guarantee.
+
+The exact siege counts were:
+
+| Notification type | Rows |
+|---|---:|
+| `MarkedForSiege` | 118 |
+| `StartedSiege` | 110 |
+| `StartedDefense` | 26 |
+| `SuccessfulSiege` | 90 |
+| `SuccessfulDefense` | 15 |
+| `FailedSiege` | 21 |
+| `FailedDefense` | 12 |
+
+Every one of the 392 siege notifications had exactly two replacements. The
+first was the Watchtower display name and the second was the encoded location,
+for example:
+
+```json
+[
+  "Ancient Dominion's Watchtower",
+  "N:{0}, E:{1}|~8197|~8027"
+]
+```
+
+The seven first-party templates were:
+
+| Type | Exact template |
+|---|---|
+| `MarkedForSiege` | `{0} at {1} is marked for siege.` |
+| `StartedSiege` | `Sieging {0} at {1}, please contribute!` |
+| `StartedDefense` | `{0} at {1} is under attack! Help defend!` |
+| `SuccessfulSiege` | `{0} at {1} was successfully sieged! Congratulations!` |
+| `SuccessfulDefense` | `{0} at {1} successfully repelled the attack! Congratulations!` |
+| `FailedSiege` | `{0} at {1} repelled our attack, the siege was a failure.` |
+| `FailedDefense` | `{0} at {1} was taken over by the enemy.` |
+
+Exact timestamp plus exact replacement-array grouping produced 22 paired
+`StartedSiege`/`StartedDefense` events, nine paired
+`SuccessfulSiege`/`FailedDefense` outcomes, and 14 paired
+`FailedSiege`/`SuccessfulDefense` outcomes. These pairs provide authoritative
+counterpart identities because each row's `empireEntityId` is the recipient:
+
+- at `2026-07-29T18:40:56Z`, The Ottoadman Empire received
+  `StartedSiege` and Turnip Fields received `StartedDefense` for the same
+  `~8197|~8027` Watchtower;
+- at `2026-07-30T19:01:31Z`, The Ottoadman Empire received
+  `SuccessfulSiege` and Turnip Fields received `FailedDefense` for that exact
+  Watchtower; and
+- at `2026-04-08T00:40:41Z`, The Cult of the Brick received `FailedSiege`
+  and Lunar Legion received `SuccessfulDefense` for the same
+  `~9110|~8778` Watchtower.
+
+This directly proves the role and outcome mapping without interpreting an
+inactive current row: `StartedSiege`, `SuccessfulSiege`, and `FailedSiege`
+belong to the attacker; `StartedDefense`, `SuccessfulDefense`, and
+`FailedDefense` belong to the defender. Exact paired rows provide both Empire
+IDs, both current names when retained in `empire_state`, the event timestamp,
+Watchtower label, and location.
+
+The current-row attacker field is independently corroborated. Each of the
+three local inactive `empire_node_siege_state` rows had a primary-key-adjacent
+`MarkedForSiege` notification (`siege entityId + 1`) addressed to the same
+Empire as the siege row's `empireEntityId`, while the joined node owner was a
+different Empire. The observed pairs were Shurima Empire/Pandocious,
+Mox/Shimmerscale Sanctuary, and Shurima Empire/Lunar Legion. This proves that
+the siege-row Empire is the marking/attacking participant in all three
+observed fixtures; it does not turn an inactive row into completion evidence.
+
+### Proven and still blocked
+
+The schema plus live pairs are sufficient to implement authoritative
+started, attacker-success/defender-failure, and
+attacker-failure/defender-success events for configured Empires. Runtime
+ingestion must use the indexed recipient IDs derived from the configured
+regional generation, durably copy new events because upstream retention is
+not contracted, and pair only exact timestamp plus exact replacement-array
+matches. A missing counterpart remains partial; it must not be guessed from a
+historical current owner.
+
+Cancellation remains unproven. There is no cancellation notification variant,
+description template, or outcome field. A `MarkedForSiege` row without a
+later start/outcome, disappearance of a current siege row, or an inactive
+zero-energy row cannot distinguish cancellation from an abandoned mark,
+cleanup, expiry, or incomplete retained history.
+
+Authoritative cancellation requires one of:
+
+1. a controlled first-party cancellation observed through a bounded typed
+   subscription that captures the exact notification/state delete sequence
+   for both known participants; or
+2. first-party module/operator documentation identifying another existing
+   typed row or reducer event as the cancellation signal; or
+3. a future explicit cancellation variant/outcome field in the generated
+   schema.
+
+Until one of those observations exists, the only safe terminal label for an
+otherwise unmatched removal is `removed_or_unknown`, never `cancelled`.
