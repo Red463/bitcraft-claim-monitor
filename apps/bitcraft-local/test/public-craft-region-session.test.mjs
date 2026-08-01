@@ -49,7 +49,6 @@ function fakeBindings() {
     playerUsernameState: [{ entityId: 700n, username: "Ada" }],
     locationState: [
       { entityId: 600n, chunkIndex: 1n, x: 20, z: 30, dimension: 1 },
-      { entityId: 901n, chunkIndex: 1n, x: 10, z: 15, dimension: 1 },
     ],
   };
   const db = {};
@@ -179,13 +178,14 @@ test("typed public craft session stages bounded joins before publishing a snapsh
   fake.state.onConnect(fake.connection);
   assert.deepEqual(fake.state.subscriptions[0].queries, [
     "SELECT * FROM public_progressive_action_state",
+    "SELECT progressive_action_state.* FROM progressive_action_state JOIN public_progressive_action_state ON progressive_action_state.entity_id = public_progressive_action_state.entity_id",
+    "SELECT building_state.* FROM building_state JOIN public_progressive_action_state ON building_state.entity_id = public_progressive_action_state.building_entity_id",
+    "SELECT building_nickname_state.* FROM building_nickname_state JOIN public_progressive_action_state ON building_nickname_state.entity_id = public_progressive_action_state.building_entity_id",
+    "SELECT location_state.* FROM location_state JOIN public_progressive_action_state ON location_state.entity_id = public_progressive_action_state.building_entity_id",
   ]);
 
   fake.state.subscriptions[0].onApplied({});
   assert.deepEqual(fake.state.subscriptions[1].queries, [
-    "SELECT * FROM progressive_action_state WHERE entity_id = 500",
-    "SELECT * FROM building_state WHERE entity_id = 600",
-    "SELECT * FROM building_nickname_state WHERE entity_id = 600",
     "SELECT * FROM player_username_state WHERE entity_id = 700",
   ]);
 
@@ -195,11 +195,6 @@ test("typed public craft session stages bounded joins before publishing a snapsh
   ]);
 
   fake.state.subscriptions[2].onApplied({});
-  assert.deepEqual(fake.state.subscriptions[3].queries, [
-    "SELECT * FROM location_state WHERE entity_id = 600 OR entity_id = 901",
-  ]);
-
-  fake.state.subscriptions[3].onApplied({});
   await Promise.resolve();
   assert.equal(snapshots.length, 1);
   assert.deepEqual(snapshots[0], {
@@ -213,9 +208,9 @@ test("typed public craft session stages bounded joins before publishing a snapsh
         buildingLocationZ: 30,
         claimEntityId: "900",
         claimName: "Test Claim",
-        claimLocationX: 10,
-        claimLocationZ: 15,
-        claimDimension: "1",
+        claimLocationX: null,
+        claimLocationZ: null,
+        claimDimension: null,
         ownerEntityId: "700",
         ownerUsername: "Ada",
         recipeId: "800",
@@ -255,6 +250,54 @@ test("typed public craft session stages bounded joins before publishing a snapsh
   assert.equal(fake.state.subscriptions.every((request) => request.unsubscribed), true);
   assert.equal(fake.state.disconnected, true);
   assert.equal(fake.state.callbacks.size, 0);
+});
+
+test("typed public craft session queues marker churn without tearing down an applying generation", async () => {
+  assert.ok(sessionModule, "public craft region session module must exist");
+  const fake = fakeBindings();
+  const snapshots = [];
+  const session = new sessionModule.RelayPublicCraftRegionSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+  });
+
+  await session.start({
+    uri: "wss://relay.example:4019",
+    database: "relay-region-19",
+    schemaFingerprint: "regional-v1",
+    manifest,
+    generation: 1,
+    regionId: "19",
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.subscriptions[0].onApplied({});
+  const firstDetail = fake.state.subscriptions[1];
+
+  fake.state.callbacks.get("publicProgressiveActionState:update")({}, {}, {});
+  await Promise.resolve();
+
+  assert.equal(
+    fake.state.subscriptions.length,
+    2,
+    "marker churn must not open a competing staged generation",
+  );
+  assert.equal(
+    firstDetail.unsubscribed,
+    false,
+    "marker churn must not tear down a subscription while Relay is applying it",
+  );
+
+  firstDetail.onApplied({});
+  fake.state.subscriptions[2].onApplied({});
+  assert.equal(snapshots.length, 0, "a changed marker generation must not publish mixed joins");
+  assert.equal(fake.state.subscriptions.length, 4, "one fresh generation must follow the active one");
+
+  fake.state.subscriptions[3].onApplied({});
+  fake.state.subscriptions[4].onApplied({});
+  await Promise.resolve();
+  assert.equal(snapshots.length, 1);
+
+  await session.stop();
 });
 
 test("typed public craft session stops enrichment when the public-row budget is exceeded", async () => {

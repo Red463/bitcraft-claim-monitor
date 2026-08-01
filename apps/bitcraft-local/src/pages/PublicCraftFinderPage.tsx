@@ -18,6 +18,7 @@ import type { MapFocus } from "./map/mapUtils";
 import {
   compareCraftEffort,
   formatCraftEffort,
+  publicCraftMapCoordinates,
   remainingCraftEffort,
 } from "./publicCraftMath";
 
@@ -98,7 +99,10 @@ export function PublicCraftFinder({ providerData, providerLoading, providerError
   const columns: Array<[string, PublicCraftSortKey, (job: AnyRecord) => React.ReactNode]> = [
     ["Craft", "output", (job) => <><strong>{job.output}</strong><small className="muted-line">{job.buildingName}</small></>],
     ["Tier", "tier", (job) => job.tier ? <TierBadge tier={job.tier} /> : "-"],
-    ["Settlement", "settlement", (job) => <><strong>{job.claimName ?? "Unknown"}</strong>{job.claimLocationX != null && job.claimLocationZ != null ? <button className="map-location-link" onClick={() => { trackAnalyticsEvent("public_craft_map_opened"); onShowMap({ name: `${job.claimName ?? "Public craft"} - ${job.output}`, locationX: toNumber(job.claimLocationX), locationZ: toNumber(job.claimLocationZ) }); }}><MapPin size={12} />R{job.regionId} - {job.claimLocationX}, {job.claimLocationZ}</button> : null}</>],
+    ["Settlement", "settlement", (job) => {
+      const mapLocation = publicCraftMapCoordinates(job);
+      return <><strong>{job.claimName ?? "Unknown"}</strong>{mapLocation ? <button className="map-location-link" onClick={() => { trackAnalyticsEvent("public_craft_map_opened"); onShowMap({ name: `${job.claimName ?? "Public craft"} - ${job.output}`, locationX: mapLocation.locationX, locationZ: mapLocation.locationZ }); }}><MapPin size={12} />R{job.regionId} - {mapLocation.locationX}, {mapLocation.locationZ}</button> : null}</>;
+    }],
     ["Required", "required", (job) => `${job.requiredSkillName} Lv ${job.minimumLevel}+`],
     ["Effort to Craft", "remaining", (job) => formatCraftEffort(job.remaining)],
     ["XP Available", "availableXp", (job) => job.availableXp == null ? "-" : formatNumber(job.availableXp)],

@@ -552,10 +552,14 @@ join chain:
 6. claim `owner_building_entity_id` to the settlement location row.
 
 The claim entity ID itself had no location row in the bounded sample, so the
-implementation does not use it as a location key. It subscribes to the
-naturally bounded public-marker table, then issues chunked equality
-subscriptions only for the referenced craft, building, owner, claim, and
-location IDs. It never subscribes to all `location_state`.
+implementation does not use it as a location key. The long-lived base
+subscription now uses indexed two-table joins from the naturally bounded
+public-marker table into craft details, buildings, nicknames, and exact
+workstation locations. Only referenced owner and claim IDs use staged,
+chunked equality subscriptions. It never subscribes to all `location_state`.
+The settlement-totem location is optional enrichment and does not delay the
+usable generation; Public Craft Finder maps to it when present and otherwise
+uses the exact workstation location.
 
 Each complete regional join is normalized with exact decimal-string IDs,
 staged as one numbered generation, and merged into the generic
@@ -570,14 +574,16 @@ exact through `BigInt` calculation and formatting.
 
 The production typed-session verifier is
 `apps/bitcraft-local/scripts/verify-relay-public-crafts-live.mjs`. Its
-2026-07-30 runs could not complete: Relay first changed to unready with both
-the local mirror and upstream reporting `down`/`local-stdb reconnect`; after a
-brief recovery long enough for the claim-market verifier to pass, the larger
-Public Craft staged subscription again failed to apply before the bounded
-timeout and the source returned to unready. Stage diagnostics are retained in
-the session health model. The runtime correctly preserves last-good data, but
-a successful applied-session proof remains required before this surface is
-marked ready for soak.
+2026-08-01 run applied generation 1 from `bitcraft-live-19` with schema
+fingerprint
+`762aeaa1449c53d5f400d72bb82f71a049997d34e28c6844ce8f3899d1cb6312`
+and returned 560 usable public craft rows. The remaining warnings were
+optional owner labels absent from `player_username_state`; they did not remove
+crafts or invent names. The SDK also logged several upstream cache-update
+inconsistencies for rapidly changing `progressive_action_state` rows, but the
+indexed base generation still applied and later changes remain live. Marker
+churn during staged enrichment now queues one coherent follow-up generation
+instead of unsubscribing a generation while the SDK is applying it.
 
 ## Regional claim rankings — 2026-07-30
 

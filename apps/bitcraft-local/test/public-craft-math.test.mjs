@@ -29,3 +29,26 @@ test("public craft effort comparison and formatting do not round decimal integer
     "108,086,391,056,891,906",
   );
 });
+
+test("public craft map coordinates prefer the settlement and fall back to the live workstation", () => {
+  assert.ok(math, "public craft exact arithmetic module must exist");
+  assert.deepEqual(
+    math.publicCraftMapCoordinates({
+      claimLocationX: 10,
+      claimLocationZ: 15,
+      buildingLocationX: 20,
+      buildingLocationZ: 30,
+    }),
+    { locationX: 10, locationZ: 15, source: "settlement" },
+  );
+  assert.deepEqual(
+    math.publicCraftMapCoordinates({
+      claimLocationX: null,
+      claimLocationZ: null,
+      buildingLocationX: "20",
+      buildingLocationZ: "30",
+    }),
+    { locationX: 20, locationZ: 30, source: "workstation" },
+  );
+  assert.equal(math.publicCraftMapCoordinates({ buildingLocationX: "invalid" }), null);
+});

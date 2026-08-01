@@ -14,6 +14,10 @@ const timeoutMs = Math.max(
   5_000,
   Number(process.env.RELAY_PUBLIC_CRAFT_VERIFY_TIMEOUT_MS ?? 90_000),
 );
+const maxIdsPerQuery = Math.max(
+  1,
+  Number(process.env.RELAY_PUBLIC_CRAFT_VERIFY_MAX_IDS_PER_QUERY ?? 100),
+);
 const manifest = JSON.parse(await readFile(
   new URL("../src/server/game-data/bindings/schema-manifest.json", import.meta.url),
   "utf8",
@@ -44,6 +48,7 @@ try {
       manifest,
       generation: 1,
       regionId,
+      maxIdsPerQuery,
     }).catch(reject);
   });
   if (snapshot.data.craftResults.length === 0) {
@@ -64,6 +69,7 @@ try {
     regionId,
     publicCrafts: snapshot.data.craftResults.length,
     warnings: snapshot.warnings.length,
+    warningSamples: snapshot.warnings.slice(0, 10),
     database: snapshot.database,
     schemaFingerprint: snapshot.schemaFingerprint,
     generation: snapshot.generation,

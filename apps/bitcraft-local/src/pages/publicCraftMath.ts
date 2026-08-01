@@ -28,3 +28,26 @@ export function formatCraftEffort(value: unknown, locales?: string | string[]): 
   const exact = decimalInteger(value);
   return exact == null ? "-" : exact.toLocaleString(locales);
 }
+
+function finiteCoordinate(value: unknown): number | null {
+  if (value == null || String(value).trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function publicCraftMapCoordinates(craft: Record<string, unknown>): {
+  locationX: number;
+  locationZ: number;
+  source: "settlement" | "workstation";
+} | null {
+  const claimX = finiteCoordinate(craft.claimLocationX);
+  const claimZ = finiteCoordinate(craft.claimLocationZ);
+  if (claimX != null && claimZ != null) {
+    return { locationX: claimX, locationZ: claimZ, source: "settlement" };
+  }
+  const buildingX = finiteCoordinate(craft.buildingLocationX);
+  const buildingZ = finiteCoordinate(craft.buildingLocationZ);
+  return buildingX == null || buildingZ == null
+    ? null
+    : { locationX: buildingX, locationZ: buildingZ, source: "workstation" };
+}

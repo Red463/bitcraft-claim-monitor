@@ -165,6 +165,7 @@ export class RelayPublicCraftRegionSession {
   #nextGeneration = 0;
   #refreshEpoch = 0;
   #detailRefreshQueued = false;
+  #detailRefreshPending = false;
   #snapshotQueued = false;
   #applyInFlight = false;
   #applyPending = false;
@@ -179,6 +180,14 @@ export class RelayPublicCraftRegionSession {
     lastAppliedAt: null as string | null,
     lastApplyDurationMs: null as number | null,
     rowCount: 0,
+    publicRowCount: 0,
+    craftIdCount: 0,
+    buildingIdCount: 0,
+    ownerIdCount: 0,
+    claimIdCount: 0,
+    locationIdCount: 0,
+    refreshEpoch: 0,
+    refreshPending: false,
     lastError: null as string | null,
   };
 
@@ -228,7 +237,13 @@ export class RelayPublicCraftRegionSession {
             this.#beginDetailRefresh(connection);
           }))
           .onError((_context, error) => this.#recordError(error))
-          .subscribe(["SELECT * FROM public_progressive_action_state"]);
+          .subscribe([
+            "SELECT * FROM public_progressive_action_state",
+            "SELECT progressive_action_state.* FROM progressive_action_state JOIN public_progressive_action_state ON progressive_action_state.entity_id = public_progressive_action_state.entity_id",
+            "SELECT building_state.* FROM building_state JOIN public_progressive_action_state ON building_state.entity_id = public_progressive_action_state.building_entity_id",
+            "SELECT building_nickname_state.* FROM building_nickname_state JOIN public_progressive_action_state ON building_nickname_state.entity_id = public_progressive_action_state.building_entity_id",
+            "SELECT location_state.* FROM location_state JOIN public_progressive_action_state ON location_state.entity_id = public_progressive_action_state.building_entity_id",
+          ]);
       })
       .onConnectError((_context, error) => this.#recordError(error))
       .onDisconnect((_context, error) => {
@@ -241,15 +256,20 @@ export class RelayPublicCraftRegionSession {
   #beginDetailRefresh(connection: BindingConnection): void {
     const config = this.#requiredConfig();
     const publicRows = rows(connection.db.publicProgressiveActionState);
+    this.#health.publicRowCount = publicRows.length;
+    this.#health.locationIdCount = rows(connection.db.locationState).length;
     if (publicRows.length > config.maxPublicRows) {
       throw new Error(
         `Relay public-craft public row budget ${config.maxPublicRows} exceeded by ${publicRows.length} rows`,
       );
     }
     this.#refreshing = true;
+    this.#detailRefreshPending = false;
     this.#health.stage = "craft-details";
     this.#refreshEpoch += 1;
     const epoch = this.#refreshEpoch;
+    this.#health.refreshEpoch = epoch;
+    this.#health.refreshPending = false;
     this.#clearDetailSubscriptions();
     const craftIds: string[] = [];
     const buildingIds: string[] = [];
@@ -269,6 +289,9 @@ export class RelayPublicCraftRegionSession {
         `Relay public-craft marker ${index} owner id`,
       ));
     }
+    this.#health.craftIdCount = new Set(craftIds).size;
+    this.#health.buildingIdCount = new Set(buildingIds).size;
+    this.#health.ownerIdCount = new Set(ownerIds).size;
     if (!craftIds.length) {
       this.#refreshing = false;
       this.#attachTableListeners(connection);
@@ -276,24 +299,6 @@ export class RelayPublicCraftRegionSession {
       return;
     }
     const queries = [
-      ...equalitySubscriptionQueries(
-        "progressive_action_state",
-        "entity_id",
-        craftIds,
-        config.maxIdsPerQuery,
-      ),
-      ...equalitySubscriptionQueries(
-        "building_state",
-        "entity_id",
-        buildingIds,
-        config.maxIdsPerQuery,
-      ),
-      ...equalitySubscriptionQueries(
-        "building_nickname_state",
-        "entity_id",
-        buildingIds,
-        config.maxIdsPerQuery,
-      ),
       ...equalitySubscriptionQueries(
         "player_username_state",
         "entity_id",
@@ -338,55 +343,17 @@ export class RelayPublicCraftRegionSession {
       claimIds,
       config.maxIdsPerQuery,
     );
-    if (!queries.length) {
-      this.#subscribeLocations(connection, epoch, buildingIds, new Set());
-      return;
-    }
-    this.#detailSubscriptions.push(
-      connection.subscriptionBuilder()
-        .onApplied(() => this.#guard(() => {
-          if (epoch !== this.#refreshEpoch) return;
-          this.#subscribeLocations(connection, epoch, buildingIds, new Set(claimIds));
-        }))
-        .onError((_context, error) => this.#recordError(error))
-        .subscribe(queries),
-    );
-  }
-
-  #subscribeLocations(
-    connection: BindingConnection,
-    epoch: number,
-    buildingIds: Set<string>,
-    claimIds: Set<string>,
-  ): void {
-    const config = this.#requiredConfig();
-    this.#health.stage = "locations";
-    const locationIds = [...buildingIds];
-    for (const [index, value] of rows(connection.db.claimState).entries()) {
-      const row = wireRecord(value, `Relay public-craft claim ${index}`);
-      const id = decimalInteger(
-        row.entityId ?? row.entity_id,
-        `Relay public-craft claim ${index} entity id`,
-      );
-      if (!claimIds.has(id)) continue;
-      locationIds.push(decimalInteger(
-        row.ownerBuildingEntityId ?? row.owner_building_entity_id,
-        `Relay public-craft claim ${id} owner building id`,
-      ));
-    }
-    const queries = equalitySubscriptionQueries(
-      "location_state",
-      "entity_id",
-      locationIds,
-      config.maxIdsPerQuery,
-    );
+    this.#health.claimIdCount = new Set(claimIds).size;
     if (!queries.length) {
       this.#completeDetailRefresh(connection, epoch);
       return;
     }
     this.#detailSubscriptions.push(
       connection.subscriptionBuilder()
-        .onApplied(() => this.#guard(() => this.#completeDetailRefresh(connection, epoch)))
+        .onApplied(() => this.#guard(() => {
+          if (epoch !== this.#refreshEpoch) return;
+          this.#completeDetailRefresh(connection, epoch);
+        }))
         .onError((_context, error) => this.#recordError(error))
         .subscribe(queries),
     );
@@ -394,6 +361,10 @@ export class RelayPublicCraftRegionSession {
 
   #completeDetailRefresh(connection: BindingConnection, epoch: number): void {
     if (epoch !== this.#refreshEpoch) return;
+    if (this.#detailRefreshPending) {
+      this.#beginDetailRefresh(connection);
+      return;
+    }
     this.#refreshing = false;
     this.#health.stage = "applying";
     this.#attachTableListeners(connection);
@@ -483,7 +454,13 @@ export class RelayPublicCraftRegionSession {
   }
 
   #queueDetailRefresh(): void {
-    if (this.#detailRefreshQueued || !this.#connection) return;
+    if (!this.#connection) return;
+    if (this.#refreshing) {
+      this.#detailRefreshPending = true;
+      this.#health.refreshPending = true;
+      return;
+    }
+    if (this.#detailRefreshQueued) return;
     this.#detailRefreshQueued = true;
     queueMicrotask(() => {
       this.#detailRefreshQueued = false;
@@ -576,6 +553,7 @@ export class RelayPublicCraftRegionSession {
     this.#config = null;
     this.#nextGeneration = 0;
     this.#detailRefreshQueued = false;
+    this.#detailRefreshPending = false;
     this.#snapshotQueued = false;
     this.#applyInFlight = false;
     this.#applyPending = false;
