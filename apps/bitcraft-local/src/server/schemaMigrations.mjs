@@ -4,6 +4,7 @@ export const additiveColumnMigrations = [
   { table: "market_events", column: "item_type", definition: "TEXT" },
   { table: "market_events", column: "trade_id", definition: "TEXT" },
   { table: "market_events", column: "source_key", definition: "TEXT" },
+  { table: "market_trades", column: "region_id", definition: "TEXT" },
   { table: "activity_events", column: "source_key", definition: "TEXT" },
   { table: "admin_users", column: "active", definition: "INTEGER NOT NULL DEFAULT 1" },
   { table: "admin_users", column: "last_login_at", definition: "TEXT" },
@@ -45,6 +46,7 @@ export const schemaIndexStatements = [
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_market_events_source ON market_events (claim_id, source_key) WHERE source_key IS NOT NULL;",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> '';",
   "CREATE INDEX IF NOT EXISTS idx_game_catalog_entities_item_list ON game_catalog_entities (item_list_id, catalog_key);",
+  "CREATE INDEX IF NOT EXISTS idx_market_trades_claim_region_item_time ON market_trades (claim_id, region_id, item_id, item_type, occurred_at DESC);",
 ];
 
 export function applySettlementStateMigration(db) {
@@ -232,11 +234,14 @@ export function applyMarketHistoryExactAmountMigration(db) {
       `);
     }
     if (migrateTrades) {
+      const hasTradeRegion = db.prepare("PRAGMA table_info(market_trades)").all()
+        .some((column) => String(column.name) === "region_id");
       db.exec(`
         ALTER TABLE market_trades RENAME TO market_trades_legacy_amounts;
         CREATE TABLE market_trades (
           trade_id TEXT PRIMARY KEY,
           claim_id TEXT NOT NULL,
+          region_id TEXT,
           order_entity_id TEXT,
           seller_entity_id TEXT,
           seller_username TEXT,
@@ -255,13 +260,13 @@ export function applyMarketHistoryExactAmountMigration(db) {
           raw_json TEXT NOT NULL
         );
         INSERT INTO market_trades (
-          trade_id, claim_id, order_entity_id, seller_entity_id,
+          trade_id, claim_id, region_id, order_entity_id, seller_entity_id,
           seller_username, purchaser_entity_id, purchaser_username, item_id,
           item_type, item_name, quantity, unit_price, total_price, tier,
           rarity, occurred_at, imported_at, raw_json
         )
         SELECT
-          trade_id, claim_id, order_entity_id, seller_entity_id,
+          trade_id, claim_id, ${hasTradeRegion ? "region_id" : "NULL"}, order_entity_id, seller_entity_id,
           seller_username, purchaser_entity_id, purchaser_username, item_id,
           item_type, item_name, CAST(quantity AS TEXT), CAST(unit_price AS TEXT),
           CAST(total_price AS TEXT), tier, rarity, occurred_at, imported_at,
@@ -269,6 +274,42 @@ export function applyMarketHistoryExactAmountMigration(db) {
         FROM market_trades_legacy_amounts;
         DROP TABLE market_trades_legacy_amounts;
       `);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function applyMarketTradeRegionBackfill(db) {
+  const rows = db.prepare(`
+    SELECT trade_id, raw_json
+    FROM market_trades
+    WHERE region_id IS NULL OR region_id = ''
+  `).all();
+  if (!rows.length) return;
+  const update = db.prepare(`
+    UPDATE market_trades
+    SET region_id = ?
+    WHERE trade_id = ? AND (region_id IS NULL OR region_id = '')
+  `);
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const row of rows) {
+      const tradeId = String(row.trade_id ?? "");
+      const relayMatch = tradeId.match(/^relay_closed_listing:(\d+):/);
+      let regionId = relayMatch?.[1] ?? "";
+      if (!regionId) {
+        try {
+          const raw = JSON.parse(String(row.raw_json ?? "{}"));
+          regionId = String(raw?.listing?.regionId ?? "").trim();
+        } catch {
+          regionId = "";
+        }
+      }
+      if (/^\d+$/.test(regionId)) update.run(regionId, tradeId);
     }
     db.exec("COMMIT");
   } catch (error) {

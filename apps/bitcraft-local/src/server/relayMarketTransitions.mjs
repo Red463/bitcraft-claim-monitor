@@ -354,11 +354,11 @@ export function createRelayMarketTransitionWriter(db, {
   `);
   const insertMarketTrade = db.prepare(`
     INSERT OR IGNORE INTO market_trades (
-      trade_id, claim_id, order_entity_id, seller_entity_id, seller_username,
+      trade_id, claim_id, region_id, order_entity_id, seller_entity_id, seller_username,
       purchaser_entity_id, purchaser_username, item_id, item_type, item_name,
       quantity, unit_price, total_price, tier, rarity, occurred_at, imported_at,
       raw_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   return {
@@ -402,9 +402,14 @@ export function createRelayMarketTransitionWriter(db, {
           if (Number(result.changes) === 0) continue;
           inserted += 1;
           if (event.eventType === "sale_confirmed" && listing.tradeId) {
+            const regionId = listing.tradeId.match(/^relay_closed_listing:(\d+):/)?.[1];
+            if (!regionId) {
+              throw new TypeError(`Confirmed Relay trade ${listing.tradeId} has no numeric region id`);
+            }
             trades += Number(insertMarketTrade.run(
               listing.tradeId,
               normalizedClaimId,
+              regionId,
               listing.key,
               listing.ownerEntityId,
               listing.owner,

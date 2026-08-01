@@ -30,6 +30,7 @@ export const schemaBootstrapSql = `
   CREATE TABLE IF NOT EXISTS market_trades (
     trade_id TEXT PRIMARY KEY,
     claim_id TEXT NOT NULL,
+    region_id TEXT,
     order_entity_id TEXT,
     seller_entity_id TEXT,
     seller_username TEXT,
@@ -756,6 +757,8 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_market_trades_claim_time ON market_trades (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_trades_claim_item_time
     ON market_trades (claim_id, item_id, item_type, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_market_trades_claim_region_item_time
+    ON market_trades (claim_id, region_id, item_id, item_type, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_craft_plan_settings_updated ON craft_plan_settings (updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_craft_plan_progress_snapshots_claim_time
     ON craft_plan_progress_audit_snapshots (claim_id, captured_at DESC);

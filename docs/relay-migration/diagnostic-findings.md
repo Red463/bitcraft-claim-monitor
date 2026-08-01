@@ -836,8 +836,10 @@ malformed retained rows are counted and marked with an error instead of being
 silently skipped. Deal Watch evaluation is independent of that ordered history
 path, so a watch failure cannot head-of-line block sale-history persistence.
 Selected-item
-history is filtered through a claim/item/type/time index before its row cap,
-so unrelated volume cannot truncate it. Both
+history is filtered through a claim/region/item/type/time index before its row
+cap, so unrelated item or foreign-region volume cannot truncate it. Existing
+Relay history is backfilled once from its authoritative trade identity or
+stored evidence. Both
 expose the progressive observation window; no regional history crawl,
 current-sale table, price snapshot, or scheduled analytics build was added.
 

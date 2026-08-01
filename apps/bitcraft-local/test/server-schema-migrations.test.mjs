@@ -7,6 +7,7 @@ import {
   applyAdditiveColumnMigrations,
   applyLegacySchemaCleanup,
   applyMarketHistoryExactAmountMigration,
+  applyMarketTradeRegionBackfill,
   applyProductionContributionExactAmountMigration,
   applySchemaIndexStatements,
   schemaIndexStatements,
@@ -140,6 +141,7 @@ test("market history migration stores exact integer amounts as text", () => {
   assert.equal(tradeTypes.get("quantity"), "TEXT");
   assert.equal(tradeTypes.get("unit_price"), "TEXT");
   assert.equal(tradeTypes.get("total_price"), "TEXT");
+  assert.equal(tradeTypes.get("region_id"), "TEXT");
   assert.deepEqual(
     { ...db.prepare(`
       SELECT quantity, price, total_value, source_key FROM market_events
@@ -155,6 +157,45 @@ test("market history migration stores exact integer amounts as text", () => {
   db.close();
 });
 
+test("market trade region migration backfills authoritative Relay identities", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE market_trades (
+      trade_id TEXT PRIMARY KEY,
+      region_id TEXT,
+      raw_json TEXT NOT NULL
+    );
+    INSERT INTO market_trades VALUES (
+      'relay_closed_listing:19:100', NULL, '{}'
+    );
+    INSERT INTO market_trades VALUES (
+      'legacy:200', NULL, '{"listing":{"regionId":"7"}}'
+    );
+    INSERT INTO market_trades VALUES (
+      'unknown:300', NULL, '{}'
+    );
+  `);
+
+  applyMarketTradeRegionBackfill(db);
+  applyMarketTradeRegionBackfill(db);
+
+  assert.deepEqual(
+    db.prepare("SELECT trade_id, region_id FROM market_trades ORDER BY trade_id").all()
+      .map((row) => ({ ...row })),
+    [{
+      trade_id: "legacy:200",
+      region_id: "7",
+    }, {
+      trade_id: "relay_closed_listing:19:100",
+      region_id: "19",
+    }, {
+      trade_id: "unknown:300",
+      region_id: null,
+    }],
+  );
+  db.close();
+});
+
 test("additiveColumnMigrations preserves bootstrap column migration order", () => {
   assert.deepEqual(additiveColumnMigrations, [
     { table: "market_events", column: "owner_entity_id", definition: "TEXT" },
@@ -162,6 +203,7 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "market_events", column: "item_type", definition: "TEXT" },
     { table: "market_events", column: "trade_id", definition: "TEXT" },
     { table: "market_events", column: "source_key", definition: "TEXT" },
+    { table: "market_trades", column: "region_id", definition: "TEXT" },
     { table: "activity_events", column: "source_key", definition: "TEXT" },
     { table: "admin_users", column: "active", definition: "INTEGER NOT NULL DEFAULT 1" },
     { table: "admin_users", column: "last_login_at", definition: "TEXT" },
@@ -303,6 +345,7 @@ test("schemaIndexStatements preserves release-sensitive unique indexes", () => {
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_market_events_source ON market_events (claim_id, source_key) WHERE source_key IS NOT NULL;",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> '';",
     "CREATE INDEX IF NOT EXISTS idx_game_catalog_entities_item_list ON game_catalog_entities (item_list_id, catalog_key);",
+    "CREATE INDEX IF NOT EXISTS idx_market_trades_claim_region_item_time ON market_trades (claim_id, region_id, item_id, item_type, occurred_at DESC);",
   ]);
 });
 

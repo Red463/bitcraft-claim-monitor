@@ -137,7 +137,8 @@ as sales. Market Browse price history reads those durable confirmed events on
 demand, calculates daily volume/value and progressive 24-hour, 7-day, and
 30-day views in memory, and labels the local observation start. Item/type
 filtering uses the indexed durable history before its bounded response limit,
-so unrelated high-volume items cannot hide a selected item. No price
+including configured region scope, so unrelated high-volume items or regions
+cannot hide a selected item. No price
 snapshot, analytics materialization table, or scheduled chart rebuild exists.
 Longer chart windows mature during the soak. Premium
 opportunities remain unavailable until Relay exposes or proves an

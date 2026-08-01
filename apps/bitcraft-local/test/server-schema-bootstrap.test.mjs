@@ -28,6 +28,7 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE TABLE IF NOT EXISTS empire_membership_periods",
     "CREATE INDEX IF NOT EXISTS idx_market_events_claim_time",
     "CREATE INDEX IF NOT EXISTS idx_market_trades_claim_item_time",
+    "CREATE INDEX IF NOT EXISTS idx_market_trades_claim_region_item_time",
     "CREATE INDEX IF NOT EXISTS idx_provider_transition_pending",
     "CREATE INDEX IF NOT EXISTS idx_user_legal_acceptances_user_time",
     "CREATE INDEX IF NOT EXISTS idx_activity_claim_time",
@@ -51,6 +52,7 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_buy_orders_current/);
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_regional_sale_averages_current/);
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS empire_hexite_/);
+  assert.match(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_trades[\s\S]*region_id TEXT/);
 });
 
 test("applySchemaBootstrap executes the complete bootstrap SQL once", () => {

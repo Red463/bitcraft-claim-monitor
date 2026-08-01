@@ -412,6 +412,7 @@ test("Relay transition history is idempotent and needs no current-listing table"
     CREATE TABLE market_trades (
       trade_id TEXT PRIMARY KEY,
       claim_id TEXT NOT NULL,
+      region_id TEXT,
       order_entity_id TEXT,
       seller_entity_id TEXT,
       seller_username TEXT,
@@ -520,7 +521,7 @@ test("Relay transition history is idempotent and needs no current-listing table"
   assert.deepEqual(
     { ...db.prepare(`
       SELECT trade_id, order_entity_id, seller_entity_id, item_id, item_type,
-             quantity, unit_price, total_price, occurred_at
+             quantity, unit_price, total_price, occurred_at, region_id
       FROM market_trades
     `).get() },
     {
@@ -533,6 +534,7 @@ test("Relay transition history is idempotent and needs no current-listing table"
       unit_price: "9007199254740993",
       total_price: "27021597764222979",
       occurred_at: "2026-07-30T14:59:00.000Z",
+      region_id: "19",
     },
   );
   assert.deepEqual(

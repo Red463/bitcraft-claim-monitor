@@ -528,12 +528,12 @@ test("server collection paginates listings and protects production mutations", a
       }
       relayStateDb.prepare(`
         INSERT OR IGNORE INTO market_trades (
-          trade_id, claim_id, order_entity_id, seller_entity_id,
+          trade_id, claim_id, region_id, order_entity_id, seller_entity_id,
           seller_username, purchaser_entity_id, purchaser_username, item_id,
           item_type, item_name, quantity, unit_price, total_price, tier, rarity,
           occurred_at, imported_at, raw_json
         ) VALUES (
-          'relay_closed_listing:19:historic-1', ?, 'historic-order', 'player-1',
+          'relay_closed_listing:19:historic-1', ?, '19', 'historic-order', 'player-1',
           'Tester', NULL, 'Buyer', '30', 'item', 'Leather', '5', '10', '50',
           NULL, NULL, '2026-05-20T12:00:00.000Z',
           '2026-05-20T12:00:01.000Z', '{}'
@@ -1151,12 +1151,12 @@ test("server collection paginates listings and protects production mutations", a
   `).run(legacyBuyOrderNow);
   staleRegionalDb.prepare(`
     INSERT OR IGNORE INTO market_trades (
-      trade_id, claim_id, order_entity_id, seller_entity_id,
+      trade_id, claim_id, region_id, order_entity_id, seller_entity_id,
       seller_username, purchaser_entity_id, purchaser_username, item_id,
       item_type, item_name, quantity, unit_price, total_price, tier, rarity,
       occurred_at, imported_at, raw_json
     ) VALUES (
-      'relay_closed_listing:19:historic-1', ?, 'historic-order', 'player-1',
+      'relay_closed_listing:19:historic-1', ?, '19', 'historic-order', 'player-1',
       'Tester', NULL, 'Buyer', '30', 'item', 'Leather', '5', '10', '50',
       NULL, NULL, '2026-05-20T12:00:00.000Z',
       '2026-05-20T12:00:01.000Z', '{}'
@@ -1169,14 +1169,14 @@ test("server collection paginates listings and protects production mutations", a
       SELECT value + 1 FROM sequence WHERE value < 5001
     )
     INSERT INTO market_trades (
-      trade_id, claim_id, order_entity_id, seller_entity_id,
+      trade_id, claim_id, region_id, order_entity_id, seller_entity_id,
       seller_username, purchaser_entity_id, purchaser_username, item_id,
       item_type, item_name, quantity, unit_price, total_price, tier, rarity,
       occurred_at, imported_at, raw_json
     )
     SELECT
-      'relay_closed_listing:19:noise-' || value, ?, 'noise-order-' || value,
-      'noise-player', 'Noise', NULL, NULL, '31', 'item', 'Noise', '1', '1',
+      'relay_closed_listing:7:noise-' || value, ?, '7', 'noise-order-' || value,
+      'noise-player', 'Noise', NULL, NULL, '30', 'item', 'Noise', '1', '1',
       '1', NULL, NULL, '2026-06-01T12:00:00.000Z',
       '2026-06-01T12:00:01.000Z', '{}'
     FROM sequence
@@ -1240,7 +1240,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(priceHistoryRequests, 0);
   await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (marketDb) => {
     marketDb.prepare(
-      "DELETE FROM market_trades WHERE claim_id = ? AND item_id = '31' AND item_name = 'Noise'",
+      "DELETE FROM market_trades WHERE claim_id = ? AND item_id = '30' AND item_name = 'Noise'",
     ).run(claimId);
   });
   const marketOverview = await fetch(`${origin}/api/local/market/overview?claimId=${claimId}&regionId=19`).then((response) => response.json());

@@ -158,7 +158,7 @@ import {
   relayEmpireMembershipObservation,
 } from "./src/server/empireMembership.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
-import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyProductionContributionExactAmountMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
+import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyProductionContributionExactAmountMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
@@ -403,6 +403,7 @@ applyLegacySchemaCleanup(db);
 
 applyAdditiveColumnMigrations(db);
 applyMarketHistoryExactAmountMigration(db);
+applyMarketTradeRegionBackfill(db);
 applyProductionContributionExactAmountMigration(db);
 applySchemaIndexStatements(db);
 
@@ -5768,34 +5769,34 @@ function regionalMarketObservedTrades(claimId, regionId, allowedRegionIds, optio
   const requestedItemType = String(options.itemType ?? "").trim().toLowerCase();
   const itemScoped = /^\d+$/.test(requestedItemId)
     && (requestedItemType === "item" || requestedItemType === "cargo");
+  const regionScope = regionId !== "all" ? [regionId] : [...allowed];
+  const regionClause = regionScope.length
+    ? ` AND region_id IN (${regionScope.map(() => "?").join(", ")})`
+    : "";
   const query = itemScoped ? `
-    SELECT trade_id, item_id, item_type, quantity, unit_price, total_price,
+    SELECT trade_id, region_id, item_id, item_type, quantity, unit_price, total_price,
       occurred_at, raw_json
     FROM market_trades
-    WHERE claim_id = ? AND item_id = ? AND item_type = ?
+    WHERE claim_id = ?${regionClause} AND item_id = ? AND item_type = ?
     ORDER BY occurred_at DESC, trade_id DESC
     LIMIT 5000
   ` : `
-    SELECT trade_id, item_id, item_type, quantity, unit_price, total_price,
+    SELECT trade_id, region_id, item_id, item_type, quantity, unit_price, total_price,
       occurred_at, raw_json
     FROM market_trades
-    WHERE claim_id = ?
+    WHERE claim_id = ?${regionClause}
     ORDER BY occurred_at DESC, trade_id DESC
     LIMIT 5000
   `;
   const queryArgs = itemScoped
-    ? [claimId, requestedItemId, requestedItemType]
-    : [claimId];
+    ? [claimId, ...regionScope, requestedItemId, requestedItemType]
+    : [claimId, ...regionScope];
   return db.prepare(query).all(...queryArgs).flatMap((row) => {
     const raw = safeJson(row.raw_json, {});
     const listing = raw?.listing && typeof raw.listing === "object"
       ? raw.listing
       : {};
-    const tradeParts = String(row.trade_id ?? "").split(":");
-    const observedRegionId = String(
-      listing.regionId
-      ?? (/^\d+$/.test(tradeParts[1] ?? "") ? tradeParts[1] : ""),
-    ).trim();
+    const observedRegionId = String(row.region_id ?? "").trim();
     if (!/^\d+$/.test(observedRegionId)) return [];
     if (allowed.size && !allowed.has(observedRegionId)) return [];
     if (regionId !== "all" && observedRegionId !== regionId) return [];
