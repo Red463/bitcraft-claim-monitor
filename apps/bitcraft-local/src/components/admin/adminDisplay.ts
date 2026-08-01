@@ -1,8 +1,6 @@
 import { toNumber, type AnyRecord } from "../../main-app-data.ts";
 import { formatNumber } from "../../utils/format.ts";
 
-export const COLLECTOR_PURPOSES: Record<string, string> = {};
-
 export function bytesLabel(value: unknown) {
   const bytes = toNumber(value);
   if (bytes < 1024) return String(bytes) + " B";

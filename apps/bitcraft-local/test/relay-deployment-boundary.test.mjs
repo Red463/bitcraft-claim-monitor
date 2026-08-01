@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const readDeployment = (name) => readFileSync(
@@ -18,8 +18,25 @@ test("Relay preview web and worker units use isolated paths and record-only Disc
     assert.match(unit, /DISCORD_DELIVERY_MODE=record/);
     assert.match(unit, /ENABLE_DISCORD_STARTUP=false/);
     assert.match(unit, /EnvironmentFile=-\/etc\/bitcraft-claim-monitor-relay\.env/);
+    assert.match(
+      unit,
+      /ExecStart=\/usr\/bin\/env DISCORD_DELIVERY_MODE=record ENABLE_DISCORD_STARTUP=false \/usr\/bin\/node /,
+    );
   }
   assert.match(readDeployment("bitcraft-claim-monitor-relay.service"), /APP_PORT=19430/);
+});
+
+test("Relay preview deployment excludes maintained service artifacts", () => {
+  for (const name of [
+    "bitcraft-claim-monitor.service",
+    "bitcraft-claim-monitor-worker.service",
+    "bitcraft-monitor-collector.service",
+    "bitcraft-monitor-collector.timer",
+    "bitcraft-claim-monitor-backup.service",
+    "bitcraft-claim-monitor-backup.timer",
+  ]) {
+    assert.equal(existsSync(new URL(`../../../deploy/${name}`, import.meta.url)), false);
+  }
 });
 
 test("Relay preview backup and Caddy routing do not share the maintained service", () => {

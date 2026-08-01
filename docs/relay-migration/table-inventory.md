@@ -4,6 +4,12 @@ This is the authoritative ownership and retirement inventory required by the
 [live-first data policy](./live-first-data-policy.md). It is updated as each
 vertical domain moves from BitJita to Relay.
 
+The exact runtime-retired table list is maintained in
+`src/server/schemaMigrations.mjs`. Startup deletes those tables idempotently;
+integration tests set `RETIRED_TABLE_GUARD_TEST=true` after startup migrations
+so the SQLite authorizer rejects any later read, write, or schema access with
+the retired table name in its diagnostic.
+
 Disposition values:
 
 - `keep-current`: materialized or derived current state needed for indexed
@@ -40,7 +46,7 @@ Disposition values:
 | `scheduled_jobs` | keep-operations | Registered maintenance, reporting, backup, retention, and delivery work | Keep the registry, but remove all retired current-data and game-evidence ingestion keys and controls. Market sales and craft contributions are subscription-driven. Current user-facing data remains live with scheduled work disabled. |
 | `server_metric_buckets`, `server_health_incidents` | keep-operations | Runtime metric/health events | Required for soak evidence, lag/budget alerts, and operational diagnosis. |
 | `admin_users`, `admin_sessions`, `user_accounts`, `user_sessions`, `user_legal_acceptances` | keep-user | Authenticated local requests and privacy workflows | User-owned identity/session/legal data; independent of game-data provider. |
-| `app_settings`, `app_secrets` | keep-user | Authenticated admin configuration | Application configuration and secrets; independent of game-data provider. |
+| `app_settings`, `app_secrets` | keep-user | Authenticated admin configuration | Application configuration and secrets; independent of game-data provider. Retired `collector_settings_json` is deleted idempotently from existing clones and is neither seeded, returned, nor accepted by the Admin configuration API. |
 | `craft_plan_settings` | keep-user | Authenticated plan edits | Saved plan targets, sources, and overrides. |
 | `craft_plan_progress_audit_snapshots`, `craft_plan_progress_audit_events`, `craft_plan_progress_audit_state` | keep-history | Normalized planner state transitions | Required for progress audit and restart continuity. |
 | Selected-player inventory and housing state | no table | Bounded Relay entity-detail service; request with 15-second memory last-good | Members, Craft Planner, and its admin manager share the provider-neutral player-data service. Inventory and housing load only for a selected monitored member. No SQL current/cache table or scheduled refresh job is justified. |

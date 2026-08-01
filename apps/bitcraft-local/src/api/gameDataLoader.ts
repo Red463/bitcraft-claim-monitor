@@ -4,6 +4,7 @@ import type { AnyRecord } from "../main-app-data";
 import type { ManualRefreshRequest } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import type { ActivePanel, LoadState } from "../types/app";
+import { useGameDataGeneration } from "../hooks/useGameDataGeneration";
 import { loadGameData } from "./gameData.ts";
 import { pageDomains } from "./pageDomains.ts";
 
@@ -48,6 +49,8 @@ export function useGameData(
     promise,
   ) => promise,
 ): LoadState<AnyRecord> {
+  const domains = pageDomains(activePanel);
+  const generation = useGameDataGeneration(claimId, domains);
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
     error: null,
@@ -57,7 +60,6 @@ export function useGameData(
   React.useEffect(() => {
     const cacheKey = `${claimId}:${activePanel}`;
     const cached = pageNavigationCache.get(cacheKey);
-    const domains = pageDomains(activePanel);
     const manualHeaders = manualRefreshHeaders(manualRefreshRequest, activePanel);
     if (domains.length === 0) {
       setState({ data: null, loading: false, error: null });
@@ -91,6 +93,7 @@ export function useGameData(
         if (cancelled || controller.signal.aborted) return;
         setState((previous) => ({
           ...previous,
+          data: previous.data,
           loading: false,
           error: error instanceof Error ? error.message : String(error),
           stale: Boolean(previous.data) || previous.stale,
@@ -106,6 +109,7 @@ export function useGameData(
   }, [
     activePanel,
     claimId,
+    generation,
     manualRefreshRequest?.sequence,
     refreshToken,
     trackManualRefreshPromise,

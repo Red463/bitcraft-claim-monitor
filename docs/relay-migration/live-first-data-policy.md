@@ -460,5 +460,8 @@ Add focused coverage proving:
   `domain_payload_current`;
 - freshness transitions and latency metrics are accurate;
 - retired tables and scheduled-job keys are absent from a fresh schema;
-- runtime database tracing fails tests when removed table names are accessed;
+- `schemaMigrations.mjs` owns one retired-table list used by both idempotent
+  startup cleanup and a test-enabled post-migration SQLite authorizer; broad
+  server integration sets `RETIRED_TABLE_GUARD_TEST=true`, so any later
+  read, write, or schema access to a retired table fails with its name;
 - browser traffic never contacts Relay, SpacetimeDB, or BitJita directly.

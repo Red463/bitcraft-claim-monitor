@@ -136,8 +136,6 @@ export const DEFAULT_DISCORD_PRESENCE: DiscordPresence = {
 
 export const DISCORD_CHANNEL_FIELDS = Object.keys(DEFAULT_DISCORD_CHANNELS);
 
-export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {};
-
 export const DEFAULT_SETTINGS: AppSettings = {
   claimId: DEFAULT_CLAIM_ID,
   syncUrl: DEFAULT_SYNC_URL,
@@ -145,7 +143,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: DEFAULT_THEME,
   refreshSeconds: 30,
   serverRefreshSeconds: 30,
-  collectorSettings: DEFAULT_COLLECTOR_SETTINGS,
   defaultPage: "dashboard",
   defaultRegion: "19",
   additionalActiveRegions: "",
@@ -153,7 +150,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   marketDealWatch: { maxWatchesPerUser: 10, thresholdPercent: 30, minActiveListings: 3, discordDmEnabled: true },
   branding: {},
   visitorSecurity: { fullIpRetentionDays: 7, statsRetentionDays: 180, geoipProvider: "ipapi", geoipCacheDays: 30, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "", geoipLicenseKeyConfigured: false },
-  browserSnapshotsEnabled: true,
   discord: {
     enabled: false,
     applicationId: "",

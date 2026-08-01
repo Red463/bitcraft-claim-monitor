@@ -78,7 +78,7 @@ import { cooldownRemainingMs, createManualRefreshRequest, createManualRefreshTas
  */
 
 const LOCAL_API = "/api/local";
-const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
+const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor-relay";
 const CHANGELOG_URL = `${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md`;
 const DISCORD_URL = "https://discord.gg/ET4bteqbG5";
 const APP_VERSION = packageJson.version;
@@ -752,32 +752,6 @@ function DashboardApp() {
     hasProductionData: hasProductionPayload(state.data),
     pushToast,
   });
-  React.useEffect(() => {
-    if (active !== "dashboard" || !appSettings.browserSnapshotsEnabled || !state.data || !data.claim?.entityId) return;
-    const controller = new AbortController();
-    async function record() {
-      try {
-        const response = await fetch(`${LOCAL_API}/snapshot`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            claimId,
-            claim: data.claim,
-            membersCount: data.members.length,
-            buildingsCount: data.buildings.length,
-            market: data.market,
-          }),
-          signal: controller.signal,
-        });
-        if (response.ok) setHistoryRefreshToken((x) => x + 1);
-      } catch {
-        // The app can still run without the local history server.
-      }
-    }
-    record();
-    return () => controller.abort();
-  }, [active, appSettings.browserSnapshotsEnabled, claimId, state.data, data.claim, data.members.length, data.buildings.length, data.market]);
-
   const activeRegionScopeKey = `${appSettings.defaultRegion}|${appSettings.additionalActiveRegions}`;
   const panels: Record<string, React.ReactNode> = {
     dashboard: <Dashboard data={data} activity={localHistory.activity} marketHistory={localHistory.market} dashboardSummary={localHistory.dashboard} lastUpdated={lastUpdated} onNavigate={navigate} />,

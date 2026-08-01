@@ -2,60 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import {
-  applyReconciliationSchedule,
-  domainCollectorDefaults,
-  normalizeCollectorSettings,
-  reconciliationCollectorStatuses,
-  reconciliationHistoryTables,
-} from "../src/server/collectorSettings.mjs";
-
-test("collector settings discard every retired game-data acquisition setting", () => {
-  const settings = normalizeCollectorSettings({
-    claim: { enabled: false, intervalSeconds: "5" },
-    members: { intervalMs: 45000 },
-    research: { intervalSeconds: "99999" },
-    market: null,
-    unknown: { enabled: false, intervalSeconds: 15 },
-  });
-
-  assert.deepEqual(settings, {});
-  assert.equal(Object.hasOwn(settings, "research"), false);
-  assert.equal(Object.hasOwn(settings, "market"), false);
-  assert.equal(Object.hasOwn(settings, "unknown"), false);
-});
-
-test("collector configuration has no scheduled game-data acquisition owner", () => {
-  const browserDefaults = readFileSync(
-    new URL("../src/settingsDefaults.ts", import.meta.url),
-    "utf8",
-  );
-  const adminDisplay = readFileSync(new URL("../src/components/admin/adminDisplay.ts", import.meta.url), "utf8");
-
-  assert.deepEqual(domainCollectorDefaults, {});
-  assert.deepEqual(reconciliationHistoryTables, {});
-  assert.doesNotMatch(browserDefaults, /\b(?:claim|members|players|professions|production|inventory|mapCatalog|region|empireMembership)\s*:\s*\{\s*label:/);
-  assert.doesNotMatch(adminDisplay, /\b(?:claim|members|players|professions|production|inventory|market|research|region|mapCatalog|empireMembership):\s*"/);
-});
-
-test("reconciliation status and cadence exclude live commit side effects", () => {
-  const settings = normalizeCollectorSettings({});
-  const statuses = {
-    production: { source: "relay-commits", nextRunAt: null },
-    settlementTransitions: { source: "relay-commits", nextRunAt: null },
-    empireMembership: { source: "relay-subscription", nextRunAt: null },
-  };
-  const nextRunAt = "2026-07-31T12:05:00.000Z";
-  const visible = reconciliationCollectorStatuses(settings, statuses);
-
-  assert.deepEqual(visible, {});
-  applyReconciliationSchedule(settings, statuses, nextRunAt);
-  assert.equal(statuses.production.nextRunAt, null);
-  assert.equal(statuses.settlementTransitions.nextRunAt, null);
-  assert.equal(statuses.empireMembership.nextRunAt, null);
-  assert.equal(statuses.empireMembership.source, "relay-subscription");
-});
-
 test("construction current state has one Relay owner and no scheduled BitJita writer", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const adminDisplay = readFileSync(
@@ -121,27 +67,10 @@ test("Empire current state runs on the adaptive regional Relay runtime", () => {
 
 test("empire membership history is subscription-driven without a scheduled collector", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
-  assert.equal(Object.hasOwn(domainCollectorDefaults, "empireMembership"), false);
-  assert.equal(Object.hasOwn(reconciliationHistoryTables, "empireMembership"), false);
   assert.match(source, /onSnapshotCommitted:\s*syncEmpireMembershipFromRelaySnapshot/);
   assert.match(source, /source:\s*"relay-subscription"/);
   assert.doesNotMatch(source, /runEmpireMembershipCollector/);
   assert.doesNotMatch(source, /fetchBitjita\([^\n]*\/empires/);
-});
-
-test("retired reconciliation keys are not restored from saved settings", () => {
-  const normalized = normalizeCollectorSettings({
-    claim: { enabled: false, intervalSeconds: 15 },
-    members: { enabled: false, intervalSeconds: 15 },
-    production: { enabled: false, intervalSeconds: 15 },
-    market: { enabled: false, intervalSeconds: 15 },
-    productionContributions: { enabled: false, intervalSeconds: 2 },
-    marketTrades: { enabled: true, intervalSeconds: 99999 },
-  });
-
-  assert.deepEqual(domainCollectorDefaults, {});
-  assert.deepEqual(normalized, {});
-  assert.equal(Object.hasOwn(normalized, "marketTrades"), false);
 });
 
 test("periodic reconciliation has no legacy current-domain writer", () => {
@@ -247,7 +176,7 @@ test("collector status reports side-effect attempts without reading current-doma
   assert.ok(start > -1);
   assert.ok(end > start);
   assert.doesNotMatch(implementation, /currentClaimId\(\)|domainPayload|lastRunMetrics/);
-  assert.match(implementation, /const lastSuccessAt = value\.lastSuccessAt \?\? null;/);
+  assert.match(implementation, /collectors: pollStatus\.collectors/);
 });
 
 test("settlement collection operator copy no longer describes snapshot history", () => {

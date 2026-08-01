@@ -9,6 +9,25 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.50.0-beta.1] - 2026-08-01
+
+### Added
+
+- Added live Relay-backed settlement, catalog, inventory, crafting, market, region, empire, map, and public-tool data.
+- Added freshness, provenance, schema-health, and last-good outage reporting throughout the dashboard.
+- Added an isolated Relay preview deployment for `relay.timbersteeltrade.com`.
+
+### Changed
+
+- Replaced scheduled browser data snapshots with provider generations that update open pages as Relay data changes.
+- Rebuilt local history and notifications from normalized Relay observations while keeping current game state live.
+- Changed preview Discord delivery to enforced record-only mode.
+
+### Removed
+
+- Removed runtime BitJita API routes, clients, proxying, configuration, and remote icon requests.
+- Removed obsolete snapshot and collector configuration tables and legacy deployment artifacts.
+
 ## [0.49.1-beta.2] - 2026-07-29
 
 ### Fixed

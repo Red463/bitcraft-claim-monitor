@@ -20,6 +20,7 @@ import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/htt
 import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
 import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySettings.mjs";
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
+import { projectCraftContributionEnvelope } from "./src/server/craftContributionProjection.mjs";
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { gameTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
@@ -64,11 +65,6 @@ import { resolveDiscordChannelSelection } from "./src/server/discordNotification
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
-import {
-  applyReconciliationSchedule,
-  normalizeCollectorSettings,
-  reconciliationCollectorStatuses,
-} from "./src/server/collectorSettings.mjs";
 import {
   readRelayClaimBuildingsForPlanning,
   readRelayClaimForSupplyReport,
@@ -116,6 +112,7 @@ import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/se
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
+import { installRetiredTableAuthorizer } from "./src/server/retiredTableAuthorizer.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
 import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
@@ -155,6 +152,7 @@ import {
   discordDeliveryMode,
   recordedDiscordResponse,
   requireLiveDiscord,
+  sendDiscordManualSandboxMessage,
 } from "./src/server/discordDeliveryMode.mjs";
 import { liveEmpireHexiteProjection } from "./src/server/empireHexite.mjs";
 import {
@@ -329,6 +327,7 @@ const discordApiOrigin = isTestRuntime && process.env.DISCORD_API_ORIGIN
   ? String(process.env.DISCORD_API_ORIGIN).replace(/\/+$/, "")
   : "https://discord.com/api/v10";
 const configuredDiscordDeliveryMode = discordDeliveryMode(process.env);
+const configuredDiscordSandboxChannelId = String(process.env.DISCORD_SANDBOX_CHANNEL_ID ?? "").trim();
 const legalPolicy = legalPolicyForEnvironment(process.env);
 const legalDigests = legalPolicyDigests(legalPolicy);
 const legalSnapshot = currentLegalSnapshot(legalPolicy, legalDigests);
@@ -359,7 +358,7 @@ const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "ut
 const appVersion = String(packageJson.version ?? "0.0.0-dev");
 const appIdentifier = process.env.BITCRAFT_APP_IDENTIFIER ?? "BitCraft Claim Monitor Relay (github.com/Red463/bitcraft-claim-monitor-relay)";
 const ipHash = createIpHasher(appIdentifier);
-const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
+const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor-relay/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
 const repoRoot = path.resolve(root, "..", "..");
 const brandingDir = path.join(dataDir, "branding");
@@ -413,6 +412,8 @@ applySchemaIndexStatements(db);
 
 const now = new Date().toISOString();
 applyDefaultAppSettings(db, { serverRefreshSeconds: Math.round(snapshotIntervalMs / 1000), updatedAt: now });
+cleanupRetiredRegionalMarketState();
+installRetiredTableAuthorizer(db);
 
 const statements = createPreparedStatements(db);
 const gameDataGenerationListeners = new Set();
@@ -1218,22 +1219,11 @@ function publicDiscordSettings() {
   };
 }
 
-function getCollectorSettings() {
-  return normalizeCollectorSettings(safeJson(statements.getSetting.get("collector_settings_json")?.value, {}));
-}
-
 function currentClaimId() {
   return statements.getSetting.get("claim_id")?.value ?? defaultClaimId;
 }
 
-function migrateRetiredCollectorSettings() {
-  const now = new Date().toISOString();
-  const source = safeJson(statements.getSetting.get("collector_settings_json")?.value, {});
-  const normalized = normalizeCollectorSettings(source);
-  const serialized = JSON.stringify(normalized);
-  if (statements.getSetting.get("collector_settings_json")?.value !== serialized) {
-    statements.upsertSetting.run("collector_settings_json", serialized, now);
-  }
+function cleanupRetiredRegionalMarketState() {
   db.prepare("DELETE FROM scheduled_jobs WHERE job_key = ?").run("regional_buy_order_sale_baselines_refresh");
   db.prepare("DELETE FROM app_settings WHERE key IN (?, ?)").run(
     "regional_buy_order_collector_retired_at",
@@ -1250,7 +1240,6 @@ function migrateMarketAccessSplit() {
   statements.upsertSetting.run(markerKey, now, now);
 }
 
-migrateRetiredCollectorSettings();
 migrateMarketAccessSplit();
 
 function marketDealWatchSettings() {
@@ -1274,7 +1263,6 @@ function getSettings() {
     theme: { ...defaultTheme, ...theme },
     refreshSeconds: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("refresh_seconds")?.value, 30),
     serverRefreshSeconds: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("server_refresh_seconds")?.value, Math.round(snapshotIntervalMs / 1000)),
-    collectorSettings: getCollectorSettings(),
     defaultPage: validAppPage(savedDefaultPage) ? savedDefaultPage : DEFAULT_APP_PAGE,
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     additionalActiveRegions: statements.getSetting.get("active_region_overrides")?.value ?? "",
@@ -1282,7 +1270,6 @@ function getSettings() {
     marketDealWatch: marketDealWatchSettings(),
     branding,
     visitorSecurity: visitorSecuritySettings(),
-    browserSnapshotsEnabled: false,
     discord: publicDiscordSettings(),
   };
 }
@@ -1295,7 +1282,11 @@ const pollStatus = {
   lastAttemptAt: null,
   lastSuccessAt: null,
   lastError: null,
-  collectors: Object.fromEntries(Object.entries(getCollectorSettings()).map(([key, value]) => [key, { ...value, intervalMs: value.intervalSeconds * 1000, lastAttemptAt: null, lastSuccessAt: null, lastError: null, durationMs: null, nextRunAt: null }])),
+  collectors: {
+    production: { label: "Production lifecycle", enabled: true, source: "relay-commits" },
+    settlementTransitions: { label: "Settlement transitions", enabled: true, source: "relay-commits" },
+    empireMembership: { label: "Empire membership", enabled: true, source: "relay-subscription" },
+  },
   storageLastAttemptAt: null,
   storageLastSuccessAt: null,
   storageLastError: null,
@@ -1308,20 +1299,8 @@ function serverRefreshIntervalMs() {
   return seconds * 1000;
 }
 
-function refreshCollectorStatusSettings() {
-  const settings = getCollectorSettings();
-  for (const [key, value] of Object.entries(settings)) {
-    setCollectorStatus(key, {
-      label: value.label,
-      enabled: serverPollingEnabled && value.enabled,
-      intervalSeconds: value.intervalSeconds,
-      intervalMs: value.intervalSeconds * 1000,
-    });
-  }
-}
-
 function setCollectorStatus(key, patch = {}) {
-  const current = pollStatus.collectors[key] ?? { label: key, enabled: serverPollingEnabled };
+  const current = pollStatus.collectors[key] ?? { label: key, enabled: true };
   pollStatus.collectors[key] = { ...current, ...patch };
 }
 
@@ -1335,15 +1314,6 @@ function collectorAttempt(key, step = "Starting") {
     progressTotal: null,
   });
   return Date.now();
-}
-
-function collectorProgress(key, step, progress = {}) {
-  setCollectorStatus(key, {
-    running: true,
-    currentStep: step,
-    progressCurrent: Number.isFinite(Number(progress.current)) ? Number(progress.current) : null,
-    progressTotal: Number.isFinite(Number(progress.total)) ? Number(progress.total) : null,
-  });
 }
 
 function collectorSuccess(key, startedAt) {
@@ -1366,15 +1336,6 @@ function collectorFailure(key, startedAt, error) {
     currentStep: null,
     progressCurrent: null,
     progressTotal: null,
-  });
-}
-
-function sideEffectCollectorDue(key, force = false) {
-  return sideEffectCollectorIsDue({
-    key,
-    force,
-    settings: getCollectorSettings(),
-    statuses: pollStatus.collectors,
   });
 }
 
@@ -2111,23 +2072,62 @@ async function craftPlanDiscordReport(profession = "") {
   }
 }
 
-async function sendCraftPlanDiscordReport({ profession = "", channelId } = {}) {
-  const settings = getDiscordSettingsRaw();
-  const targetChannelId = String(channelId ?? "").trim();
-  if (!settings.enabled || !settings.botToken) throw new Error("Discord notifications are not fully configured.");
-  if (!validDiscordId(targetChannelId)) throw new Error("Choose a valid Discord channel.");
-  const report = await craftPlanDiscordReport(profession);
-  const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(report), settings, targetChannelId);
-  recordDiscordDeliverySafe({
-    status: "sent",
-    eventType: "craft_plan_report",
-    channelId: targetChannelId,
-    channelKey: "craftPlanReports",
-    summary: report.title,
-    metadata: { profession: report.profession || "overview", test: true },
-    response: { id: response?.id, channel_id: response?.channel_id },
+async function manualDiscordSandboxMessage(payload, settings, requestedChannelId = "") {
+  return sendDiscordManualSandboxMessage({
+    apiOrigin: discordApiOrigin,
+    configuredChannelId: configuredDiscordSandboxChannelId,
+    fetchImpl: fetch,
+    payload,
+    requestedChannelId,
+    settings,
   });
-  return { report, response: { id: response?.id, channel_id: response?.channel_id } };
+}
+
+function discordDeliveryResponse(response) {
+  return {
+    id: response?.id,
+    channel_id: response?.channel_id,
+    ...(response?.recorded === true ? { recorded: true } : {}),
+  };
+}
+
+async function sendCraftPlanDiscordReport({ profession = "", requestedChannelId = "" } = {}) {
+  const settings = getDiscordSettingsRaw();
+  const metadata = {
+    profession: profession || "overview",
+    test: true,
+    manualSandboxTest: true,
+    deliveryMode: configuredDiscordDeliveryMode,
+  };
+  try {
+    const report = await craftPlanDiscordReport(profession);
+    const response = await manualDiscordSandboxMessage(
+      buildCraftPlanDiscordEmbed(report),
+      settings,
+      requestedChannelId,
+    );
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType: "craft_plan_report",
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary: report.title,
+      metadata: { ...metadata, profession: report.profession || metadata.profession },
+      response: discordDeliveryResponse(response),
+    });
+    return { report, response: discordDeliveryResponse(response) };
+  } catch (error) {
+    recordDiscordDeliverySafe({
+      status: "failed",
+      eventType: "craft_plan_report",
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary: "Craft Planner report sandbox test",
+      error: error instanceof Error ? error.message : String(error),
+      metadata,
+    });
+    throw error;
+  }
 }
 
 let craftPlanReportDispatcherRunning = false;
@@ -3543,9 +3543,9 @@ async function sendDiscordCharacterLinkRequest(userRow, metadata = {}, settings 
       channelKey,
       summary: `Character link requested: ${characterName}`,
       metadata: diagnostics,
-      response: { id: response?.id, channel_id: response?.channel_id },
+      response: discordDeliveryResponse(response),
     });
-    return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
+    return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     recordDiscordDeliverySafe({
@@ -3608,7 +3608,7 @@ async function sendDiscordCharacterLinkAdminAction(userRow, action, administrato
       channelKey,
       summary,
       metadata,
-      response: { id: response?.id, channel_id: response?.channel_id },
+      response: discordDeliveryResponse(response),
     });
     return { ok: true, skipped: false };
   } catch (error) {
@@ -3660,7 +3660,7 @@ async function sendDiscordCharacterLinkUserNotice(userRow, action, administrator
       channelKey: "dm",
       summary,
       metadata,
-      response: { id: response?.id, channel_id: response?.channel_id },
+      response: discordDeliveryResponse(response),
     });
     return { ok: true, skipped: false, response: { id: response?.id, channelId: response?.channel_id } };
   } catch (error) {
@@ -3755,7 +3755,7 @@ async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredA
   const responses = [];
   for (const recipientId of recipients) {
     const response = await sendDiscordDirectMessage(recipientId, payload, settings);
-    responses.push({ recipientId, id: response?.id, channel_id: response?.channel_id });
+    responses.push({ recipientId, ...discordDeliveryResponse(response) });
   }
   recordDiscordDeliverySafe({
     status: "sent",
@@ -3786,8 +3786,8 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
   try {
     if (eventType === "craft_plan_report") {
       const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(metadata.report), settings, channelId);
-      recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
-      return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
+      recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: discordDeliveryResponse(response) });
+      return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
     }
     if (isMarketSaleDiscordEvent(eventType) && settings.marketSalesDelivery === "dm") {
       return await sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata, settings, diagnostics);
@@ -3799,9 +3799,9 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
       components: discordCraftWatchComponents(eventType, metadata),
       allowed_mentions: { roles: role ? [role.roleId] : [], parse: [] },
     }, settings, channelId);
-    recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
+    recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: discordDeliveryResponse(response) });
     if (eventType === "supplies") statements.upsertSetting.run("discord_last_low_supplies_at", new Date().toISOString(), new Date().toISOString());
-    return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
+    return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     recordDiscordDeliverySafe({ status: "failed", eventType, channelId, channelKey, summary, error: message, metadata: diagnostics });
@@ -4381,7 +4381,7 @@ async function sendDiscordAnnouncement(body, settings = getDiscordSettingsRaw())
   const message = String(body.message ?? "").trim();
   if (!channelId || !message) throw new Error("Announcement needs a channel and message.");
   const response = await sendDiscordMessage({ embeds: [discordCommandEmbed(title, message, [], 0xf0c64f)] }, settings, channelId);
-  recordDiscordDeliverySafe({ status: "sent", eventType: "announcement", channelId, channelKey: "announcement", summary: title, response: { id: response?.id, channel_id: response?.channel_id } });
+  recordDiscordDeliverySafe({ status: "sent", eventType: "announcement", channelId, channelKey: "announcement", summary: title, response: discordDeliveryResponse(response) });
   return response;
 }
 
@@ -4393,7 +4393,7 @@ async function updateDiscordPinnedInfo(body, settings = getDiscordSettingsRaw())
   if (!channelId || !message) throw new Error("Pinned info needs a channel and message.");
   const { response, action } = await sendOrUpdateDiscordMessage(channelId, messageId, { embeds: [discordCommandEmbed(title, message, [], 0x5865f2)] }, settings);
   if (response?.id) await discordApiRequest(`/channels/${encodeURIComponent(channelId)}/pins/${encodeURIComponent(response.id)}`, { method: "PUT" }, settings).catch(() => null);
-  recordDiscordDeliverySafe({ status: "sent", eventType: "pinned_info", channelId, channelKey: "pinnedInfo", summary: `${action === "updated" ? "Updated" : "Posted"} pinned info`, response: { id: response?.id, channel_id: response?.channel_id } });
+  recordDiscordDeliverySafe({ status: "sent", eventType: "pinned_info", channelId, channelKey: "pinnedInfo", summary: `${action === "updated" ? "Updated" : "Posted"} pinned info`, response: discordDeliveryResponse(response) });
   return { response, action };
 }
 
@@ -4880,28 +4880,55 @@ async function currentAppUpdateDetails() {
   };
 }
 
-async function sendDiscordTestNotification(kind = "basic") {
+async function sendDiscordTestNotification(kind = "basic", { requestedChannelId = "" } = {}) {
   const settings = getDiscordSettingsRaw();
-  if (kind === "basic") {
-    const summary = "Discord integration test from Timbersteel Trade.";
-    try {
-      const response = await sendDiscordMessage({
-        content: summary,
-        allowed_mentions: { parse: [] },
-      }, settings, settings.channelId);
-      recordDiscordDeliverySafe({ status: "sent", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, metadata: discordDiagnosticContext("test_basic", {}, settings), response: { id: response?.id, channel_id: response?.channel_id } });
-      return response;
-    } catch (error) {
-      recordDiscordDeliverySafe({ status: "failed", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("test_basic", {}, settings) });
-      throw error;
-    }
-  }
-  const sample = discordTestEvents[kind];
+  const sample = kind === "basic" ? {
+    eventType: "test_basic",
+    summary: "Discord integration test from Timbersteel Trade.",
+    metadata: {},
+  } : discordTestEvents[kind];
   if (!sample) throw new Error("Unknown Discord test notification");
   const updateDetails = sample.eventType === "app_update" ? await currentAppUpdateDetails() : null;
   const summary = updateDetails?.summary ?? sample.summary;
   const metadata = updateDetails ? { ...sample.metadata, changeNotes: updateDetails.changeNotes } : sample.metadata;
-  return sendDiscordActivity(sample.eventType, summary, new Date().toISOString(), metadata, settings);
+  const payload = kind === "basic"
+    ? { content: summary, allowed_mentions: { parse: [] } }
+    : {
+        embeds: [discordEmbedForActivity(sample.eventType, summary, new Date().toISOString(), metadata, settings)],
+        allowed_mentions: { parse: [] },
+      };
+  try {
+    const response = await manualDiscordSandboxMessage(payload, settings, requestedChannelId);
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType: sample.eventType,
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary,
+      metadata: {
+        ...discordDiagnosticContext(sample.eventType, metadata, settings),
+        manualSandboxTest: true,
+        deliveryMode: configuredDiscordDeliveryMode,
+      },
+      response: discordDeliveryResponse(response),
+    });
+    return response;
+  } catch (error) {
+    recordDiscordDeliverySafe({
+      status: "failed",
+      eventType: sample.eventType,
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary,
+      error: error instanceof Error ? error.message : String(error),
+      metadata: {
+        ...discordDiagnosticContext(sample.eventType, metadata, settings),
+        manualSandboxTest: true,
+        deliveryMode: configuredDiscordDeliveryMode,
+      },
+    });
+    throw error;
+  }
 }
 
 async function announceDiscordAppUpdateIfNeeded({ recordAlreadyAnnounced = true } = {}) {
@@ -4958,7 +4985,7 @@ async function sendScheduledSupplyReportIfDue(claim) {
       embeds: [discordSupplyEmbed(claim)],
       allowed_mentions: { parse: [] },
     }, settings, channelId);
-    recordDiscordDeliverySafe({ status: "sent", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings), response: { id: response?.id, channel_id: response?.channel_id } });
+    recordDiscordDeliverySafe({ status: "sent", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings), response: discordDeliveryResponse(response) });
   } catch (error) {
     recordDiscordDeliverySafe({ status: "failed", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings) });
     throw error;
@@ -5437,14 +5464,9 @@ function inventoryStoredTotalsFromPayload(inventories) {
 }
 
 function collectorStatusPayload() {
-  refreshCollectorStatusSettings();
   const intervalMs = serverRefreshIntervalMs();
   pollStatus.intervalMs = intervalMs;
   const nextRunAt = pollStatus.running ? null : pollStatus.nextRunAt;
-  const reconciliationStatuses = reconciliationCollectorStatuses(
-    getCollectorSettings(),
-    pollStatus.collectors,
-  );
   return {
     enabled: serverPollingEnabled,
     intervalMs,
@@ -5453,13 +5475,7 @@ function collectorStatusPayload() {
     lastAttemptAt: pollStatus.lastAttemptAt,
     lastSuccessAt: pollStatus.lastSuccessAt,
     lastError: pollStatus.lastError,
-    collectors: Object.fromEntries(Object.entries(reconciliationStatuses).map(([key, value]) => {
-      const lastSuccessAt = value.lastSuccessAt ?? null;
-      const collectorNextRunAt = lastSuccessAt && value.enabled !== false
-        ? new Date(new Date(lastSuccessAt).getTime() + toNumber(value.intervalMs ?? intervalMs)).toISOString()
-        : value.nextRunAt ?? nextRunAt;
-      return [key, { ...value, lastSuccessAt, nextRunAt: collectorNextRunAt }];
-    })),
+    collectors: pollStatus.collectors,
   };
 }
 
@@ -5548,9 +5564,11 @@ function enrichRelayCraftsForSideEffects(crafts) {
 
 function relayCraftContributionTargets(craftsPayload) {
   const catalog = craftOutputCatalog(craftsPayload);
-  return unwrap(craftsPayload, "craftResults", [])
-    .filter((craft) => craft?.entityId && craft.completed !== true)
-    .map((craft) => {
+  const targets = [];
+  const warnings = [];
+  for (const craft of unwrap(craftsPayload, "craftResults", [])) {
+    if (!craft?.entityId || craft.completed === true) continue;
+    try {
       const craftEntityId = String(craft.entityId).trim();
       if (!/^\d+$/.test(craftEntityId)) {
         throw new Error("Relay craft contribution target has an invalid craft entity id");
@@ -5560,7 +5578,7 @@ function relayCraftContributionTargets(craftsPayload) {
         throw new Error(`Relay craft ${craftEntityId} has invalid experience per progress`);
       }
       const item = craftContributionOutputItem(craft, catalog);
-      return {
+      targets.push({
         craftEntityId,
         profession: craftPrimarySkill(craft) || null,
         craftLabel: String(item.name ?? craft.recipeName ?? craft.craftedItemName ?? "Unknown craft"),
@@ -5569,8 +5587,12 @@ function relayCraftContributionTargets(craftsPayload) {
           ? (craft.tier == null ? null : String(craft.tier))
           : String(item.tier),
         xpPerProgress: String(xpPerProgress),
-      };
-    });
+      });
+    } catch (error) {
+      warnings.push(errorMessage(error));
+    }
+  }
+  return { targets, warnings };
 }
 
 async function runScheduledSupplyReport(claimId) {
@@ -6183,6 +6205,23 @@ function contributionLeaderboard(claimId) {
   };
 }
 
+function currentCraftContributions(claimId) {
+  return projectCraftContributionEnvelope(db.prepare(`
+    SELECT
+      craft_entity_id,
+      contributor_entity_id,
+      contributor_name,
+      contributed_progress,
+      contributed_xp,
+      contribution_count,
+      first_contributed_at,
+      last_contributed_at
+    FROM production_contributions
+    WHERE claim_id = ?
+    ORDER BY last_contributed_at DESC, contributor_name
+  `).all(claimId));
+}
+
 function dashboardHistory(claimId) {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -6671,7 +6710,7 @@ function discordHelpCommand() {
     { name: "/price", value: "Shows current Relay sell and buy orders for an item.", inline: false },
     { name: "/craftwatch", value: "Shows and clears your profession notification roles.", inline: false },
     { name: "/craft-plan", value: "Shows Craft Planner progress. Choose a profession for a focused report.", inline: false },
-    { name: "Links", value: `[App](${appUrl}) | [Feature requests](https://github.com/Red463/bitcraft-claim-monitor/issues)`, inline: false },
+    { name: "Links", value: `[App](${appUrl}) | [Feature requests](https://github.com/Red463/bitcraft-claim-monitor-relay/issues)`, inline: false },
   ], 0x5865f2);
 }
 
@@ -7292,6 +7331,13 @@ const server = createServer(async (req, res) => {
                 (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
                 (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
               ),
+            };
+          }
+          if (domain === "contributions") {
+            const projected = currentCraftContributions(claimId);
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
             };
           }
           if (domain === "public-crafts") {
@@ -7994,16 +8040,16 @@ const server = createServer(async (req, res) => {
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/test") {
         const body = await readJson(req);
         const kind = String(body.kind ?? "basic");
-        const result = await sendDiscordTestNotification(kind);
-        audit(user, "discord.test_message", { kind, status: result?.skipped ? "skipped" : "sent" });
+        const result = await sendDiscordTestNotification(kind, { requestedChannelId: body.channelId });
+        audit(user, "discord.test_message", { kind, channelId: result?.channel_id, status: "sent", sandbox: true });
         return send(res, 200, { ok: true, result });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/craft-plan-report/test") {
         const body = await readJson(req, BODY_LIMITS.settings);
         const profession = body.reportType === "profession" ? normalizeCraftPlanReportProfession(body.profession) : "";
         if (body.reportType === "profession" && !profession) return send(res, 400, { error: "Choose a valid profession." });
-        const result = await sendCraftPlanDiscordReport({ profession, channelId: body.channelId });
-        audit(user, "discord.craft_plan_report.test", { profession: profession || "overview", channelId: body.channelId, messageId: result.response?.id });
+        const result = await sendCraftPlanDiscordReport({ profession, requestedChannelId: body.channelId });
+        audit(user, "discord.craft_plan_report.test", { profession: profession || "overview", channelId: result.response?.channel_id, messageId: result.response?.id, sandbox: true });
         return send(res, 200, { ok: true, result });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/colour-roles/post") {
@@ -8182,7 +8228,6 @@ const server = createServer(async (req, res) => {
         if (!validRefreshIntervalSeconds(refreshSeconds)) return send(res, 400, { error: "Display refresh interval must be between 15 and 300 seconds" });
         const serverRefreshSeconds = Number(body.serverRefreshSeconds ?? refreshSeconds);
         if (!validRefreshIntervalSeconds(serverRefreshSeconds)) return send(res, 400, { error: "Reconciliation cadence must be between 15 and 300 seconds" });
-        const collectorSettings = normalizeCollectorSettings(body.collectorSettings ?? {});
         const defaultPage = String(body.defaultPage ?? DEFAULT_APP_PAGE);
         if (!validAppPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
         const defaultRegion = String(body.defaultRegion ?? "").trim();
@@ -8219,7 +8264,6 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("theme_json", JSON.stringify(nextTheme), updatedAt);
         statements.upsertSetting.run("refresh_seconds", String(refreshSeconds), updatedAt);
         statements.upsertSetting.run("server_refresh_seconds", String(serverRefreshSeconds), updatedAt);
-        statements.upsertSetting.run("collector_settings_json", JSON.stringify(collectorSettings), updatedAt);
         statements.upsertSetting.run("default_page", defaultPage, updatedAt);
         statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
         statements.upsertSetting.run("active_region_overrides", additionalActiveRegions, updatedAt);
@@ -8236,8 +8280,7 @@ const server = createServer(async (req, res) => {
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
         pollStatus.intervalMs = serverRefreshSeconds * 1000;
         scheduleServerPolling(serverRefreshSeconds * 1000);
-        refreshCollectorStatusSettings();
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, collectorCount: Object.keys(collectorSettings).length, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
         startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
         requestRelayRuntimeRefresh?.("manual");
@@ -9177,11 +9220,6 @@ function scheduleServerPolling(delayMs = 0) {
   const intervalMs = serverRefreshIntervalMs();
   pollStatus.intervalMs = intervalMs;
   pollStatus.nextRunAt = new Date(Date.now() + delayMs).toISOString();
-  applyReconciliationSchedule(
-    getCollectorSettings(),
-    pollStatus.collectors,
-    pollStatus.nextRunAt,
-  );
   serverPollTimer = setTimeout(async () => {
     try {
       await collectServerSnapshot();
@@ -9419,16 +9457,20 @@ function startBackgroundTasks() {
         return;
       }
       let contributionTargets = [];
+      let contributionWarnings = [];
       try {
         const crafts = currentStateRepository.read(claimId, "crafts")?.data;
         if (crafts) {
-          contributionTargets = relayCraftContributionTargets(
+          const contributionScope = relayCraftContributionTargets(
             enrichRelayCraftsForSideEffects(crafts),
           );
+          contributionTargets = contributionScope.targets;
+          contributionWarnings = contributionScope.warnings;
         }
       } catch (error) {
+        contributionWarnings = [`Relay craft-contribution targets unavailable: ${errorMessage(error)}`];
         if (!isTestRuntime) {
-          console.warn(`Relay craft-contribution targets unavailable: ${errorMessage(error)}`);
+          console.warn(contributionWarnings[0]);
         }
       }
       if (!relayPrimaryRegionStarted) {
@@ -9438,6 +9480,7 @@ function startBackgroundTasks() {
           regionId,
           members,
           contributionTargets,
+          contributionWarnings,
         });
         relayPrimaryRegionStarted = true;
       } else {
@@ -9446,6 +9489,7 @@ function startBackgroundTasks() {
           regionId,
           members,
           contributionTargets,
+          contributionWarnings,
         });
       }
     };

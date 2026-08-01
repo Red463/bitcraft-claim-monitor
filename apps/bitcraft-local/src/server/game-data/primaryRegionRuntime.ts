@@ -70,8 +70,12 @@ function sessionSignature(
   regionId: string,
   members: Member[],
   targets: ContributionTarget[],
+  warnings: string[] = [],
 ): string {
-  return `${membershipSignature(regionId, members)}|${contributionSignature(targets)}`;
+  const warningSignature = [...new Set(warnings.map((warning) => String(warning).trim()).filter(Boolean))]
+    .sort()
+    .join(",");
+  return `${membershipSignature(regionId, members)}|${contributionSignature(targets)}|${warningSignature}`;
 }
 
 function primaryRegionSource(
@@ -148,6 +152,7 @@ export class RelayPrimaryRegionRuntime {
     regionId: string;
     members: Member[];
     contributionTargets?: ContributionTarget[];
+    contributionWarnings?: string[];
   }): Promise<void> {
     if (this.#session) throw new Error("Relay primary-region runtime is already started");
     this.#relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
@@ -156,6 +161,7 @@ export class RelayPrimaryRegionRuntime {
       config.regionId,
       config.members,
       config.contributionTargets ?? [],
+      config.contributionWarnings ?? [],
     );
   }
 
@@ -164,13 +170,16 @@ export class RelayPrimaryRegionRuntime {
     regionId: string;
     members: Member[];
     contributionTargets?: ContributionTarget[];
+    contributionWarnings?: string[];
   }): Promise<void> {
     const claimId = String(config.claimId ?? this.#claimId ?? "").trim();
     const contributionTargets = config.contributionTargets ?? [];
+    const contributionWarnings = config.contributionWarnings ?? [];
     const nextSignature = sessionSignature(
       config.regionId,
       config.members,
       contributionTargets,
+      contributionWarnings,
     );
     const sameScope = this.#session
       && claimId === this.#claimId
@@ -202,7 +211,7 @@ export class RelayPrimaryRegionRuntime {
       this.#session = null;
       this.#signature = null;
       this.#claimId = claimId;
-      await this.#startSession(config.regionId, config.members, contributionTargets);
+      await this.#startSession(config.regionId, config.members, contributionTargets, contributionWarnings);
     })();
     this.#reconcileInFlight = reconcile;
     return reconcile.finally(() => {
@@ -214,6 +223,7 @@ export class RelayPrimaryRegionRuntime {
     regionIdValue: string,
     members: Member[],
     contributionTargets: ContributionTarget[],
+    contributionWarnings: string[] = [],
   ): Promise<void> {
     const relayBaseUrl = this.#relayBaseUrl;
     if (!relayBaseUrl || !this.#claimId) {
@@ -243,9 +253,10 @@ export class RelayPrimaryRegionRuntime {
         claimId: this.#claimId,
         members,
         ...(contributionTargets.length ? { contributionTargets } : {}),
+        ...(contributionWarnings.length ? { contributionWarnings } : {}),
       });
       this.#session = openingSession;
-      this.#signature = sessionSignature(regionId, members, contributionTargets);
+      this.#signature = sessionSignature(regionId, members, contributionTargets, contributionWarnings);
       this.#lastError = null;
     } catch (error) {
       this.#lastError = error instanceof Error ? error.message : String(error);
@@ -369,6 +380,20 @@ export class RelayPrimaryRegionRuntime {
               receivedAt: snapshot.receivedAt,
             },
             warnings: snapshot.bankInventoryWarnings,
+          },
+          contributions: {
+            data: {},
+            confidence: snapshot.contributionWarnings?.length ? "partial" : "authoritative",
+            provenance: {
+              provider: "relay",
+              sourceKey,
+              regionId: snapshot.regionId,
+              database: snapshot.database,
+              schemaFingerprint: snapshot.schemaFingerprint,
+              sourceObservedAt: null,
+              receivedAt: snapshot.receivedAt,
+            },
+            warnings: snapshot.contributionWarnings ?? [],
           },
         },
       });

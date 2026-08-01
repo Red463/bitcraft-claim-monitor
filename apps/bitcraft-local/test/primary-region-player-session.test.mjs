@@ -237,6 +237,7 @@ test("primary-region session filters member, settlement, and Town Bank state bef
     regionId: "19",
     claimId: "1369094286777412590",
     members,
+    contributionWarnings: ["Relay craft 9002 has invalid experience per progress"],
   });
   fake.state.onConnect(fake.connection);
   assert.deepEqual(fake.state.queries, [
@@ -376,6 +377,7 @@ test("primary-region session filters member, settlement, and Town Bank state bef
       }],
     },
     bankInventoryWarnings: [],
+    contributionWarnings: ["Relay craft 9002 has invalid experience per progress"],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",

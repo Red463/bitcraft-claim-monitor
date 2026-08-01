@@ -120,6 +120,7 @@ test("primary-region runtime publishes players and restarts only when membership
       }],
     },
     bankInventoryWarnings: [],
+    contributionWarnings: ["Relay craft 9002 has invalid experience per progress"],
     database: "relay-region-19",
     regionId: "19",
     schemaFingerprint: "regional-v1",
@@ -254,6 +255,20 @@ test("primary-region runtime publishes players and restarts only when membership
           receivedAt: "2026-07-29T20:41:00.000Z",
         },
         warnings: [],
+      },
+      contributions: {
+        data: {},
+        confidence: "partial",
+        provenance: {
+          provider: "relay",
+          sourceKey: "region:19",
+          regionId: "19",
+          database: "relay-region-19",
+          schemaFingerprint: "regional-v1",
+          sourceObservedAt: null,
+          receivedAt: "2026-07-29T20:41:00.000Z",
+        },
+        warnings: ["Relay craft 9002 has invalid experience per progress"],
       },
     },
   });

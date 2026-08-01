@@ -1,0 +1,105 @@
+name: Deploy Relay preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_database_backup:
+        description: Create a manual Relay database backup even when the schema is unchanged
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-preview
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Require main
+        run: test "$GITHUB_REF" = "refs/heads/main"
+      - name: Check out verified revision
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+      - name: Test application
+        run: corepack pnpm --filter @workspace/bitcraft-local test
+      - name: Build application
+        run: corepack pnpm --filter @workspace/bitcraft-local run build
+      - name: Test deployment contracts
+        run: node --test scripts/test/deploy-*.test.mjs
+      - name: Validate Relay systemd units
+        run: |
+          test -x /usr/bin/node || sudo ln -s "$(command -v node)" /usr/bin/node
+          systemd-analyze verify \
+            deploy/bitcraft-claim-monitor-relay.service \
+            deploy/bitcraft-claim-monitor-relay-worker.service \
+            deploy/bitcraft-claim-monitor-relay-collector.service \
+            deploy/bitcraft-claim-monitor-relay-collector.timer \
+            deploy/bitcraft-claim-monitor-relay-backup.service \
+            deploy/bitcraft-claim-monitor-relay-backup.timer
+      - name: Install Caddy validator
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes caddy
+      - name: Validate coexistence Caddy example
+        run: caddy validate --config deploy/Caddyfile.example
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: relay-preview
+    steps:
+      - name: Configure pinned SSH identity
+        env:
+          RELAY_VPS_SSH_PRIVATE_KEY: ${{ secrets.RELAY_VPS_SSH_PRIVATE_KEY }}
+          RELAY_VPS_KNOWN_HOSTS: ${{ secrets.RELAY_VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$RELAY_VPS_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$RELAY_VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Deploy verified Relay revision
+        env:
+          RELAY_VPS_HOST: ${{ secrets.RELAY_VPS_HOST }}
+          RELAY_VPS_DEPLOY_USER: ${{ secrets.RELAY_VPS_DEPLOY_USER }}
+          FORCE_DATABASE_BACKUP: ${{ inputs.force_database_backup }}
+        run: |
+          BACKUP_OPTION=""
+          if [[ "$FORCE_DATABASE_BACKUP" == "true" ]]; then
+            BACKUP_OPTION=" --force-backup"
+          fi
+          set +e
+          DEPLOY_OUTPUT="$(ssh -i "$HOME/.ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -- "$RELAY_VPS_DEPLOY_USER@$RELAY_VPS_HOST" \
+            "sudo /usr/local/bin/update-bitcraft-claim-monitor-relay --revision '$GITHUB_SHA'$BACKUP_OPTION" 2>&1)"
+          DEPLOY_STATUS=$?
+          set -e
+
+          {
+            printf '## Relay preview deployment\n\n'
+            printf 'Revision: `%s`  \n' "$GITHUB_SHA"
+            printf 'Result: `%s`\n\n' "$([[ "$DEPLOY_STATUS" -eq 0 ]] && printf success || printf failed)"
+            printf 'Remote diagnostics are retained on the VPS and are not copied into GitHub output.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$DEPLOY_STATUS"

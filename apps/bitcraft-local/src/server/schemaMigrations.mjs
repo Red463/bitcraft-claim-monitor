@@ -49,6 +49,22 @@ export const schemaIndexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_market_trades_claim_region_item_time ON market_trades (claim_id, region_id, item_id, item_type, occurred_at DESC);",
 ];
 
+export const retiredTableNames = [
+  "current_claim_state",
+  "recipe_catalog_entries",
+  "game_catalog_refresh_targets",
+  "game_catalog_refresh_runs",
+  "market_listings",
+  "market_buy_orders_current",
+  "market_regional_sale_averages_current",
+  "global_market_price_snapshots",
+  "empire_hexite_targets",
+  "empire_hexite_snapshots",
+  "empire_hexite_sweep_empires",
+  "empire_hexite_sources",
+  "empire_hexite_sweeps",
+];
+
 export function applySettlementStateMigration(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS settlement_state_current (
@@ -383,19 +399,7 @@ export function applySchemaIndexStatements(db, statements = schemaIndexStatement
 }
 export function applyLegacySchemaCleanup(db) {
   db.exec(`
-    DROP TABLE IF EXISTS current_claim_state;
-    DROP TABLE IF EXISTS recipe_catalog_entries;
-    DROP TABLE IF EXISTS game_catalog_refresh_targets;
-    DROP TABLE IF EXISTS game_catalog_refresh_runs;
-    DROP TABLE IF EXISTS market_listings;
-    DROP TABLE IF EXISTS market_buy_orders_current;
-    DROP TABLE IF EXISTS market_regional_sale_averages_current;
-    DROP TABLE IF EXISTS global_market_price_snapshots;
-    DROP TABLE IF EXISTS empire_hexite_targets;
-    DROP TABLE IF EXISTS empire_hexite_snapshots;
-    DROP TABLE IF EXISTS empire_hexite_sweep_empires;
-    DROP TABLE IF EXISTS empire_hexite_sources;
-    DROP TABLE IF EXISTS empire_hexite_sweeps;
+    ${retiredTableNames.map((table) => `DROP TABLE IF EXISTS ${table};`).join("\n")}
     DELETE FROM scheduled_jobs WHERE job_key = 'recipe_catalog_refresh';
     DELETE FROM scheduled_jobs WHERE job_key = 'global_market_insights';
     DELETE FROM scheduled_jobs WHERE job_key = 'empire_hexite_reserves_refresh';

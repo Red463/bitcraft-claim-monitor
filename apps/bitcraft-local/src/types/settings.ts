@@ -86,7 +86,6 @@ export type AppSettings = {
   theme: ThemeSettings;
   refreshSeconds: number;
   serverRefreshSeconds: number;
-  collectorSettings: Record<string, { label: string; enabled: boolean; intervalSeconds: number }>;
   defaultPage: ActivePanel;
   defaultRegion: string;
   additionalActiveRegions: string;
@@ -94,7 +93,6 @@ export type AppSettings = {
   marketDealWatch: MarketDealWatchSettings;
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
   visitorSecurity: { fullIpRetentionDays: number; statsRetentionDays: number; geoipProvider: string; geoipCacheDays: number; geoipSourceUrl: string; geoipAccountId: string; geoipLicenseKey?: string; geoipLicenseKeyConfigured?: boolean; geoipClearLicenseKey?: boolean };
-  browserSnapshotsEnabled: boolean;
   discord: DiscordSettings;
 };
 

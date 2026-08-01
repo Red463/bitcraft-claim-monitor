@@ -106,7 +106,7 @@ export function RefreshStatus({
     return collector.lastError ? `Error: ${collector.lastError}` : `Updated ${collectorTimeLabel(collector.lastSuccessAt)}`;
   };
   return (
-    <div className="refresh-status" aria-label={`Display refreshes every ${intervalSeconds} seconds`} tabIndex={0}>
+    <div className="refresh-status" aria-label={`Live updates apply immediately; local fallback refreshes every ${intervalSeconds} seconds`} tabIndex={0}>
       <span className={`refresh-dot ${loading ? "refreshing" : ""}`} />
       <span className="refresh-copy">
         <small>{loading ? "Refreshing" : "Last refresh"}</small>

@@ -302,7 +302,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
                       <span key={person.contributorEntityId}><strong><TrackedOwnerName name={person.contributorUsername ?? "Unknown"} claim={data.claim} members={data.members} /></strong> {formatNumber(person.totalProgressContributed)} progress - {timeAgo(person.lastContributedAt)}</span>
                     ))}
                   </div>
-                ) : <small>Contributor mapping is not yet available from the Relay.</small>}
+                ) : <small>No contributor activity has been observed for this craft.</small>}
               </section>
             </article>
           );

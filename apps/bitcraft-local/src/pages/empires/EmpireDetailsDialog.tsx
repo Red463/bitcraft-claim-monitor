@@ -22,6 +22,7 @@ type EmpireDetailsDialogProps = {
   empireId: string;
   regionId: string;
   inactiveDays: string;
+  generation: number;
   onClose: () => void;
   onBack?: () => void;
 };
@@ -36,6 +37,7 @@ export function EmpireDetailsDialog({
   empireId,
   regionId,
   inactiveDays,
+  generation,
   onClose,
   onBack,
 }: EmpireDetailsDialogProps) {
@@ -55,7 +57,7 @@ export function EmpireDetailsDialog({
 
   React.useEffect(() => {
     const cached = empireDetailsCache.get(cacheKey);
-    if (!request && cached && retry === 0) {
+    if (!request && cached && retry === 0 && generation === 0) {
       setState({ data: cached, loading: false, error: null });
       return;
     }
@@ -75,7 +77,7 @@ export function EmpireDetailsDialog({
         }
       });
     return () => controller.abort();
-  }, [cacheKey, empireId, inactiveDays, regionId, retry, request?.sequence, trackPromise]);
+  }, [cacheKey, empireId, generation, inactiveDays, regionId, retry, request?.sequence, trackPromise]);
 
   const data = state.data;
   const empire = data?.empire ?? {};
