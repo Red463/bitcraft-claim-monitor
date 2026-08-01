@@ -163,6 +163,36 @@ test("buy-order view keeps item and cargo sale baselines separate for colliding 
   ]);
 });
 
+test("buy-order view joins numeric cargo orders to cargo baselines when item IDs collide", () => {
+  const result = views.regionalBuyOrdersView({
+    orders: [{
+      ...snapshot.orders[0],
+      entityId: "numeric-cargo",
+      itemType: 1,
+      itemId: "43",
+      price: "25",
+    }],
+  }, {
+    regionId: "19",
+    saleBaselines: new Map([
+      ["19:item:43", {
+        regionId: "19", itemType: "item", itemId: "43",
+        salesCount: 3, unitsSold: "3", totalValue: "30",
+      }],
+      ["19:cargo:43", {
+        regionId: "19", itemType: "cargo", itemId: "43",
+        salesCount: 3, unitsSold: "3", totalValue: "60",
+      }],
+    ]),
+    getEntity: () => null,
+  });
+
+  assert.equal(result.rows[0].itemType, "cargo");
+  assert.equal(result.rows[0].averageUnitPrice, "20");
+  assert.equal(result.rows[0].premiumPercent, "25");
+  assert.equal(result.rows[0].opportunityEligible, true);
+});
+
 test("buy-order view sorts fractional premiums by their exact values beyond display rounding", () => {
   const result = views.regionalBuyOrdersView({
     orders: [

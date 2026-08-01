@@ -337,9 +337,9 @@ export function regionalBuyOrdersView(snapshot, options = {}) {
     .map(record)
     .filter((order) => String(order.side ?? "buy").toLowerCase() !== "sell")
     .map((order) => {
-    const itemType = String(order.itemType ?? "").toLowerCase() === "cargo" ? "cargo" : "item";
+    const normalizedItemType = itemType(order.itemType);
     const itemId = decimal(order.itemId);
-    const item = record(getEntity(`${itemType === "cargo" ? "cargo" : "items"}:${itemId}`));
+    const item = record(getEntity(`${normalizedItemType === "cargo" ? "cargo" : "items"}:${itemId}`));
     const quantity = decimal(order.quantity);
     const unitPrice = decimal(order.price ?? order.priceThreshold);
     const listedAt = order.timestamp == null ? null : String(order.timestamp);
@@ -352,8 +352,8 @@ export function regionalBuyOrdersView(snapshot, options = {}) {
       buyerEntityId: decimal(order.ownerEntityId),
       buyerName: String(order.ownerUsername ?? ""),
       itemId,
-      itemType,
-      itemName: String(item.name ?? `${itemType === "cargo" ? "Cargo" : "Item"} #${itemId}`),
+      itemType: normalizedItemType,
+      itemName: String(item.name ?? `${normalizedItemType === "cargo" ? "Cargo" : "Item"} #${itemId}`),
       tier: item.tier ?? null,
       rarity: String(item.rarity ?? ""),
       rarityStr: String(item.rarity ?? ""),
