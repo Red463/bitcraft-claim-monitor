@@ -77,7 +77,6 @@ import { ItemIcon, ItemLabel, TierMaterialIcon } from "../main/ItemDisplay";
 import { SearchBox } from "../main/SearchBox";
 import { Info, MiniStat, Stat } from "../main/Stats";
 import {
-  DEFAULT_COLLECTOR_SETTINGS,
   DEFAULT_COLOUR_ROLES,
   DEFAULT_CRAFT_CHANNELS,
   DEFAULT_CRAFT_ROLES,
@@ -120,7 +119,7 @@ import type {
   DiscordWelcomeFlow,
 } from "../../types/settings";
 import type { ActivePanel } from "../../types/app";
-import { COLLECTOR_PURPOSES, bytesLabel, collectorStatusValue, discordAuditActionLabel, discordAuditUserLabel, discordChangeLabel, discordSnowflakeDate, scheduledJobProgressText } from "./adminDisplay";
+import { bytesLabel, collectorStatusValue, discordAuditActionLabel, discordAuditUserLabel, discordChangeLabel, discordSnowflakeDate, scheduledJobProgressText } from "./adminDisplay";
 import { claimPendingAction, releasePendingAction } from "../../utils/pendingActions";
 
 const LOCAL_API = "/api/local";
@@ -579,16 +578,6 @@ export function AdminPanel({
     setDraft((current) => ({
       ...current,
       toastSettings: { ...current.toastSettings, [key]: value },
-    }));
-  }
-
-  function updateCollectorSetting(key: string, patch: Partial<AppSettings["collectorSettings"][string]>) {
-    setDraft((current) => ({
-      ...current,
-      collectorSettings: {
-        ...current.collectorSettings,
-        [key]: { ...current.collectorSettings[key], ...patch },
-      },
     }));
   }
 
@@ -1726,45 +1715,6 @@ export function AdminPanel({
             <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
           </section>
           <AdminPopupsSection api={api} />
-          <section className="form-card">
-            <div className="split-header">
-              <div>
-                <h3><RefreshCw size={17} /> Blocked Evidence Reconciliation</h3>
-                <p className="legend">Current pages update from committed Relay generations. These two jobs only preserve history that still needs an authoritative upstream mapping.</p>
-              </div>
-            </div>
-            <div className="collector-summary">
-              <div>
-                <strong>Live pages</strong>
-                <span>Publish from committed Relay generations without waiting for a scheduled job.</span>
-              </div>
-              <div>
-                <strong>Blocked imports</strong>
-                <span>Use validated Relay crafts, then request only the still-unproven contribution evidence.</span>
-              </div>
-              <div>
-                <strong>Disabling a job</strong>
-                <span>Leaves live pages unchanged, but the related historical reconciliation pauses.</span>
-              </div>
-            </div>
-            <div className="collector-settings-list">
-              {Object.entries(draft.collectorSettings).map(([key, collector]) => (
-                <div className="collector-setting-row" key={key}>
-                  <label className="toggle-line collector-toggle">
-                    <input type="checkbox" checked={collector.enabled !== false} onChange={(event) => updateCollectorSetting(key, { enabled: event.target.checked })} />
-                    <span>
-                      <strong>{collector.label ?? key}</strong>
-                      <small>{COLLECTOR_PURPOSES[key] ?? "Maintains background data for history, notifications, cached tools, or diagnostics."}</small>
-                    </span>
-                  </label>
-                  <label className="field compact-field collector-interval-field">
-                    <span>{collector.enabled === false ? "Disabled" : "Runs every"}</span>
-                    <div className="unit-input"><input type="number" min={15} max={3600} value={collector.intervalSeconds} onChange={(event) => updateCollectorSetting(key, { intervalSeconds: Number(event.target.value) })} /><em>sec</em></div>
-                  </label>
-                </div>
-              ))}
-            </div>
-          </section>
           <div className="admin-section">
             <section className="form-card member-tracking-card">
               <div className="split-header">

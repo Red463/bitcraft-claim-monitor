@@ -10,8 +10,11 @@ import {
   applyMarketTradeRegionBackfill,
   applyProductionContributionExactAmountMigration,
   applySchemaIndexStatements,
+  retiredTableNames,
   schemaIndexStatements,
 } from "../src/server/schemaMigrations.mjs";
+import { installRetiredTableAuthorizer } from "../src/server/retiredTableAuthorizer.mjs";
+import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 
 test("production contribution migration stores live Relay totals as text", () => {
   const db = new DatabaseSync(":memory:");
@@ -460,4 +463,43 @@ test("applyLegacySchemaCleanup drops legacy server-owned cache tables", () => {
   assert.match(executed[0], /domain IN \('regionStatus', 'tradeVolume'\)/);
   assert.match(executed[0], /domain = 'region' AND json_type\(data_json, '\$\.claims'\) = 'array'/);
   assert.doesNotMatch(executed[0], /provider = 'legacy'/);
+});
+
+test("retired tables share cleanup ownership and are absent from a fresh schema", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyLegacySchemaCleanup(db);
+  const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+  for (const table of retiredTableNames) assert.equal(tables.has(table), false, `${table} must be retired`);
+  assert.equal(tables.has("app_settings"), true);
+  db.close();
+});
+
+test("retired table authorizer rejects post-cleanup access while permitting retained tables", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE scheduled_jobs (job_key TEXT PRIMARY KEY);
+    CREATE TABLE domain_payload_current (domain TEXT, data_json TEXT);
+  `);
+  applyLegacySchemaCleanup(db);
+  db.exec("CREATE TABLE market_listings (id INTEGER);");
+  installRetiredTableAuthorizer(db, { enabled: true });
+
+  for (const statement of [
+    "SELECT * FROM market_listings",
+    "INSERT INTO market_listings (id) VALUES (1)",
+    "UPDATE market_listings SET id = 2",
+    "DELETE FROM market_listings",
+    "PRAGMA table_info(market_listings)",
+    "DROP TABLE market_listings",
+  ]) {
+    assert.throws(
+      () => db.prepare(statement).run(),
+      /Retired SQLite table access: market_listings/,
+      statement,
+    );
+  }
+  assert.doesNotThrow(() => db.prepare("INSERT INTO app_settings (key, value) VALUES ('kept', 'yes')").run());
+  db.close();
 });

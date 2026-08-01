@@ -5,7 +5,6 @@ import test from "node:test";
 const admin = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
 const page = readFileSync(new URL("../src/components/admin/ServerHealthSection.tsx", import.meta.url), "utf8");
 const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
-const collectorSettings = readFileSync(new URL("../src/server/collectorSettings.mjs", import.meta.url), "utf8");
 const defaultAppSettings = readFileSync(new URL("../src/server/defaultAppSettings.mjs", import.meta.url), "utf8");
 const appSettingsPolicy = readFileSync(new URL("../src/server/appSettingsPolicy.mjs", import.meta.url), "utf8");
 const permissions = readFileSync(new URL("../src/server/adminPermissions.mjs", import.meta.url), "utf8");
@@ -48,7 +47,7 @@ test("deployment installs a root collector timer without granting Node sudo", ()
 });
 
 test("server no longer exposes snapshot history configuration or routes", () => {
-  const serverSource = [server, collectorSettings, defaultAppSettings, appSettingsPolicy, permissions].join("\n");
+  const serverSource = [server, defaultAppSettings, appSettingsPolicy, permissions].join("\n");
   for (const legacy of [
     "/api/local/snapshots",
     "snapshotRetentionDays",

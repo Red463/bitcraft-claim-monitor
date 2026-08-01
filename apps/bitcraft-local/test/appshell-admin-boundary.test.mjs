@@ -59,7 +59,7 @@ test("Linked Accounts uses typed in-app confirmation for administrator-assisted 
   assert.doesNotMatch(access, /window\.confirm/);
   assert.match(adminCss, /\.account-privacy-deletion-dialog\s*\{[^}]*max-height:\s*calc\(100vh - 36px\)/);
 });
-test("Admin diagnostics and collector settings stay bounded", () => {
+test("Admin diagnostics stay bounded", () => {
   const adminCss = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
 
   assert.match(adminCss, /\.map-url-diagnostics code \{/);
@@ -67,7 +67,6 @@ test("Admin diagnostics and collector settings stay bounded", () => {
   assert.match(adminCss, /overflow-wrap:\s*anywhere/);
   assert.match(adminCss, /\.map-url-log-list \{/);
   assert.match(adminCss, /max-height:\s*220px/);
-  assert.match(adminCss, /\.collector-setting-row \{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/);
 });
 test("Admin console uses compact navigation and bounded audit tools", () => {
   const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");

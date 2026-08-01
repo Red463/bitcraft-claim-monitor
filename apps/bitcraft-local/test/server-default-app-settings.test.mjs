@@ -17,7 +17,7 @@ test("defaultAppSettingRows preserves bootstrap app settings and timestamps", ()
     updatedAt: "2026-06-29T12:00:00.000Z",
   });
 
-  assert.equal(rows.length, 19);
+  assert.equal(rows.length, 18);
   assert.deepEqual(rows.map((row) => row.key), [
     "claim_id",
     "bitcraft_sync_url",
@@ -25,7 +25,6 @@ test("defaultAppSettingRows preserves bootstrap app settings and timestamps", ()
     "theme_json",
     "refresh_seconds",
     "server_refresh_seconds",
-    "collector_settings_json",
     "default_page",
     "default_region",
     "toast_json",
@@ -52,7 +51,6 @@ test("defaultAppSettingRows preserves JSON defaults used by admin and notificati
   const rows = Object.fromEntries(defaultAppSettingRows({ serverRefreshSeconds: 30, updatedAt: "now" }).map((row) => [row.key, row.value]));
 
   assert.deepEqual(JSON.parse(rows.excluded_member_ids_json), []);
-  assert.deepEqual(JSON.parse(rows.collector_settings_json), {});
   assert.deepEqual(JSON.parse(rows.toast_json), { marketListings: true, marketSales: true, production: true });
   assert.deepEqual(JSON.parse(rows.market_deal_watch_json), {
     maxWatchesPerUser: 10,
@@ -78,8 +76,8 @@ test("defaultAppSettingRows preserves JSON defaults used by admin and notificati
   assert.deepEqual(JSON.parse(rows.discord_last_delivery_json), { status: "none" });
 });
 
-test("obsoleteAppSettingKeys preserves removed settings cleanup", () => {
-  assert.deepEqual(obsoleteAppSettingKeys, ["analytics_json"]);
+test("obsoleteAppSettingKeys removes retired configuration from existing databases", () => {
+  assert.deepEqual(obsoleteAppSettingKeys, ["analytics_json", "collector_settings_json"]);
 });
 test("applyDefaultAppSettings inserts defaults and removes obsolete settings", () => {
   const calls = [];
@@ -125,7 +123,7 @@ test("applyDefaultAppSettings derives default rows when rows are not supplied", 
     updatedAt: "2026-06-29T12:45:00.000Z",
   });
 
-  assert.equal(inserted.length, 19);
+  assert.equal(inserted.length, 18);
   assert.deepEqual(inserted.find(([key]) => key === "server_refresh_seconds"), ["server_refresh_seconds", "75", "2026-06-29T12:45:00.000Z"]);
-  assert.deepEqual(deleted, [["analytics_json"]]);
+  assert.deepEqual(deleted, [["analytics_json"], ["collector_settings_json"]]);
 });

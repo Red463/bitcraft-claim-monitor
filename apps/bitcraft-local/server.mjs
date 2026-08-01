@@ -65,11 +65,6 @@ import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/s
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import {
-  applyReconciliationSchedule,
-  normalizeCollectorSettings,
-  reconciliationCollectorStatuses,
-} from "./src/server/collectorSettings.mjs";
-import {
   readRelayClaimBuildingsForPlanning,
   readRelayClaimForSupplyReport,
   readRelayCraftsForDiscord,
@@ -116,6 +111,7 @@ import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/se
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
+import { installRetiredTableAuthorizer } from "./src/server/retiredTableAuthorizer.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
 import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
@@ -413,6 +409,8 @@ applySchemaIndexStatements(db);
 
 const now = new Date().toISOString();
 applyDefaultAppSettings(db, { serverRefreshSeconds: Math.round(snapshotIntervalMs / 1000), updatedAt: now });
+cleanupRetiredRegionalMarketState();
+installRetiredTableAuthorizer(db);
 
 const statements = createPreparedStatements(db);
 const gameDataGenerationListeners = new Set();
@@ -1218,22 +1216,11 @@ function publicDiscordSettings() {
   };
 }
 
-function getCollectorSettings() {
-  return normalizeCollectorSettings(safeJson(statements.getSetting.get("collector_settings_json")?.value, {}));
-}
-
 function currentClaimId() {
   return statements.getSetting.get("claim_id")?.value ?? defaultClaimId;
 }
 
-function migrateRetiredCollectorSettings() {
-  const now = new Date().toISOString();
-  const source = safeJson(statements.getSetting.get("collector_settings_json")?.value, {});
-  const normalized = normalizeCollectorSettings(source);
-  const serialized = JSON.stringify(normalized);
-  if (statements.getSetting.get("collector_settings_json")?.value !== serialized) {
-    statements.upsertSetting.run("collector_settings_json", serialized, now);
-  }
+function cleanupRetiredRegionalMarketState() {
   db.prepare("DELETE FROM scheduled_jobs WHERE job_key = ?").run("regional_buy_order_sale_baselines_refresh");
   db.prepare("DELETE FROM app_settings WHERE key IN (?, ?)").run(
     "regional_buy_order_collector_retired_at",
@@ -1250,7 +1237,6 @@ function migrateMarketAccessSplit() {
   statements.upsertSetting.run(markerKey, now, now);
 }
 
-migrateRetiredCollectorSettings();
 migrateMarketAccessSplit();
 
 function marketDealWatchSettings() {
@@ -1274,7 +1260,6 @@ function getSettings() {
     theme: { ...defaultTheme, ...theme },
     refreshSeconds: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("refresh_seconds")?.value, 30),
     serverRefreshSeconds: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("server_refresh_seconds")?.value, Math.round(snapshotIntervalMs / 1000)),
-    collectorSettings: getCollectorSettings(),
     defaultPage: validAppPage(savedDefaultPage) ? savedDefaultPage : DEFAULT_APP_PAGE,
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     additionalActiveRegions: statements.getSetting.get("active_region_overrides")?.value ?? "",
@@ -1294,7 +1279,11 @@ const pollStatus = {
   lastAttemptAt: null,
   lastSuccessAt: null,
   lastError: null,
-  collectors: Object.fromEntries(Object.entries(getCollectorSettings()).map(([key, value]) => [key, { ...value, intervalMs: value.intervalSeconds * 1000, lastAttemptAt: null, lastSuccessAt: null, lastError: null, durationMs: null, nextRunAt: null }])),
+  collectors: {
+    production: { label: "Production lifecycle", enabled: true, source: "relay-commits" },
+    settlementTransitions: { label: "Settlement transitions", enabled: true, source: "relay-commits" },
+    empireMembership: { label: "Empire membership", enabled: true, source: "relay-subscription" },
+  },
   storageLastAttemptAt: null,
   storageLastSuccessAt: null,
   storageLastError: null,
@@ -1307,20 +1296,8 @@ function serverRefreshIntervalMs() {
   return seconds * 1000;
 }
 
-function refreshCollectorStatusSettings() {
-  const settings = getCollectorSettings();
-  for (const [key, value] of Object.entries(settings)) {
-    setCollectorStatus(key, {
-      label: value.label,
-      enabled: serverPollingEnabled && value.enabled,
-      intervalSeconds: value.intervalSeconds,
-      intervalMs: value.intervalSeconds * 1000,
-    });
-  }
-}
-
 function setCollectorStatus(key, patch = {}) {
-  const current = pollStatus.collectors[key] ?? { label: key, enabled: serverPollingEnabled };
+  const current = pollStatus.collectors[key] ?? { label: key, enabled: true };
   pollStatus.collectors[key] = { ...current, ...patch };
 }
 
@@ -1334,15 +1311,6 @@ function collectorAttempt(key, step = "Starting") {
     progressTotal: null,
   });
   return Date.now();
-}
-
-function collectorProgress(key, step, progress = {}) {
-  setCollectorStatus(key, {
-    running: true,
-    currentStep: step,
-    progressCurrent: Number.isFinite(Number(progress.current)) ? Number(progress.current) : null,
-    progressTotal: Number.isFinite(Number(progress.total)) ? Number(progress.total) : null,
-  });
 }
 
 function collectorSuccess(key, startedAt) {
@@ -1365,15 +1333,6 @@ function collectorFailure(key, startedAt, error) {
     currentStep: null,
     progressCurrent: null,
     progressTotal: null,
-  });
-}
-
-function sideEffectCollectorDue(key, force = false) {
-  return sideEffectCollectorIsDue({
-    key,
-    force,
-    settings: getCollectorSettings(),
-    statuses: pollStatus.collectors,
   });
 }
 
@@ -5436,14 +5395,9 @@ function inventoryStoredTotalsFromPayload(inventories) {
 }
 
 function collectorStatusPayload() {
-  refreshCollectorStatusSettings();
   const intervalMs = serverRefreshIntervalMs();
   pollStatus.intervalMs = intervalMs;
   const nextRunAt = pollStatus.running ? null : pollStatus.nextRunAt;
-  const reconciliationStatuses = reconciliationCollectorStatuses(
-    getCollectorSettings(),
-    pollStatus.collectors,
-  );
   return {
     enabled: serverPollingEnabled,
     intervalMs,
@@ -5452,13 +5406,7 @@ function collectorStatusPayload() {
     lastAttemptAt: pollStatus.lastAttemptAt,
     lastSuccessAt: pollStatus.lastSuccessAt,
     lastError: pollStatus.lastError,
-    collectors: Object.fromEntries(Object.entries(reconciliationStatuses).map(([key, value]) => {
-      const lastSuccessAt = value.lastSuccessAt ?? null;
-      const collectorNextRunAt = lastSuccessAt && value.enabled !== false
-        ? new Date(new Date(lastSuccessAt).getTime() + toNumber(value.intervalMs ?? intervalMs)).toISOString()
-        : value.nextRunAt ?? nextRunAt;
-      return [key, { ...value, lastSuccessAt, nextRunAt: collectorNextRunAt }];
-    })),
+    collectors: pollStatus.collectors,
   };
 }
 
@@ -8181,7 +8129,6 @@ const server = createServer(async (req, res) => {
         if (!validRefreshIntervalSeconds(refreshSeconds)) return send(res, 400, { error: "Display refresh interval must be between 15 and 300 seconds" });
         const serverRefreshSeconds = Number(body.serverRefreshSeconds ?? refreshSeconds);
         if (!validRefreshIntervalSeconds(serverRefreshSeconds)) return send(res, 400, { error: "Reconciliation cadence must be between 15 and 300 seconds" });
-        const collectorSettings = normalizeCollectorSettings(body.collectorSettings ?? {});
         const defaultPage = String(body.defaultPage ?? DEFAULT_APP_PAGE);
         if (!validAppPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
         const defaultRegion = String(body.defaultRegion ?? "").trim();
@@ -8218,7 +8165,6 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("theme_json", JSON.stringify(nextTheme), updatedAt);
         statements.upsertSetting.run("refresh_seconds", String(refreshSeconds), updatedAt);
         statements.upsertSetting.run("server_refresh_seconds", String(serverRefreshSeconds), updatedAt);
-        statements.upsertSetting.run("collector_settings_json", JSON.stringify(collectorSettings), updatedAt);
         statements.upsertSetting.run("default_page", defaultPage, updatedAt);
         statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
         statements.upsertSetting.run("active_region_overrides", additionalActiveRegions, updatedAt);
@@ -8235,8 +8181,7 @@ const server = createServer(async (req, res) => {
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
         pollStatus.intervalMs = serverRefreshSeconds * 1000;
         scheduleServerPolling(serverRefreshSeconds * 1000);
-        refreshCollectorStatusSettings();
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, collectorCount: Object.keys(collectorSettings).length, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
         startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
         requestRelayRuntimeRefresh?.("manual");
@@ -9176,11 +9121,6 @@ function scheduleServerPolling(delayMs = 0) {
   const intervalMs = serverRefreshIntervalMs();
   pollStatus.intervalMs = intervalMs;
   pollStatus.nextRunAt = new Date(Date.now() + delayMs).toISOString();
-  applyReconciliationSchedule(
-    getCollectorSettings(),
-    pollStatus.collectors,
-    pollStatus.nextRunAt,
-  );
   serverPollTimer = setTimeout(async () => {
     try {
       await collectServerSnapshot();

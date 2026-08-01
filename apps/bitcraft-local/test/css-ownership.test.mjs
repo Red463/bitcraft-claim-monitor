@@ -841,7 +841,6 @@ test("admin page and loader styles live in the admin stylesheet", () => {
     ".admin-tabs",
     ".admin-section",
     ".admin-metrics",
-    ".collector-settings-list",
     ".scheduled-job-list",
     ".scheduled-job-row",
     ".database-browser",

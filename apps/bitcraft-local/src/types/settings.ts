@@ -86,7 +86,6 @@ export type AppSettings = {
   theme: ThemeSettings;
   refreshSeconds: number;
   serverRefreshSeconds: number;
-  collectorSettings: Record<string, { label: string; enabled: boolean; intervalSeconds: number }>;
   defaultPage: ActivePanel;
   defaultRegion: string;
   additionalActiveRegions: string;

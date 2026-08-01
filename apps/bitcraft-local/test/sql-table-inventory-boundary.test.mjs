@@ -2,12 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { retiredTableNames } from "../src/server/schemaMigrations.mjs";
+
 const bootstrap = readFileSync(
   new URL("../src/server/schemaBootstrap.mjs", import.meta.url),
-  "utf8",
-);
-const migrations = readFileSync(
-  new URL("../src/server/schemaMigrations.mjs", import.meta.url),
   "utf8",
 );
 const inventory = readFileSync(
@@ -35,12 +33,8 @@ test("every fresh SQL table has an explicit live-first ownership decision", () =
 });
 
 test("every explicitly retired legacy table is absent from bootstrap and documented", () => {
-  const retiredTables = names(
-    migrations,
-    /DROP TABLE IF EXISTS\s+([A-Za-z0-9_]+)/g,
-  );
-  assert.ok(retiredTables.length > 0);
-  for (const table of retiredTables) {
+  assert.ok(retiredTableNames.length > 0);
+  for (const table of retiredTableNames) {
     assert.doesNotMatch(
       bootstrap,
       new RegExp(`CREATE TABLE IF NOT EXISTS\\s+${table}\\b`),

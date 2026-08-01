@@ -16,6 +16,8 @@ const claimId = "1369094286777412590";
 const legalPolicy = legalPolicyForEnvironment({});
 const legalDigests = legalPolicyDigests(legalPolicy);
 
+process.env.RETIRED_TABLE_GUARD_TEST = "true";
+
 function json(res, body, status = 200) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
@@ -1437,7 +1439,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(initialConfig.analytics, undefined);
   assert.deepEqual(initialConfig.excludedMemberIds, []);
   assert.equal(initialConfig.serverRefreshSeconds, 30);
-  assert.equal(initialConfig.collectorSettings.buyOrders, undefined);
+  assert.equal(initialConfig.collectorSettings, undefined);
   const initialPublicPopups = await fetch(`${origin}/api/local/popups`).then((response) => response.json());
   assert.deepEqual(initialPublicPopups, { popups: [] });
   const anonymousAdminPopups = await fetch(`${origin}/api/local/admin/popups`);
@@ -2108,8 +2110,9 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(poll.status, 200);
   const pollJson = await poll.json();
   const reconcilers = pollJson.collectorStatus.collectors;
-  assert.deepEqual(reconcilers, {});
-  assert.equal(reconcilers.production, undefined);
+  assert.equal(reconcilers.production.source, "relay-commits");
+  assert.equal(reconcilers.settlementTransitions.source, "relay-commits");
+  assert.equal(reconcilers.empireMembership.source, "relay-subscription");
   const baselineHistory = await fetch(`${origin}/api/local/market/history?claimId=${claimId}&owner=Tester`).then((response) => response.json());
   assert.ok(baselineHistory.totals, JSON.stringify(baselineHistory));
   assert.equal(baselineHistory.totals.confirmedSales, 1);
@@ -2667,15 +2670,15 @@ test("regional market retirement cleanup runs after the older collector marker",
 
   await start();
   const migratedDatabase = new DatabaseSync(databasePath, { readOnly: true });
-  const collectorSettings = JSON.parse(
-    migratedDatabase.prepare("SELECT value FROM app_settings WHERE key = 'collector_settings_json'").get().value,
-  );
+  const collectorSettingsCount = migratedDatabase.prepare(
+    "SELECT COUNT(*) AS count FROM app_settings WHERE key = 'collector_settings_json'",
+  ).get().count;
   const markerCount = migratedDatabase.prepare(`
     SELECT COUNT(*) AS count
     FROM app_settings
     WHERE key IN ('regional_buy_order_collector_retired_at', 'regional_buy_order_state_retired_at')
   `).get().count;
   migratedDatabase.close();
-  assert.deepEqual(collectorSettings, {});
+  assert.equal(collectorSettingsCount, 0);
   assert.equal(markerCount, 0);
 });

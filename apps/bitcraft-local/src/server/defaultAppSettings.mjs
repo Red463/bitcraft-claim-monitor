@@ -15,7 +15,7 @@ export const defaultTheme = {
   danger: "#ef6461",
 };
 
-export const obsoleteAppSettingKeys = ["analytics_json"];
+export const obsoleteAppSettingKeys = ["analytics_json", "collector_settings_json"];
 
 export function defaultAppSettingRows({ serverRefreshSeconds, updatedAt }) {
   return [
@@ -25,7 +25,6 @@ export function defaultAppSettingRows({ serverRefreshSeconds, updatedAt }) {
     settingRow("theme_json", JSON.stringify(defaultTheme), updatedAt),
     settingRow("refresh_seconds", "30", updatedAt),
     settingRow("server_refresh_seconds", String(serverRefreshSeconds), updatedAt),
-    settingRow("collector_settings_json", JSON.stringify({}), updatedAt),
     settingRow("default_page", "dashboard", updatedAt),
     settingRow("default_region", defaultRegionId, updatedAt),
     settingRow("toast_json", JSON.stringify({ marketListings: true, marketSales: true, production: true }), updatedAt),
