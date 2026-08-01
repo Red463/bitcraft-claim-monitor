@@ -110,9 +110,12 @@ DISCORD_SANDBOX_CHANNEL_ID=<explicit-test-channel>
 ```
 
 Automated preview delivery and command registration stay disabled.
-`DISCORD_SANDBOX_CHANNEL_ID` is reserved for a later authenticated
-manual-delivery gate; the current runtime does not read it and records preview
-tests instead of sending them. Tests must never send real Discord messages.
+An authenticated administrator may explicitly send a manual test only to the
+exact sandbox Discord channel in `DISCORD_SANDBOX_CHANNEL_ID`. A supplied
+nonmatching channel is rejected. Automatic jobs, the outbox, DMs, gateway
+startup, and command registration remain recorded or disabled and cannot use
+this exception. Tests use a local fake Discord origin and must never send real
+Discord messages.
 
 ## Assets
 

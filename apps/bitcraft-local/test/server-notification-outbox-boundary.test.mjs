@@ -18,9 +18,9 @@ test("event-driven Discord notifications are enqueued and delivered by the worke
   assert.match(server, /sourceKey: `app_update:/);
 });
 
-test("Discord notification tests use the same sender gate as real notifications", () => {
-  assert.match(server, /sendDiscordActivity\(sample\.eventType/);
-  assert.doesNotMatch(server, /sendDiscordMessage\(\{\s*embeds: \[discordEmbedForActivity\(sample\.eventType/);
+test("Discord notification tests use only the explicit sandbox sender", () => {
+  assert.match(server, /manualDiscordSandboxMessage\(payload, settings, requestedChannelId\)/);
+  assert.doesNotMatch(server, /sendDiscordActivity\(sample\.eventType/);
 });
 
 test("Discord craft notifications pass settings into embed rendering for profession emojis", () => {

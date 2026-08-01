@@ -151,6 +151,7 @@ import {
   discordDeliveryMode,
   recordedDiscordResponse,
   requireLiveDiscord,
+  sendDiscordManualSandboxMessage,
 } from "./src/server/discordDeliveryMode.mjs";
 import { liveEmpireHexiteProjection } from "./src/server/empireHexite.mjs";
 import {
@@ -325,6 +326,7 @@ const discordApiOrigin = isTestRuntime && process.env.DISCORD_API_ORIGIN
   ? String(process.env.DISCORD_API_ORIGIN).replace(/\/+$/, "")
   : "https://discord.com/api/v10";
 const configuredDiscordDeliveryMode = discordDeliveryMode(process.env);
+const configuredDiscordSandboxChannelId = String(process.env.DISCORD_SANDBOX_CHANNEL_ID ?? "").trim();
 const legalPolicy = legalPolicyForEnvironment(process.env);
 const legalDigests = legalPolicyDigests(legalPolicy);
 const legalSnapshot = currentLegalSnapshot(legalPolicy, legalDigests);
@@ -2069,23 +2071,62 @@ async function craftPlanDiscordReport(profession = "") {
   }
 }
 
-async function sendCraftPlanDiscordReport({ profession = "", channelId } = {}) {
-  const settings = getDiscordSettingsRaw();
-  const targetChannelId = String(channelId ?? "").trim();
-  if (!settings.enabled || !settings.botToken) throw new Error("Discord notifications are not fully configured.");
-  if (!validDiscordId(targetChannelId)) throw new Error("Choose a valid Discord channel.");
-  const report = await craftPlanDiscordReport(profession);
-  const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(report), settings, targetChannelId);
-  recordDiscordDeliverySafe({
-    status: "sent",
-    eventType: "craft_plan_report",
-    channelId: targetChannelId,
-    channelKey: "craftPlanReports",
-    summary: report.title,
-    metadata: { profession: report.profession || "overview", test: true },
-    response: { id: response?.id, channel_id: response?.channel_id },
+async function manualDiscordSandboxMessage(payload, settings, requestedChannelId = "") {
+  return sendDiscordManualSandboxMessage({
+    apiOrigin: discordApiOrigin,
+    configuredChannelId: configuredDiscordSandboxChannelId,
+    fetchImpl: fetch,
+    payload,
+    requestedChannelId,
+    settings,
   });
-  return { report, response: { id: response?.id, channel_id: response?.channel_id } };
+}
+
+function discordDeliveryResponse(response) {
+  return {
+    id: response?.id,
+    channel_id: response?.channel_id,
+    ...(response?.recorded === true ? { recorded: true } : {}),
+  };
+}
+
+async function sendCraftPlanDiscordReport({ profession = "", requestedChannelId = "" } = {}) {
+  const settings = getDiscordSettingsRaw();
+  const metadata = {
+    profession: profession || "overview",
+    test: true,
+    manualSandboxTest: true,
+    deliveryMode: configuredDiscordDeliveryMode,
+  };
+  try {
+    const report = await craftPlanDiscordReport(profession);
+    const response = await manualDiscordSandboxMessage(
+      buildCraftPlanDiscordEmbed(report),
+      settings,
+      requestedChannelId,
+    );
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType: "craft_plan_report",
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary: report.title,
+      metadata: { ...metadata, profession: report.profession || metadata.profession },
+      response: discordDeliveryResponse(response),
+    });
+    return { report, response: discordDeliveryResponse(response) };
+  } catch (error) {
+    recordDiscordDeliverySafe({
+      status: "failed",
+      eventType: "craft_plan_report",
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary: "Craft Planner report sandbox test",
+      error: error instanceof Error ? error.message : String(error),
+      metadata,
+    });
+    throw error;
+  }
 }
 
 let craftPlanReportDispatcherRunning = false;
@@ -3501,9 +3542,9 @@ async function sendDiscordCharacterLinkRequest(userRow, metadata = {}, settings 
       channelKey,
       summary: `Character link requested: ${characterName}`,
       metadata: diagnostics,
-      response: { id: response?.id, channel_id: response?.channel_id },
+      response: discordDeliveryResponse(response),
     });
-    return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
+    return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     recordDiscordDeliverySafe({
@@ -3566,7 +3607,7 @@ async function sendDiscordCharacterLinkAdminAction(userRow, action, administrato
       channelKey,
       summary,
       metadata,
-      response: { id: response?.id, channel_id: response?.channel_id },
+      response: discordDeliveryResponse(response),
     });
     return { ok: true, skipped: false };
   } catch (error) {
@@ -3618,7 +3659,7 @@ async function sendDiscordCharacterLinkUserNotice(userRow, action, administrator
       channelKey: "dm",
       summary,
       metadata,
-      response: { id: response?.id, channel_id: response?.channel_id },
+      response: discordDeliveryResponse(response),
     });
     return { ok: true, skipped: false, response: { id: response?.id, channelId: response?.channel_id } };
   } catch (error) {
@@ -3713,7 +3754,7 @@ async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredA
   const responses = [];
   for (const recipientId of recipients) {
     const response = await sendDiscordDirectMessage(recipientId, payload, settings);
-    responses.push({ recipientId, id: response?.id, channel_id: response?.channel_id });
+    responses.push({ recipientId, ...discordDeliveryResponse(response) });
   }
   recordDiscordDeliverySafe({
     status: "sent",
@@ -3744,8 +3785,8 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
   try {
     if (eventType === "craft_plan_report") {
       const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(metadata.report), settings, channelId);
-      recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
-      return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
+      recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: discordDeliveryResponse(response) });
+      return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
     }
     if (isMarketSaleDiscordEvent(eventType) && settings.marketSalesDelivery === "dm") {
       return await sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata, settings, diagnostics);
@@ -3757,9 +3798,9 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
       components: discordCraftWatchComponents(eventType, metadata),
       allowed_mentions: { roles: role ? [role.roleId] : [], parse: [] },
     }, settings, channelId);
-    recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
+    recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: discordDeliveryResponse(response) });
     if (eventType === "supplies") statements.upsertSetting.run("discord_last_low_supplies_at", new Date().toISOString(), new Date().toISOString());
-    return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
+    return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     recordDiscordDeliverySafe({ status: "failed", eventType, channelId, channelKey, summary, error: message, metadata: diagnostics });
@@ -4339,7 +4380,7 @@ async function sendDiscordAnnouncement(body, settings = getDiscordSettingsRaw())
   const message = String(body.message ?? "").trim();
   if (!channelId || !message) throw new Error("Announcement needs a channel and message.");
   const response = await sendDiscordMessage({ embeds: [discordCommandEmbed(title, message, [], 0xf0c64f)] }, settings, channelId);
-  recordDiscordDeliverySafe({ status: "sent", eventType: "announcement", channelId, channelKey: "announcement", summary: title, response: { id: response?.id, channel_id: response?.channel_id } });
+  recordDiscordDeliverySafe({ status: "sent", eventType: "announcement", channelId, channelKey: "announcement", summary: title, response: discordDeliveryResponse(response) });
   return response;
 }
 
@@ -4351,7 +4392,7 @@ async function updateDiscordPinnedInfo(body, settings = getDiscordSettingsRaw())
   if (!channelId || !message) throw new Error("Pinned info needs a channel and message.");
   const { response, action } = await sendOrUpdateDiscordMessage(channelId, messageId, { embeds: [discordCommandEmbed(title, message, [], 0x5865f2)] }, settings);
   if (response?.id) await discordApiRequest(`/channels/${encodeURIComponent(channelId)}/pins/${encodeURIComponent(response.id)}`, { method: "PUT" }, settings).catch(() => null);
-  recordDiscordDeliverySafe({ status: "sent", eventType: "pinned_info", channelId, channelKey: "pinnedInfo", summary: `${action === "updated" ? "Updated" : "Posted"} pinned info`, response: { id: response?.id, channel_id: response?.channel_id } });
+  recordDiscordDeliverySafe({ status: "sent", eventType: "pinned_info", channelId, channelKey: "pinnedInfo", summary: `${action === "updated" ? "Updated" : "Posted"} pinned info`, response: discordDeliveryResponse(response) });
   return { response, action };
 }
 
@@ -4838,28 +4879,55 @@ async function currentAppUpdateDetails() {
   };
 }
 
-async function sendDiscordTestNotification(kind = "basic") {
+async function sendDiscordTestNotification(kind = "basic", { requestedChannelId = "" } = {}) {
   const settings = getDiscordSettingsRaw();
-  if (kind === "basic") {
-    const summary = "Discord integration test from Timbersteel Trade.";
-    try {
-      const response = await sendDiscordMessage({
-        content: summary,
-        allowed_mentions: { parse: [] },
-      }, settings, settings.channelId);
-      recordDiscordDeliverySafe({ status: "sent", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, metadata: discordDiagnosticContext("test_basic", {}, settings), response: { id: response?.id, channel_id: response?.channel_id } });
-      return response;
-    } catch (error) {
-      recordDiscordDeliverySafe({ status: "failed", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("test_basic", {}, settings) });
-      throw error;
-    }
-  }
-  const sample = discordTestEvents[kind];
+  const sample = kind === "basic" ? {
+    eventType: "test_basic",
+    summary: "Discord integration test from Timbersteel Trade.",
+    metadata: {},
+  } : discordTestEvents[kind];
   if (!sample) throw new Error("Unknown Discord test notification");
   const updateDetails = sample.eventType === "app_update" ? await currentAppUpdateDetails() : null;
   const summary = updateDetails?.summary ?? sample.summary;
   const metadata = updateDetails ? { ...sample.metadata, changeNotes: updateDetails.changeNotes } : sample.metadata;
-  return sendDiscordActivity(sample.eventType, summary, new Date().toISOString(), metadata, settings);
+  const payload = kind === "basic"
+    ? { content: summary, allowed_mentions: { parse: [] } }
+    : {
+        embeds: [discordEmbedForActivity(sample.eventType, summary, new Date().toISOString(), metadata, settings)],
+        allowed_mentions: { parse: [] },
+      };
+  try {
+    const response = await manualDiscordSandboxMessage(payload, settings, requestedChannelId);
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType: sample.eventType,
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary,
+      metadata: {
+        ...discordDiagnosticContext(sample.eventType, metadata, settings),
+        manualSandboxTest: true,
+        deliveryMode: configuredDiscordDeliveryMode,
+      },
+      response: discordDeliveryResponse(response),
+    });
+    return response;
+  } catch (error) {
+    recordDiscordDeliverySafe({
+      status: "failed",
+      eventType: sample.eventType,
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary,
+      error: error instanceof Error ? error.message : String(error),
+      metadata: {
+        ...discordDiagnosticContext(sample.eventType, metadata, settings),
+        manualSandboxTest: true,
+        deliveryMode: configuredDiscordDeliveryMode,
+      },
+    });
+    throw error;
+  }
 }
 
 async function announceDiscordAppUpdateIfNeeded({ recordAlreadyAnnounced = true } = {}) {
@@ -4916,7 +4984,7 @@ async function sendScheduledSupplyReportIfDue(claim) {
       embeds: [discordSupplyEmbed(claim)],
       allowed_mentions: { parse: [] },
     }, settings, channelId);
-    recordDiscordDeliverySafe({ status: "sent", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings), response: { id: response?.id, channel_id: response?.channel_id } });
+    recordDiscordDeliverySafe({ status: "sent", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings), response: discordDeliveryResponse(response) });
   } catch (error) {
     recordDiscordDeliverySafe({ status: "failed", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings) });
     throw error;
@@ -7941,16 +8009,16 @@ const server = createServer(async (req, res) => {
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/test") {
         const body = await readJson(req);
         const kind = String(body.kind ?? "basic");
-        const result = await sendDiscordTestNotification(kind);
-        audit(user, "discord.test_message", { kind, status: result?.skipped ? "skipped" : "sent" });
+        const result = await sendDiscordTestNotification(kind, { requestedChannelId: body.channelId });
+        audit(user, "discord.test_message", { kind, channelId: result?.channel_id, status: "sent", sandbox: true });
         return send(res, 200, { ok: true, result });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/craft-plan-report/test") {
         const body = await readJson(req, BODY_LIMITS.settings);
         const profession = body.reportType === "profession" ? normalizeCraftPlanReportProfession(body.profession) : "";
         if (body.reportType === "profession" && !profession) return send(res, 400, { error: "Choose a valid profession." });
-        const result = await sendCraftPlanDiscordReport({ profession, channelId: body.channelId });
-        audit(user, "discord.craft_plan_report.test", { profession: profession || "overview", channelId: body.channelId, messageId: result.response?.id });
+        const result = await sendCraftPlanDiscordReport({ profession, requestedChannelId: body.channelId });
+        audit(user, "discord.craft_plan_report.test", { profession: profession || "overview", channelId: result.response?.channel_id, messageId: result.response?.id, sandbox: true });
         return send(res, 200, { ok: true, result });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/colour-roles/post") {

@@ -34,7 +34,7 @@ export function DiscordTestsPanel({
         Use a Discord application with the bot and applications.commands scopes. Guild command registration is immediate; global
         commands can take longer to appear.
       </p>
-      <p className="legend">Send sample messages to the configured channel to preview how each alert type will look in Discord.</p>
+      <p className="legend">Send sample messages only to the server-configured sandbox Discord channel.</p>
       <div className="discord-test-grid">
         {discordTestButtons.map(([kind, label]) => (
           <ActionButton key={kind} className="toolbar-button" pending={isPending(`discord-test:${kind}`)} pendingLabel={`Sending ${label}...`} onClick={() => onSendTest(kind, label)}>

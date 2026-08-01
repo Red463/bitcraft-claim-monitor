@@ -164,3 +164,6 @@ The Relay service uses:
 
 Preview Discord is forced to record mode at process execution. The maintained
 application and its database remain untouched until cutover gates pass.
+Automatic Discord work remains recorded. Authenticated manual tests are the
+only exception and can post only to the exact configured sandbox Discord
+channel, with mentions disabled.

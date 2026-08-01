@@ -201,7 +201,7 @@ export function DiscordNotificationsSection({
         roleIdSelect={roleIdSelect}
         onChange={(craftPlanReports) => updateDiscord({ craftPlanReports })}
         onTest={onTestCraftPlanReport}
-        renderTestAction={(rule) => <ActionButton className="toolbar-button" pending={isPending(`discord-craft-report-test:${rule.id}`)} pendingLabel="Sending report..." disabled={!rule.channelId} onClick={() => void onTestCraftPlanReport(rule)}>Send test</ActionButton>}
+        renderTestAction={(rule) => <ActionButton className="toolbar-button" pending={isPending(`discord-craft-report-test:${rule.id}`)} pendingLabel="Sending report..." onClick={() => void onTestCraftPlanReport(rule)}>Send sandbox test</ActionButton>}
       />
       <div className="status-detail discord-notification-status">
         <BotStatusInfo

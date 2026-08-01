@@ -125,8 +125,9 @@ Start with [`.env.example`](./.env.example). Important groups are:
   work;
 - `BITCRAFT_LOCAL_DATA_DIR` for the fresh standalone SQLite data directory;
 - `DISCORD_DELIVERY_MODE=record` and `ENABLE_DISCORD_STARTUP=false` for
-  preview-safe shadow delivery. `DISCORD_SANDBOX_CHANNEL_ID` is reserved for a
-  later manual-delivery gate and is not active yet.
+  preview-safe shadow delivery. Authenticated Admin manual tests may send only
+  to the exact `DISCORD_SANDBOX_CHANNEL_ID`; automatic work remains recorded
+  and cannot use this exception.
 
 Do not commit credentials or player tokens.
 
@@ -146,9 +147,10 @@ identities:
 - preview host: `relay.timbersteeltrade.com`
 
 The `relay-preview` GitHub environment deploys exact tested SHAs. Preview units
-force Discord record mode and disable startup/command registration. Caddy
-routing is a one-time supervised bootstrap and the updater never overwrites the
-live Caddyfile.
+force Discord record mode and disable startup/command registration. Only an
+authenticated manual test can post to the configured sandbox Discord channel.
+Caddy routing is a one-time supervised bootstrap and the updater never
+overwrites the live Caddyfile.
 
 See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for setup, diagnostics, backups, rollback,
 and cutover gates.

@@ -165,6 +165,11 @@ also force `DISCORD_DELIVERY_MODE=record` and
 loaded. Conflicting environment-file values therefore cannot enable real
 Discord delivery or startup messages.
 
+Set `DISCORD_SANDBOX_CHANNEL_ID` only to a dedicated test channel. Authenticated
+Admin manual tests may post to that exact sandbox channel with mentions
+disabled. Automatic jobs, outbox delivery, DMs, command registration, and
+gateway startup remain in record mode and cannot use the manual test exception.
+
 Do not place private keys, bot tokens, OAuth secrets, or setup keys in Git,
 release directories, workflow output, or shell history.
 

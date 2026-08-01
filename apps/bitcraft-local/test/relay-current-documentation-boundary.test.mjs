@@ -33,6 +33,8 @@ test("current documentation and environment use only the Relay browser contract"
   assert.match(environment, /BITCRAFT_RELAY_ORIGIN=https:\/\/relay\.bitcraftsync\.app/);
   assert.match(environment, /DISCORD_DELIVERY_MODE=record/);
   assert.match(environment, /DISCORD_SANDBOX_CHANNEL_ID=/);
+  assert.match(environment, /manual.*test.*sandbox/i);
+  assert.doesNotMatch(environment, /reserved for a later|later manual-delivery implementation/i);
 
   const architecture = `${readRoot("README.md")}\n${readRoot("docs/application-overview.md")}`;
   assert.match(architecture, /\/api\/local\/game-data/);
@@ -42,6 +44,8 @@ test("current documentation and environment use only the Relay browser contract"
   assert.match(architecture, /relay\.timbersteeltrade\.com/);
 
   const deploymentDocs = `${readRoot("README.md")}\n${readRoot("docs/developer-guide.md")}`;
+  assert.match(deploymentDocs, /manual.*test.*sandbox Discord channel/i);
+  assert.match(deploymentDocs, /automatic.*record/i);
   for (const expected of [
     "19428",
     "/opt/bitcraft-claim-monitor-relay",

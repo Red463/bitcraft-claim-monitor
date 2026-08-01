@@ -467,6 +467,7 @@ test("server collection paginates listings and protects production mutations", a
       IPAPI_BASE_URL: `http://127.0.0.1:${upstreamPort}/ipapi`,
       DISCORD_API_ORIGIN: `http://127.0.0.1:${upstreamPort}/discord/api/v10`,
       DISCORD_DELIVERY_MODE: "live",
+      DISCORD_SANDBOX_CHANNEL_ID: "666666666666666666",
       DISCORD_OAUTH_CLIENT_ID: "1511277824525471826",
       DISCORD_OAUTH_CLIENT_SECRET: "test-discord-oauth-secret",
     },
@@ -1592,6 +1593,58 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(persistedDiscordSettings.discord.botToken, undefined);
   assert.equal(persistedDiscordSettings.discord.botTokenConfigured, true);
   assert.equal(JSON.stringify(persistedDiscordSettings).includes("test-discord-bot-token"), false);
+  const anonymousDiscordSandboxTest = await fetch(`${origin}/api/local/admin/discord/test`, {
+    method: "POST",
+    headers: { origin, "content-type": "application/json" },
+    body: JSON.stringify({ kind: "basic" }),
+  });
+  assert.equal(anonymousDiscordSandboxTest.status, 401);
+  const channelMessagesBeforeMismatch = discordChannelMessages.length;
+  const mismatchedDiscordSandboxTest = await fetch(`${origin}/api/local/admin/discord/test`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ kind: "basic", channelId: "555555555555555555" }),
+  });
+  assert.equal(mismatchedDiscordSandboxTest.status, 400);
+  assert.equal(discordChannelMessages.length, channelMessagesBeforeMismatch);
+  const basicDiscordSandboxTest = await fetch(`${origin}/api/local/admin/discord/test`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ kind: "basic" }),
+  });
+  assert.equal(basicDiscordSandboxTest.status, 200);
+  assert.equal(discordChannelMessages.at(-1)?.channelId, "666666666666666666");
+  assert.deepEqual(discordChannelMessages.at(-1)?.payload.allowed_mentions, { parse: [] });
+  const directMessagesBeforeSaleSandboxTest = discordDirectMessages.length;
+  const saleDiscordSandboxTest = await fetch(`${origin}/api/local/admin/discord/test`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ kind: "sale" }),
+  });
+  assert.equal(saleDiscordSandboxTest.status, 200);
+  assert.equal(discordDirectMessages.length, directMessagesBeforeSaleSandboxTest);
+  assert.equal(discordChannelMessages.at(-1)?.channelId, "666666666666666666");
+  assert.deepEqual(discordChannelMessages.at(-1)?.payload.allowed_mentions, { parse: [] });
+  const craftPlanDiscordSandboxTest = await fetch(`${origin}/api/local/admin/discord/craft-plan-report/test`, {
+    method: "POST",
+    headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
+    body: JSON.stringify({ reportType: "overview" }),
+  });
+  assert.equal(craftPlanDiscordSandboxTest.status, 200);
+  assert.equal(discordChannelMessages.at(-1)?.channelId, "666666666666666666");
+  assert.deepEqual(discordChannelMessages.at(-1)?.payload.allowed_mentions, { parse: [] });
+  const sandboxDeliveryDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
+  const sandboxDeliveries = sandboxDeliveryDb.prepare(`
+    SELECT channel_id, metadata_json
+    FROM discord_delivery_log
+    WHERE channel_key = 'manualSandbox'
+    ORDER BY id DESC
+    LIMIT 3
+  `).all();
+  sandboxDeliveryDb.close();
+  assert.equal(sandboxDeliveries.length, 3);
+  assert.equal(sandboxDeliveries.every((row) => row.channel_id === "666666666666666666"), true);
+  assert.equal(sandboxDeliveries.every((row) => JSON.parse(row.metadata_json).manualSandboxTest === true), true);
   const authStatus = await fetch(`${origin}/api/local/auth/me`).then((response) => response.json());
   assert.equal(authStatus.discordLoginEnabled, true);
   assert.equal(authStatus.user, null);
