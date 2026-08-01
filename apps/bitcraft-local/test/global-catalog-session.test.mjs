@@ -474,12 +474,13 @@ test("typed global catalog session subscribes narrowly and emits normalized item
       startedAt: "2026-06-04T17:55:57.807Z",
     }],
     foundryWarnings: [],
-    siegeNotifications: {
-      notifications: [],
-      outcomes: [],
-      warnings: [],
-    },
-    changed: ["catalogs", "region", "empire-foundries"],
+      siegeNotifications: {
+        notifications: [],
+        outcomes: [],
+        warnings: [],
+      },
+      notificationScopeEmpireIds: [],
+      changed: ["catalogs", "region", "empire-foundries"],
     database: "relay-mirror-bc-global",
     schemaFingerprint: "global-v1",
     generation: 9,
@@ -572,6 +573,7 @@ test("typed global catalog session replaces exact Empire notification scopes wit
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(snapshots.length, 1);
   assert.deepEqual(snapshots[0].changed, ["empire-notifications"]);
+  assert.deepEqual(snapshots[0].notificationScopeEmpireIds, ["3", "20"]);
   assert.deepEqual(
     snapshots[0].siegeNotifications.outcomes,
     [{
@@ -595,6 +597,7 @@ test("typed global catalog session replaces exact Empire notification scopes wit
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(snapshots.length, 2, "the active last-good scope continues while replacement applies");
   assert.deepEqual(snapshots[1].changed, ["region", "empire-notifications"]);
+  assert.deepEqual(snapshots[1].notificationScopeEmpireIds, ["3", "20"]);
   fake.state.subscriptions[2].onApplied({});
   assert.equal(await replacementApply, true);
   await new Promise((resolve) => setImmediate(resolve));
@@ -603,6 +606,7 @@ test("typed global catalog session replaces exact Empire notification scopes wit
     snapshots[2].siegeNotifications.notifications.map(({ empireEntityId }) => empireEntityId),
     ["30"],
   );
+  assert.deepEqual(snapshots[2].notificationScopeEmpireIds, ["30"]);
 
   staleCallback({}, {}, {});
   await new Promise((resolve) => setImmediate(resolve));

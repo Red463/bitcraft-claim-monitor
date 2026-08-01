@@ -177,6 +177,28 @@ test("Empire details and watchtowers expose proven current roles and paired outc
   assert.equal(JSON.stringify(towers).includes("cancelled"), false);
 });
 
+test("current siege projection preserves two rows from the same attacking Empire with one defender", () => {
+  const repeatedAttacker = structuredClone(snapshot);
+  repeatedAttacker.nodes[0].sieges.push({
+    ...repeatedAttacker.nodes[0].sieges[0],
+    entityId: "81",
+    energy: "9",
+  });
+  const towers = empireWatchtowersView(repeatedAttacker, "19", 14);
+  assert.deepEqual(
+    towers.towers[0].activeSiegeParticipants.map((participant) => [
+      participant.entityId,
+      participant.empireEntityId,
+      participant.attacker,
+    ]),
+    [
+      ["80", "11", true],
+      ["81", "11", true],
+      ["defender:60:10", "10", false],
+    ],
+  );
+});
+
 test("claim member view joins claim permissions with the live Empire rank", () => {
   const view = empireClaimMembersView(snapshot, "40", { regionalClaims });
   assert.equal(view.claim.name, "Timbersteel Trade");
@@ -307,4 +329,20 @@ test("Empire response freshness requires both the selected and primary regional 
     now: () => Date.parse("2026-07-30T18:00:30.000Z"),
     staleAfterMs: 60_000,
   }).stale, true);
+
+  const warned = empireSnapshotStatus({
+    ...stored,
+    warnings: [
+      "Global Siege: Unmatched siege outcome notification.",
+      "Global Siege: Unmatched siege outcome notification.",
+    ],
+  }, "19", {
+    now: () => Date.parse("2026-07-30T18:03:00.000Z"),
+    staleAfterMs: 60_000,
+  });
+  assert.equal(warned.partial, true);
+  assert.equal(
+    warned.errors.filter((error) => error === "Global Siege: Unmatched siege outcome notification.").length,
+    1,
+  );
 });

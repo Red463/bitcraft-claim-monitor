@@ -26,6 +26,17 @@ export function groupSiegeParticipants(tower: AnyRecord) {
   };
 }
 
+export function siegeParticipantKey(
+  participant: AnyRecord,
+  role: "attacker" | "defender" | "unknown",
+  index: number,
+): string {
+  const entityId = String(participant.entityId ?? "").trim();
+  if (entityId) return `${role}:${entityId}`;
+  const empireId = String(participant.empireEntityId ?? participant.empireId ?? "").trim();
+  return `${role}:${empireId || "unknown"}:${index}`;
+}
+
 export function siegeDurationLabel(startedAt: unknown, now = Date.now()): string {
   const started = Date.parse(String(startedAt ?? ""));
   if (!Number.isFinite(started) || started > now) return "Unavailable";

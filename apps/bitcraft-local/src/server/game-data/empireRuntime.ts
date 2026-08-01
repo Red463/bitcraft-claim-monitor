@@ -239,6 +239,17 @@ function sameDecimalIds(left: string[], right: string[]): boolean {
     && left.every((value, index) => value === right[index]);
 }
 
+function normalizedNotificationScope(values: unknown[]): string[] {
+  const normalized = values.map((value, index) => (
+    decimalInteger(value, `Relay siege notification scope ${index}`)
+  ));
+  const unique = [...new Set(normalized)].sort(numericStringOrder);
+  if (unique.length !== normalized.length) {
+    throw new TypeError("Relay siege notification scope contains duplicate Empire ids");
+  }
+  return unique;
+}
+
 function notificationScopeFor(data: Pick<
   EmpireCombinedData,
   "settlements" | "nodes"
@@ -482,16 +493,19 @@ export class RelayEmpireRuntime {
       outcomes: unknown[];
       warnings: string[];
     };
+    notificationScopeEmpireIds: unknown[];
     database: string;
     schemaFingerprint: string;
     generation: number;
     receivedAt: string;
-  }): Promise<void> {
+  }): Promise<boolean> {
+    const appliedScope = normalizedNotificationScope(snapshot.notificationScopeEmpireIds);
+    if (!sameDecimalIds(appliedScope, this.#notificationScopeRequested)) return false;
     const outcomes = normalizeSiegeOutcomes(snapshot.siegeNotifications.outcomes);
     const warnings = snapshot.siegeNotifications.warnings.map(String);
     this.#globalSiegeOutcomes = outcomes;
     this.#globalSiegeWarnings = warnings;
-    this.#notificationScopeApplied = [...this.#notificationScopeRequested];
+    this.#notificationScopeApplied = appliedScope;
     this.#notificationScopeApplying = false;
     this.#notificationScopeLastError = null;
     await this.#commitSiegeProjection({
@@ -499,6 +513,7 @@ export class RelayEmpireRuntime {
       schemaFingerprint: snapshot.schemaFingerprint,
       receivedAt: snapshot.receivedAt,
     });
+    return true;
   }
 
   async start(config: RuntimeConfig): Promise<void> {
@@ -1055,9 +1070,6 @@ export class RelayEmpireRuntime {
       const error = await replacement;
       if (error == null) {
         if (!sameDecimalIds(requested, this.#notificationScopeRequested)) return;
-        this.#notificationScopeApplied = requested;
-        this.#notificationScopeApplying = false;
-        this.#notificationScopeLastError = null;
       } else {
         if (!sameDecimalIds(requested, this.#notificationScopeRequested)) return;
         this.#notificationScopeApplying = false;

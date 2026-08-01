@@ -64,7 +64,7 @@ type RuntimeDependencies = {
   >) => Promise<void> | void;
   onEmpireNotifications?: (snapshot: Pick<
     GlobalCatalogSnapshot,
-    "siegeNotifications" | "database" | "schemaFingerprint" | "generation" | "receivedAt"
+    "siegeNotifications" | "notificationScopeEmpireIds" | "database" | "schemaFingerprint" | "generation" | "receivedAt"
   >) => Promise<void> | void;
   discoverTopology?: (
     baseUrl: string,
@@ -265,6 +265,7 @@ export class RelayGlobalCatalogRuntime {
       const publication = this.#notificationPublicationContext.run(true, async () => {
         await this.#onEmpireNotifications?.({
           siegeNotifications: snapshot.siegeNotifications,
+          notificationScopeEmpireIds: snapshot.notificationScopeEmpireIds,
           database: snapshot.database,
           schemaFingerprint: snapshot.schemaFingerprint,
           generation: snapshot.generation,

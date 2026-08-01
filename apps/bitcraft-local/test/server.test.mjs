@@ -904,6 +904,28 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(claimMembers.members[0].isClaimOwner, true);
   assert.equal(claimMembers.members.some((member) => member.username === "Citizen One" && member.claimRole === "Co-owner"), true);
   assert.equal(claimMembers.members[0].lastLoginTimestamp, "2026-05-21T12:00:00.000Z");
+  const globalSiegeWarning = "Global Siege: Unmatched siege outcome notification.";
+  await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (empireDb) => {
+    empireDb.prepare(`
+      UPDATE domain_payload_current
+      SET warnings_json = ?, confidence = 'partial'
+      WHERE claim_id = ? AND domain = 'empires'
+    `).run(JSON.stringify([globalSiegeWarning, globalSiegeWarning]), claimId);
+  });
+  for (const route of [
+    "/api/local/empires?regionId=19",
+    "/api/local/empires/details?empireId=10&regionId=19",
+    "/api/local/empires/watchtowers?regionId=19&inactiveDays=14",
+    `/api/local/empires/claim-members?claimId=${claimId}`,
+  ]) {
+    const warnedResponse = await fetch(`${origin}${route}`).then((response) => response.json());
+    assert.equal(warnedResponse.partial, true, `${route} must surface top-level Empire warnings`);
+    assert.equal(
+      warnedResponse.errors.filter((error) => error === globalSiegeWarning).length,
+      1,
+      `${route} must deduplicate top-level Empire warnings`,
+    );
+  }
   await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (catalogDb) => {
     catalogDb.prepare(`
       INSERT INTO game_catalog_entities (

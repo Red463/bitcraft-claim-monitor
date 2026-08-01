@@ -523,6 +523,7 @@ test("global catalog runtime normalizes and retains Empire notification scope ac
       outcomes: [],
       warnings: ["Unmatched siege outcome notification."],
     },
+    notificationScopeEmpireIds: ["3", "20"],
     changed: ["empire-notifications"],
     database: "relay-global-1",
     schemaFingerprint: "global-v1",
@@ -533,6 +534,7 @@ test("global catalog runtime normalizes and retains Empire notification scope ac
   assert.deepEqual(notificationSnapshots[0].siegeNotifications.warnings, [
     "Unmatched siege outcome notification.",
   ]);
+  assert.deepEqual(notificationSnapshots[0].notificationScopeEmpireIds, ["3", "20"]);
   assert.equal(runtime.health().subscription.notifications.applied, true);
   assert.equal(runtime.health().lastError, null);
 

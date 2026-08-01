@@ -445,6 +445,7 @@ test("Empire runtime atomically retains compact last-good siege outcomes and rec
       }],
       warnings: ["Unmatched siege outcome notifications at 2026-07-30T17:00:00.000Z."],
     },
+    notificationScopeEmpireIds: ["190", "800"],
     database: "relay-global",
     schemaFingerprint: "global-v1",
     generation: 2,
@@ -472,6 +473,7 @@ test("Empire runtime atomically retains compact last-good siege outcomes and rec
         }],
         warnings: [],
       },
+      notificationScopeEmpireIds: ["190", "800"],
       database: "relay-global",
       schemaFingerprint: "global-v1",
       generation: 3,
@@ -527,8 +529,147 @@ test("Empire runtime atomically retains compact last-good siege outcomes and rec
   for (let index = 0; index < 10 && stored.warnings.some((warning) => /scope unavailable/.test(warning)); index += 1) {
     await new Promise((resolve) => setImmediate(resolve));
   }
+  assert.match(stored.warnings.join("\n"), /notification scope unavailable/);
+  assert.deepEqual(runtime.health().notifications.appliedEmpireIds, ["190", "800"]);
+  assert.equal(runtime.health().notifications.applying, true);
+  await runtime.updateGlobalSiegeNotifications({
+    siegeNotifications: {
+      notifications: [],
+      outcomes: stored.data.siegeOutcomes,
+      warnings: [],
+    },
+    notificationScopeEmpireIds: ["190", "800", "801"],
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 4,
+    receivedAt: "2026-07-30T18:06:00.000Z",
+  });
   assert.doesNotMatch(stored.warnings.join("\n"), /notification scope unavailable/);
   assert.deepEqual(runtime.health().notifications.appliedEmpireIds, ["190", "800", "801"]);
+  await runtime.stop();
+});
+
+test("Empire runtime rejects an old applied notification scope while a replacement is pending", async () => {
+  const handlers = new Map();
+  const writes = [];
+  let stored = null;
+  const scopeCalls = [];
+  let releaseReplacement;
+  const replacementPending = new Promise((resolve) => {
+    releaseReplacement = resolve;
+  });
+  const runtime = new runtimeModule.RelayEmpireRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: (options) => ({
+      start: async (config) => handlers.set(config.regionId, options.onSnapshot),
+      stop: async () => {},
+      health: () => ({ connected: true, applied: true, stage: "live" }),
+    }),
+    currentStateRepository: {
+      read: () => stored,
+      nextGeneration: () => writes.length + 1,
+      commitGeneration: (batch) => {
+        writes.push(batch);
+        stored = batch.domains.empires;
+      },
+    },
+    onNotificationScopeChanged: (ids) => {
+      scopeCalls.push(ids);
+      return ids.includes("801") ? replacementPending : undefined;
+    },
+    poolOptions: {
+      maxSessions: 1,
+      staggerMs: 0,
+      idleCloseMs: 60_000,
+      sleep: async () => {},
+      scheduleSweep: () => () => {},
+    },
+    scheduleRotation: () => () => {},
+  });
+  await runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    primaryRegionId: "19",
+    activeRegionIds: ["19"],
+  });
+  const primary = regionData("19", "190");
+  const siege = (entityId, attackerEmpireEntityId) => ({
+    entityId,
+    buildingEntityId: primary.nodes[0].entityId,
+    empireEntityId: attackerEmpireEntityId,
+    defenderEmpireEntityId: "190",
+    role: "attacker",
+    active: true,
+  });
+  primary.nodes[0].sieges = [siege("1905", "800")];
+  await handlers.get("19")({
+    data: primary,
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 1,
+    receivedAt: "2026-07-30T18:01:00.000Z",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const outcome = (eventKey, attackerEmpireEntityId) => ({
+    eventKey,
+    occurredAt: "2026-07-30T18:00:00.000Z",
+    watchtowerLabel: "North Watch",
+    encodedLocation: "19:1:2",
+    attackerEmpireEntityId,
+    defenderEmpireEntityId: "190",
+    outcome: "attacker_won",
+  });
+  assert.equal(await runtime.updateGlobalSiegeNotifications({
+    siegeNotifications: { notifications: [], outcomes: [outcome("scope-a", "800")], warnings: [] },
+    notificationScopeEmpireIds: ["190", "800"],
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 2,
+    receivedAt: "2026-07-30T18:02:00.000Z",
+  }), true);
+
+  primary.nodes[0].sieges = [siege("1906", "801")];
+  await handlers.get("19")({
+    data: primary,
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 2,
+    receivedAt: "2026-07-30T18:03:00.000Z",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(scopeCalls.at(-1), ["190", "801"]);
+  assert.equal(await runtime.updateGlobalSiegeNotifications({
+    siegeNotifications: { notifications: [], outcomes: [outcome("stale-a", "800")], warnings: [] },
+    notificationScopeEmpireIds: ["190", "800"],
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 3,
+    receivedAt: "2026-07-30T18:03:10.000Z",
+  }), false);
+  assert.equal(stored.data.siegeOutcomes[0].eventKey, "scope-a");
+  assert.deepEqual(runtime.health().notifications.appliedEmpireIds, ["190", "800"]);
+  assert.equal(runtime.health().notifications.applying, true);
+
+  releaseReplacement();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(runtime.health().notifications.appliedEmpireIds, ["190", "800"]);
+  assert.equal(runtime.health().notifications.applying, true);
+  assert.equal(await runtime.updateGlobalSiegeNotifications({
+    siegeNotifications: { notifications: [], outcomes: [outcome("scope-b", "801")], warnings: [] },
+    notificationScopeEmpireIds: ["190", "801"],
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 4,
+    receivedAt: "2026-07-30T18:04:00.000Z",
+  }), true);
+  assert.equal(stored.data.siegeOutcomes[0].eventKey, "scope-b");
+  assert.deepEqual(runtime.health().notifications.appliedEmpireIds, ["190", "801"]);
+  assert.equal(runtime.health().notifications.applying, false);
   await runtime.stop();
 });
 

@@ -94,6 +94,7 @@ export type GlobalCatalogSnapshot = {
   foundries: ReturnType<typeof normalizeGlobalEmpireFoundries>["data"];
   foundryWarnings: string[];
   siegeNotifications: ReturnType<typeof normalizeAndPairSiegeNotifications>;
+  notificationScopeEmpireIds: string[];
   changed: Array<"catalogs" | "region" | "empire-foundries" | "empire-notifications">;
   database: string;
   schemaFingerprint: string;
@@ -556,6 +557,7 @@ export class RelayGlobalCatalogSession {
         foundries: foundries.data,
         foundryWarnings: foundries.warnings,
         siegeNotifications,
+        notificationScopeEmpireIds: [...this.#notificationAppliedIds],
         changed: [...changed],
         database: config.database,
         schemaFingerprint: config.schemaFingerprint,

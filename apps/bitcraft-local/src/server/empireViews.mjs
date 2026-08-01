@@ -53,6 +53,17 @@ export function empireSnapshotStatus(snapshot, regionIdValue, options = {}) {
   const hasRequiredRegionalMetadata = requiredRegionIds.every((regionId) => metadata.has(regionId));
   let stale = false;
   let partial = !hasRequiredRegionalMetadata && text(source.confidence) !== "authoritative";
+  const snapshotWarnings = list(source.warnings)
+    .map(String)
+    .filter((warning) => {
+      if (!warning) return false;
+      const taggedRegionWarning = /^Region (\d+):/.exec(warning);
+      return !taggedRegionWarning || requiredRegionIds.includes(taggedRegionWarning[1]);
+    });
+  if (snapshotWarnings.length) {
+    partial = true;
+    errors.push(...snapshotWarnings);
+  }
   const snapshotError = text(source.lastError);
   const taggedSnapshotError = /^Region (\d+):\s*(.+)$/.exec(snapshotError);
   const snapshotErrorAffectsView = (

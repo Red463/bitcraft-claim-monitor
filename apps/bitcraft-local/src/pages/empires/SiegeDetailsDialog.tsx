@@ -3,7 +3,7 @@ import { AlertTriangle, Landmark, MapPin, Shield, X, Zap } from "lucide-react";
 import { Dialog } from "../../components/main/Dialog";
 import type { AnyRecord } from "../../main-app-data";
 import { dateLabel, formatNumber } from "../../utils/format";
-import { groupSiegeParticipants, siegeDurationLabel } from "./siegePresentation";
+import { groupSiegeParticipants, siegeDurationLabel, siegeParticipantKey } from "./siegePresentation";
 import { coordinateText } from "./watchtowerPresentation";
 
 type SiegeDetailsDialogProps = {
@@ -99,7 +99,7 @@ export function SiegeDetailsDialog({ tower, onClose, onViewEmpire }: SiegeDetail
         </section>
         {attackers.map((participant, index) => (
           <ParticipantCard
-            key={`attacker:${String(participant.empireEntityId ?? participant.empireId ?? index)}`}
+            key={siegeParticipantKey(participant, "attacker", index)}
             role="attacker"
             participant={participant}
             onViewEmpire={onViewEmpire}
@@ -107,7 +107,7 @@ export function SiegeDetailsDialog({ tower, onClose, onViewEmpire }: SiegeDetail
         ))}
         {defenders.map((participant, index) => (
           <ParticipantCard
-            key={`defender:${String(participant.empireEntityId ?? participant.empireId ?? index)}`}
+            key={siegeParticipantKey(participant, "defender", index)}
             role="defender"
             participant={participant}
             onViewEmpire={onViewEmpire}
@@ -115,7 +115,7 @@ export function SiegeDetailsDialog({ tower, onClose, onViewEmpire }: SiegeDetail
         ))}
         {unknown.map((participant, index) => (
           <ParticipantCard
-            key={`unknown:${String(participant.empireEntityId ?? participant.empireId ?? index)}`}
+            key={siegeParticipantKey(participant, "unknown", index)}
             role="unknown"
             participant={participant}
             onViewEmpire={onViewEmpire}

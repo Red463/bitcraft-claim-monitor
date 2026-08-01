@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   activeSiegeParticipants,
   groupSiegeParticipants,
+  siegeParticipantKey,
   siegeDurationLabel,
 } from "../src/pages/empires/siegePresentation.ts";
 
@@ -46,6 +47,17 @@ test("groupSiegeParticipants keeps one proven defender alongside every attacker"
   assert.deepEqual(grouped.attackers.map((entry) => entry.empireEntityId), ["11", "12"]);
   assert.deepEqual(grouped.defenders.map((entry) => entry.empireEntityId), ["10"]);
   assert.deepEqual(grouped.unknown, []);
+});
+
+test("same-Empire attacker rows retain unique stable React identities", () => {
+  assert.notEqual(
+    siegeParticipantKey({ entityId: "501", empireEntityId: "11" }, "attacker", 0),
+    siegeParticipantKey({ entityId: "502", empireEntityId: "11" }, "attacker", 1),
+  );
+  assert.equal(
+    siegeParticipantKey({ entityId: "501", empireEntityId: "11" }, "attacker", 9),
+    "attacker:501",
+  );
 });
 
 test("siegeDurationLabel is deterministic and handles missing values", () => {
