@@ -327,7 +327,7 @@ test("every runtime-user Git operation uses the Relay app root as HOME", { skip:
     : >"$LOG_FILE"
     cat >"$TEST_ROOT/bin/git" <<'GIT'
 #!/usr/bin/env bash
-printf '%s|%s\n' "$HOME" "$*" >>"$GIT_LOG"
+printf '%s|%s|%s\n' "$HOME" "$GIT_SSH_COMMAND" "$*" >>"$GIT_LOG"
 GIT
     chmod +x "$TEST_ROOT/bin/git"
 
@@ -351,7 +351,7 @@ GIT
     prune_releases "$release_dir"
 
     [[ "$(wc -l <"$GIT_LOG")" -eq 5 ]]
-    while IFS='|' read -r observed_home arguments; do
+    while IFS='|' read -r observed_home observed_ssh_command arguments; do
       if [[ "$observed_home" != "$APP_ROOT" ]]; then
         printf 'Git HOME mismatch: expected=%s actual=%s args=%s\n' \
           "$APP_ROOT" "$observed_home" "$arguments" >&2
@@ -359,6 +359,7 @@ GIT
       fi
       [[ "$observed_home" != "/opt/bitcraft-claim-monitor" ]]
       [[ "$observed_home" != "/home/bitcraft" ]]
+      [[ "$observed_ssh_command" == "ssh -F $APP_ROOT/.ssh/config" ]]
       [[ "$arguments" == "-C $SOURCE_DIR"* ]]
     done <"$GIT_LOG"
     grep -Fq -- "-C $SOURCE_DIR fetch --prune origin main" "$GIT_LOG"
