@@ -111,6 +111,20 @@ test("empire session stages regional state before exact claim, username, and nic
       timePlayed: 3600,
     }]),
     buildingNicknameState: table([{ entityId: 60n, nickname: "North Watch" }]),
+    buildingState: table([{
+      entityId: 5001n,
+      claimEntityId: 40n,
+      buildingDescriptionId: 90001,
+    }]),
+    inventoryState: table([{
+      entityId: 7001n,
+      ownerEntityId: 5001n,
+      playerOwnerEntityId: 20n,
+      pockets: [
+        { contents: { itemId: 828972621, itemType: { tag: "Item" }, quantity: 12 } },
+        { contents: { itemId: 2000000, itemType: { tag: "Cargo" }, quantity: 3 } },
+      ],
+    }]),
   };
   let disconnected = () => {};
   const connection = {
@@ -164,6 +178,7 @@ test("empire session stages regional state before exact claim, username, and nic
     now: () => new Date("2026-07-30T18:00:00.000Z"),
   });
 
+  const basePromise = waitForSnapshot();
   const initialPromise = waitForSnapshot();
   await session.start({
     uri: "wss://relay.example:4019",
@@ -172,8 +187,11 @@ test("empire session stages regional state before exact claim, username, and nic
     manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
     generation: 1,
     regionId: "19",
+    includeHexiteInventories: true,
   });
+  const baseSnapshot = await basePromise;
   const initial = await initialPromise;
+  assert.equal(baseSnapshot.data.hexite, null);
 
   assert.deepEqual(subscriptions[0], [
     "SELECT * FROM world_region_state",
@@ -192,6 +210,13 @@ test("empire session stages regional state before exact claim, username, and nic
     "SELECT * FROM player_state WHERE entity_id = 20",
     "SELECT * FROM building_nickname_state WHERE entity_id = 60 OR entity_id = 100",
   ]);
+  assert.deepEqual(subscriptions[2], [
+    "SELECT * FROM building_state WHERE claim_entity_id = 40",
+  ]);
+  assert.deepEqual(subscriptions[3], [
+    "SELECT * FROM inventory_state WHERE player_owner_entity_id = 20",
+    "SELECT * FROM inventory_state WHERE owner_entity_id = 5001",
+  ]);
   assert.equal(subscriptions.flat().includes("SELECT * FROM player_username_state"), false);
   assert.equal(subscriptions.flat().includes("SELECT * FROM claim_state"), false);
   assert.equal(subscriptions.flat().includes("SELECT * FROM claim_member_state"), false);
@@ -202,6 +227,23 @@ test("empire session stages regional state before exact claim, username, and nic
   assert.equal(initial.data.nodes[0].nickname, "North Watch");
   assert.equal(initial.data.members[0].signedIn, true);
   assert.equal(initial.data.claimMembers[0].inventoryPermission, true);
+  assert.deepEqual(initial.data.hexite, {
+    inventories: [{
+      entityId: "7001",
+      empireEntityId: "10",
+      regionId: "19",
+      sourceType: "player",
+      energy: "12",
+      capsules: "3",
+      reserveBuilding: true,
+    }],
+    coverage: [{
+      empireEntityId: "10",
+      regionId: "19",
+      playerCount: 1,
+      claimCount: 1,
+    }],
+  });
 
   const updatedPromise = waitForSnapshot();
   empireRows[0].empireCurrencyTreasury = 4;
@@ -221,10 +263,9 @@ test("empire session stages regional state before exact claim, username, and nic
   const foreignKeyUpdatePromise = waitForSnapshot();
   db.empireSettlementState.emit("update");
   const foreignKeyUpdate = await foreignKeyUpdatePromise;
-  assert.equal(
-    subscriptions.at(-1).includes("SELECT * FROM claim_state WHERE entity_id = 41"),
-    true,
-  );
+  assert.equal(subscriptions.some(
+    (queries) => queries.includes("SELECT * FROM claim_state WHERE entity_id = 41"),
+  ), true);
   assert.equal(foreignKeyUpdate.data.settlements[0].claimName, "New Settlement");
 
   await new Promise((resolve) => setImmediate(resolve));
@@ -233,7 +274,7 @@ test("empire session stages regional state before exact claim, username, and nic
   assert.deepEqual(failures, []);
 });
 
-test("secondary empire sessions omit replicated identity and player subscriptions", async () => {
+test("secondary empire sessions omit replicated identities but add bounded local Hexite joins", async () => {
   const subscriptions = [];
   const db = {
     worldRegionState: table([{
@@ -313,6 +354,19 @@ test("secondary empire sessions omit replicated identity and player subscription
     playerUsernameState: table([]),
     playerState: table([]),
     buildingNicknameState: table([{ entityId: 60n, nickname: "Local Watch" }]),
+    buildingState: table([{
+      entityId: 5001n,
+      claimEntityId: 40n,
+      buildingDescriptionId: 90001,
+    }]),
+    inventoryState: table([{
+      entityId: 7001n,
+      ownerEntityId: 5001n,
+      playerOwnerEntityId: 20n,
+      pockets: [{
+        contents: { itemId: 2000000, itemType: { tag: "Cargo" }, quantity: 4 },
+      }],
+    }]),
   };
   const connection = {
     db,
@@ -353,13 +407,20 @@ test("secondary empire sessions omit replicated identity and player subscription
       },
     },
   });
+  let baseSnapshot = null;
   let resolveSnapshot;
   const snapshotPromise = new Promise((resolve) => {
     resolveSnapshot = resolve;
   });
   const session = new RelayEmpireRegionSession({
     loadBindings,
-    onSnapshot: resolveSnapshot,
+    onSnapshot: (snapshot) => {
+      if (snapshot.data.hexite == null) {
+        baseSnapshot = snapshot;
+      } else {
+        resolveSnapshot(snapshot);
+      }
+    },
   });
 
   await session.start({
@@ -370,8 +431,10 @@ test("secondary empire sessions omit replicated identity and player subscription
     generation: 1,
     regionId: "19",
     includeIdentities: false,
+    includeHexiteInventories: true,
   });
   const snapshot = await snapshotPromise;
+  assert.equal(baseSnapshot?.data.hexite, null);
 
   assert.deepEqual(subscriptions[0], [
     "SELECT * FROM world_region_state",
@@ -385,10 +448,20 @@ test("secondary empire sessions omit replicated identity and player subscription
     "SELECT * FROM claim_member_state WHERE claim_entity_id = 40",
     "SELECT * FROM building_nickname_state WHERE entity_id = 60 OR entity_id = 100",
   ]);
+  assert.deepEqual(subscriptions[2], [
+    "SELECT * FROM empire_player_data_state WHERE empire_entity_id = 10",
+    "SELECT * FROM building_state WHERE claim_entity_id = 40",
+  ]);
+  assert.deepEqual(subscriptions[3], [
+    "SELECT * FROM inventory_state WHERE player_owner_entity_id = 20",
+    "SELECT * FROM inventory_state WHERE owner_entity_id = 5001",
+  ]);
+  assert.equal(subscriptions.flat().includes("SELECT * FROM empire_player_data_state"), false);
   assert.deepEqual(snapshot.data.empires, []);
   assert.deepEqual(snapshot.data.members, []);
   assert.equal(snapshot.data.settlements[0].claimOwnerName, "Local Owner");
   assert.equal(snapshot.data.nodes[0].nickname, "Local Watch");
+  assert.equal(snapshot.data.hexite.inventories[0].capsules, "4");
 
   await session.stop();
 });

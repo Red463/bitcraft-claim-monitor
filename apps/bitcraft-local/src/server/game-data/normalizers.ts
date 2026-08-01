@@ -192,6 +192,164 @@ export function normalizeGlobalEmpireFoundries(values: unknown[]) {
   return { data, warnings };
 }
 
+const HEXITE_ENERGY_ITEM_ID = "828972621";
+const HEXITE_CAPSULE_CARGO_ID = "2000000";
+const HEXITE_RESERVE_BUILDING_DESCRIPTION_ID = 90001;
+
+export function normalizeRegionalEmpireHexite(options: {
+  regionId: string;
+  playerRows: unknown[];
+  settlements: unknown[];
+  buildingRows: unknown[];
+  inventoryRows: unknown[];
+}) {
+  const regionId = decimalString(options.regionId, "regional Empire Hexite region id");
+  const warnings: string[] = [];
+  const claimEmpire = new Map<string, string>();
+  for (const [index, value] of options.settlements.entries()) {
+    const settlement = record(value, `regional Empire Hexite settlement ${index}`);
+    claimEmpire.set(
+      decimalString(
+        settlement.claimEntityId ?? settlement.claim_entity_id,
+        `regional Empire Hexite settlement ${index} claim id`,
+      ),
+      decimalString(
+        settlement.empireEntityId ?? settlement.empire_entity_id,
+        `regional Empire Hexite settlement ${index} Empire id`,
+      ),
+    );
+  }
+  const localEmpireIds = new Set(claimEmpire.values());
+  const playerEmpire = new Map<string, string>();
+  for (const [index, value] of options.playerRows.entries()) {
+    const player = record(value, `regional Empire Hexite player ${index}`);
+    const empireEntityId = decimalString(
+      player.empireEntityId ?? player.empire_entity_id,
+      `regional Empire Hexite player ${index} Empire id`,
+    );
+    if (!localEmpireIds.has(empireEntityId)) continue;
+    playerEmpire.set(
+      decimalString(
+        player.entityId ?? player.entity_id,
+        `regional Empire Hexite player ${index} entity id`,
+      ),
+      empireEntityId,
+    );
+  }
+  const buildingClaim = new Map<string, string>();
+  const reserveBuildingIds = new Set<string>();
+  for (const [index, value] of options.buildingRows.entries()) {
+    const building = record(value, `regional Empire Hexite building ${index}`);
+    const claimEntityId = decimalString(
+      building.claimEntityId ?? building.claim_entity_id,
+      `regional Empire Hexite building ${index} claim id`,
+    );
+    if (!claimEmpire.has(claimEntityId)) continue;
+    const entityId = decimalString(
+      building.entityId ?? building.entity_id,
+      `regional Empire Hexite building ${index} entity id`,
+    );
+    buildingClaim.set(entityId, claimEntityId);
+    const buildingDescriptionId = integer(
+      building.buildingDescriptionId ?? building.building_description_id,
+      `regional Empire Hexite building ${index} description id`,
+    );
+    if (buildingDescriptionId === HEXITE_RESERVE_BUILDING_DESCRIPTION_ID) {
+      reserveBuildingIds.add(entityId);
+    }
+  }
+  const inventories = [];
+  const seenInventoryIds = new Set<string>();
+  for (const [index, value] of options.inventoryRows.entries()) {
+    try {
+      const inventory = record(value, `regional Empire Hexite inventory ${index}`);
+      const entityId = decimalString(
+        inventory.entityId ?? inventory.entity_id,
+        `regional Empire Hexite inventory ${index} entity id`,
+      );
+      if (seenInventoryIds.has(entityId)) continue;
+      const ownerEntityId = decimalString(
+        inventory.ownerEntityId ?? inventory.owner_entity_id,
+        `regional Empire Hexite inventory ${index} owner id`,
+      );
+      const playerOwnerEntityId = decimalString(
+        inventory.playerOwnerEntityId ?? inventory.player_owner_entity_id,
+        `regional Empire Hexite inventory ${index} player owner id`,
+      );
+      const playerEmpireEntityId = playerEmpire.get(playerOwnerEntityId);
+      const ownerClaimEntityId = buildingClaim.get(ownerEntityId);
+      const claimEmpireEntityId = ownerClaimEntityId == null
+        ? undefined
+        : claimEmpire.get(ownerClaimEntityId);
+      const empireEntityId = playerEmpireEntityId ?? claimEmpireEntityId;
+      if (!empireEntityId) continue;
+      let energy = 0n;
+      let capsules = 0n;
+      for (const [pocketIndex, pocketValue] of records(inventory.pockets).entries()) {
+        if (pocketValue.contents == null) continue;
+        const contents = record(
+          pocketValue.contents,
+          `regional Empire Hexite inventory ${index} pocket ${pocketIndex} contents`,
+        );
+        const quantity = integer(
+          contents.quantity,
+          `regional Empire Hexite inventory ${index} pocket ${pocketIndex} quantity`,
+        );
+        if (quantity < 0) {
+          throw new TypeError(
+            `regional Empire Hexite inventory ${index} pocket ${pocketIndex} quantity must be non-negative.`,
+          );
+        }
+        const itemId = decimalString(
+          contents.itemId ?? contents.item_id,
+          `regional Empire Hexite inventory ${index} pocket ${pocketIndex} item id`,
+        );
+        const kind = normalizeItemKind(enumLabel(contents.itemType ?? contents.item_type));
+        if (kind === "item" && itemId === HEXITE_ENERGY_ITEM_ID) {
+          energy += BigInt(quantity);
+        }
+        if (kind === "cargo" && itemId === HEXITE_CAPSULE_CARGO_ID) {
+          capsules += BigInt(quantity);
+        }
+      }
+      seenInventoryIds.add(entityId);
+      if (energy === 0n && capsules === 0n) continue;
+      inventories.push({
+        entityId,
+        empireEntityId,
+        regionId,
+        sourceType: playerEmpireEntityId ? "player" as const : "claim" as const,
+        energy: energy.toString(),
+        capsules: capsules.toString(),
+        reserveBuilding: reserveBuildingIds.has(ownerEntityId),
+      });
+    } catch (error) {
+      warnings.push(
+        `Regional Empire Hexite omitted inventory ${index}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  const coverage = [...localEmpireIds].map((empireEntityId) => ({
+    empireEntityId,
+    regionId,
+    playerCount: [...playerEmpire.values()]
+      .filter((candidate) => candidate === empireEntityId)
+      .length,
+    claimCount: [...claimEmpire.values()]
+      .filter((candidate) => candidate === empireEntityId)
+      .length,
+  }));
+  const order = (left: string, right: string) => (
+    BigInt(left) < BigInt(right) ? -1 : BigInt(left) > BigInt(right) ? 1 : 0
+  );
+  inventories.sort((left, right) => (
+    order(left.empireEntityId, right.empireEntityId)
+    || order(left.entityId, right.entityId)
+  ));
+  coverage.sort((left, right) => order(left.empireEntityId, right.empireEntityId));
+  return { data: { inventories, coverage }, warnings };
+}
+
 export function normalizeRegionalClaims(options: {
   regionId: string;
   claimRows: unknown[];

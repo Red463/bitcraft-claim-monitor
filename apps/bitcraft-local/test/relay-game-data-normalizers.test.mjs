@@ -20,6 +20,7 @@ const {
   normalizeRegionalEquipment,
   normalizeRegionalBankInventories,
   normalizeRegionalEmpires,
+  normalizeRegionalEmpireHexite,
   normalizeRegionalConstruction,
   normalizeRegionalClaims,
   normalizeRegionalPlayers,
@@ -1217,6 +1218,103 @@ test("global Empire Foundry rows preserve exact identity and completed capsule c
     ],
     warnings: [
       "Global empire_foundry_state omitted row 1: global Empire Foundry 1 completed Capsules must be non-negative.",
+    ],
+  });
+});
+
+test("regional Empire Hexite joins stay exact, deduplicate inventories, and prefer player ownership", () => {
+  assert.deepEqual(normalizeRegionalEmpireHexite({
+    regionId: "19",
+    playerRows: [
+      { entityId: 101n, empireEntityId: 10n },
+      { entityId: 102n, empireEntityId: 10n },
+      { entityId: 201n, empireEntityId: 20n },
+    ],
+    settlements: [
+      { claimEntityId: "1001", empireEntityId: "10" },
+      { claimEntityId: "2001", empireEntityId: "20" },
+    ],
+    buildingRows: [
+      { entityId: 5001n, claimEntityId: 1001n, buildingDescriptionId: 90001 },
+      { entityId: 5002n, claimEntityId: 2001n, buildingDescriptionId: 12 },
+    ],
+    inventoryRows: [
+      {
+        entityId: 7001n,
+        ownerEntityId: 5001n,
+        playerOwnerEntityId: 101n,
+        pockets: [
+          { contents: { itemId: 828972621, itemType: { tag: "Item" }, quantity: 12 } },
+          { contents: { itemId: 2000000, itemType: { tag: "Cargo" }, quantity: 3 } },
+        ],
+      },
+      {
+        entityId: 7002n,
+        ownerEntityId: 5002n,
+        playerOwnerEntityId: 999n,
+        pockets: [
+          { contents: { itemId: 828972621, itemType: { tag: "Item" }, quantity: 5 } },
+          { contents: { itemId: 2000000, itemType: { tag: "Cargo" }, quantity: 7 } },
+        ],
+      },
+      {
+        entityId: 7003n,
+        ownerEntityId: 5001n,
+        playerOwnerEntityId: 102n,
+        pockets: [{ contents: { itemId: 1, itemType: { tag: "Item" }, quantity: 99 } }],
+      },
+      {
+        entityId: 7004n,
+        ownerEntityId: 9999n,
+        playerOwnerEntityId: 999n,
+        pockets: [{ contents: { itemId: 828972621, itemType: { tag: "Item" }, quantity: 99 } }],
+      },
+      {
+        entityId: 7005n,
+        ownerEntityId: 5001n,
+        playerOwnerEntityId: 101n,
+        pockets: [{ contents: { itemId: 2000000, itemType: { tag: "Cargo" }, quantity: -1 } }],
+      },
+    ],
+  }), {
+    data: {
+      inventories: [
+        {
+          entityId: "7001",
+          empireEntityId: "10",
+          regionId: "19",
+          sourceType: "player",
+          energy: "12",
+          capsules: "3",
+          reserveBuilding: true,
+        },
+        {
+          entityId: "7002",
+          empireEntityId: "20",
+          regionId: "19",
+          sourceType: "claim",
+          energy: "5",
+          capsules: "7",
+          reserveBuilding: false,
+        },
+      ],
+      coverage: [
+        {
+          empireEntityId: "10",
+          regionId: "19",
+          playerCount: 2,
+          claimCount: 1,
+        },
+        {
+          empireEntityId: "20",
+          regionId: "19",
+          playerCount: 1,
+          claimCount: 1,
+        },
+      ],
+    },
+    warnings: [
+      "Regional Empire Hexite omitted inventory 4: regional Empire Hexite inventory 4 pocket 0 quantity must be non-negative.",
     ],
   });
 });

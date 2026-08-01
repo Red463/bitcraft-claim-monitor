@@ -1,5 +1,6 @@
 import {
   normalizeRegionalEmpires,
+  normalizeRegionalEmpireHexite,
   regionalEmpireDetailIds,
 } from "./normalizers.ts";
 import { equalitySubscriptionQueries } from "./publicCraftRegionSession.ts";
@@ -39,6 +40,8 @@ type BindingConnection = {
     playerUsernameState: CachedTable;
     playerState: CachedTable;
     buildingNicknameState: CachedTable;
+    buildingState: CachedTable;
+    inventoryState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
@@ -63,6 +66,7 @@ type SessionConfig = {
   maxApplyRows?: number;
   maxIdsPerQuery?: number;
   includeIdentities?: boolean;
+  includeHexiteInventories?: boolean;
 };
 type SessionSource = Pick<SessionConfig, "uri" | "database" | "schemaFingerprint">;
 type SessionDependencies = {
@@ -75,7 +79,9 @@ type SessionDependencies = {
   scheduleRetry?: (callback: () => void, delayMs: number) => () => void;
 };
 export type RegionalEmpireSnapshot = {
-  data: ReturnType<typeof normalizeRegionalEmpires>["data"];
+  data: ReturnType<typeof normalizeRegionalEmpires>["data"] & {
+    hexite: ReturnType<typeof normalizeRegionalEmpireHexite>["data"] | null;
+  };
   warnings: string[];
   database: string;
   regionId: string;
@@ -131,16 +137,25 @@ export class RelayEmpireRegionSession {
   #connection: BindingConnection | null = null;
   #baseSubscription: SubscriptionHandle | null = null;
   #detailSubscription: SubscriptionHandle | null = null;
+  #hexiteTargetSubscription: SubscriptionHandle | null = null;
+  #hexiteInventorySubscription: SubscriptionHandle | null = null;
   #config: Required<
-    Pick<SessionConfig, "maxBaseRows" | "maxApplyRows" | "maxIdsPerQuery" | "includeIdentities">
+    Pick<
+      SessionConfig,
+      "maxBaseRows" | "maxApplyRows" | "maxIdsPerQuery" | "includeIdentities" | "includeHexiteInventories"
+    >
   > & Omit<
     SessionConfig,
-    "maxBaseRows" | "maxApplyRows" | "maxIdsPerQuery" | "includeIdentities"
+    "maxBaseRows" | "maxApplyRows" | "maxIdsPerQuery" | "includeIdentities" | "includeHexiteInventories"
   > | null = null;
   #nextGeneration = 0;
   #detailEpoch = 0;
+  #hexiteEpoch = 0;
+  #hexiteApplied = false;
   #refreshingDetails = false;
+  #refreshingHexite = false;
   #detailRefreshQueued = false;
+  #hexiteRefreshQueued = false;
   #snapshotQueued = false;
   #applyInFlight = false;
   #applyPending = false;
@@ -151,8 +166,33 @@ export class RelayEmpireRegionSession {
   #reconnects = 0;
   #cancelReconnect: (() => void) | null = null;
   readonly #identityChanged = () => this.#queueDetailRefresh();
+  readonly #empirePlayerUpdated = (...args: unknown[]) => {
+    const previous = args[1] && typeof args[1] === "object"
+      ? args[1] as WireRecord
+      : {};
+    const current = args[2] && typeof args[2] === "object"
+      ? args[2] as WireRecord
+      : {};
+    const previousIdentity = String(
+      previous.empireEntityId ?? previous.empire_entity_id ?? "",
+    );
+    const currentIdentity = String(
+      current.empireEntityId ?? current.empire_entity_id ?? "",
+    );
+    const previousEntity = String(previous.entityId ?? previous.entity_id ?? "");
+    const currentEntity = String(current.entityId ?? current.entity_id ?? "");
+    if (
+      this.#config?.includeHexiteInventories
+      && (previousIdentity !== currentIdentity || previousEntity !== currentEntity)
+    ) {
+      this.#queueDetailRefresh();
+      return;
+    }
+    this.#queueSnapshot();
+  };
   readonly #baseChanged = () => this.#queueSnapshot();
   readonly #detailChanged = () => this.#queueSnapshot();
+  readonly #hexiteTargetChanged = () => this.#queueHexiteTargetRefresh();
   #health = {
     connected: false,
     applied: false,
@@ -201,6 +241,7 @@ export class RelayEmpireRegionSession {
         "Relay empire query-size budget",
       ),
       includeIdentities: config.includeIdentities !== false,
+      includeHexiteInventories: config.includeHexiteInventories === true,
     };
     this.#nextGeneration = this.#config.generation;
     this.#stopping = false;
@@ -397,7 +438,12 @@ export class RelayEmpireRegionSession {
     this.#detailSubscription = null;
     if (!queries.length) {
       this.#refreshingDetails = false;
-      this.#applySnapshot(connection);
+      if (config.includeHexiteInventories) {
+        this.#applySnapshot(connection);
+        this.#refreshHexiteTargets(connection);
+      } else {
+        this.#applySnapshot(connection);
+      }
       return;
     }
     this.#health.stage = "details";
@@ -406,6 +452,136 @@ export class RelayEmpireRegionSession {
       .onApplied(() => this.#guard(() => {
         if (epoch !== this.#detailEpoch) return;
         this.#refreshingDetails = false;
+        if (config.includeHexiteInventories) {
+          this.#applySnapshot(connection);
+          this.#refreshHexiteTargets(connection);
+        } else {
+          this.#applySnapshot(connection);
+        }
+      }))
+      .onError((_context, error) => (
+        this.#handleSubscriptionError(connection, connectionEpoch, error)
+      ))
+      .subscribe(queries);
+  }
+
+  #refreshHexiteTargets(connection: BindingConnection): void {
+    const config = this.#requiredConfig();
+    this.#refreshingHexite = true;
+    this.#hexiteEpoch += 1;
+    const epoch = this.#hexiteEpoch;
+    this.#hexiteTargetSubscription?.unsubscribe();
+    this.#hexiteTargetSubscription = null;
+    this.#hexiteInventorySubscription?.unsubscribe();
+    this.#hexiteInventorySubscription = null;
+    const base = this.#baseRows(connection);
+    const { claimIds } = regionalEmpireDetailIds({
+      regionId: config.regionId,
+      worldRegionRows: base.worldRegionRows,
+      settlementRows: base.settlementRows,
+      nodeRows: base.nodeRows,
+    });
+    const claimIdSet = new Set(claimIds);
+    const localEmpireIds = [...new Set(base.settlementRows.flatMap((value, index) => {
+      const settlement = row(value, `Relay Empire Hexite settlement ${index}`);
+      const claimEntityId = decimalInteger(
+        settlement.claimEntityId ?? settlement.claim_entity_id,
+        `Relay Empire Hexite settlement ${index} claim id`,
+      );
+      if (!claimIdSet.has(claimEntityId)) return [];
+      return [decimalInteger(
+        settlement.empireEntityId ?? settlement.empire_entity_id,
+        `Relay Empire Hexite settlement ${index} Empire id`,
+      )];
+    }))];
+    const queries = [
+      ...(config.includeIdentities ? [] : equalitySubscriptionQueries(
+        "empire_player_data_state",
+        "empire_entity_id",
+        localEmpireIds,
+        config.maxIdsPerQuery,
+      )),
+      ...equalitySubscriptionQueries(
+        "building_state",
+        "claim_entity_id",
+        claimIds,
+        config.maxIdsPerQuery,
+      ),
+    ];
+    if (!queries.length) {
+      this.#refreshingHexite = false;
+      this.#hexiteApplied = true;
+      this.#applySnapshot(connection);
+      return;
+    }
+    this.#health.stage = "hexite-targets";
+    const connectionEpoch = this.#connectionEpoch;
+    this.#hexiteTargetSubscription = connection.subscriptionBuilder()
+      .onApplied(() => this.#guard(() => {
+        if (epoch !== this.#hexiteEpoch) return;
+        this.#refreshHexiteInventories(connection, localEmpireIds);
+      }))
+      .onError((_context, error) => (
+        this.#handleSubscriptionError(connection, connectionEpoch, error)
+      ))
+      .subscribe(queries);
+  }
+
+  #refreshHexiteInventories(
+    connection: BindingConnection,
+    localEmpireIds: string[],
+  ): void {
+    const config = this.#requiredConfig();
+    const localEmpires = new Set(localEmpireIds);
+    const playerIds = rows(connection.db.empirePlayerDataState).flatMap((value, index) => {
+      const player = row(value, `Relay Empire Hexite player ${index}`);
+      const empireEntityId = decimalInteger(
+        player.empireEntityId ?? player.empire_entity_id,
+        `Relay Empire Hexite player ${index} Empire id`,
+      );
+      if (!localEmpires.has(empireEntityId)) return [];
+      return [decimalInteger(
+        player.entityId ?? player.entity_id,
+        `Relay Empire Hexite player ${index} entity id`,
+      )];
+    });
+    const buildingIds = rows(connection.db.buildingState).map((value, index) => {
+      const building = row(value, `Relay Empire Hexite building ${index}`);
+      return decimalInteger(
+        building.entityId ?? building.entity_id,
+        `Relay Empire Hexite building ${index} entity id`,
+      );
+    });
+    const queries = [
+      ...equalitySubscriptionQueries(
+        "inventory_state",
+        "player_owner_entity_id",
+        playerIds,
+        config.maxIdsPerQuery,
+      ),
+      ...equalitySubscriptionQueries(
+        "inventory_state",
+        "owner_entity_id",
+        buildingIds,
+        config.maxIdsPerQuery,
+      ),
+    ];
+    this.#hexiteInventorySubscription?.unsubscribe();
+    this.#hexiteInventorySubscription = null;
+    if (!queries.length) {
+      this.#refreshingHexite = false;
+      this.#hexiteApplied = true;
+      this.#applySnapshot(connection);
+      return;
+    }
+    const epoch = this.#hexiteEpoch;
+    const connectionEpoch = this.#connectionEpoch;
+    this.#health.stage = "hexite-inventories";
+    this.#hexiteInventorySubscription = connection.subscriptionBuilder()
+      .onApplied(() => this.#guard(() => {
+        if (epoch !== this.#hexiteEpoch) return;
+        this.#refreshingHexite = false;
+        this.#hexiteApplied = true;
         this.#applySnapshot(connection);
       }))
       .onError((_context, error) => (
@@ -435,7 +611,7 @@ export class RelayEmpireRegionSession {
 
   #applySnapshot(connection: BindingConnection): void {
     const config = this.#config;
-    if (!config || this.#refreshingDetails) return;
+    if (!config || this.#refreshingDetails || this.#refreshingHexite) return;
     if (this.#applyInFlight) {
       this.#applyPending = true;
       return;
@@ -452,9 +628,16 @@ export class RelayEmpireRegionSession {
         ? rows(connection.db.playerState)
         : [];
       const nicknameRows = rows(connection.db.buildingNicknameState);
+      const buildingRows = config.includeHexiteInventories && this.#hexiteApplied
+        ? rows(connection.db.buildingState)
+        : [];
+      const inventoryRows = config.includeHexiteInventories && this.#hexiteApplied
+        ? rows(connection.db.inventoryState)
+        : [];
       const rowCount = Object.values(base).reduce((total, values) => total + values.length, 0)
         + claimRows.length + claimMemberRows.length + usernameRows.length
-        + playerStateRows.length + nicknameRows.length;
+        + playerStateRows.length + nicknameRows.length + buildingRows.length
+        + inventoryRows.length;
       if (rowCount > config.maxApplyRows) {
         throw new Error(
           `Relay empire apply-row budget ${config.maxApplyRows} exceeded by ${rowCount} rows`,
@@ -469,6 +652,15 @@ export class RelayEmpireRegionSession {
         playerStateRows,
         nicknameRows,
       });
+      const hexite = config.includeHexiteInventories && this.#hexiteApplied
+        ? normalizeRegionalEmpireHexite({
+            regionId: config.regionId,
+            playerRows: rows(connection.db.empirePlayerDataState),
+            settlements: normalized.data.settlements,
+            buildingRows,
+            inventoryRows,
+          })
+        : null;
       const receivedAt = this.#now().toISOString();
       const generation = this.#nextGeneration;
       this.#nextGeneration += 1;
@@ -477,8 +669,14 @@ export class RelayEmpireRegionSession {
       this.#health.lastApplyDurationMs = Date.now() - startedAt;
       this.#health.stage = "applying";
       Promise.resolve(this.#onSnapshot({
-        data: normalized.data,
-        warnings: normalized.warnings,
+        data: {
+          ...normalized.data,
+          hexite: hexite?.data ?? null,
+        },
+        warnings: [
+          ...normalized.warnings,
+          ...(hexite?.warnings ?? []),
+        ],
         database: config.database,
         regionId: config.regionId,
         schemaFingerprint: config.schemaFingerprint,
@@ -517,11 +715,30 @@ export class RelayEmpireRegionSession {
   }
 
   #queueSnapshot(): void {
-    if (this.#snapshotQueued || !this.#connection || this.#refreshingDetails) return;
+    if (
+      this.#snapshotQueued
+      || !this.#connection
+      || this.#refreshingDetails
+      || this.#refreshingHexite
+    ) return;
     this.#snapshotQueued = true;
     queueMicrotask(() => {
       this.#snapshotQueued = false;
       if (this.#connection) this.#applySnapshot(this.#connection);
+    });
+  }
+
+  #queueHexiteTargetRefresh(): void {
+    if (
+      this.#hexiteRefreshQueued
+      || !this.#connection
+      || !this.#config?.includeHexiteInventories
+      || this.#refreshingHexite
+    ) return;
+    this.#hexiteRefreshQueued = true;
+    queueMicrotask(() => {
+      this.#hexiteRefreshQueued = false;
+      if (this.#connection) this.#guard(() => this.#refreshHexiteTargets(this.#connection!));
     });
   }
 
@@ -533,7 +750,11 @@ export class RelayEmpireRegionSession {
     ]) {
       table.onInsert?.(this.#identityChanged);
       table.onDelete?.(this.#identityChanged);
-      table.onUpdate?.(this.#baseChanged);
+      table.onUpdate?.(
+        table === connection.db.empirePlayerDataState
+          ? this.#empirePlayerUpdated
+          : this.#baseChanged,
+      );
     }
     connection.db.empireSettlementState.onInsert?.(this.#identityChanged);
     connection.db.empireSettlementState.onUpdate?.(this.#identityChanged);
@@ -560,6 +781,14 @@ export class RelayEmpireRegionSession {
       table.onUpdate?.(this.#detailChanged);
       table.onDelete?.(this.#detailChanged);
     }
+    if (this.#requiredConfig().includeHexiteInventories) {
+      connection.db.buildingState.onInsert?.(this.#hexiteTargetChanged);
+      connection.db.buildingState.onDelete?.(this.#hexiteTargetChanged);
+      connection.db.buildingState.onUpdate?.(this.#detailChanged);
+      connection.db.inventoryState.onInsert?.(this.#detailChanged);
+      connection.db.inventoryState.onUpdate?.(this.#detailChanged);
+      connection.db.inventoryState.onDelete?.(this.#detailChanged);
+    }
     this.#listenersAttached = true;
   }
 
@@ -572,7 +801,11 @@ export class RelayEmpireRegionSession {
     ]) {
       table.removeOnInsert?.(this.#identityChanged);
       table.removeOnDelete?.(this.#identityChanged);
-      table.removeOnUpdate?.(this.#baseChanged);
+      table.removeOnUpdate?.(
+        table === connection.db.empirePlayerDataState
+          ? this.#empirePlayerUpdated
+          : this.#baseChanged,
+      );
     }
     connection.db.empireSettlementState.removeOnInsert?.(this.#identityChanged);
     connection.db.empireSettlementState.removeOnUpdate?.(this.#identityChanged);
@@ -599,18 +832,34 @@ export class RelayEmpireRegionSession {
       table.removeOnUpdate?.(this.#detailChanged);
       table.removeOnDelete?.(this.#detailChanged);
     }
+    if (this.#config?.includeHexiteInventories) {
+      connection.db.buildingState.removeOnInsert?.(this.#hexiteTargetChanged);
+      connection.db.buildingState.removeOnDelete?.(this.#hexiteTargetChanged);
+      connection.db.buildingState.removeOnUpdate?.(this.#detailChanged);
+      connection.db.inventoryState.removeOnInsert?.(this.#detailChanged);
+      connection.db.inventoryState.removeOnUpdate?.(this.#detailChanged);
+      connection.db.inventoryState.removeOnDelete?.(this.#detailChanged);
+    }
     this.#listenersAttached = false;
   }
 
   #clearConnectionState(connection: BindingConnection): void {
     if (this.#connection === connection) this.#removeListeners();
     this.#detailEpoch += 1;
+    this.#hexiteEpoch += 1;
     this.#detailSubscription?.unsubscribe();
     this.#detailSubscription = null;
+    this.#hexiteTargetSubscription?.unsubscribe();
+    this.#hexiteTargetSubscription = null;
+    this.#hexiteInventorySubscription?.unsubscribe();
+    this.#hexiteInventorySubscription = null;
     this.#baseSubscription?.unsubscribe();
     this.#baseSubscription = null;
     this.#refreshingDetails = false;
+    this.#refreshingHexite = false;
+    this.#hexiteApplied = false;
     this.#detailRefreshQueued = false;
+    this.#hexiteRefreshQueued = false;
     this.#snapshotQueued = false;
   }
 
@@ -638,9 +887,14 @@ export class RelayEmpireRegionSession {
     this.#cancelReconnect = null;
     this.#connectionEpoch += 1;
     this.#detailEpoch += 1;
+    this.#hexiteEpoch += 1;
     this.#removeListeners();
     this.#detailSubscription?.unsubscribe();
     this.#detailSubscription = null;
+    this.#hexiteTargetSubscription?.unsubscribe();
+    this.#hexiteTargetSubscription = null;
+    this.#hexiteInventorySubscription?.unsubscribe();
+    this.#hexiteInventorySubscription = null;
     this.#baseSubscription?.unsubscribe();
     this.#baseSubscription = null;
     this.#connection?.disconnect();
@@ -648,6 +902,8 @@ export class RelayEmpireRegionSession {
     this.#bindings = null;
     this.#config = null;
     this.#refreshingDetails = false;
+    this.#refreshingHexite = false;
+    this.#hexiteApplied = false;
     this.#health.connected = false;
     this.#health.stage = "stopped";
   }

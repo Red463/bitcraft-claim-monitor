@@ -115,6 +115,40 @@ test("Empire runtime atomically merges only configured regional generations", as
   assert.equal(sessionConfigs.get("7").includeIdentities, false);
   const primary = regionData("19", "190");
   const secondary = regionData("7", "70");
+  primary.hexite = {
+    inventories: [{
+      entityId: "9001",
+      empireEntityId: "190",
+      regionId: "19",
+      sourceType: "player",
+      energy: "12",
+      capsules: "3",
+      reserveBuilding: false,
+    }],
+    coverage: [{
+      empireEntityId: "190",
+      regionId: "19",
+      playerCount: 1,
+      claimCount: 1,
+    }],
+  };
+  secondary.hexite = {
+    inventories: [{
+      entityId: "9002",
+      empireEntityId: "70",
+      regionId: "7",
+      sourceType: "claim",
+      energy: "5",
+      capsules: "2",
+      reserveBuilding: true,
+    }],
+    coverage: [{
+      empireEntityId: "70",
+      regionId: "7",
+      playerCount: 1,
+      claimCount: 1,
+    }],
+  };
   primary.empires.push(secondary.empires[0]);
   primary.members.push(secondary.members[0]);
   await handlers.get("19")({
@@ -149,7 +183,28 @@ test("Empire runtime atomically merges only configured regional generations", as
     ["19", "190"],
   ]);
   assert.deepEqual(combined.regions.map((row) => row.regionId), ["7", "19"]);
+  assert.deepEqual(combined.hexite.availableRegionIds, ["7", "19"]);
+  assert.deepEqual(combined.hexite.missingRegionIds, []);
+  assert.deepEqual(
+    combined.hexite.inventories.map((row) => [row.regionId, row.entityId]),
+    [["7", "9002"], ["19", "9001"]],
+  );
   assert.equal(combined.foundries, null);
+
+  await handlers.get("19")({
+    data: { ...primary, hexite: null },
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 2,
+    receivedAt: "2026-07-30T18:02:10.000Z",
+  });
+  assert.equal(writes[2].domains.empires.data.hexite.inventories.length, 2);
+  assert.match(
+    writes[2].domains.empires.warnings.join("\n"),
+    /retained last-good values/,
+  );
 
   await runtime.updateGlobalFoundries({
     foundries: [{
@@ -165,8 +220,8 @@ test("Empire runtime atomically merges only configured regional generations", as
     generation: 4,
     receivedAt: "2026-07-30T18:02:15.000Z",
   });
-  assert.equal(writes.length, 3);
-  assert.equal(writes[2].domains.empires.data.foundries[0].hexiteCapsules, "12");
+  assert.equal(writes.length, 4);
+  assert.equal(writes[3].domains.empires.data.foundries[0].hexiteCapsules, "12");
 
   await runtime.updateGlobalFoundries({
     foundries: [{
@@ -182,9 +237,9 @@ test("Empire runtime atomically merges only configured regional generations", as
     generation: 5,
     receivedAt: "2026-07-30T18:02:30.000Z",
   });
-  assert.equal(writes.length, 4);
-  assert.equal(writes[3].domains.empires.data.foundries[0].hexiteCapsules, "13");
-  assert.equal(writes[3].domains.empires.provenance.sourceKey, "global");
+  assert.equal(writes.length, 5);
+  assert.equal(writes[4].domains.empires.data.foundries[0].hexiteCapsules, "13");
+  assert.equal(writes[4].domains.empires.provenance.sourceKey, "global");
 
   await assert.rejects(
     async () => handlers.get("19")({

@@ -730,16 +730,40 @@ sentinel as a malformed timestamp. Entity IDs remain the unique row identity,
 and Capsule totals are aggregated by `empire_entity_id`.
 
 The regional `inventory_state` schema exposes owner fields and inventory
-pockets, but complete bounded joins across all Empire players and aligned
-claims are not yet proven. Full reserve parity therefore remains blocked on a
-filtered regional inventory diagnostic. The live treasury slice is useful
-immediately without hiding that limitation or recreating a scheduled crawl.
+pockets. A staged 2026-08-01 Region 19 proof first resolved 23 local Empires,
+1,460 Empire players, 55 aligned claims, and 13,503 claim buildings, then
+opened indexed inventory predicates only for those exact player and building
+IDs. The complete generation contained 9,226 inventories but projected only
+37 non-zero Hexite contributions into current state: 4,243 Hexite Energy,
+1,754 ready Capsules, and 914 Capsules located in 12 Hexite Reserve buildings.
+The integrated normalizer matched the independent raw diagnostic exactly.
+
+The same exact predicates returned zero inventory rows from
+`bitcraft-live-global`, proving that the global table is not a current
+substitute. Each existing pooled regional connection therefore owns its
+filtered staged inventory joins. Secondary sessions subscribe to
+`empire_player_data_state` only for their locally observed Empire IDs instead
+of duplicating the unfiltered identity graph. Current pages receive compact
+per-inventory contributions and per-Empire coverage immediately after the
+first complete generation; subsequent insert/update/delete events republish
+without a scheduler. No Hexite-specific SQL table or extra WebSocket
+connection is added.
+
+The production session publishes its ordinary Empire/settlement/watchtower
+generation before starting the optional inventory stages. In the final live
+proof, the base generation arrived at `11:50:36.308Z` and the exact Hexite
+enrichment at `11:50:46.749Z`, 10.441 seconds later. A reconnect retains the
+last complete Hexite projection while new inventory predicates apply, so this
+enrichment never delays or blanks the rest of the Empire page.
+
+Configured regions that have not applied, or Empires whose observed aligned
+claim count is below the authoritative Empire claim count, remain explicitly
+partial. Available regional values still appear as a known minimum rather than
+waiting for the retired six-hour crawl or being coerced to zero.
 
 ## Remaining diagnostic blockers
 
 - attacker/defender meaning and completion semantics for empire siege rows;
-- bounded multi-region player/claim inventory joins for complete Hexite reserve
-  aggregation.
 
 ## Claim-market completed-sale evidence — 2026-08-01
 

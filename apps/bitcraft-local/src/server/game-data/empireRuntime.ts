@@ -90,12 +90,36 @@ type FoundryRow = Record<string, unknown> & {
   queued: string;
   startedAt: string | null;
 };
+type HexiteInventoryRow = Record<string, unknown> & {
+  entityId: string;
+  empireEntityId: string;
+  regionId: string;
+  sourceType: "player" | "claim";
+  energy: string;
+  capsules: string;
+  reserveBuilding: boolean;
+};
+type HexiteCoverageRow = Record<string, unknown> & {
+  empireEntityId: string;
+  regionId: string;
+  playerCount: number;
+  claimCount: number;
+};
+type HexiteRegionData = {
+  inventories: HexiteInventoryRow[];
+  coverage: HexiteCoverageRow[];
+};
+type HexiteCombinedData = HexiteRegionData & {
+  availableRegionIds: string[];
+  missingRegionIds: string[];
+};
 type RegionState = {
   empires: EmpireRow[];
   members: MemberRow[];
   settlements: SettlementRow[];
   claimMembers: ClaimMemberRow[];
   nodes: NodeRow[];
+  hexite: HexiteRegionData | null;
   warnings: string[];
   database: string;
   schemaFingerprint: string;
@@ -111,6 +135,7 @@ export type EmpireCombinedData = {
   claimMembers: ClaimMemberRow[];
   nodes: NodeRow[];
   foundries: FoundryRow[] | null;
+  hexite: HexiteCombinedData | null;
   regions: Array<{
     regionId: string;
     empireCount: number;
@@ -136,6 +161,53 @@ function numericStringOrder(left: string, right: string): number {
   const leftValue = BigInt(left);
   const rightValue = BigInt(right);
   return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+}
+
+function combineHexiteRegions(
+  activeRegionIds: string[],
+  regions: Map<string, RegionState>,
+): HexiteCombinedData | null {
+  const availableRegionIds = activeRegionIds.filter(
+    (regionId) => regions.get(regionId)?.hexite != null,
+  );
+  if (!availableRegionIds.length) return null;
+  const missingRegionIds = activeRegionIds.filter(
+    (regionId) => regions.get(regionId)?.hexite == null,
+  );
+  const inventoryById = new Map<string, HexiteInventoryRow>();
+  const coverageByKey = new Map<string, HexiteCoverageRow>();
+  for (const regionId of availableRegionIds) {
+    const hexite = regions.get(regionId)?.hexite;
+    if (!hexite) continue;
+    for (const inventory of hexite.inventories) {
+      const previous = inventoryById.get(inventory.entityId);
+      if (previous && JSON.stringify(previous) !== JSON.stringify(inventory)) {
+        throw new Error(
+          `Relay Empire Hexite inventory ${inventory.entityId} conflicts across regional sources`,
+        );
+      }
+      inventoryById.set(inventory.entityId, inventory);
+    }
+    for (const coverage of hexite.coverage) {
+      const key = `${coverage.regionId}:${coverage.empireEntityId}`;
+      if (coverageByKey.has(key)) {
+        throw new Error(`Relay Empire Hexite coverage ${key} is duplicated`);
+      }
+      coverageByKey.set(key, coverage);
+    }
+  }
+  return {
+    inventories: [...inventoryById.values()].sort((left, right) => (
+      numericStringOrder(left.empireEntityId, right.empireEntityId)
+      || numericStringOrder(left.entityId, right.entityId)
+    )),
+    coverage: [...coverageByKey.values()].sort((left, right) => (
+      numericStringOrder(left.regionId, right.regionId)
+      || numericStringOrder(left.empireEntityId, right.empireEntityId)
+    )),
+    availableRegionIds,
+    missingRegionIds,
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -465,6 +537,7 @@ export class RelayEmpireRuntime {
             generation: 1,
             regionId,
             includeIdentities: regionId === this.#primaryRegionId,
+            includeHexiteInventories: true,
           });
         } catch (error) {
           if (this.#activeSessionIds.get(regionId) === sessionId) {
@@ -519,6 +592,79 @@ export class RelayEmpireRuntime {
     const nodes = snapshot.data.nodes
       .map((value) => scopedEntity(value, snapshot.regionId, "entityId"))
       .filter((value): value is NodeRow => value != null);
+    const rawHexite = snapshot.data.hexite;
+    const hexite = rawHexite == null ? null : {
+      inventories: rawHexite.inventories.map((value, index) => {
+        const row = asRecord(value);
+        const regionId = decimalInteger(
+          row.regionId,
+          `Relay Empire Hexite inventory ${index} region id`,
+        );
+        if (regionId !== snapshot.regionId) {
+          throw new Error(
+            `Relay Empire Hexite inventory ${index} escaped region ${snapshot.regionId}`,
+          );
+        }
+        const sourceType = String(row.sourceType);
+        if (sourceType !== "player" && sourceType !== "claim") {
+          throw new TypeError(`Relay Empire Hexite inventory ${index} source type is invalid`);
+        }
+        return {
+          ...row,
+          entityId: decimalInteger(
+            row.entityId,
+            `Relay Empire Hexite inventory ${index} entity id`,
+          ),
+          empireEntityId: decimalInteger(
+            row.empireEntityId,
+            `Relay Empire Hexite inventory ${index} Empire id`,
+          ),
+          regionId,
+          sourceType,
+          energy: decimalInteger(
+            row.energy,
+            `Relay Empire Hexite inventory ${index} energy`,
+          ),
+          capsules: decimalInteger(
+            row.capsules,
+            `Relay Empire Hexite inventory ${index} Capsules`,
+          ),
+          reserveBuilding: row.reserveBuilding === true,
+        } as HexiteInventoryRow;
+      }),
+      coverage: rawHexite.coverage.map((value, index) => {
+        const row = asRecord(value);
+        const regionId = decimalInteger(
+          row.regionId,
+          `Relay Empire Hexite coverage ${index} region id`,
+        );
+        if (regionId !== snapshot.regionId) {
+          throw new Error(
+            `Relay Empire Hexite coverage ${index} escaped region ${snapshot.regionId}`,
+          );
+        }
+        const playerCount = Number(row.playerCount);
+        const claimCount = Number(row.claimCount);
+        if (
+          !Number.isSafeInteger(playerCount)
+          || playerCount < 0
+          || !Number.isSafeInteger(claimCount)
+          || claimCount < 0
+        ) {
+          throw new TypeError(`Relay Empire Hexite coverage ${index} counts are invalid`);
+        }
+        return {
+          ...row,
+          empireEntityId: decimalInteger(
+            row.empireEntityId,
+            `Relay Empire Hexite coverage ${index} Empire id`,
+          ),
+          regionId,
+          playerCount,
+          claimCount,
+        } as HexiteCoverageRow;
+      }),
+    };
     if (
       empires.length !== snapshot.data.empires.length
       || members.length !== snapshot.data.members.length
@@ -534,6 +680,7 @@ export class RelayEmpireRuntime {
       settlements,
       claimMembers,
       nodes,
+      hexite,
       warnings: [...snapshot.warnings],
       database: snapshot.database,
       schemaFingerprint: snapshot.schemaFingerprint,
@@ -549,6 +696,13 @@ export class RelayEmpireRuntime {
       throw new Error(`Relay Empire snapshot leaked unconfigured region ${snapshot.regionId}`);
     }
     const nextRegion = this.#normalizeRegion(snapshot);
+    const previousRegion = this.#regions.get(snapshot.regionId);
+    if (nextRegion.hexite == null && previousRegion?.hexite != null) {
+      nextRegion.hexite = previousRegion.hexite;
+      nextRegion.warnings.push(
+        "Relay Empire Hexite inventory generation is still applying; retained last-good values.",
+      );
+    }
     const nextRegions = new Map(this.#regions);
     nextRegions.set(snapshot.regionId, nextRegion);
     const nextSourceErrors = new Map(this.#sourceErrors);
@@ -593,6 +747,7 @@ export class RelayEmpireRuntime {
       claimMembers: sortEntities(claimMembers, (row) => row.entityId),
       nodes: sortEntities(nodes, (row) => row.entityId),
       foundries: this.#globalFoundries == null ? null : [...this.#globalFoundries],
+      hexite: combineHexiteRegions(this.#activeRegionIds, nextRegions),
       regions: this.#activeRegionIds.flatMap((regionId) => {
         const region = nextRegions.get(regionId);
         if (!region) return [];
@@ -681,6 +836,7 @@ export class RelayEmpireRuntime {
       claimMembers,
       nodes,
       foundries: this.#globalFoundries == null ? null : [...this.#globalFoundries],
+      hexite: combineHexiteRegions(this.#activeRegionIds, this.#regions),
       regions: this.#activeRegionIds.flatMap((regionId) => {
         const region = this.#regions.get(regionId);
         if (!region) return [];
@@ -750,6 +906,12 @@ export class RelayEmpireRuntime {
     stored ??= this.#currentStateRepository.read(claimId, "empires");
     const data = asRecord(stored?.data);
     const metadata = Array.isArray(data.regions) ? data.regions : [];
+    const storedHexite = asRecord(data.hexite);
+    const storedHexiteRegionIds = new Set(
+      Array.isArray(storedHexite.availableRegionIds)
+        ? storedHexite.availableRegionIds.map(String)
+        : [],
+    );
     for (const value of metadata) {
       const row = asRecord(value);
       const regionId = String(row.regionId ?? "").trim();
@@ -765,12 +927,25 @@ export class RelayEmpireRuntime {
       );
       const lastError = row.lastError == null ? null : String(row.lastError);
       if (lastError) this.#sourceErrors.set(regionId, lastError);
+      const hexite = storedHexiteRegionIds.has(regionId) ? {
+        inventories: (Array.isArray(storedHexite.inventories)
+          ? storedHexite.inventories
+          : [])
+          .filter((entry) => String(asRecord(entry).regionId ?? "") === regionId)
+          .map((entry) => asRecord(entry) as HexiteInventoryRow),
+        coverage: (Array.isArray(storedHexite.coverage)
+          ? storedHexite.coverage
+          : [])
+          .filter((entry) => String(asRecord(entry).regionId ?? "") === regionId)
+          .map((entry) => asRecord(entry) as HexiteCoverageRow),
+      } : null;
       this.#regions.set(regionId, {
         empires: select("empires", "entityId") as EmpireRow[],
         members: select("members", "entityId") as MemberRow[],
         settlements: select("settlements", "buildingEntityId") as SettlementRow[],
         claimMembers: select("claimMembers", "entityId") as ClaimMemberRow[],
         nodes: select("nodes", "entityId") as NodeRow[],
+        hexite,
         warnings: Array.isArray(row.warnings) ? row.warnings.map(String) : [],
         database: String(row.database ?? ""),
         schemaFingerprint: String(row.schemaFingerprint ?? ""),

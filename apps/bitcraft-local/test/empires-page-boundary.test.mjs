@@ -59,7 +59,7 @@ test("Empire overview presents one combined Hexite Reserves column", () => {
   assert.match(empiresPage, /presentHexiteReserveSummary\(row\.hexiteReserves\)\.sortValue/);
   assert.match(empiresPage, /<details className="hexite-reserve-details">/);
   assert.match(empiresPage, /<summary>Details<\/summary>/);
-  assert.match(empiresPage, /Live known minimum includes the Empire treasury and completed Foundry Capsules; player and claim inventories remain unavailable\./);
+  assert.match(empiresPage, /Live known minimum includes the Empire treasury, completed Foundry Capsules, and bounded configured-region player and claim inventories; incomplete regional coverage remains explicit\./);
   assert.match(empiresCss, /\.hexite-reserve-cell\s*\{[^}]*min-width:\s*230px/s);
   assert.match(empiresPage, /className=\{`hexite-reserve-cell \$\{presentation\.tone\}`\}/);
   assert.match(empiresCss, /\.hexite-reserve-cell\.danger\s*>\s*strong/);

@@ -63,6 +63,33 @@ test("live Empire Hexite projection adds completed global Foundry capsules to th
   assert.equal(projection.errors.some((error) => /inventory joins are not available/i.test(error)), true);
 });
 
+test("live Empire Hexite projection adds exact event-driven regional inventories", () => {
+  const projection = liveEmpireHexiteProjection({
+    treasury: "5000",
+    foundryCapsules: "25",
+    playerInventoryEnergy: "12",
+    sharedClaimInventoryEnergy: "5",
+    playerInventoryCapsules: "3",
+    sharedClaimInventoryCapsules: "7",
+    reserveBuildingCapsules: "7",
+    inventoryCoverage: {
+      players: { fresh: 2, reused: 0, missing: 0, total: 2 },
+      claims: { fresh: 1, reused: 0, missing: 0, total: 1 },
+    },
+    inventoryComplete: true,
+    memberCount: 2,
+    claimCount: 1,
+    observedAt: "2026-07-30T18:00:00.000Z",
+  });
+
+  assert.equal(projection.status, "complete");
+  assert.equal(projection.energy.total, "5017");
+  assert.equal(projection.capsules.readyTotal, "35");
+  assert.equal(projection.capsules.reserveBuildings, "7");
+  assert.equal(projection.estimatedEnergyEquivalent, "40017");
+  assert.deepEqual(projection.errors, []);
+});
+
 test("live Empire Hexite projection never invents invalid counts or amounts", () => {
   const projection = liveEmpireHexiteProjection({
     treasury: "not-an-amount",

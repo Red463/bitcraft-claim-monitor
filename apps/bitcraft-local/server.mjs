@@ -5020,9 +5020,66 @@ function relayEmpireHexiteForView(empireId, empire, observedAt) {
   const foundryCapsules = foundries == null
     ? null
     : foundries.reduce((total, row) => total + BigInt(String(row.hexiteCapsules)), 0n).toString();
+  const hexite = current?.hexite && typeof current.hexite === "object"
+    ? current.hexite
+    : null;
+  const inventoryRows = Array.isArray(hexite?.inventories)
+    ? hexite.inventories.filter(
+        (row) => String(row?.empireEntityId ?? "") === String(empireId),
+      )
+    : null;
+  const coverageRows = Array.isArray(hexite?.coverage)
+    ? hexite.coverage.filter(
+        (row) => String(row?.empireEntityId ?? "") === String(empireId),
+      )
+    : [];
+  const sumInventory = (sourceType, key) => inventoryRows == null
+    ? null
+    : inventoryRows
+        .filter((row) => row?.sourceType === sourceType)
+        .reduce((total, row) => total + BigInt(String(row?.[key] ?? "0")), 0n)
+        .toString();
+  const reserveBuildingCapsules = inventoryRows == null
+    ? null
+    : inventoryRows
+        .filter((row) => row?.reserveBuilding === true)
+        .reduce((total, row) => total + BigInt(String(row?.capsules ?? "0")), 0n)
+        .toString();
+  const coveredClaims = coverageRows.reduce(
+    (total, row) => total + Math.max(0, Number(row?.claimCount) || 0),
+    0,
+  );
+  const expectedPlayers = Math.max(0, Number(empire?.memberCount) || 0);
+  const expectedClaims = Math.max(0, Number(empire?.numClaims) || 0);
+  const missingRegionIds = Array.isArray(hexite?.missingRegionIds)
+    ? hexite.missingRegionIds
+    : [];
+  const inventoryComplete = inventoryRows != null
+    && missingRegionIds.length === 0
+    && coveredClaims >= expectedClaims;
   return liveEmpireHexiteProjection({
     treasury: empire?.empireCurrencyTreasury,
     foundryCapsules,
+    playerInventoryEnergy: sumInventory("player", "energy"),
+    sharedClaimInventoryEnergy: sumInventory("claim", "energy"),
+    playerInventoryCapsules: sumInventory("player", "capsules"),
+    sharedClaimInventoryCapsules: sumInventory("claim", "capsules"),
+    reserveBuildingCapsules,
+    inventoryCoverage: inventoryRows == null ? null : {
+      players: {
+        fresh: inventoryComplete ? expectedPlayers : 0,
+        reused: 0,
+        missing: inventoryComplete ? 0 : expectedPlayers,
+        total: expectedPlayers,
+      },
+      claims: {
+        fresh: Math.min(coveredClaims, expectedClaims),
+        reused: 0,
+        missing: Math.max(0, expectedClaims - coveredClaims),
+        total: expectedClaims,
+      },
+    },
+    inventoryComplete,
     memberCount: empire?.memberCount,
     claimCount: empire?.numClaims,
     observedAt,

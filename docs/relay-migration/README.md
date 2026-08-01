@@ -205,9 +205,12 @@ unknown. The legacy six-hour Empire Hexite sweep and its five current/work
 tables are retired: each committed Empire generation now publishes the exact
 treasury amount immediately, while the continuously subscribed global Foundry
 generation adds completed Capsules to the same clearly labelled known minimum
-as soon as either source changes. Player and claim inventory joins remain
-unavailable until bounded regional joins are proven; the app does not invent
-those amounts or make users wait for a scheduled crawl.
+as soon as either source changes. Existing pooled regional sessions also stage
+bounded local Empire, player, claim-building, and inventory predicates, then
+publish only compact Hexite contributions and coverage metadata. Missing
+configured regions or claims remain explicitly partial; the app does not
+invent those amounts, add a current-state table, or make users wait for a
+scheduled crawl.
 
 Implementation is dependency-ordered:
 
