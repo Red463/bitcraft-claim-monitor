@@ -3,7 +3,11 @@ import {
   RelayGlobalCatalogSession,
   type GlobalCatalogSnapshot,
 } from "./globalCatalogSession.ts";
-import { discoverRelayTopology, type RelayTopology } from "./topology.ts";
+import {
+  discoverRelayTopology,
+  type RelayTopology,
+  type RelayTopologyDiscoveryOptions,
+} from "./topology.ts";
 
 type BindingManifest = Parameters<RelayGlobalCatalogSession["start"]>[0]["manifest"];
 
@@ -51,8 +55,13 @@ type RuntimeDependencies = {
   manifest: BindingManifest;
   catalogRepository: CatalogRepository;
   currentStateRepository: CurrentStateRepository;
-  discoverTopology?: (baseUrl: string) => Promise<RelayTopology>;
+  discoverTopology?: (
+    baseUrl: string,
+    options?: RelayTopologyDiscoveryOptions,
+  ) => Promise<RelayTopology>;
   createSession?: CatalogSessionFactory;
+  now?: () => number;
+  topologyRefreshMs?: number;
 };
 
 function relayWebSocketUri(baseUrl: string, port: number): string {
@@ -65,12 +74,37 @@ function relayWebSocketUri(baseUrl: string, port: number): string {
   return url.href.replace(/\/$/, "");
 }
 
+function globalSourceFromTopology(baseUrl: string, topology: RelayTopology) {
+  if (!topology.global?.ready || !topology.global.schemaFingerprint) {
+    throw new Error("Relay global source is not ready or has no schema fingerprint");
+  }
+  return {
+    database: topology.global.database,
+    schemaFingerprint: topology.global.schemaFingerprint,
+    uri: relayWebSocketUri(baseUrl, topology.global.port),
+  };
+}
+
+function sameGlobalSource(
+  left: ReturnType<typeof globalSourceFromTopology> | null,
+  right: ReturnType<typeof globalSourceFromTopology>,
+) {
+  return left?.database === right.database
+    && left.schemaFingerprint === right.schemaFingerprint
+    && left.uri === right.uri;
+}
+
 export class RelayGlobalCatalogRuntime {
   readonly #manifest: BindingManifest;
   readonly #catalogRepository: CatalogRepository;
   readonly #currentStateRepository: CurrentStateRepository;
-  readonly #discoverTopology: (baseUrl: string) => Promise<RelayTopology>;
+  readonly #discoverTopology: (
+    baseUrl: string,
+    options?: RelayTopologyDiscoveryOptions,
+  ) => Promise<RelayTopology>;
   readonly #createSession: CatalogSessionFactory;
+  readonly #now: () => number;
+  readonly #topologyRefreshMs: number;
   #session: CatalogSession | null = null;
   #relayBaseUrl: string | null = null;
   #claimId: string | null = null;
@@ -81,14 +115,18 @@ export class RelayGlobalCatalogRuntime {
   } | null = null;
   #lastError: string | null = null;
   #reconcileInFlight: Promise<boolean> | null = null;
+  #lastTopologyCheckedAt = 0;
 
   constructor(dependencies: RuntimeDependencies) {
     this.#manifest = dependencies.manifest;
     this.#catalogRepository = dependencies.catalogRepository;
     this.#currentStateRepository = dependencies.currentStateRepository;
-    this.#discoverTopology = dependencies.discoverTopology ?? discoverRelayTopology;
+    this.#discoverTopology = dependencies.discoverTopology
+      ?? ((baseUrl, options) => discoverRelayTopology(baseUrl, fetch, options));
     this.#createSession = dependencies.createSession
       ?? ((options) => new RelayGlobalCatalogSession(options));
+    this.#now = dependencies.now ?? Date.now;
+    this.#topologyRefreshMs = dependencies.topologyRefreshMs ?? 60_000;
   }
 
   async start(config: { relayBaseUrl: string; claimId: string }): Promise<void> {
@@ -96,15 +134,11 @@ export class RelayGlobalCatalogRuntime {
     this.#relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
     this.#claimId = String(config.claimId).trim();
     try {
-      const topology = await this.#discoverTopology(this.#relayBaseUrl);
-      if (!topology.global?.ready || !topology.global.schemaFingerprint) {
-        throw new Error("Relay global source is not ready or has no schema fingerprint");
-      }
-      this.#source = {
-        database: topology.global.database,
-        schemaFingerprint: topology.global.schemaFingerprint,
-        uri: relayWebSocketUri(this.#relayBaseUrl, topology.global.port),
-      };
+      const topology = await this.#discoverTopology(this.#relayBaseUrl, {
+        sourceKeys: new Set(["global"]),
+      });
+      this.#source = globalSourceFromTopology(this.#relayBaseUrl, topology);
+      this.#lastTopologyCheckedAt = this.#now();
       const generation = Number(this.#catalogRepository.getSourceState()?.generation ?? 0) + 1;
       this.#session = this.#createSession({
         onSnapshot: (snapshot) => this.#commitSnapshot(snapshot),
@@ -140,9 +174,19 @@ export class RelayGlobalCatalogRuntime {
       && subscription.applied === true
       && !subscription.lastError
       && !this.#lastError;
-    if (healthy) return Promise.resolve(false);
+    const topologyDue = healthy
+      && this.#now() - this.#lastTopologyCheckedAt >= this.#topologyRefreshMs;
+    if (healthy && !topologyDue) return Promise.resolve(false);
     if (this.#reconcileInFlight) return this.#reconcileInFlight;
     const reconcile = (async () => {
+      if (healthy) {
+        const topology = await this.#discoverTopology(normalized.relayBaseUrl, {
+          sourceKeys: new Set(["global"]),
+        });
+        const discoveredSource = globalSourceFromTopology(normalized.relayBaseUrl, topology);
+        this.#lastTopologyCheckedAt = this.#now();
+        if (sameGlobalSource(this.#source, discoveredSource)) return false;
+      }
       await this.stop();
       await this.start(normalized);
       return true;

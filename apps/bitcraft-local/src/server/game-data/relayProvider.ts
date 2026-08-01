@@ -18,7 +18,7 @@ import {
   normalizeDeposits,
   normalizeMembersPayload,
 } from "./normalizers.ts";
-import { relayTopologyFromPayloads, type RelayTopology } from "./topology.ts";
+import { discoverRelayTopologyWithClient, type RelayTopology } from "./topology.ts";
 
 type ProviderDependencies = {
   fetcher?: typeof fetch;
@@ -399,12 +399,12 @@ export class RelayBitCraftProvider implements GameDataProvider {
   }
 
   async #refreshTopology() {
-    const http = this.#requireHttp();
-    const [health, cacheHealth] = await Promise.all([
-      http.health(),
-      http.cacheHealth(),
-    ]);
-    this.#topology = relayTopologyFromPayloads(health, cacheHealth, this.#now().toISOString());
+    const config = this.#requireConfig();
+    this.#topology = await discoverRelayTopologyWithClient(
+      config.relayBaseUrl,
+      this.#requireHttp(),
+      this.#fetcher,
+    );
     if (!this.#topology.cacheReady) throw new Error("Relay HTTP cache is not ready.");
     if (!this.#topology.global?.ready) throw new Error("Relay global source is not ready.");
     await this.#persistHealth();

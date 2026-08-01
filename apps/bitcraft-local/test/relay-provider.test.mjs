@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 const { RelayBitCraftProvider } = await import(
@@ -114,6 +115,70 @@ test("Relay provider discovers topology then atomically commits normalized claim
 
   await provider.stop();
   assert.equal(provider.health().running, false);
+});
+
+test("Relay provider fingerprints current live topology before persisting source health", async () => {
+  const responses = relayResponses();
+  const globalSchema = JSON.stringify({ tables: [{ name: "item_desc" }] });
+  const regionalSchema = JSON.stringify({ tables: [{ name: "claim_state" }] });
+  responses.set("/health", {
+    sources: {
+      global: {
+        connectivity: "live",
+        connected_since: "2026-08-01T07:00:00.000Z",
+        database: "bitcraft-live-global",
+        port: 3000,
+        schema_cached: true,
+        tables_live: 281,
+        tables_total: 281,
+      },
+      "unexpected-region-key": {
+        connectivity: "live",
+        connected_since: "2026-08-01T07:00:00.000Z",
+        database: "bitcraft-live-19",
+        port: 3019,
+        schema_cached: true,
+        tables_live: 274,
+        tables_total: 274,
+      },
+    },
+  });
+  const healthWrites = [];
+  const provider = new RelayBitCraftProvider({
+    fetcher: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/schema")) {
+        const body = url.port === "3000" ? globalSchema : regionalSchema;
+        return new Response(body, { status: 200 });
+      }
+      const body = responses.get(url.pathname);
+      return body
+        ? new Response(JSON.stringify(body), { status: 200 })
+        : new Response("missing", { status: 404 });
+    },
+    now: () => new Date("2026-08-01T07:00:01.000Z"),
+    scheduleTopologyRefresh: () => () => {},
+  });
+
+  await provider.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    activeRegionIds: ["19"],
+  }, {
+    commitGeneration: async () => {},
+    appendEvents: async () => {},
+    recordHealth: async (health) => healthWrites.push(structuredClone(health)),
+  });
+
+  const health = healthWrites.at(-1);
+  assert.equal(
+    health.sources.global.schemaFingerprint,
+    createHash("sha256").update(globalSchema).digest("hex"),
+  );
+  assert.equal(
+    health.sources["region:19"].schemaFingerprint,
+    createHash("sha256").update(regionalSchema).digest("hex"),
+  );
 });
 
 test("Relay provider rejects a claim whose derived region is not available and preserves last-good data", async () => {

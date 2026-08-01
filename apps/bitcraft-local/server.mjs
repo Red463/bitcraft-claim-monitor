@@ -67,6 +67,7 @@ import {
 } from "./src/server/collectorSettings.mjs";
 import {
   fetchCraftContributionEvidence,
+  readRelayClaimBuildingsForPlanning,
   readRelayClaimForSupplyReport,
   readRelayCraftsForDiscord,
   readRelayCraftsForContributionReconciliation,
@@ -1496,10 +1497,10 @@ function currentConstructionProjection(claimId) {
 }
 
 function currentClaimBuildingsProjection(claimId) {
-  const current = currentStateRepository.read(String(claimId), "construction");
-  const buildings = current?.data?.buildings;
-  if (!Array.isArray(buildings)) throw new Error("Relay claim buildings have not loaded yet");
-  return { buildings };
+  return readRelayClaimBuildingsForPlanning(
+    (id, domain) => currentStateRepository.read(id, domain),
+    claimId,
+  );
 }
 
 function currentRecruitmentProjection(claimId) {
@@ -9332,6 +9333,25 @@ async function superviseRelayGlobalCatalog() {
     relayGlobalCatalogReconnectAttempt = 0;
     relayGlobalCatalogNextAttemptAt = 0;
     relayGlobalCatalogApplyDeadlineAt = 0;
+    if (!relayGlobalCatalogReconcileInFlight) {
+      const reconcile = relayGlobalCatalogRuntime.reconcile({
+        relayBaseUrl,
+        claimId: currentClaimId(),
+      });
+      relayGlobalCatalogReconcileInFlight = reconcile;
+      try {
+        const restarted = await reconcile;
+        if (restarted) relayGlobalCatalogApplyDeadlineAt = Date.now() + 30_000;
+      } catch (error) {
+        if (!isTestRuntime) {
+          console.warn(`Relay global catalog topology reconcile failed: ${errorMessage(error)}`);
+        }
+      } finally {
+        if (relayGlobalCatalogReconcileInFlight === reconcile) {
+          relayGlobalCatalogReconcileInFlight = null;
+        }
+      }
+    }
     await persistHealthIfDue();
     return;
   }

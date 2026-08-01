@@ -4,7 +4,11 @@ import {
   RelayPrimaryRegionPlayerSession,
   type RegionalPlayerSnapshot,
 } from "./primaryRegionPlayerSession.ts";
-import { discoverRelayTopology, type RelayTopology } from "./topology.ts";
+import {
+  discoverRelayTopology,
+  type RelayTopology,
+  type RelayTopologyDiscoveryOptions,
+} from "./topology.ts";
 
 type BindingManifest = Parameters<RelayPrimaryRegionPlayerSession["start"]>[0]["manifest"];
 type Member = Parameters<RelayPrimaryRegionPlayerSession["start"]>[0]["members"][number];
@@ -27,8 +31,13 @@ type RegionalSessionFactory = (
 type RuntimeDependencies = {
   manifest: BindingManifest;
   currentStateRepository: CurrentStateRepository;
-  discoverTopology?: (baseUrl: string) => Promise<RelayTopology>;
+  discoverTopology?: (
+    baseUrl: string,
+    options?: RelayTopologyDiscoveryOptions,
+  ) => Promise<RelayTopology>;
   createSession?: RegionalSessionFactory;
+  now?: () => number;
+  topologyRefreshMs?: number;
 };
 
 function memberId(member: Member): string {
@@ -42,11 +51,45 @@ function membershipSignature(regionId: string, members: Member[]): string {
   return `${regionId}:${[...new Set(identities)].sort().join(",")}`;
 }
 
+function primaryRegionSource(
+  relayBaseUrl: string,
+  regionId: string,
+  topology: RelayTopology,
+) {
+  const region = topology.regions.get(regionId);
+  if (!region?.ready || !region.schemaFingerprint) {
+    throw new Error(`Relay region ${regionId} source is not ready or has no schema fingerprint`);
+  }
+  return {
+    sourceKey: `region:${Number(regionId)}` as const,
+    regionId,
+    database: region.database,
+    schemaFingerprint: region.schemaFingerprint,
+    uri: relayWebSocketUri(relayBaseUrl, region.port),
+  };
+}
+
+function samePrimaryRegionSource(
+  left: ReturnType<typeof primaryRegionSource> | null,
+  right: ReturnType<typeof primaryRegionSource>,
+) {
+  return left?.sourceKey === right.sourceKey
+    && left.regionId === right.regionId
+    && left.database === right.database
+    && left.schemaFingerprint === right.schemaFingerprint
+    && left.uri === right.uri;
+}
+
 export class RelayPrimaryRegionRuntime {
   readonly #manifest: BindingManifest;
   readonly #currentStateRepository: CurrentStateRepository;
-  readonly #discoverTopology: (baseUrl: string) => Promise<RelayTopology>;
+  readonly #discoverTopology: (
+    baseUrl: string,
+    options?: RelayTopologyDiscoveryOptions,
+  ) => Promise<RelayTopology>;
   readonly #createSession: RegionalSessionFactory;
+  readonly #now: () => number;
+  readonly #topologyRefreshMs: number;
   #session: RegionalSession | null = null;
   #relayBaseUrl: string | null = null;
   #claimId: string | null = null;
@@ -61,13 +104,18 @@ export class RelayPrimaryRegionRuntime {
     uri: string;
   } | null = null;
   #lastError: string | null = null;
+  #lastTopologyCheckedAt = 0;
+  #reconcileInFlight: Promise<void> | null = null;
 
   constructor(dependencies: RuntimeDependencies) {
     this.#manifest = dependencies.manifest;
     this.#currentStateRepository = dependencies.currentStateRepository;
-    this.#discoverTopology = dependencies.discoverTopology ?? discoverRelayTopology;
+    this.#discoverTopology = dependencies.discoverTopology
+      ?? ((baseUrl, options) => discoverRelayTopology(baseUrl, fetch, options));
     this.#createSession = dependencies.createSession
       ?? ((options) => new RelayPrimaryRegionPlayerSession(options));
+    this.#now = dependencies.now ?? Date.now;
+    this.#topologyRefreshMs = dependencies.topologyRefreshMs ?? 60_000;
   }
 
   async start(config: {
@@ -82,17 +130,44 @@ export class RelayPrimaryRegionRuntime {
     await this.#startSession(config.regionId, config.members);
   }
 
-  async reconcile(config: { claimId?: string; regionId: string; members: Member[] }): Promise<void> {
+  reconcile(config: { claimId?: string; regionId: string; members: Member[] }): Promise<void> {
     const claimId = String(config.claimId ?? this.#claimId ?? "").trim();
     const nextSignature = membershipSignature(config.regionId, config.members);
-    if (this.#session && claimId === this.#claimId && nextSignature === this.#signature) return;
-    this.#sessionEpoch += 1;
-    await this.#session?.stop();
-    await this.#commitTail;
-    this.#session = null;
-    this.#signature = null;
-    this.#claimId = claimId;
-    await this.#startSession(config.regionId, config.members);
+    const sameScope = this.#session
+      && claimId === this.#claimId
+      && nextSignature === this.#signature;
+    if (
+      sameScope
+      && this.#now() - this.#lastTopologyCheckedAt < this.#topologyRefreshMs
+    ) return Promise.resolve();
+    if (this.#reconcileInFlight) return this.#reconcileInFlight;
+    const reconcile = (async () => {
+      if (sameScope) {
+        const relayBaseUrl = this.#relayBaseUrl;
+        if (!relayBaseUrl) throw new Error("Relay primary-region runtime is not configured");
+        const topology = await this.#discoverTopology(relayBaseUrl, {
+          sourceKeys: new Set([`region:${Number(config.regionId)}`]),
+        });
+        const discoveredSource = primaryRegionSource(
+          relayBaseUrl,
+          String(config.regionId).trim(),
+          topology,
+        );
+        this.#lastTopologyCheckedAt = this.#now();
+        if (samePrimaryRegionSource(this.#source, discoveredSource)) return;
+      }
+      this.#sessionEpoch += 1;
+      await this.#session?.stop();
+      await this.#commitTail;
+      this.#session = null;
+      this.#signature = null;
+      this.#claimId = claimId;
+      await this.#startSession(config.regionId, config.members);
+    })();
+    this.#reconcileInFlight = reconcile;
+    return reconcile.finally(() => {
+      if (this.#reconcileInFlight === reconcile) this.#reconcileInFlight = null;
+    });
   }
 
   async #startSession(regionIdValue: string, members: Member[]): Promise<void> {
@@ -103,18 +178,11 @@ export class RelayPrimaryRegionRuntime {
     const regionId = String(regionIdValue).trim();
     let openingSession: RegionalSession | null = null;
     try {
-      const topology = await this.#discoverTopology(relayBaseUrl);
-      const region = topology.regions.get(regionId);
-      if (!region?.ready || !region.schemaFingerprint) {
-        throw new Error(`Relay region ${regionId} source is not ready or has no schema fingerprint`);
-      }
-      this.#source = {
-        sourceKey: `region:${Number(regionId)}`,
-        regionId,
-        database: region.database,
-        schemaFingerprint: region.schemaFingerprint,
-        uri: relayWebSocketUri(relayBaseUrl, region.port),
-      };
+      const topology = await this.#discoverTopology(relayBaseUrl, {
+        sourceKeys: new Set([`region:${Number(regionId)}`]),
+      });
+      this.#source = primaryRegionSource(relayBaseUrl, regionId, topology);
+      this.#lastTopologyCheckedAt = this.#now();
       const sessionEpoch = this.#sessionEpoch + 1;
       this.#sessionEpoch = sessionEpoch;
       openingSession = this.#createSession({

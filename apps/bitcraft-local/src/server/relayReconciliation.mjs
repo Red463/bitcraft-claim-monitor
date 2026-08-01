@@ -62,6 +62,67 @@ export function readRelayMembersForTradeReconciliation(readSnapshot, claimId) {
   return snapshot.data;
 }
 
+export function readRelayClaimBuildingsForPlanning(readSnapshot, claimId) {
+  const configuredClaimId = requiredDecimal(claimId, "configured claim id");
+  const snapshot = committedRelaySnapshotForReconciliation(
+    readSnapshot,
+    configuredClaimId,
+    "construction",
+  );
+  if (!["authoritative", "joined"].includes(snapshot.confidence)) {
+    throw new Error("Relay construction input is partial.");
+  }
+  const payload = snapshot.data;
+  if (
+    !payload
+    || typeof payload !== "object"
+    || Array.isArray(payload)
+    || !Array.isArray(payload.projects)
+    || !Array.isArray(payload.buildings)
+  ) {
+    throw new Error("Relay construction input is malformed.");
+  }
+  for (const project of payload.projects) {
+    if (!project || typeof project !== "object" || Array.isArray(project)) {
+      throw new Error("Relay construction input contains a malformed project.");
+    }
+    requiredDecimal(project.entityId, "construction project id");
+    if (requiredDecimal(project.ownerId, "construction project claim id") !== configuredClaimId) {
+      throw new Error("Relay construction input contains a cross-claim project.");
+    }
+    requiredDecimal(project.constructionRecipeId, "construction project recipe id");
+  }
+  const seenBuildingIds = new Set();
+  for (const building of payload.buildings) {
+    if (!building || typeof building !== "object" || Array.isArray(building)) {
+      throw new Error("Relay construction input contains a malformed building.");
+    }
+    const buildingId = requiredDecimal(building.entityId, "construction building id");
+    if (seenBuildingIds.has(buildingId)) {
+      throw new Error(`Relay construction input contains duplicate building ${buildingId}.`);
+    }
+    seenBuildingIds.add(buildingId);
+    if (
+      requiredDecimal(building.claimEntityId, "construction building claim id")
+      !== configuredClaimId
+    ) {
+      throw new Error("Relay construction input contains a cross-claim building.");
+    }
+    requiredDecimal(
+      building.buildingDescriptionId,
+      "construction building description id",
+    );
+    requiredDecimal(
+      building.constructedByPlayerEntityId,
+      "construction building constructor id",
+    );
+    if (!Number.isInteger(building.directionIndex)) {
+      throw new Error(`Relay construction building ${buildingId} direction is malformed.`);
+    }
+  }
+  return { buildings: payload.buildings };
+}
+
 export function readRelayOnlineMembers(readSnapshot, claimId) {
   const members = readRelayMembersForTradeReconciliation(readSnapshot, claimId);
   const playersSnapshot = committedRelaySnapshotForReconciliation(

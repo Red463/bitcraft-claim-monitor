@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { discoverRelayTopology } = await import(
+const { discoverRelayTopology, discoverRelayTopologyWithClient } = await import(
   new URL("../src/server/game-data/topology.ts", import.meta.url).href,
 );
 const { RelayHttpClient } = await import(
@@ -66,6 +66,201 @@ test("topology discovery derives global and regional databases without fixed por
     schemaFingerprint: "region-fingerprint",
     ready: true,
   });
+});
+
+test("topology discovery supports current live-source health and fingerprints public schemas", async () => {
+  let now = 0;
+  const discoveryOptions = {
+    now: () => now,
+    schemaFingerprintCacheMs: 45_000,
+  };
+  const globalSchema = JSON.stringify({ tables: [{ name: "item_desc" }] });
+  const regionalSchema = JSON.stringify({ tables: [{ name: "claim_state" }] });
+  const responses = new Map([
+    ["https://relay.example/health", {
+      schema_count: 2,
+      sources: {
+        global: {
+          connectivity: "live",
+          connected_since: "2026-07-31T04:01:14.396Z",
+          database: "bitcraft-live-global",
+          port: 3000,
+          schema_cached: true,
+          tables_live: 281,
+          tables_total: 281,
+        },
+        "unexpected-live-source-key": {
+          connectivity: "live",
+          connected_since: "2026-07-31T04:05:40.436Z",
+          database: "bitcraft-live-19",
+          port: 3019,
+          schema_cached: true,
+          tables_live: 274,
+          tables_total: 274,
+        },
+        "unrelated-live-source": {
+          connectivity: "live",
+          connected_since: "2026-07-31T04:05:40.436Z",
+          database: "unrelated-live-database",
+          port: 3999,
+          schema_cached: true,
+          tables_live: 1,
+          tables_total: 1,
+        },
+      },
+    }],
+    ["https://relay.example/cache-health", {
+      ready: true,
+      regions: [{ region: 19, ready: true }],
+    }],
+    ["https://relay.example:3000/v1/database/bitcraft-live-global/schema?version=9", globalSchema],
+    ["https://relay.example:3019/v1/database/bitcraft-live-19/schema?version=9", regionalSchema],
+  ]);
+  const requested = [];
+  const fetcher = async (input) => {
+    requested.push(String(input));
+    const body = responses.get(String(input));
+    return body == null
+      ? new Response("missing", { status: 404 })
+      : new Response(typeof body === "string" ? body : JSON.stringify(body), { status: 200 });
+  };
+
+  const topology = await discoverRelayTopology(
+    "https://relay.example",
+    fetcher,
+    discoveryOptions,
+  );
+
+  assert.deepEqual(topology.global, {
+    sourceKey: "global",
+    database: "bitcraft-live-global",
+    port: 3000,
+    schemaFingerprint: "5cb5c6aca97912b63f2b58a7b6e94360a16b479bbdf174f8409786cdd9a68e92",
+    ready: true,
+  });
+  assert.deepEqual(topology.regions.get("19"), {
+    sourceKey: "region:19",
+    database: "bitcraft-live-19",
+    port: 3019,
+    schemaFingerprint: "b54d38f391895e0e1c8cabfe3ffd44e633725e52a48037f9901787321190633f",
+    ready: true,
+  });
+  await discoverRelayTopology("https://relay.example", fetcher, discoveryOptions);
+  assert.equal(requested.filter((url) => url.includes("/schema?version=9")).length, 2);
+  await Promise.all([
+    discoverRelayTopology("https://relay.example", fetcher, discoveryOptions),
+    discoverRelayTopology("https://relay.example", fetcher, discoveryOptions),
+  ]);
+  assert.equal(requested.filter((url) => url.includes("/schema?version=9")).length, 2);
+  now = 45_000;
+  await discoverRelayTopology("https://relay.example", fetcher, discoveryOptions);
+  assert.equal(requested.filter((url) => url.includes("/schema?version=9")).length, 4);
+});
+
+test("topology discovery can fingerprint only the source required by a runtime", async () => {
+  const requested = [];
+  const fetcher = async (input) => {
+    const url = String(input);
+    requested.push(url);
+    if (url.endsWith("/health")) {
+      return new Response(JSON.stringify({
+        sources: {
+          global: {
+            connectivity: "live",
+            connected_since: "global-1",
+            database: "bitcraft-live-global",
+            port: 3000,
+            schema_cached: true,
+            tables_live: 281,
+            tables_total: 281,
+          },
+          region19: {
+            connectivity: "live",
+            connected_since: "region-1",
+            database: "bitcraft-live-19",
+            port: 3019,
+            schema_cached: true,
+            tables_live: 274,
+            tables_total: 274,
+          },
+        },
+      }), { status: 200 });
+    }
+    if (url.endsWith("/cache-health")) {
+      return new Response(JSON.stringify({
+        ready: true,
+        regions: [{ region: 19, ready: true }],
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ tables: [] }), { status: 200 });
+  };
+
+  const topology = await discoverRelayTopology("https://relay-filter.example", fetcher, {
+    sourceKeys: new Set(["global"]),
+  });
+
+  assert.ok(topology.global?.schemaFingerprint);
+  assert.equal(topology.regions.get("19")?.schemaFingerprint, null);
+  assert.deepEqual(
+    requested.filter((url) => url.includes("/schema?version=9")),
+    ["https://relay-filter.example:3000/v1/database/bitcraft-live-global/schema?version=9"],
+  );
+});
+
+test("topology discovery leaves a live source fingerprint unavailable when schema retrieval fails", async () => {
+  let schemaRequests = 0;
+  const fetcher = async (input) => {
+    if (String(input).endsWith("/health")) {
+      return new Response(JSON.stringify({
+        sources: {
+          global: {
+            connectivity: "live",
+            database: "bitcraft-live-global",
+            port: 3000,
+            schema_cached: true,
+            tables_live: 281,
+            tables_total: 281,
+          },
+        },
+      }), { status: 200 });
+    }
+    if (String(input).endsWith("/cache-health")) {
+      return new Response(JSON.stringify({ ready: true, regions: [] }), { status: 200 });
+    }
+    schemaRequests += 1;
+    return new Response("schema unavailable", { status: 404 });
+  };
+
+  const topology = await discoverRelayTopology("https://relay.example", fetcher);
+
+  assert.equal(topology.global?.ready, true);
+  assert.equal(topology.global?.schemaFingerprint, null);
+  assert.equal(schemaRequests, 1);
+});
+
+test("topology discovery can retain one HTTP circuit across refreshes", async () => {
+  let requests = 0;
+  const client = new RelayHttpClient({
+    baseUrl: "https://relay.example",
+    fetcher: async () => {
+      requests += 1;
+      throw new TypeError("network unavailable");
+    },
+    retryDelayMs: 0,
+  });
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await assert.rejects(
+      discoverRelayTopologyWithClient("https://relay.example", client, fetch),
+      /network unavailable/,
+    );
+  }
+  const requestsBeforeOpenCheck = requests;
+  await assert.rejects(
+    discoverRelayTopologyWithClient("https://relay.example", client, fetch),
+    /circuit is open/i,
+  );
+  assert.equal(requests, requestsBeforeOpenCheck);
 });
 
 test("Relay HTTP retries one transient response but never retries a permanent 4xx", async () => {

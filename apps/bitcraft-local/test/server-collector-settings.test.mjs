@@ -111,6 +111,19 @@ test("regional rankings run on a live typed session rather than BitJita paginati
   assert.doesNotMatch(source, /url\.pathname === "\/api\/local\/region\/claims"/);
 });
 
+test("global catalog supervisor reconciles healthy topology on the runtime cadence", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("async function superviseRelayGlobalCatalog");
+  const end = source.indexOf("function startBackgroundTasks", start);
+  const supervisor = source.slice(start, end);
+
+  assert.ok(start > -1 && end > start);
+  assert.match(
+    supervisor,
+    /if \(healthy\) \{[\s\S]*?relayGlobalCatalogRuntime\.reconcile\(\{[\s\S]*?relayBaseUrl,[\s\S]*?claimId: currentClaimId\(\)/,
+  );
+});
+
 test("Empire current state runs on the adaptive regional Relay runtime", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
 

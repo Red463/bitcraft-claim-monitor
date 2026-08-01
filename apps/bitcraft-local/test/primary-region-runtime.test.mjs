@@ -308,6 +308,114 @@ test("primary-region runtime preserves last-good data when the region source is 
   assert.equal(constructed, false);
 });
 
+test("healthy primary-region runtime replaces its session when the discovered source changes", async () => {
+  let now = 0;
+  let sourceRevision = 1;
+  let discoveryCount = 0;
+  const sessions = [];
+  const runtime = new runtimeModule.RelayPrimaryRegionRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    now: () => now,
+    topologyRefreshMs: 60_000,
+    discoverTopology: async () => {
+      discoveryCount += 1;
+      const value = topology();
+      value.regions.get("19").database = `relay-region-19-${sourceRevision}`;
+      value.regions.get("19").port = 4019 + sourceRevision;
+      return value;
+    },
+    createSession: () => {
+      const session = {
+        stopped: false,
+        async start() {},
+        health: () => ({
+          connected: true,
+          applied: true,
+          lastAppliedAt: "2026-08-01T08:00:00.000Z",
+          lastError: null,
+        }),
+        async stop() { session.stopped = true; },
+      };
+      sessions.push(session);
+      return session;
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+  });
+  const config = {
+    claimId: "1",
+    regionId: "19",
+    members: [{ playerEntityId: "101", userName: "Ada" }],
+  };
+
+  await runtime.start({ relayBaseUrl: "https://relay.example", ...config });
+  now = 59_999;
+  await runtime.reconcile(config);
+  assert.equal(discoveryCount, 1);
+
+  sourceRevision = 2;
+  now = 60_000;
+  await runtime.reconcile(config);
+  assert.equal(sessions[0].stopped, true);
+  assert.equal(runtime.health().source.database, "relay-region-19-2");
+  assert.equal(discoveryCount, 3);
+});
+
+test("primary-region runtime coalesces concurrent topology reconciliation", async () => {
+  let now = 0;
+  let discoveryCount = 0;
+  let releaseDiscovery;
+  const discoveryGate = new Promise((resolve) => {
+    releaseDiscovery = resolve;
+  });
+  const sessions = [];
+  const runtime = new runtimeModule.RelayPrimaryRegionRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    now: () => now,
+    topologyRefreshMs: 60_000,
+    discoverTopology: async () => {
+      discoveryCount += 1;
+      if (discoveryCount === 2) await discoveryGate;
+      return topology();
+    },
+    createSession: () => {
+      const session = {
+        async start() {},
+        health: () => ({
+          connected: true,
+          applied: true,
+          lastAppliedAt: "2026-08-01T08:00:00.000Z",
+          lastError: null,
+        }),
+        async stop() {},
+      };
+      sessions.push(session);
+      return session;
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+  });
+  const config = {
+    claimId: "1",
+    regionId: "19",
+    members: [{ playerEntityId: "101", userName: "Ada" }],
+  };
+  await runtime.start({ relayBaseUrl: "https://relay.example", ...config });
+  now = 60_000;
+
+  const first = runtime.reconcile(config);
+  const second = runtime.reconcile(config);
+  releaseDiscovery();
+  await Promise.all([first, second]);
+
+  assert.equal(discoveryCount, 2);
+  assert.equal(sessions.length, 1);
+});
+
 test("primary-region runtime stops a session whose startup rejects", async () => {
   assert.ok(runtimeModule, "primary-region runtime module must exist");
   let stopped = false;

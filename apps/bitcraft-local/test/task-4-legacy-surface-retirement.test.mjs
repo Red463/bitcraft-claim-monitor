@@ -123,6 +123,7 @@ test("Craft Plan save reconciles committed Relay buildings without an upstream r
 
   assert.match(route, /currentClaimBuildingsProjection\(getSettings\(\)\.claimId\)/);
   assert.doesNotMatch(route, /fetchBitjita|\/buildings/);
+  assert.match(server, /readRelayClaimBuildingsForPlanning/);
 });
 
 test("current-data copy names Relay while legal disclosure retains BitJita evidence processing", () => {

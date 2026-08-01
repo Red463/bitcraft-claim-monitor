@@ -16,11 +16,11 @@ The dev command starts two local services:
 - Vite frontend on `http://localhost:19428`
 - SQLite history API on `http://127.0.0.1:19430`
 
-The Vite dev server proxies `/api/bitjita/*` to `https://bitjita.com/api/*` and `/api/local/*` to the local SQLite API.
+The Vite dev server sends `/api/local/*` requests to the local Node API. Browser code uses provider-neutral local routes and never connects directly to Relay, SpacetimeDB, or BitJita.
 
-Persistent history and cached tool data are stored at `apps/bitcraft-local/data/bitcraft-local.sqlite`. Normal browser pages refresh live data through the local `/api/bitjita/*` proxy, while local tables retain market history, activity history, contribution history, analytics, notifications, recipe cache, regional buy-order cache, and diagnostics.
+Current game state is published as committed Relay generations and read immediately through provider-neutral local routes. SQLite stores the atomic last-good domain boundary, shared catalog projections, genuine history, user settings, notification/outbox state, and operational diagnostics; it is not a scheduled mirror that pages wait for.
 
-In production, the Node server runs background collectors itself, so market, activity, production contribution and notification history continues collecting without a browser left open. Collector intervals and enabled states are configurable from Admin.
+In production, the Node worker maintains Relay HTTP refresh loops and typed SpacetimeDB subscriptions without a browser open. Generation commits trigger history and notification side effects immediately. Scheduled work is limited to reconciliation, repair, retention, reporting, delivery, and maintenance rather than current page-data acquisition. Two temporary, independently due BitJita craft-contribution and completed-sale evidence reconcilers remain until authoritative Relay mappings are proven.
 
 Notification generation, deduplication, settings and verification notes are documented in [docs/notification-system.md](../../docs/notification-system.md).
 

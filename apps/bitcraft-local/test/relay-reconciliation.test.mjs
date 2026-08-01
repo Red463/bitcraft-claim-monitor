@@ -9,6 +9,7 @@ import {
   runIndependentReconciliation,
   sideEffectCollectorIsDue,
 } from "../src/server/relayReconciliation.mjs";
+import { reconcileCraftPlanBuildingProgress } from "../src/server/craftPlanning.mjs";
 
 const claimId = "1369094286777412590";
 const receivedAt = "2026-07-31T12:00:00.000Z";
@@ -79,6 +80,92 @@ test("relay reconciliation rejects snapshots that are not Relay-owned", () => {
     : null;
 
   assert.throws(() => readRelayClaimForSupplyReport(legacyClaim, claimId), /not Relay-owned/);
+});
+
+test("Craft Plan building reconciliation rejects incomplete generations before they can create a false completion", async () => {
+  const relay = await import("../src/server/relayReconciliation.mjs");
+  assert.equal(typeof relay.readRelayClaimBuildingsForPlanning, "function");
+  const buildingId = "1369094286777412599";
+  const buildingDescriptionId = "77";
+  const config = {
+    targets: [{ kind: "building", id: buildingDescriptionId, name: "Workshop", quantity: 1 }],
+    buildingProgress: {},
+  };
+  const partial = snapshot(
+    { projects: [], buildings: [] },
+    { confidence: "partial", warnings: ["Regional building_state omitted row 0."] },
+  );
+  const readPartial = (_claimId, domain) => domain === "construction" ? partial : null;
+
+  assert.throws(
+    () => relay.readRelayClaimBuildingsForPlanning(readPartial, claimId),
+    /partial|warning/i,
+  );
+
+  const unchangedAfterRejectedPartial = config;
+  const complete = snapshot({
+    projects: [],
+    buildings: [{
+      entityId: buildingId,
+      claimEntityId: claimId,
+      buildingDescriptionId,
+      constructedByPlayerEntityId: "1369094286777412598",
+      directionIndex: 0,
+    }],
+  }, { confidence: "authoritative" });
+  const buildings = relay.readRelayClaimBuildingsForPlanning(
+    (_claimId, domain) => domain === "construction" ? complete : null,
+    claimId,
+  );
+  const reconciled = reconcileCraftPlanBuildingProgress(
+    unchangedAfterRejectedPartial,
+    buildings,
+  ).config;
+
+  assert.deepEqual(reconciled.buildingProgress[`building:${buildingDescriptionId}`], {
+    baselineEntityIds: [buildingId],
+    completedEntityIds: [],
+  });
+});
+
+test("Craft Plan building reconciliation rejects warned, malformed, and cross-claim construction rows", async () => {
+  const relay = await import("../src/server/relayReconciliation.mjs");
+  assert.equal(typeof relay.readRelayClaimBuildingsForPlanning, "function");
+  const valid = {
+    entityId: "1369094286777412599",
+    claimEntityId: claimId,
+    buildingDescriptionId: "77",
+    constructedByPlayerEntityId: "1369094286777412598",
+    directionIndex: 0,
+  };
+  const read = (construction) => (_claimId, domain) => (
+    domain === "construction" ? construction : null
+  );
+
+  assert.throws(
+    () => relay.readRelayClaimBuildingsForPlanning(
+      read(snapshot({ projects: [], buildings: [valid] }, { warnings: ["row omitted"] })),
+      claimId,
+    ),
+    /partial|warning/i,
+  );
+  assert.throws(
+    () => relay.readRelayClaimBuildingsForPlanning(
+      read(snapshot({ projects: "invalid", buildings: [valid] })),
+      claimId,
+    ),
+    /malformed/i,
+  );
+  assert.throws(
+    () => relay.readRelayClaimBuildingsForPlanning(
+      read(snapshot({
+        projects: [],
+        buildings: [{ ...valid, claimEntityId: "1369094286777412000" }],
+      })),
+      claimId,
+    ),
+    /cross-claim/i,
+  );
 });
 
 test("Discord online state joins exact member and player decimal-string identities", async () => {

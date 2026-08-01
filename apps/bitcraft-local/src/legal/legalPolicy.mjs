@@ -1,5 +1,5 @@
-export const LEGAL_VERSION = "2026-07-25";
-export const LEGAL_EFFECTIVE_DATE = "2026-07-25";
+export const LEGAL_VERSION = "2026-07-31";
+export const LEGAL_EFFECTIVE_DATE = "2026-07-31";
 
 export const defaultLegalOperator = Object.freeze({
   controllerName: "Thomas Bush",
@@ -34,11 +34,18 @@ const providerDefinitions = Object.freeze([
     location: "International processing under Discord's terms and privacy policy.",
   },
   {
+    key: "bitcraft-relay",
+    name: "BitCraft Relay",
+    role: "Current public BitCraft game-data relay",
+    data: "Public BitCraft game, character, settlement, inventory, market, and activity information requested by the app server.",
+    location: "The Relay operator and infrastructure locations have not been published to this app; processing may occur outside the United Kingdom.",
+  },
+  {
     key: "bitjita",
     name: "BitJita",
-    role: "Public BitCraft game-data API",
-    data: "Public game, character, settlement, inventory, market, and activity information.",
-    location: "As described by BitJita.",
+    role: "Temporary evidence API for craft contributions and completed sales",
+    data: "Public craft-contribution records and completed-sale or trade records for monitored settlement members.",
+    location: "As described by BitJita; processing may occur outside the United Kingdom.",
   },
   {
     key: "proton",
@@ -120,7 +127,7 @@ function termsSections(operator) {
       title: "Operator and status",
       paragraphs: [
         operator.status,
-        `${project} is unofficial and is not affiliated with Clockwork Labs, BitCraft, BitJita, Discord, HostWorld, Namecheap, Proton, GitHub, or Buy Me a Coffee.`,
+        `${project} is unofficial and is not affiliated with Clockwork Labs, BitCraft, BitCraft Relay, BitJita, Discord, HostWorld, Namecheap, Proton, GitHub, or Buy Me a Coffee.`,
       ],
     },
     {
@@ -151,7 +158,8 @@ function termsSections(operator) {
       title: "Discord, game-data, and app features",
       paragraphs: [
         `${project} may provide Discord bot commands, notifications, guild tools, role management, moderation, polls, events, diagnostics, market watches, alerts, production tools, history, analytics, backups, and administration.`,
-        "BitJita and BitCraft information may be public, delayed, partial, unavailable, or inaccurate. Calculations and estimates are operational aids, not guaranteed facts.",
+        "BitCraft Relay provides current public game data. BitJita is used only for craft-contribution and completed-sale evidence until equivalent authoritative Relay mappings are proven.",
+        "BitCraft information may be public, delayed, partial, unavailable, or inaccurate. Calculations and estimates are operational aids, not guaranteed facts.",
       ],
     },
     {
@@ -179,14 +187,14 @@ function termsSections(operator) {
       id: "intellectual-property",
       title: "Intellectual property and trademarks",
       paragraphs: [
-        `The ${project} code and original presentation remain subject to their applicable ownership and licence terms. BitCraft, Discord, BitJita, provider names, game assets, and third-party content belong to their respective owners.`,
+        `The ${project} code and original presentation remain subject to their applicable ownership and licence terms. BitCraft, BitCraft Relay, Discord, BitJita, provider names, game assets, and third-party content belong to their respective owners.`,
       ],
     },
     {
       id: "third-party-services",
       title: "Third-party services",
       paragraphs: [
-        "Discord, BitJita, hosting, domain, email, source-code, and donation services operate under their own terms and privacy policies. The operator does not control their independent availability or processing.",
+        "Discord, BitCraft Relay, the limited BitJita evidence service, hosting, domain, email, source-code, and donation services operate under their own terms and privacy policies. The operator does not control their independent availability or processing.",
       ],
     },
     {
@@ -257,7 +265,7 @@ function privacySections(operator) {
       title: "Personal data we process",
       paragraphs: [
         "Depending on the features you use, this includes Discord ID and profile data, sessions, settings, legal acceptance, character links, market watches and alerts, bot/guild interactions, role and moderation records, votes and RSVPs, delivery diagnostics, security logs, optional analytics, and privacy correspondence.",
-        "Public BitJita game and settlement data may become personal data in context when it is linked to a Discord account or community activity. Special-category data is not intentionally requested.",
+        "Public BitCraft game and settlement data obtained through BitCraft Relay may become personal data in context when it is linked to a Discord account or community activity. BitJita is used only for craft-contribution and completed-sale evidence until equivalent authoritative Relay mappings are proven. Special-category data is not intentionally requested.",
       ],
     },
     {
@@ -294,14 +302,14 @@ function privacySections(operator) {
       id: "sharing",
       title: "Service providers and disclosures",
       paragraphs: [
-        "Data is shared only as needed with the providers listed below, where you direct a Discord/BitJita action, to protect people or the service, to comply with law, or with your permission. Discord API data is not sold or shared with donation or advertising services.",
+        "Data is shared only as needed with the providers listed below, where you direct a Discord action, to protect people or the service, to comply with law, or with your permission. The app server requests current public game data from BitCraft Relay. It requests only craft-contribution and completed-sale evidence from BitJita while those authoritative Relay mappings remain unproven. Discord API data is not sold or shared with game-data, donation, or advertising services.",
       ],
     },
     {
       id: "international-transfers",
       title: "International processing",
       paragraphs: [
-        "The primary VPS/database arrangement is described as UK-hosted. Discord, GitHub, Buy Me a Coffee, Proton, Namecheap, BitJita, and their providers may process data internationally under their own safeguards and applicable transfer mechanisms.",
+        "The primary VPS/database arrangement is described as UK-hosted. BitCraft Relay may process data internationally; its operator and infrastructure locations have not been published to this app. Discord, GitHub, Buy Me a Coffee, Proton, Namecheap, BitJita, and their providers may also process data internationally under their own safeguards and applicable transfer mechanisms.",
       ],
     },
     {

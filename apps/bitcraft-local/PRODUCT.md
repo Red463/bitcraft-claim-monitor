@@ -16,7 +16,9 @@ Primary users use the app to understand settlement status, production, inventori
 
 ## Purpose
 
-Claim Monitor gives a monitored settlement one local-first command surface for day-to-day operations. It combines BitJita public API data, local SQLite history, Discord automation, browser notifications, and admin-managed planning into a dashboard that is fast to scan and practical during active play.
+Claim Monitor gives a monitored settlement one local-first command surface for day-to-day operations. It combines current committed Relay generations, local SQLite history, Discord automation, browser notifications, and admin-managed planning into a dashboard that is fast to scan and practical during active play.
+
+Browser features read provider-neutral local routes. They do not wait for scheduled acquisition jobs: Relay HTTP refresh loops and typed SpacetimeDB subscriptions publish complete generations as soon as they validate, while last-good data remains available during outages. BitJita remains narrowly used by two evidence reconcilers for craft-contribution and completed-sale evidence until authoritative Relay mappings are proven.
 
 Success means users can quickly answer:
 
@@ -45,7 +47,7 @@ Avoid:
 - One-note palettes dominated by a single hue family.
 - Low-density dashboards that require extra scrolling for routine operations.
 - Popups or wizards that appear in page flow instead of the current viewport.
-- UI that implies uncertain BitJita data is more exact than it is.
+- UI that implies delayed, partial, stale, or unavailable provider data is more exact than it is.
 
 ## Accessibility
 

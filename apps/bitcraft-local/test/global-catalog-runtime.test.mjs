@@ -340,3 +340,65 @@ test("global catalog runtime rediscovers topology after disconnect and changes c
   assert.equal(runtime.health().claimId, "2");
   assert.equal(discoveryCount, 3);
 });
+
+test("healthy global catalog runtime replaces its session when the discovered source changes", async () => {
+  let now = 0;
+  let sourceRevision = 1;
+  let discoveryCount = 0;
+  const sessions = [];
+  const runtime = new runtimeModule.RelayGlobalCatalogRuntime({
+    manifest: { schemas: { global: { fingerprint: "global-v1", bindingsGenerated: true } } },
+    now: () => now,
+    topologyRefreshMs: 60_000,
+    discoverTopology: async () => {
+      discoveryCount += 1;
+      return {
+        cacheReady: true,
+        global: {
+          sourceKey: "global",
+          database: `relay-global-${sourceRevision}`,
+          port: 3000 + sourceRevision,
+          schemaFingerprint: "global-v1",
+          ready: true,
+        },
+        regions: new Map(),
+        discoveredAt: "2026-08-01T08:00:00.000Z",
+      };
+    },
+    createSession: () => {
+      const session = {
+        stopped: false,
+        async start() {},
+        health: () => ({
+          connected: true,
+          applied: true,
+          lastAppliedAt: "2026-08-01T08:00:00.000Z",
+          lastError: null,
+        }),
+        async stop() { session.stopped = true; },
+      };
+      sessions.push(session);
+      return session;
+    },
+    catalogRepository: {
+      getSourceState: () => null,
+      replaceCatalogSnapshot: () => {},
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+  });
+
+  await runtime.start({ relayBaseUrl: "https://relay.example", claimId: "1" });
+  now = 59_999;
+  assert.equal(await runtime.reconcile({ relayBaseUrl: "https://relay.example", claimId: "1" }), false);
+  assert.equal(discoveryCount, 1);
+
+  sourceRevision = 2;
+  now = 60_000;
+  assert.equal(await runtime.reconcile({ relayBaseUrl: "https://relay.example", claimId: "1" }), true);
+  assert.equal(sessions[0].stopped, true);
+  assert.equal(runtime.health().source.database, "relay-global-2");
+  assert.equal(discoveryCount, 3);
+});

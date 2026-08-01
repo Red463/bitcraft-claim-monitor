@@ -662,6 +662,68 @@ immediately without hiding that limitation or recreating a scheduled crawl.
 - bounded multi-region player/claim inventory and Foundry joins for complete
   Hexite reserve aggregation.
 
+## Relay topology and schema drift — 2026-07-31
+
+The public Relay health contract changed from the earlier mirror-oriented
+shape. Live sources now report `connectivity`, `connected_since`, `database`,
+`port`, `schema_cached`, `tables_live`, and `tables_total`; they no longer
+publish `metrics.publisher.fingerprint`. Database identities are currently
+`bitcraft-live-global` and `bitcraft-live-{region}`.
+
+Topology discovery now accepts a source as ready only when it is live, has a
+cached schema, and reports every expected table live. When health does not
+publish a fingerprint, discovery downloads that source's public SpacetimeDB
+V9 schema from the discovered port and database and hashes the exact response
+with SHA-256. Downloads are bounded, retried once for transient failures, and
+single-flighted while in progress. Successful fingerprints remain reusable for
+45 seconds, keyed by source URL, connection generation, and live-table counts,
+so provider and runtime checks in the same observation window do not repeatedly
+download all schemas. The cache expires within the 60-second topology cadence,
+and a changed source generation bypasses it immediately. Individual typed
+runtimes request only their global or primary-regional fingerprint; the
+provider health pass can still verify every ready source. Failure to retrieve
+a schema leaves the topology row ready but its fingerprint unavailable, so
+the typed session cannot start and last-good data remains authoritative.
+
+All thirteen observed regional schemas remained byte-identical at fingerprint
+`762aeaa1449c53d5f400d72bb82f71a049997d34e28c6844ce8f3899d1cb6312`.
+The global schema changed to
+`5e44626f1c24e9f8392ebce8bdc9de135f76a58747b208d5e4aa455dd411036a`.
+The first live verification correctly stopped on that mismatch. The global
+bindings were then regenerated from the captured live module definition with
+the pinned official SpacetimeDB CLI `2.7.0`; the resulting 697-file binding
+set has the same public generated model as the previous set. The manifest now
+records the live database identities and current fingerprints.
+
+The rebuilt 2026-08-01 live checks then proved:
+
+- the global catalog session applied 8,167 items, 636 cargo descriptions, and
+  every required catalog family from `bitcraft-live-global`;
+- the primary region session applied all 18 monitored members, 18 player
+  rows, 432 traveler tasks, equipment/buffs, construction, research, and
+  recruitment from `bitcraft-live-19` with no warnings;
+- the production worker published fresh Relay-owned HTTP, global, and
+  primary-region domains into a fresh database; and
+- persisted provider health retained the exact discovered global and regional
+  fingerprints instead of overwriting them with null values.
+
+The HTTP provider retains one Relay client across those refreshes so its
+failure window and circuit breaker cannot be reset by topology discovery.
+Healthy global-catalog and primary-region runtimes also compare their active
+database, WebSocket port, and fingerprint with freshly discovered topology
+every 60 seconds. A changed source stops and replaces the affected session;
+an incompatible fingerprint then fails closed at the generated-binding gate
+while durable last-good data remains readable. Primary-region reconciliation
+is single-flight, so simultaneous scheduled and manual refresh requests cannot
+open competing replacement sessions.
+
+This incident validates the fail-closed generation rule: health-contract
+drift can be adapted without hard-coded database names, while schema drift
+still requires regenerated bindings and a deployment before ingestion
+resumes. The rebuilt global, primary-region, and combined provider apply gates
+now pass against the public Relay; reconnect and soak drills remain separate
+release gates.
+
 ## Deal Watch live-order baseline
 
 Deal Watch no longer depends on the BitJita regional claim crawl or price

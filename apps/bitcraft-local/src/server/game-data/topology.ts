@@ -1,7 +1,26 @@
+import { createHash } from "node:crypto";
+
 import type { RegionId } from "./contracts.ts";
 import { RelayHttpClient } from "./http.ts";
 
 type Fetcher = typeof fetch;
+const SCHEMA_VERSION = "9";
+const DEFAULT_SCHEMA_FINGERPRINT_CACHE_MS = 45_000;
+type SchemaFingerprintCacheEntry = {
+  promise: Promise<string>;
+  expiresAt: number;
+  settled: boolean;
+};
+const schemaFingerprintCaches = new WeakMap<
+  Fetcher,
+  Map<string, SchemaFingerprintCacheEntry>
+>();
+
+export type RelayTopologyDiscoveryOptions = {
+  sourceKeys?: ReadonlySet<string>;
+  schemaFingerprintCacheMs?: number;
+  now?: () => number;
+};
 
 export type RelaySourceTopology = {
   sourceKey: "global" | `region:${number}`;
@@ -27,7 +46,9 @@ function asRecord(value: unknown): Record<string, unknown> {
 function regionIdFor(sourceName: string, source: Record<string, unknown>): string | null {
   const metrics = asRecord(source.metrics);
   const upstreamDatabase = String(metrics.upstream_database ?? "");
-  const candidates = [upstreamDatabase, sourceName];
+  const mirrorDatabase = String(metrics.mirror_database ?? "");
+  const database = String(source.database ?? "");
+  const candidates = [upstreamDatabase, mirrorDatabase, database, sourceName];
   for (const candidate of candidates) {
     const match = candidate.match(/(?:bitcraft-live-|region:)(\d+)$/);
     if (match) return match[1];
@@ -35,12 +56,119 @@ function regionIdFor(sourceName: string, source: Record<string, unknown>): strin
   return null;
 }
 
+function sourceKeyFor(
+  sourceName: string,
+  source: Record<string, unknown>,
+): "global" | `region:${number}` | null {
+  const regionId = regionIdFor(sourceName, source);
+  if (regionId) return `region:${Number(regionId)}`;
+  return sourceName === "global" ? "global" : null;
+}
+
 function sourceReady(source: Record<string, unknown>) {
   const metrics = asRecord(source.metrics);
   const upstream = asRecord(metrics.upstream);
-  return source.schema_cached === true
+  const legacyReady = source.schema_cached === true
     && metrics.initial_subscribe_complete === true
     && upstream.state === "up";
+  const tablesLive = Number(source.tables_live);
+  const tablesTotal = Number(source.tables_total);
+  const liveSourceReady = source.schema_cached === true
+    && source.connectivity === "live"
+    && Number.isInteger(tablesLive)
+    && Number.isInteger(tablesTotal)
+    && tablesTotal > 0
+    && tablesLive === tablesTotal;
+  return legacyReady || liveSourceReady;
+}
+
+function schemaUrl(baseUrl: string, source: Record<string, unknown>, database: string) {
+  const url = new URL(baseUrl);
+  url.port = String(Number(source.port));
+  url.pathname = `/v1/database/${encodeURIComponent(database)}/schema`;
+  url.search = `version=${SCHEMA_VERSION}`;
+  url.hash = "";
+  return url.href;
+}
+
+async function fetchSchemaFingerprint(url: string, fetcher: Fetcher): Promise<string> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetcher(url, { signal: AbortSignal.timeout(8_000) });
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
+    if (!response.ok) {
+      const error = new Error(`Relay schema ${url} returned HTTP ${response.status}`);
+      if (response.status !== 429 && response.status < 500) throw error;
+      lastError = error;
+      continue;
+    }
+    try {
+      const schema = await response.text();
+      if (!schema) throw new Error(`Relay schema ${url} was empty`);
+      return createHash("sha256").update(schema).digest("hex");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Relay schema ${url} could not be fingerprinted`);
+}
+
+function cachedSchemaFingerprint(
+  baseUrl: string,
+  source: Record<string, unknown>,
+  database: string,
+  fetcher: Fetcher,
+  options: RelayTopologyDiscoveryOptions,
+) {
+  const now = options.now ?? Date.now;
+  const cacheMs = options.schemaFingerprintCacheMs
+    ?? DEFAULT_SCHEMA_FINGERPRINT_CACHE_MS;
+  const url = schemaUrl(baseUrl, source, database);
+  const cacheKey = [
+    url,
+    String(source.connected_since ?? ""),
+    String(source.tables_live ?? ""),
+    String(source.tables_total ?? ""),
+  ].join("|");
+  let cache = schemaFingerprintCaches.get(fetcher);
+  if (!cache) {
+    cache = new Map();
+    schemaFingerprintCaches.set(fetcher, cache);
+  }
+  for (const [key, entry] of cache) {
+    if (entry.settled && entry.expiresAt <= now()) cache.delete(key);
+  }
+  const cached = cache.get(cacheKey);
+  if (cached && (!cached.settled || cached.expiresAt > now())) {
+    return cached.promise;
+  }
+  const entry: SchemaFingerprintCacheEntry = {
+    promise: Promise.resolve(""),
+    expiresAt: Number.POSITIVE_INFINITY,
+    settled: false,
+  };
+  const promise = fetchSchemaFingerprint(url, fetcher);
+  entry.promise = promise;
+  cache.set(cacheKey, entry);
+  void promise.then(
+    () => {
+      entry.settled = true;
+      entry.expiresAt = now() + Math.max(0, cacheMs);
+    },
+    () => {
+      if (cache?.get(cacheKey) === entry) {
+        cache.delete(cacheKey);
+      }
+    },
+  );
+  return promise;
 }
 
 export function relayTopologyFromPayloads(
@@ -61,6 +189,8 @@ export function relayTopologyFromPayloads(
 
   for (const [sourceName, rawSource] of Object.entries(asRecord(health.sources))) {
     const source = asRecord(rawSource);
+    const sourceKey = sourceKeyFor(sourceName, source);
+    if (!sourceKey) continue;
     const metrics = asRecord(source.metrics);
     const publisher = asRecord(metrics.publisher);
     const database = String(source.database ?? metrics.mirror_database ?? "").trim();
@@ -69,9 +199,7 @@ export function relayTopologyFromPayloads(
     const schemaFingerprint = typeof publisher.fingerprint === "string" && publisher.fingerprint
       ? publisher.fingerprint
       : null;
-    const regionId = regionIdFor(sourceName, source);
-    if (!regionId) {
-      if (sourceName !== "global") continue;
+    if (sourceKey === "global") {
       global = {
         sourceKey: "global",
         database,
@@ -81,8 +209,9 @@ export function relayTopologyFromPayloads(
       };
       continue;
     }
+    const regionId = sourceKey.slice("region:".length);
     regions.set(regionId, {
-      sourceKey: `region:${Number(regionId)}`,
+      sourceKey,
       database,
       port,
       schemaFingerprint,
@@ -98,11 +227,53 @@ export function relayTopologyFromPayloads(
   };
 }
 
-export async function discoverRelayTopology(baseUrl: string, fetcher: Fetcher = fetch): Promise<RelayTopology> {
-  const http = new RelayHttpClient({ baseUrl, fetcher });
+export async function discoverRelayTopologyWithClient(
+  baseUrl: string,
+  http: RelayHttpClient,
+  fetcher: Fetcher = fetch,
+  options: RelayTopologyDiscoveryOptions = {},
+): Promise<RelayTopology> {
   const [healthValue, cacheValue] = await Promise.all([
     http.health(),
     http.cacheHealth(),
   ]);
-  return relayTopologyFromPayloads(healthValue, cacheValue);
+  const topology = relayTopologyFromPayloads(healthValue, cacheValue);
+  const health = asRecord(healthValue);
+  const fingerprintTasks: Promise<void>[] = [];
+  for (const [sourceName, rawSource] of Object.entries(asRecord(health.sources))) {
+    const source = asRecord(rawSource);
+    const sourceKey = sourceKeyFor(sourceName, source);
+    if (!sourceKey) continue;
+    if (options.sourceKeys && !options.sourceKeys.has(sourceKey)) continue;
+    const target = sourceKey === "global"
+      ? topology.global
+      : topology.regions.get(sourceKey.slice("region:".length));
+    if (!target?.ready || target.schemaFingerprint) continue;
+    fingerprintTasks.push(
+      cachedSchemaFingerprint(baseUrl, source, target.database, fetcher, options)
+        .then((fingerprint) => {
+          target.schemaFingerprint = fingerprint;
+        })
+        .catch(() => {
+          // A source can remain topology-ready while its schema is unavailable.
+          // Subscription runtimes require a non-null fingerprint and preserve
+          // their last-good generation until the schema can be verified.
+        }),
+    );
+  }
+  await Promise.all(fingerprintTasks);
+  return topology;
+}
+
+export async function discoverRelayTopology(
+  baseUrl: string,
+  fetcher: Fetcher = fetch,
+  options: RelayTopologyDiscoveryOptions = {},
+): Promise<RelayTopology> {
+  return discoverRelayTopologyWithClient(
+    baseUrl,
+    new RelayHttpClient({ baseUrl, fetcher }),
+    fetcher,
+    options,
+  );
 }
