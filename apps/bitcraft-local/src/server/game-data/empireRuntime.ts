@@ -8,7 +8,10 @@ import {
 } from "./empireRegionSession.ts";
 import { relayWebSocketUri } from "./globalCatalogRuntime.ts";
 import { AdaptiveRegionSessionPool } from "./regionSessionPool.ts";
-import type { SiegeOutcome } from "./siegeNotifications.ts";
+import type {
+  SiegeNotificationDiagnostics,
+  SiegeOutcome,
+} from "./siegeNotifications.ts";
 import { discoverRelayTopology, type RelayTopology } from "./topology.ts";
 
 type BindingManifest = Parameters<RelayEmpireRegionSession["start"]>[0]["manifest"];
@@ -138,6 +141,9 @@ export type EmpireCombinedData = {
   nodes: NodeRow[];
   foundries: FoundryRow[] | null;
   siegeOutcomes: SiegeOutcome[] | null;
+  siegeOutcomeDiagnostics: SiegeNotificationDiagnostics | null;
+  cancellationSemantics: "unavailable";
+  unmatchedTerminalStatus: "removed_or_unknown";
   hexite: HexiteCombinedData | null;
   regions: Array<{
     regionId: string;
@@ -322,6 +328,25 @@ function normalizeSiegeOutcomes(values: unknown[]): SiegeOutcome[] {
   )).slice(0, 50);
 }
 
+const SIEGE_DIAGNOSTIC_KEYS = [
+  "invalidDescriptionRowCount",
+  "invalidNotificationRowCount",
+  "duplicateNotificationIdCount",
+  "unmatchedTerminalGroupCount",
+  "ambiguousTerminalGroupCount",
+] as const satisfies readonly (keyof SiegeNotificationDiagnostics)[];
+
+function normalizeSiegeDiagnostics(value: unknown): SiegeNotificationDiagnostics {
+  const row = value == null ? {} : asRecord(value);
+  return Object.fromEntries(SIEGE_DIAGNOSTIC_KEYS.map((key) => {
+    const count = Number(row[key] ?? 0);
+    if (!Number.isSafeInteger(count) || count < 0) {
+      throw new TypeError(`Relay siege diagnostic ${key} is invalid`);
+    }
+    return [key, count];
+  })) as SiegeNotificationDiagnostics;
+}
+
 export class RelayEmpireRuntime {
   readonly #manifest: BindingManifest;
   readonly #currentStateRepository: CurrentStateRepository;
@@ -339,6 +364,7 @@ export class RelayEmpireRuntime {
   #globalFoundries: FoundryRow[] | null = null;
   #globalFoundryWarnings: string[] = [];
   #globalSiegeOutcomes: SiegeOutcome[] | null = null;
+  #globalSiegeDiagnostics: SiegeNotificationDiagnostics | null = null;
   #globalSiegeWarnings: string[] = [];
   #notificationScopeRequested: string[] = [];
   #notificationScopeApplied: string[] = [];
@@ -492,6 +518,7 @@ export class RelayEmpireRuntime {
       notifications: unknown[];
       outcomes: unknown[];
       warnings: string[];
+      diagnostics?: unknown;
     };
     notificationScopeEmpireIds: unknown[];
     database: string;
@@ -502,8 +529,10 @@ export class RelayEmpireRuntime {
     const appliedScope = normalizedNotificationScope(snapshot.notificationScopeEmpireIds);
     if (!sameDecimalIds(appliedScope, this.#notificationScopeRequested)) return false;
     const outcomes = normalizeSiegeOutcomes(snapshot.siegeNotifications.outcomes);
+    const diagnostics = normalizeSiegeDiagnostics(snapshot.siegeNotifications.diagnostics);
     const warnings = snapshot.siegeNotifications.warnings.map(String);
     this.#globalSiegeOutcomes = outcomes;
+    this.#globalSiegeDiagnostics = diagnostics;
     this.#globalSiegeWarnings = warnings;
     this.#notificationScopeApplied = appliedScope;
     this.#notificationScopeApplying = false;
@@ -882,6 +911,11 @@ export class RelayEmpireRuntime {
       nodes: sortEntities(nodes, (row) => row.entityId),
       foundries: this.#globalFoundries == null ? null : [...this.#globalFoundries],
       siegeOutcomes: this.#globalSiegeOutcomes == null ? null : [...this.#globalSiegeOutcomes],
+      siegeOutcomeDiagnostics: this.#globalSiegeDiagnostics == null
+        ? null
+        : { ...this.#globalSiegeDiagnostics },
+      cancellationSemantics: "unavailable",
+      unmatchedTerminalStatus: "removed_or_unknown",
       hexite: combineHexiteRegions(this.#activeRegionIds, nextRegions),
       regions: this.#activeRegionIds.flatMap((regionId) => {
         const region = nextRegions.get(regionId);
@@ -973,6 +1007,11 @@ export class RelayEmpireRuntime {
       nodes,
       foundries: this.#globalFoundries == null ? null : [...this.#globalFoundries],
       siegeOutcomes: this.#globalSiegeOutcomes == null ? null : [...this.#globalSiegeOutcomes],
+      siegeOutcomeDiagnostics: this.#globalSiegeDiagnostics == null
+        ? null
+        : { ...this.#globalSiegeDiagnostics },
+      cancellationSemantics: "unavailable",
+      unmatchedTerminalStatus: "removed_or_unknown",
       hexite: combineHexiteRegions(this.#activeRegionIds, this.#regions),
       regions: this.#activeRegionIds.flatMap((regionId) => {
         const region = this.#regions.get(regionId);
@@ -1108,6 +1147,11 @@ export class RelayEmpireRuntime {
               siegeOutcomes: this.#globalSiegeOutcomes == null
                 ? null
                 : [...this.#globalSiegeOutcomes],
+              siegeOutcomeDiagnostics: this.#globalSiegeDiagnostics == null
+                ? null
+                : { ...this.#globalSiegeDiagnostics },
+              cancellationSemantics: "unavailable",
+              unmatchedTerminalStatus: "removed_or_unknown",
             },
             confidence: warnings.length ? "partial" : "authoritative",
             provenance: metadata ? {
@@ -1138,8 +1182,12 @@ export class RelayEmpireRuntime {
       this.#globalSiegeOutcomes = Array.isArray(data.siegeOutcomes)
         ? normalizeSiegeOutcomes(data.siegeOutcomes)
         : null;
+      this.#globalSiegeDiagnostics = data.siegeOutcomeDiagnostics == null
+        ? null
+        : normalizeSiegeDiagnostics(data.siegeOutcomeDiagnostics);
     } catch {
       this.#globalSiegeOutcomes = null;
+      this.#globalSiegeDiagnostics = null;
       this.#globalSiegeWarnings = ["Stored last-good siege outcomes were malformed and rejected."];
     }
     const metadata = Array.isArray(data.regions) ? data.regions : [];
@@ -1250,6 +1298,9 @@ export class RelayEmpireRuntime {
         applying: this.#notificationScopeApplying,
         lastError: this.#notificationScopeLastError,
         outcomeCount: this.#globalSiegeOutcomes?.length ?? 0,
+        diagnostics: this.#globalSiegeDiagnostics == null
+          ? null
+          : { ...this.#globalSiegeDiagnostics },
       },
       sourceErrors: Object.fromEntries(this.#sourceErrors),
       pool: this.#pool?.health() ?? null,
@@ -1279,6 +1330,7 @@ export class RelayEmpireRuntime {
     this.#regions.clear();
     this.#sourceErrors.clear();
     this.#globalSiegeOutcomes = null;
+    this.#globalSiegeDiagnostics = null;
     this.#globalSiegeWarnings = [];
     this.#notificationScopeRequested = [];
     this.#notificationScopeApplied = [];

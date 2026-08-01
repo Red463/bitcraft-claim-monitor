@@ -25,6 +25,7 @@
     "verify:relay-live": "corepack pnpm run build:server && node scripts/verify-relay-provider-live.mjs",
     "verify:relay-global-live": "corepack pnpm run build:server && node scripts/verify-relay-global-catalog-live.mjs",
     "verify:relay-region-live": "corepack pnpm run build:server && node scripts/verify-relay-primary-region-live.mjs",
+    "verify:relay-siege-live": "corepack pnpm run build:server && node scripts/verify-relay-siege-notifications-live.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

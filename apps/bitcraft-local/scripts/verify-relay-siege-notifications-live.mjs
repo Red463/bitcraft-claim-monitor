@@ -5,8 +5,10 @@ import {
   equalitySubscriptionQueries,
   relayWebSocketUri,
 } from "../dist-server/game-data/index.js";
-import { normalizeAndPairSiegeNotifications } from
-  "../dist-server/game-data/siegeNotifications.js";
+import {
+  analyzeSiegeStartPairs,
+  normalizeAndPairSiegeNotifications,
+} from "../dist-server/game-data/siegeNotifications.js";
 
 const relayBaseUrl = String(
   process.env.BITCRAFT_RELAY_ORIGIN ?? "https://relay.bitcraftsync.app",
@@ -36,34 +38,6 @@ function canonicalDecimal(value, label) {
 
 function rows(table) {
   return [...table.iter()];
-}
-
-function exactPairKey(notification) {
-  return `${notification.occurredAt}\u0000${notification.replacements[0]}\u0000${notification.replacements[1]}`;
-}
-
-function countExactStartedPairs(notifications) {
-  const groups = new Map();
-  for (const notification of notifications) {
-    if (notification.kind !== "started_attack" && notification.kind !== "started_defense") {
-      continue;
-    }
-    const key = exactPairKey(notification);
-    const group = groups.get(key) ?? [];
-    group.push(notification);
-    groups.set(key, group);
-  }
-  let count = 0;
-  for (const group of groups.values()) {
-    if (
-      group.length === 2
-      && group.filter(({ kind }) => kind === "started_attack").length === 1
-      && group.filter(({ kind }) => kind === "started_defense").length === 1
-    ) {
-      count += 1;
-    }
-  }
-  return count;
 }
 
 function regionBounds(worldRegionRows) {
@@ -259,15 +233,23 @@ try {
     globalSnapshot.rows.empireNotificationDesc,
     globalSnapshot.rows.empireNotificationState,
   );
-  const malformedWarnings = normalized.warnings.filter(
-    (warning) => !/^Unmatched siege outcome notifications\b/.test(warning),
-  );
-  if (malformedWarnings.length) {
+  const malformedCount = normalized.diagnostics.invalidDescriptionRowCount
+    + normalized.diagnostics.invalidNotificationRowCount
+    + normalized.diagnostics.duplicateNotificationIdCount
+    + normalized.diagnostics.ambiguousTerminalGroupCount;
+  if (malformedCount !== 0) {
     throw new Error(
-      `Bounded siege notification rows failed closed: ${malformedWarnings.join("; ")}`,
+      `Bounded siege notification rows failed closed: ${JSON.stringify(normalized.diagnostics)}`,
     );
   }
-  const pairedStartEvents = countExactStartedPairs(normalized.notifications);
+  const startPairs = analyzeSiegeStartPairs(normalized.notifications);
+  if (startPairs.ambiguousStartGroupCount !== 0) {
+    throw new Error(
+      `Bounded siege start notifications contain ${startPairs.ambiguousStartGroupCount} ambiguous or duplicate groups`,
+    );
+  }
+  const pairedStartEvents = startPairs.pairedStartEventCount;
+  const ambiguousStartGroups = startPairs.ambiguousStartGroupCount;
   const attackerWinEvents = normalized.outcomes.filter(
     ({ outcome }) => outcome === "attacker_won",
   ).length;
@@ -310,9 +292,12 @@ try {
     firstSiegeNotificationAt: observedTimes[0] ?? null,
     lastSiegeNotificationAt: observedTimes.at(-1) ?? null,
     pairedStartEvents,
+    unmatchedStartGroups: startPairs.unmatchedStartGroupCount,
+    ambiguousStartGroups,
     attackerWinEvents,
     defenderWinEvents,
-    unmatchedOutcomeWarnings: normalized.warnings.length,
+    unmatchedTerminalGroupCount: normalized.diagnostics.unmatchedTerminalGroupCount,
+    normalizationDiagnostics: normalized.diagnostics,
     cancellationSemantics: "unavailable",
   }, null, 2));
 } finally {

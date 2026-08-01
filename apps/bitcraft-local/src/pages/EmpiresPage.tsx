@@ -319,6 +319,9 @@ export function Empires({
   const recentSiegeOutcomes: AnyRecord[] = Array.isArray(watchtowers.data?.recentSiegeOutcomes)
     ? watchtowers.data.recentSiegeOutcomes
     : [];
+  const unmatchedTerminalStatus = watchtowers.data?.unmatchedTerminalStatus === "removed_or_unknown"
+    ? "removed or unknown"
+    : "unavailable";
   const largestEmpire = overviewSummary.largestEmpireName ?? "-";
   const membersByEmpire = React.useMemo(() => {
     const map = new Map<string, AnyRecord[]>();
@@ -493,7 +496,7 @@ export function Empires({
               <strong id="recent-siege-outcomes-title"><Shield size={15} /> Recent Siege Outcomes</strong>
               <span>{formatNumber(recentSiegeOutcomes.length)} proven</span>
             </div>
-            <p className="siege-availability-note">Successful and failed outcomes require exact paired Relay notifications. Cancelled or removed sieges are unavailable from Relay.</p>
+            <p className="siege-availability-note">Successful and failed outcomes require exact paired Relay notifications. Cancellation is unavailable from Relay; unmatched terminal rows remain {unmatchedTerminalStatus}.</p>
             {recentSiegeOutcomes.length ? (
               <div className="siege-outcome-list">
                 {recentSiegeOutcomes.map((outcome) => {

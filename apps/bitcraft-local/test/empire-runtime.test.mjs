@@ -443,7 +443,16 @@ test("Empire runtime atomically retains compact last-good siege outcomes and rec
         defenderEmpireEntityId: "190",
         outcome: "attacker_won",
       }],
-      warnings: ["Unmatched siege outcome notifications at 2026-07-30T17:00:00.000Z."],
+      warnings: [
+        "Siege outcomes are partial: 92 terminal notification groups have no exact counterpart.",
+      ],
+      diagnostics: {
+        invalidDescriptionRowCount: 0,
+        invalidNotificationRowCount: 0,
+        duplicateNotificationIdCount: 0,
+        unmatchedTerminalGroupCount: 92,
+        ambiguousTerminalGroupCount: 0,
+      },
     },
     notificationScopeEmpireIds: ["190", "800"],
     database: "relay-global",
@@ -461,7 +470,14 @@ test("Empire runtime atomically retains compact last-good siege outcomes and rec
     outcome: "attacker_won",
   }]);
   assert.equal(JSON.stringify(stored.data).includes("raw-normalized-row-must-not-be-stored"), false);
-  assert.match(stored.warnings.join("\n"), /Global Siege: Unmatched siege outcome/);
+  assert.equal(stored.data.cancellationSemantics, "unavailable");
+  assert.equal(stored.data.unmatchedTerminalStatus, "removed_or_unknown");
+  assert.equal(stored.data.siegeOutcomeDiagnostics.unmatchedTerminalGroupCount, 92);
+  assert.equal(stored.confidence, "partial");
+  assert.equal(
+    stored.warnings.filter((warning) => /terminal notification groups/.test(warning)).length,
+    1,
+  );
 
   await assert.rejects(
     runtime.updateGlobalSiegeNotifications({

@@ -478,6 +478,13 @@ test("typed global catalog session subscribes narrowly and emits normalized item
         notifications: [],
         outcomes: [],
         warnings: [],
+        diagnostics: {
+          invalidDescriptionRowCount: 0,
+          invalidNotificationRowCount: 0,
+          duplicateNotificationIdCount: 0,
+          unmatchedTerminalGroupCount: 0,
+          ambiguousTerminalGroupCount: 0,
+        },
       },
       notificationScopeEmpireIds: [],
       changed: ["catalogs", "region", "empire-foundries"],
@@ -502,6 +509,13 @@ test("typed global catalog session subscribes narrowly and emits normalized item
     notifications: [],
     outcomes: [],
     warnings: [],
+    diagnostics: {
+      invalidDescriptionRowCount: 0,
+      invalidNotificationRowCount: 0,
+      duplicateNotificationIdCount: 0,
+      unmatchedTerminalGroupCount: 0,
+      ambiguousTerminalGroupCount: 0,
+    },
   });
 
   fake.connection.db.empireFoundryState.triggerUpdate();

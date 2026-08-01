@@ -9,7 +9,10 @@ import {
   assertSchemaFingerprint,
   schemaBindingsReady,
 } from "./schemaManifest.ts";
-import { normalizeAndPairSiegeNotifications } from "./siegeNotifications.ts";
+import {
+  emptySiegeNotificationDiagnostics,
+  normalizeAndPairSiegeNotifications,
+} from "./siegeNotifications.ts";
 import { equalitySubscriptionQueries } from "./publicCraftRegionSession.ts";
 
 export const GLOBAL_CATALOG_QUERIES = [
@@ -545,7 +548,12 @@ export class RelayGlobalCatalogSession {
               return empireId != null && notificationScope.has(empireId);
             }),
           )
-        : { notifications: [], outcomes: [], warnings: [] };
+        : {
+            notifications: [],
+            outcomes: [],
+            warnings: [],
+            diagnostics: emptySiegeNotificationDiagnostics(),
+          };
       const receivedAt = this.#now().toISOString();
       const generation = this.#nextGeneration;
       this.#nextGeneration += 1;

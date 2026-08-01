@@ -230,8 +230,11 @@ only an exact-Empire-ID notification subscription and publishes exact paired
 attacker-win or defender-win outcomes into the same atomic `empires`
 generation; reconnect and scope replacement preserve the last complete
 projection. Cancellation remains unavailable and is rendered only as
-`removed_or_unknown`, never inferred from a missing or inactive row. No raw
-notification table or scheduled siege acquisition job exists. The legacy
+`removed_or_unknown`, never inferred from a missing or inactive row. Unmatched
+terminal groups publish one compact availability warning and a structured
+count, keeping the outcome enrichment partial without allowing warning volume
+to grow with retained history. No raw notification table or scheduled siege
+acquisition job exists. The legacy
 six-hour Empire Hexite sweep and its five current/work tables are retired:
 each committed Empire generation now publishes the exact treasury amount
 immediately, while the continuously subscribed global Foundry generation adds

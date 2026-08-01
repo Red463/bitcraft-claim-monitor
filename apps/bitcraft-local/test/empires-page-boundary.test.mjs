@@ -152,6 +152,7 @@ test("watchtower popup exposes aligned claims and lazy claim member drilldown", 
 test("siege and empire details use shared accessible dialogs with complete drilldown states", () => {
   const siegeDialog = readFileSync(new URL("../src/pages/empires/SiegeDetailsDialog.tsx", import.meta.url), "utf8");
   const empireDialog = readFileSync(new URL("../src/pages/empires/EmpireDetailsDialog.tsx", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
 
   assert.match(siegeDialog, /<Dialog[\s\S]*open[\s\S]*title="Siege Details"/);
   assert.match(siegeDialog, /groupSiegeParticipants/);
@@ -162,6 +163,9 @@ test("siege and empire details use shared accessible dialogs with complete drill
   assert.match(siegeDialog, /onViewEmpire/);
   assert.match(siegeDialog, /siegeParticipantKey\(participant, "attacker", index\)/);
   assert.match(siegeDialog, /Cancelled or removed sieges are unavailable from Relay/);
+  assert.match(page, /unmatchedTerminalStatus/);
+  assert.match(page, /removed_or_unknown/);
+  assert.match(page, /removed or unknown/);
   assert.match(
     readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8"),
     /Recent Siege Outcomes/,

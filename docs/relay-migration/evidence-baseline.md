@@ -157,12 +157,17 @@ the provider name as evidence, but they are not executable dependencies.
 - The maintained 2026-08-01 siege verifier matched the checked-in global and
   regional fingerprints, derived 24 exact Region 19 Empire IDs, and read 5,106
   rows through one indexed equality subscription. Its 392 siege rows produced
-  22 exact paired starts, nine attacker wins, and 14 defender wins. Current
+  22 exact paired starts, nine attacker wins, 14 defender wins, and 92
+  unmatched terminal groups. The 92 groups are retained as one compact
+  availability warning plus a structured count, so outcome enrichment remains
+  honestly `partial` without unbounded warning growth. Current
   attacker/defender roles and successful/failed outcomes are implemented
-  without a siege SQL table or scheduler.
+  without a siege SQL table or scheduler. The clean-checkout verifier command
+  builds `dist-server` before running.
 - The remaining functional evidence gate inside Empire parity is cancellation:
   Relay exposes no authoritative cancellation signal, so unmatched removals
-  remain `removed_or_unknown`. Empire parity stays in progress pending
+  expose `unmatchedTerminalStatus: "removed_or_unknown"` while
+  `cancellationSemantics` remains `unavailable`. Empire parity stays in progress pending
   controlled/operator evidence or explicit owner approval to retire cancelled
   outcome parity. Production Relay operator confirmation and the seven-day
   preview soak/cutover drill also remain required.

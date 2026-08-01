@@ -307,6 +307,23 @@ function recentSiegeOutcomes(data, regionId, allEmpires) {
     .slice(0, 20);
 }
 
+function siegeAvailability(data) {
+  const current = record(data);
+  const diagnostics = record(current.siegeOutcomeDiagnostics);
+  return {
+    cancellationSemantics: current.cancellationSemantics === "unavailable"
+      ? "unavailable"
+      : "unavailable",
+    unmatchedTerminalStatus: current.unmatchedTerminalStatus === "removed_or_unknown"
+      ? "removed_or_unknown"
+      : "removed_or_unknown",
+    unmatchedTerminalCount: Math.max(
+      0,
+      number(diagnostics.unmatchedTerminalGroupCount),
+    ),
+  };
+}
+
 function regionProjection(data, regionId, options = {}) {
   const allEmpires = list(record(data).empires);
   const members = list(record(data).members);
@@ -435,7 +452,7 @@ export function empireDetailsView(data, regionIdValue, empireIdValue, inactiveDa
     towers: selected.towers,
     activity: activityForMembers(selected.rawMembers, now),
     recentSiegeOutcomes: outcomes,
-    cancellationSemantics: "unavailable",
+    ...siegeAvailability(data),
     errors,
     partial: errors.length > 0,
     fetchedAt: metadata?.receivedAt ?? null,
@@ -467,7 +484,7 @@ export function empireWatchtowersView(data, regionIdValue, inactiveDays = 14, op
       regionId,
       list(record(data).empires),
     ),
-    cancellationSemantics: "unavailable",
+    ...siegeAvailability(data),
     summary: {
       towerCount: towers.length,
       inactiveRiskEmpires: empires.filter((empire) => empire.inactiveRisk === true).length,

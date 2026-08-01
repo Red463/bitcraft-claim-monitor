@@ -27,6 +27,20 @@ export type SiegeOutcome = {
   outcome: "attacker_won" | "defender_won";
 };
 
+export type SiegeNotificationDiagnostics = {
+  invalidDescriptionRowCount: number;
+  invalidNotificationRowCount: number;
+  duplicateNotificationIdCount: number;
+  unmatchedTerminalGroupCount: number;
+  ambiguousTerminalGroupCount: number;
+};
+
+export type SiegeStartPairDiagnostics = {
+  pairedStartEventCount: number;
+  unmatchedStartGroupCount: number;
+  ambiguousStartGroupCount: number;
+};
+
 const SIEGE_KINDS: Readonly<Record<string, SiegeNotificationKind>> = {
   MarkedForSiege: "marked",
   StartedSiege: "started_attack",
@@ -92,6 +106,52 @@ function occurredAt(value: unknown): string {
   return new Date(milliseconds).toISOString();
 }
 
+function pairKey(notification: NormalizedSiegeNotification): string {
+  return `${notification.occurredAt}\u0000${notification.replacements[0]}\u0000${notification.replacements[1]}`;
+}
+
+export function emptySiegeNotificationDiagnostics(): SiegeNotificationDiagnostics {
+  return {
+    invalidDescriptionRowCount: 0,
+    invalidNotificationRowCount: 0,
+    duplicateNotificationIdCount: 0,
+    unmatchedTerminalGroupCount: 0,
+    ambiguousTerminalGroupCount: 0,
+  };
+}
+
+export function analyzeSiegeStartPairs(
+  notifications: readonly NormalizedSiegeNotification[],
+): SiegeStartPairDiagnostics {
+  const groups = new Map<string, NormalizedSiegeNotification[]>();
+  for (const notification of notifications) {
+    if (notification.kind !== "started_attack" && notification.kind !== "started_defense") {
+      continue;
+    }
+    const key = pairKey(notification);
+    const group = groups.get(key) ?? [];
+    group.push(notification);
+    groups.set(key, group);
+  }
+  const diagnostics: SiegeStartPairDiagnostics = {
+    pairedStartEventCount: 0,
+    unmatchedStartGroupCount: 0,
+    ambiguousStartGroupCount: 0,
+  };
+  for (const group of groups.values()) {
+    const attacks = group.filter(({ kind }) => kind === "started_attack").length;
+    const defenses = group.filter(({ kind }) => kind === "started_defense").length;
+    if (attacks === 1 && defenses === 1 && group.length === 2) {
+      diagnostics.pairedStartEventCount += 1;
+    } else if (group.length === 1 && (attacks === 1 || defenses === 1)) {
+      diagnostics.unmatchedStartGroupCount += 1;
+    } else {
+      diagnostics.ambiguousStartGroupCount += 1;
+    }
+  }
+  return diagnostics;
+}
+
 function normalizeNotification(
   value: unknown,
   index: number,
@@ -138,8 +198,10 @@ export function normalizeAndPairSiegeNotifications(
   notifications: NormalizedSiegeNotification[];
   outcomes: SiegeOutcome[];
   warnings: string[];
+  diagnostics: SiegeNotificationDiagnostics;
 } {
   const warnings: string[] = [];
+  const diagnostics = emptySiegeNotificationDiagnostics();
   const descriptionCounts = new Map<string, number>();
   for (const [index, value] of descriptions.entries()) {
     try {
@@ -152,9 +214,11 @@ export function normalizeAndPairSiegeNotifications(
         descriptionCounts.set(tag, (descriptionCounts.get(tag) ?? 0) + 1);
       } else if (!KNOWN_NON_SIEGE_TYPES.has(tag)) {
         warnings.push(`Empire notification description row ${index} has unsupported type ${tag}.`);
+        diagnostics.invalidDescriptionRowCount += 1;
       }
     } catch (error) {
       warnings.push(error instanceof Error ? error.message : String(error));
+      diagnostics.invalidDescriptionRowCount += 1;
     }
   }
   const availableDescriptionTags = new Set<string>();
@@ -163,6 +227,7 @@ export function normalizeAndPairSiegeNotifications(
       availableDescriptionTags.add(tag);
     } else {
       warnings.push(`Duplicate Empire notification descriptions for ${tag}; that type was rejected.`);
+      diagnostics.invalidDescriptionRowCount += count;
     }
   }
 
@@ -191,6 +256,7 @@ export function normalizeAndPairSiegeNotifications(
       if (notification) parsedNotifications.push(notification);
     } catch (error) {
       warnings.push(error instanceof Error ? error.message : String(error));
+      diagnostics.invalidNotificationRowCount += 1;
     }
   }
   const duplicateIds = [...idCounts]
@@ -200,6 +266,7 @@ export function normalizeAndPairSiegeNotifications(
   for (const entityId of duplicateIds) {
     warnings.push(`Duplicate siege notification entity ID ${entityId}; all duplicate rows were rejected.`);
   }
+  diagnostics.duplicateNotificationIdCount = duplicateIds.length;
   const notifications = parsedNotifications.filter(
     (notification) => idCounts.get(notification.entityId) === 1,
   );
@@ -207,12 +274,12 @@ export function normalizeAndPairSiegeNotifications(
   const outcomes: SiegeOutcome[] = [];
   const byPair = new Map<string, NormalizedSiegeNotification[]>();
   for (const notification of notifications) {
-    const pairKey = `${notification.occurredAt}\u0000${notification.replacements[0]}\u0000${notification.replacements[1]}`;
-    const group = byPair.get(pairKey) ?? [];
+    const key = pairKey(notification);
+    const group = byPair.get(key) ?? [];
     group.push(notification);
-    byPair.set(pairKey, group);
+    byPair.set(key, group);
   }
-  for (const [pairKey, group] of byPair) {
+  for (const [eventKey, group] of byPair) {
     const terminal = group.filter((row) => (
       row.kind === "attack_won"
       || row.kind === "defense_failed"
@@ -226,7 +293,7 @@ export function normalizeAndPairSiegeNotifications(
     const defense = terminal.find((row) => row.kind === "defense_won");
     if (terminal.length === 2 && attack && failedDefense) {
       outcomes.push({
-        eventKey: pairKey,
+        eventKey,
         occurredAt: attack.occurredAt,
         watchtowerLabel: attack.replacements[0],
         encodedLocation: attack.replacements[1],
@@ -236,7 +303,7 @@ export function normalizeAndPairSiegeNotifications(
       });
     } else if (terminal.length === 2 && failedAttack && defense) {
       outcomes.push({
-        eventKey: pairKey,
+        eventKey,
         occurredAt: failedAttack.occurredAt,
         watchtowerLabel: failedAttack.replacements[0],
         encodedLocation: failedAttack.replacements[1],
@@ -244,11 +311,20 @@ export function normalizeAndPairSiegeNotifications(
         defenderEmpireEntityId: defense.empireEntityId,
         outcome: "defender_won",
       });
+    } else if (terminal.length === 1) {
+      diagnostics.unmatchedTerminalGroupCount += 1;
     } else {
+      diagnostics.ambiguousTerminalGroupCount += 1;
       warnings.push(
-        `${terminal.length === 1 ? "Unmatched" : "Ambiguous"} siege outcome notifications at ${terminal[0].occurredAt}.`,
+        `Ambiguous siege outcome notifications at ${terminal[0].occurredAt}.`,
       );
     }
   }
-  return { notifications, outcomes, warnings };
+  if (diagnostics.unmatchedTerminalGroupCount > 0) {
+    const count = diagnostics.unmatchedTerminalGroupCount;
+    warnings.push(
+      `Siege outcomes are partial: ${count} terminal notification ${count === 1 ? "group has" : "groups have"} no exact counterpart.`,
+    );
+  }
+  return { notifications, outcomes, warnings, diagnostics };
 }

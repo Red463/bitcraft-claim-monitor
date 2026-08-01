@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const {
+  analyzeSiegeStartPairs,
   normalizeAndPairSiegeNotifications,
 } = await import(
   new URL("../src/server/game-data/siegeNotifications.ts", import.meta.url).href
@@ -83,7 +84,26 @@ test("keeps an unmatched outcome notification partial instead of inventing an ou
   );
 
   assert.equal(result.outcomes.length, 0);
-  assert.match(result.warnings[0], /unmatched/i);
+  assert.deepEqual(result.warnings, [
+    "Siege outcomes are partial: 1 terminal notification group has no exact counterpart.",
+  ]);
+  assert.equal(result.diagnostics.unmatchedTerminalGroupCount, 1);
+  assert.equal(result.diagnostics.ambiguousTerminalGroupCount, 0);
+});
+
+test("compacts a live-scale unmatched terminal window into one availability warning", () => {
+  const result = normalizeAndPairSiegeNotifications(
+    [description("SuccessfulSiege", 1)],
+    Array.from({ length: 92 }, (_, index) => (
+      notification(BigInt(index + 1), 8000001n, "SuccessfulSiege", 1785430800 + index)
+    )),
+  );
+
+  assert.equal(result.outcomes.length, 0);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /partial.*92 terminal notification groups/i);
+  assert.equal(result.diagnostics.unmatchedTerminalGroupCount, 92);
+  assert.equal(result.diagnostics.ambiguousTerminalGroupCount, 0);
 });
 
 test("does not infer cancellation or an outcome from a siege mark", () => {
@@ -117,6 +137,47 @@ test("normalizes started attack and defense roles without creating a terminal ou
   assert.equal(result.notifications[0].occurredAt, "2026-07-30T17:00:00.000Z");
   assert.deepEqual(result.outcomes, []);
   assert.deepEqual(result.warnings, []);
+});
+
+test("analyzes exact start pairs and rejects duplicate or ambiguous start groups", () => {
+  const normalized = normalizeAndPairSiegeNotifications(
+    [
+      description("StartedSiege", 1),
+      description("StartedDefense", 2),
+    ],
+    [
+      notification(11n, 8000001n, "StartedSiege"),
+      notification(12n, 7000001n, "StartedDefense"),
+      notification(13n, 8000002n, "StartedSiege", 1785430801),
+      notification(14n, 8000003n, "StartedSiege", 1785430801),
+      notification(15n, 7000002n, "StartedDefense", 1785430801),
+    ],
+  );
+
+  assert.deepEqual(analyzeSiegeStartPairs(normalized.notifications), {
+    pairedStartEventCount: 1,
+    unmatchedStartGroupCount: 0,
+    ambiguousStartGroupCount: 1,
+  });
+});
+
+test("distinguishes unmatched start groups from duplicate start groups", () => {
+  const normalized = normalizeAndPairSiegeNotifications(
+    [
+      description("StartedSiege", 1),
+      description("StartedDefense", 2),
+    ],
+    [
+      notification(11n, 8000001n, "StartedSiege"),
+      notification(12n, 7000001n, "StartedDefense", 1785430801),
+    ],
+  );
+
+  assert.deepEqual(analyzeSiegeStartPairs(normalized.notifications), {
+    pairedStartEventCount: 0,
+    unmatchedStartGroupCount: 2,
+    ambiguousStartGroupCount: 0,
+  });
 });
 
 test("silently ignores the complete known first-party non-siege notification set", () => {
@@ -332,8 +393,10 @@ test("does not pair counterpart rows with different timestamps or replacements",
 
   assert.deepEqual(differentTimestamp.outcomes, []);
   assert.deepEqual(differentTuple.outcomes, []);
-  assert.equal(differentTimestamp.warnings.filter((warning) => /unmatched/i.test(warning)).length, 2);
-  assert.equal(differentTuple.warnings.filter((warning) => /unmatched/i.test(warning)).length, 2);
+  assert.equal(differentTimestamp.warnings.length, 1);
+  assert.equal(differentTimestamp.diagnostics.unmatchedTerminalGroupCount, 2);
+  assert.equal(differentTuple.warnings.length, 1);
+  assert.equal(differentTuple.diagnostics.unmatchedTerminalGroupCount, 2);
 });
 
 test("rejects an ambiguous counterpart group", () => {
@@ -351,6 +414,7 @@ test("rejects an ambiguous counterpart group", () => {
 
   assert.deepEqual(result.outcomes, []);
   assert.match(result.warnings[0], /ambiguous/i);
+  assert.equal(result.diagnostics.ambiguousTerminalGroupCount, 1);
 });
 
 test("rejects conflicting exact outcome pairs sharing one event key", () => {
@@ -371,6 +435,7 @@ test("rejects conflicting exact outcome pairs sharing one event key", () => {
 
   assert.deepEqual(result.outcomes, []);
   assert.match(result.warnings[0], /ambiguous/i);
+  assert.equal(result.diagnostics.ambiguousTerminalGroupCount, 1);
 });
 
 test("rejects a notification whose siege description is unavailable", () => {

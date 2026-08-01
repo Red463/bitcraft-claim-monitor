@@ -6,6 +6,10 @@ const verifierUrl = new URL(
   "../scripts/verify-relay-siege-notifications-live.mjs",
   import.meta.url,
 );
+const packageJson = JSON.parse(readFileSync(
+  new URL("../package.json", import.meta.url),
+  "utf8",
+));
 
 test("siege live verifier stays generated-binding, fingerprint, and exact-Empire scoped", () => {
   const source = readFileSync(verifierUrl, "utf8");
@@ -31,7 +35,18 @@ test("siege live verifier reports exact paired evidence and unavailable cancella
   const source = readFileSync(verifierUrl, "utf8");
 
   assert.match(source, /pairedStartEvents/);
+  assert.match(source, /analyzeSiegeStartPairs/);
+  assert.match(source, /ambiguousStartGroups/);
+  assert.match(source, /ambiguousStartGroupCount\s*!==\s*0/);
   assert.match(source, /attackerWinEvents/);
   assert.match(source, /defenderWinEvents/);
+  assert.match(source, /unmatchedTerminalGroupCount/);
   assert.match(source, /cancellationSemantics:\s*"unavailable"/);
+});
+
+test("siege live verifier has a clean-checkout command that builds server artifacts first", () => {
+  assert.equal(
+    packageJson.scripts["verify:relay-siege-live"],
+    "corepack pnpm run build:server && node scripts/verify-relay-siege-notifications-live.mjs",
+  );
 });

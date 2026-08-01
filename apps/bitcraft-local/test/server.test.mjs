@@ -878,6 +878,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalWatchtowers.recentSiegeOutcomes[0].attackerEmpireName, "Verdant");
   assert.equal(regionalWatchtowers.recentSiegeOutcomes[0].defenderEmpireName, "Test Empire");
   assert.equal(regionalWatchtowers.cancellationSemantics, "unavailable");
+  assert.equal(regionalWatchtowers.unmatchedTerminalStatus, "removed_or_unknown");
   assert.equal(regionalWatchtowers.summary.underSiege, 1);
   assert.equal(regionalWatchtowers.towers[0].accessMembers, undefined);
   assert.equal(regionalWatchtowers.empires[0].accessMembers.length, 2);

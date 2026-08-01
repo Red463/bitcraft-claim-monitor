@@ -163,6 +163,7 @@ test("Empire details and watchtowers expose proven current roles and paired outc
   assert.equal(details.recentSiegeOutcomes[0].defenderEmpireName, "Timbersteel Empire");
   assert.equal(details.recentSiegeOutcomes[0].outcome, "defender_won");
   assert.equal(details.cancellationSemantics, "unavailable");
+  assert.equal(details.unmatchedTerminalStatus, "removed_or_unknown");
 
   const towers = empireWatchtowersView(snapshot, "19", 14, {
     now: () => Date.parse("2026-07-30T18:00:00.000Z"),
@@ -174,6 +175,7 @@ test("Empire details and watchtowers expose proven current roles and paired outc
   assert.equal(towers.recentSiegeOutcomes.length, 1);
   assert.equal(towers.recentSiegeOutcomes[0].occurredAt, "2026-07-29T16:00:00.000Z");
   assert.equal(towers.cancellationSemantics, "unavailable");
+  assert.equal(towers.unmatchedTerminalStatus, "removed_or_unknown");
   assert.equal(JSON.stringify(towers).includes("cancelled"), false);
 });
 

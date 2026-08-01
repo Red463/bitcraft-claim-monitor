@@ -1085,13 +1085,15 @@ observed fixtures; it does not turn an inactive row into completion evidence.
 
 ### Maintained verifier confirmation
 
-At `2026-08-01T18:58:28.197Z`, the maintained read-only verifier repeated the
+At `2026-08-01T19:25:08.635Z`, the maintained read-only verifier repeated the
 proof against the current Relay:
 
 ```powershell
-node apps/bitcraft-local/scripts/verify-relay-siege-notifications-live.mjs
+corepack pnpm --filter @workspace/bitcraft-local run verify:relay-siege-live
 ```
 
+The package command builds the provider and generated binding bundles first,
+so it is reproducible from a clean checkout where `dist-server` is absent.
 Topology discovery again returned `bitcraft-live-19` and
 `bitcraft-live-global` with the exact regional and global fingerprints in the
 checked-in schema manifest. Generated regional bindings reduced the live rows
@@ -1104,14 +1106,20 @@ The scoped rows contained 392 recognized siege notifications from
 `2026-02-28T09:14:09.000Z` through `2026-07-30T19:01:31.000Z`. Exact timestamp
 and replacement-tuple matching reproduced 22 paired starts, nine attacker-win
 outcomes, and 14 defender-win outcomes. Ninety-two terminal rows lacked an
-exact retained counterpart and remained warnings rather than being assigned
-an outcome. The verifier reported `cancellationSemantics: "unavailable"`.
+exact retained counterpart. Runtime normalization reports their count through
+structured diagnostics and emits one stable availability warning rather than
+92 warning strings. That warning keeps siege outcome enrichment explicitly
+partial. The provider-neutral DTO exposes
+`unmatchedTerminalStatus: "removed_or_unknown"` while the verifier reports
+`cancellationSemantics: "unavailable"`. The same window also contained 92
+unmatched start groups but zero duplicate or ambiguous start groups.
 
 The maintained verifier rejects schema-fingerprint drift, an empty or
-unbounded Empire scope, malformed notification rows, ambiguous pairings, and
-a live window that no longer retains at least one of each proven pair. It
-prints topology identities, fingerprints, bounded counts, and exact Empire
-IDs only; it reads no application secrets and performs no mutation.
+unbounded Empire scope, malformed notification rows, ambiguous terminal
+pairings, duplicate or ambiguous start groups, and a live window that no
+longer retains at least one of each proven pair. It prints topology identities,
+fingerprints, bounded counts, and exact Empire IDs only; it reads no
+application secrets and performs no mutation.
 
 ### Proven and still gated
 
@@ -1124,8 +1132,9 @@ timestamp-plus-replacement counterpart pairs, retains the last complete
 compact outcome projection across scope replacement or reconnect, and stores
 it only inside the generic atomic `empires` generation. No raw notification
 mirror, siege cache, work table, or scheduled acquisition job was added. A
-missing counterpart remains partial and is never guessed from a historical
-owner.
+missing counterpart increments the structured unmatched count, produces one
+bounded availability warning for the complete generation, and remains
+partial; it is never guessed from a historical owner.
 
 Cancellation remains unproven. There is no cancellation notification variant,
 description template, or outcome field. A `MarkedForSiege` row without a
