@@ -146,19 +146,24 @@ chmod 0600 \
 ## Clone and prepare the initial immutable release
 
 ```sh
-sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay git clone \
+sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay \
+  GIT_SSH_COMMAND='ssh -F /opt/bitcraft-claim-monitor-relay/.ssh/config' git clone \
   git@github.com:Red463/bitcraft-claim-monitor-relay.git \
   /opt/bitcraft-claim-monitor-relay/source
 sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay \
+  GIT_SSH_COMMAND='ssh -F /opt/bitcraft-claim-monitor-relay/.ssh/config' \
   git -C /opt/bitcraft-claim-monitor-relay/source fetch --prune origin main
 
 REVISION="$(sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay \
+  GIT_SSH_COMMAND='ssh -F /opt/bitcraft-claim-monitor-relay/.ssh/config' \
   git -C /opt/bitcraft-claim-monitor-relay/source rev-parse origin/main)"
 printf '%s\n' "$REVISION" | grep -Eq '^[0-9a-f]{40}$'
 sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay \
+  GIT_SSH_COMMAND='ssh -F /opt/bitcraft-claim-monitor-relay/.ssh/config' \
   git -C /opt/bitcraft-claim-monitor-relay/source \
   merge-base --is-ancestor "$REVISION" origin/main
 sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay \
+  GIT_SSH_COMMAND='ssh -F /opt/bitcraft-claim-monitor-relay/.ssh/config' \
   git -C /opt/bitcraft-claim-monitor-relay/source \
   worktree add --detach "/opt/bitcraft-claim-monitor-relay/releases/$REVISION" "$REVISION"
 

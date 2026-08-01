@@ -24,6 +24,7 @@ test("Relay updater has only isolated defaults", () => {
     /UPDATER_PATH="\$\{UPDATER_PATH:-\/usr\/local\/bin\/update-bitcraft-claim-monitor-relay\}"/,
     /SYSTEMD_DIR="\$\{SYSTEMD_DIR:-\/etc\/systemd\/system\}"/,
     /RUN_HOME="\$\{RUN_HOME:-\$APP_ROOT\}"/,
+    /RUN_SSH_CONFIG="\$\{RUN_SSH_CONFIG:-\$RUN_HOME\/\.ssh\/config\}"/,
   ]) {
     assert.match(script, expected);
   }
@@ -82,7 +83,7 @@ test("Relay updater retains three releases only after success", () => {
 test("every runtime-user Git boundary uses the isolated Relay HOME", () => {
   assert.match(
     script,
-    /run_git_as_user\(\) \{\s+sudo -u "\$RUN_USER" env HOME="\$RUN_HOME" git "\$@"/,
+    /run_git_as_user\(\) \{\s+sudo -u "\$RUN_USER" env HOME="\$RUN_HOME" \\\s+GIT_SSH_COMMAND="ssh -F \$RUN_SSH_CONFIG" git "\$@"/,
   );
   for (const operation of [
     /run_git_as_user[\s\\]+-C "\$SOURCE_DIR" fetch --prune origin main/,

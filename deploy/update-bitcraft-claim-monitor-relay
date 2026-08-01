@@ -17,6 +17,7 @@ LOCK_FILE="${LOCK_FILE:-/run/lock/bitcraft-claim-monitor-relay-deploy.lock}"
 KEEP_RELEASES="${KEEP_RELEASES:-3}"
 RUN_USER="${RUN_USER:-bitcraft}"
 RUN_HOME="${RUN_HOME:-$APP_ROOT}"
+RUN_SSH_CONFIG="${RUN_SSH_CONFIG:-$RUN_HOME/.ssh/config}"
 WEB_SERVICE="${WEB_SERVICE:-bitcraft-claim-monitor-relay.service}"
 WORKER_SERVICE="${WORKER_SERVICE:-bitcraft-claim-monitor-relay-worker.service}"
 COLLECTOR_TIMER="${COLLECTOR_TIMER:-bitcraft-claim-monitor-relay-collector.timer}"
@@ -146,7 +147,8 @@ run_logged() {
 }
 
 run_git_as_user() {
-  sudo -u "$RUN_USER" env HOME="$RUN_HOME" git "$@"
+  sudo -u "$RUN_USER" env HOME="$RUN_HOME" \
+    GIT_SSH_COMMAND="ssh -F $RUN_SSH_CONFIG" git "$@"
 }
 
 sync_source_revision() {
