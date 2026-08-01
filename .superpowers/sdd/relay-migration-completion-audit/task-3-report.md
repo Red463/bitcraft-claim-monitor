@@ -169,3 +169,45 @@ Validation limits:
   external follow-up work.
 - The first successful preview deployment and a forced-failure rollback must be
   observed in a supervised window before beginning the soak.
+
+## Follow-up review fixes
+
+A separate follow-up commit on top of `026e2bb404c4c883dd31f81b37ebc608633868e1`
+addresses all five deployment-review findings:
+
+1. The private repository bootstrap now uses a dedicated read-only GitHub
+   deploy key owned by `bitcraft`, an SSH remote, an explicitly verified and
+   pinned `known_hosts` file, and strict host-key checking. The runbook
+   explicitly leaves deploy-key write access unchecked and never embeds a PAT
+   in a GitHub URL.
+2. The updater now takes a private transaction snapshot of the current
+   symlink, updater, all three helper paths, and all six live Relay unit paths
+   before its first live mutation. Any later failure restores exact prior
+   presence/content, reloads systemd, and restores the prior web, worker, and
+   backup-timer runtime state.
+3. `deployment_succeeded=1` is now set only after the candidate updater is
+   installed, the backup timer is enabled/started, and release pruning
+   completes.
+4. Updater logs now use root-owned mode-`0700`
+   `/var/log/bitcraft-claim-monitor-relay` and an unpredictable `mktemp` name;
+   logs are mode `0600`. A test override must name a path that does not already
+   exist and is created with shell noclobber semantics.
+5. The runbook sets `umask 077` before the first key write and documents final
+   `0600`/`0640` key modes.
+
+Follow-up TDD:
+
+- RED: `node --test scripts/test/deploy-update-script.test.mjs` produced
+  20 tests, with 14 passing and 6 expected failures covering the five findings.
+- GREEN: the focused updater contracts passed 21/21, including a guard proving
+  help and pre-snapshot exits cannot trigger rollback.
+- Targeted deployment and boundary verification passed 56/56 runnable tests;
+  12 Bash integration tests were skipped because Bash is unavailable on this
+  Windows host. The Linux-only set now includes explicit failures immediately
+  after unit installation and immediately after backup-timer enablement.
+- `git diff --check` passed with only expected Windows LF/CRLF notices.
+
+The full application suite and production build were not repeated for this
+follow-up because it changes only the deployment shell script, its focused
+tests, and the runbook; no application runtime or TypeScript code changed.
+Linux-only Bash, systemd, and Caddy checks remain mandatory workflow gates.

@@ -56,6 +56,7 @@ install -d -o bitcraft -g bitcraft -m 0700 /var/backups/bitcraft-claim-monitor-r
 install -d -o root -g bitcraft -m 0750 /etc/bitcraft-claim-monitor-relay
 install -d -o root -g root -m 0755 /usr/local/lib/bitcraft-claim-monitor-relay
 
+umask 077
 openssl rand 32 | basenc --base64url | tr -d '=' \
   > /etc/bitcraft-claim-monitor-relay/backup-encryption.key
 openssl rand 32 | basenc --base64url | tr -d '=' \
@@ -68,11 +69,59 @@ chmod 0640 /etc/bitcraft-claim-monitor-relay/privacy-ledger.key
 
 Use fresh keys. Do not reuse the maintained deployment's key directory.
 
+## Bootstrap a read-only GitHub deploy key
+
+The private standalone repository is fetched by the unprivileged `bitcraft`
+account over SSH. Create a dedicated read-only GitHub deploy key; do not put a
+personal access token in the remote URL.
+
+```sh
+install -d -o bitcraft -g bitcraft -m 0700 /home/bitcraft/.ssh
+sudo -u bitcraft sh -c '
+  umask 077
+  ssh-keygen -q -t ed25519 -N "" \
+    -C bitcraft-claim-monitor-relay-readonly \
+    -f /home/bitcraft/.ssh/bitcraft-claim-monitor-relay-readonly
+'
+chmod 0600 /home/bitcraft/.ssh/bitcraft-claim-monitor-relay-readonly
+chmod 0644 /home/bitcraft/.ssh/bitcraft-claim-monitor-relay-readonly.pub
+```
+
+In `Red463/bitcraft-claim-monitor-relay`, open **Settings → Deploy keys**, add
+the contents of the `.pub` file, and leave **Allow write access** unchecked.
+
+Pin GitHub's Ed25519 host key before the first Git operation. Capture the key
+to a private temporary file, print its fingerprint, and compare that
+fingerprint through a trusted channel with GitHub's currently published SSH
+key fingerprints. Do not install it if the fingerprint differs.
+
+```sh
+umask 077
+GITHUB_HOST_KEYS="$(mktemp)"
+ssh-keyscan -t ed25519 github.com >"$GITHUB_HOST_KEYS"
+ssh-keygen -lf "$GITHUB_HOST_KEYS"
+# Stop here and compare the displayed fingerprint with GitHub's published value.
+install -o bitcraft -g bitcraft -m 0600 \
+  "$GITHUB_HOST_KEYS" /home/bitcraft/.ssh/known_hosts
+rm -f "$GITHUB_HOST_KEYS"
+
+install -o bitcraft -g bitcraft -m 0600 /dev/null /home/bitcraft/.ssh/config
+sudo -u bitcraft sh -c 'cat > /home/bitcraft/.ssh/config <<EOF
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile /home/bitcraft/.ssh/bitcraft-claim-monitor-relay-readonly
+  IdentitiesOnly yes
+  StrictHostKeyChecking yes
+  UserKnownHostsFile /home/bitcraft/.ssh/known_hosts
+EOF'
+```
+
 ## Clone and prepare the initial immutable release
 
 ```sh
 sudo -u bitcraft git clone \
-  https://github.com/Red463/bitcraft-claim-monitor-relay.git \
+  git@github.com:Red463/bitcraft-claim-monitor-relay.git \
   /opt/bitcraft-claim-monitor-relay/source
 sudo -u bitcraft git -C /opt/bitcraft-claim-monitor-relay/source fetch --prune origin main
 
@@ -277,20 +326,22 @@ For every requested revision the updater:
 1. Acquires `/run/lock/bitcraft-claim-monitor-relay-deploy.lock`.
 2. Fetches `origin/main` and verifies the full SHA is reachable.
 3. Creates and builds an immutable detached worktree.
-4. Syntax-checks and stages the encrypted-backup helpers.
-5. Validates only Relay systemd units and the tracked Caddy example.
+4. Validates only Relay systemd units and the tracked Caddy example.
+5. Snapshots the current symlink, updater, helpers, and every live Relay unit,
+   then syntax-checks and stages the encrypted-backup helpers.
 6. Creates a migration backup when the schema marker changes, or a manual
    backup when requested.
 7. Installs only Relay units, atomically switches `current`, and restarts only
    the Relay web and worker.
 8. Checks the local release version and public preview.
 
-If cutover health fails, automatic rollback switches `current` to the previous
-immutable release, reinstalls its Relay units, and restarts the Relay web and
-worker. Failed releases are retained for diagnosis. Rollback changes
-application code only; it never restores SQLite automatically because that
-could discard writes accepted during deployment. Database migrations must stay
-backward compatible with the immediately previous release.
+Any failure after the live snapshot—including updater installation, backup
+timer enablement, or release pruning—restores the exact prior symlink, updater,
+helpers, and unit files, reloads systemd, and restores the prior web, worker,
+and backup-timer runtime state. Failed releases are retained for diagnosis.
+Rollback never restores SQLite automatically because that could discard writes
+accepted during deployment. Database migrations must stay backward compatible
+with the immediately previous release.
 
 Before relying on unattended preview deployments, perform one successful
 deployment and one forced-failure rollback in a supervised window.
@@ -312,8 +363,9 @@ curl --fail --silent --show-error https://relay.timbersteeltrade.com/api/local/h
 caddy validate --config /etc/caddy/Caddyfile
 ```
 
-Deployment logs use
-`/tmp/bitcraft-claim-monitor-relay-update-YYYYMMDD-HHMMSS.log`. They may contain
+Deployment logs use unpredictable names such as
+`/var/log/bitcraft-claim-monitor-relay/update.A1b2C3.log`. The root-owned
+directory is mode `0700` and each log is mode `0600`. Logs may contain
 operational metadata but must not contain secrets.
 
 ## Backups, privacy ledger, and restore

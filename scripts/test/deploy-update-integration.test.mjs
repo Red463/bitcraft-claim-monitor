@@ -8,29 +8,160 @@ import test from "node:test";
 const script = new URL("../../deploy/update-bitcraft-claim-monitor-relay", import.meta.url);
 const hasBash = process.platform !== "win32" && spawnSync("bash", ["--version"]).status === 0;
 
-test("atomic switch and rollback restore the previous release", { skip: !hasBash }, () => {
+test("failure after unit installation restores every live artifact and prior runtime", { skip: !hasBash }, () => {
   const root = mkdtempSync(join(tmpdir(), "bitcraft-deploy-"));
-  const releases = join(root, "releases");
-  const previous = join(releases, "previous");
-  const candidate = join(releases, "candidate");
-  const current = join(root, "current");
 
   const harness = `
     set -euo pipefail
     source "$1"
     APP_ROOT="$2"
     CURRENT_LINK="$2/current"
-    mkdir -p "$2/releases/previous" "$2/releases/candidate"
+    SYSTEMD_DIR="$2/systemd"
+    BACKUP_HELPER_PATH="$2/bin/backup"
+    BACKUP_CRYPTO_HELPER_PATH="$2/lib/crypto"
+    PRIVACY_REPLAY_HELPER_PATH="$2/lib/replay"
+    UPDATER_PATH="$2/bin/updater"
+    LOG_FILE="$2/update.log"
+    TMPDIR="$2/tmp"
+    TEST_ROOT="$2"
+    mkdir -p "$2/releases/previous" "$2/releases/candidate" "$SYSTEMD_DIR" "$2/bin" "$2/lib" "$TMPDIR"
     ln -s "releases/previous" "$CURRENT_LINK"
-    atomic_switch "$2/releases/candidate"
-    [[ "$(readlink -f "$CURRENT_LINK")" == "$2/releases/candidate" ]]
-    previous_release="$2/releases/previous"
-    install_release_config() { return 0; }
+    : >"$LOG_FILE"
+    for path in \
+      "$BACKUP_HELPER_PATH" \
+      "$BACKUP_CRYPTO_HELPER_PATH" \
+      "$PRIVACY_REPLAY_HELPER_PATH" \
+      "$UPDATER_PATH" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-worker.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.timer" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.timer"; do
+      printf 'original:%s\n' "$path" >"$path"
+    done
+    systemctl() {
+      case "$1" in
+        is-active|is-enabled) return 0 ;;
+        *) return 0 ;;
+      esac
+    }
     restart_service() { return 0; }
     wait_for_service() { return 0; }
     wait_for_health() { return 0; }
-    rollback_release "$previous_release"
+
+    snapshot_live_installation
+    # Simulate a failure immediately after candidate unit/helper installation.
+    for path in \
+      "$BACKUP_HELPER_PATH" \
+      "$BACKUP_CRYPTO_HELPER_PATH" \
+      "$PRIVACY_REPLAY_HELPER_PATH" \
+      "$UPDATER_PATH" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-worker.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.timer" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.timer"; do
+      printf 'candidate\n' >"$path"
+    done
+    atomic_switch "$2/releases/candidate"
+    rollback_deployment_transaction
+
     [[ "$(readlink -f "$CURRENT_LINK")" == "$2/releases/previous" ]]
+    for path in \
+      "$BACKUP_HELPER_PATH" \
+      "$BACKUP_CRYPTO_HELPER_PATH" \
+      "$PRIVACY_REPLAY_HELPER_PATH" \
+      "$UPDATER_PATH" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-worker.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.timer" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.timer"; do
+      grep -Fqx "original:$path" "$path"
+    done
+    cleanup_deployment_transaction
+  `;
+
+  try {
+    const result = spawnSync("bash", ["-c", harness, "test", script.pathname, root], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("failure after backup timer enable is restored by EXIT cleanup", { skip: !hasBash }, () => {
+  const root = mkdtempSync(join(tmpdir(), "bitcraft-timer-finalize-"));
+  const harness = `
+    set -euo pipefail
+    source "$1"
+    APP_ROOT="$2"
+    CURRENT_LINK="$2/current"
+    SYSTEMD_DIR="$2/systemd"
+    BACKUP_HELPER_PATH="$2/bin/backup"
+    BACKUP_CRYPTO_HELPER_PATH="$2/lib/crypto"
+    PRIVACY_REPLAY_HELPER_PATH="$2/lib/replay"
+    UPDATER_PATH="$2/bin/updater"
+    LOG_FILE="$2/update.log"
+    TMPDIR="$2/tmp"
+    TEST_ROOT="$2"
+    mkdir -p "$2/releases/previous" "$SYSTEMD_DIR" "$2/bin" "$2/lib" "$TMPDIR"
+    ln -s "releases/previous" "$CURRENT_LINK"
+    : >"$LOG_FILE"
+    printf 'original-updater\n' >"$UPDATER_PATH"
+    printf 'original-unit\n' >"$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service"
+
+    systemctl() {
+      local operation="$1"
+      shift
+      case "$operation" in
+        is-active)
+          [[ "$*" == *"$BACKUP_TIMER"* && -f "$TEST_ROOT/timer-active" ]]
+          ;;
+        is-enabled)
+          [[ "$*" == *"$BACKUP_TIMER"* && -f "$TEST_ROOT/timer-enabled" ]]
+          ;;
+        enable)
+          : >"$TEST_ROOT/timer-enabled"
+          [[ "$1" != "--now" ]] || : >"$TEST_ROOT/timer-active"
+          ;;
+        disable)
+          rm -f "$TEST_ROOT/timer-enabled"
+          ;;
+        start)
+          : >"$TEST_ROOT/timer-active"
+          ;;
+        stop)
+          rm -f "$TEST_ROOT/timer-active"
+          ;;
+        daemon-reload)
+          ;;
+      esac
+    }
+    restart_service() { return 0; }
+    wait_for_service() { return 0; }
+    wait_for_health() { return 0; }
+
+    set +e
+    (
+      set -e
+      trap cleanup_deployment_transaction EXIT
+      snapshot_live_installation
+      printf 'candidate-updater\n' >"$UPDATER_PATH"
+      printf 'candidate-unit\n' >"$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service"
+      systemctl enable --now "$BACKUP_TIMER"
+      false
+    )
+    failure_status=$?
+    set -e
+    [[ "$failure_status" -ne 0 ]]
+    grep -Fqx 'original-updater' "$UPDATER_PATH"
+    grep -Fqx 'original-unit' "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service"
+    [[ ! -e "$TEST_ROOT/timer-enabled" ]]
+    [[ ! -e "$TEST_ROOT/timer-active" ]]
   `;
 
   try {
