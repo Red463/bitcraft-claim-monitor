@@ -1,5 +1,6 @@
 import type { DomainSnapshotBatch } from "./contracts.ts";
 import {
+  normalizeEmpireNotificationScope,
   RelayGlobalCatalogSession,
   type GlobalCatalogSnapshot,
 } from "./globalCatalogSession.ts";
@@ -43,6 +44,7 @@ type CurrentStateRepository = {
 
 type CatalogSession = {
   start(config: Parameters<RelayGlobalCatalogSession["start"]>[0]): Promise<void>;
+  setEmpireNotificationScope(empireIds: string[]): Promise<boolean>;
   health(): ReturnType<RelayGlobalCatalogSession["health"]>;
   stop(): Promise<void>;
 };
@@ -58,6 +60,10 @@ type RuntimeDependencies = {
   onEmpireFoundries?: (snapshot: Pick<
     GlobalCatalogSnapshot,
     "foundries" | "foundryWarnings" | "database" | "schemaFingerprint" | "generation" | "receivedAt"
+  >) => Promise<void> | void;
+  onEmpireNotifications?: (snapshot: Pick<
+    GlobalCatalogSnapshot,
+    "siegeNotifications" | "database" | "schemaFingerprint" | "generation" | "receivedAt"
   >) => Promise<void> | void;
   discoverTopology?: (
     baseUrl: string,
@@ -110,6 +116,7 @@ export class RelayGlobalCatalogRuntime {
   readonly #now: () => number;
   readonly #topologyRefreshMs: number;
   readonly #onEmpireFoundries: RuntimeDependencies["onEmpireFoundries"];
+  readonly #onEmpireNotifications: RuntimeDependencies["onEmpireNotifications"];
   #session: CatalogSession | null = null;
   #relayBaseUrl: string | null = null;
   #claimId: string | null = null;
@@ -119,6 +126,8 @@ export class RelayGlobalCatalogRuntime {
     uri: string;
   } | null = null;
   #lastError: string | null = null;
+  #notificationLastError: string | null = null;
+  #empireNotificationScope: string[] = [];
   #reconcileInFlight: Promise<boolean> | null = null;
   #lastTopologyCheckedAt = 0;
 
@@ -133,6 +142,7 @@ export class RelayGlobalCatalogRuntime {
     this.#now = dependencies.now ?? Date.now;
     this.#topologyRefreshMs = dependencies.topologyRefreshMs ?? 60_000;
     this.#onEmpireFoundries = dependencies.onEmpireFoundries;
+    this.#onEmpireNotifications = dependencies.onEmpireNotifications;
   }
 
   async start(config: { relayBaseUrl: string; claimId: string }): Promise<void> {
@@ -154,6 +164,9 @@ export class RelayGlobalCatalogRuntime {
         manifest: this.#manifest,
         generation,
       });
+      if (this.#empireNotificationScope.length) {
+        await this.#session.setEmpireNotificationScope(this.#empireNotificationScope);
+      }
       this.#lastError = null;
     } catch (error) {
       this.#lastError = error instanceof Error ? error.message : String(error);
@@ -164,6 +177,22 @@ export class RelayGlobalCatalogRuntime {
       }
       this.#session = null;
       throw error;
+    }
+  }
+
+  async setEmpireNotificationScope(empireIds: string[]): Promise<boolean> {
+    const normalized = normalizeEmpireNotificationScope(empireIds);
+    const identical = normalized.length === this.#empireNotificationScope.length
+      && normalized.every((value, index) => value === this.#empireNotificationScope[index]);
+    if (identical) return false;
+    this.#empireNotificationScope = normalized;
+    this.#notificationLastError = null;
+    if (!this.#session) return true;
+    try {
+      return await this.#session.setEmpireNotificationScope(normalized);
+    } catch (error) {
+      this.#notificationLastError = error instanceof Error ? error.message : String(error);
+      return false;
     }
   }
 
@@ -206,6 +235,20 @@ export class RelayGlobalCatalogRuntime {
   async #commitSnapshot(snapshot: GlobalCatalogSnapshot): Promise<void> {
     const claimId = this.#claimId;
     if (!claimId) throw new Error("Relay global catalog runtime has no configured claim");
+    if (snapshot.changed.includes("empire-notifications")) {
+      try {
+        await this.#onEmpireNotifications?.({
+          siegeNotifications: snapshot.siegeNotifications,
+          database: snapshot.database,
+          schemaFingerprint: snapshot.schemaFingerprint,
+          generation: snapshot.generation,
+          receivedAt: snapshot.receivedAt,
+        });
+        this.#notificationLastError = null;
+      } catch (error) {
+        this.#notificationLastError = error instanceof Error ? error.message : String(error);
+      }
+    }
     try {
       const provenance = {
         provider: "relay" as const,
@@ -312,6 +355,7 @@ export class RelayGlobalCatalogRuntime {
         lastError: null,
       },
       lastError: this.#lastError,
+      notificationLastError: this.#notificationLastError,
     };
   }
 

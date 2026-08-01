@@ -9,6 +9,7 @@ import {
   assertSchemaFingerprint,
   schemaBindingsReady,
 } from "./schemaManifest.ts";
+import { normalizeAndPairSiegeNotifications } from "./siegeNotifications.ts";
 
 export const GLOBAL_CATALOG_QUERIES = [
   "SELECT * FROM item_desc",
@@ -30,6 +31,7 @@ export const GLOBAL_CATALOG_QUERIES = [
   "SELECT * FROM region_population_info",
   "SELECT * FROM region_control_info",
   "SELECT * FROM world_region_name_state",
+  "SELECT * FROM empire_notification_desc",
 ] as const;
 
 type BindingManifest = Parameters<typeof assertSchemaFingerprint>[0];
@@ -62,6 +64,8 @@ type BindingConnection = {
     regionPopulationInfo: CachedTable;
     regionControlInfo: CachedTable;
     worldRegionNameState: CachedTable;
+    empireNotificationDesc: CachedTable;
+    empireNotificationState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
@@ -88,7 +92,8 @@ export type GlobalCatalogSnapshot = {
   regions: ReturnType<typeof normalizeGlobalRegions>;
   foundries: ReturnType<typeof normalizeGlobalEmpireFoundries>["data"];
   foundryWarnings: string[];
-  changed: Array<"catalogs" | "region" | "empire-foundries">;
+  siegeNotifications: ReturnType<typeof normalizeAndPairSiegeNotifications>;
+  changed: Array<"catalogs" | "region" | "empire-foundries" | "empire-notifications">;
   database: string;
   schemaFingerprint: string;
   generation: number;
@@ -135,19 +140,66 @@ async function loadBundledGlobalBindings(): Promise<GlobalBindingModule> {
   return await import(moduleUrl) as unknown as GlobalBindingModule;
 }
 
+export function normalizeEmpireNotificationScope(empireIds: string[]): string[] {
+  if (!Array.isArray(empireIds)) {
+    throw new TypeError("Empire notification scope must be an array of decimal IDs");
+  }
+  const unique = new Set<string>();
+  for (const value of empireIds) {
+    if (typeof value !== "string" || !/^(?:0|[1-9]\d*)$/.test(value)) {
+      throw new TypeError("Empire notification scope IDs must be canonical non-negative decimal integers");
+    }
+    unique.add(value);
+  }
+  return [...unique].sort((left, right) => (
+    BigInt(left) < BigInt(right) ? -1 : BigInt(left) > BigInt(right) ? 1 : 0
+  ));
+}
+
+function sameScope(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function notificationQueries(empireIds: readonly string[]): string[] {
+  return empireIds.map(
+    (empireId) => `SELECT * FROM empire_notification_state WHERE empire_entity_id = ${empireId}`,
+  );
+}
+
+function notificationRowEmpireId(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const raw = row.empireEntityId ?? row.empire_entity_id;
+  if (typeof raw === "bigint" && raw >= 0n) return raw.toString();
+  if (typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0) return String(raw);
+  if (typeof raw === "string" && /^(?:0|[1-9]\d*)$/.test(raw)) return raw;
+  return null;
+}
+
 export class RelayGlobalCatalogSession {
   readonly #loadBindings: () => Promise<GlobalBindingModule>;
   readonly #onSnapshot: SessionDependencies["onSnapshot"];
   readonly #now: () => Date;
   #connection: BindingConnection | null = null;
   #subscription: SubscriptionHandle | null = null;
+  #notificationSubscription: SubscriptionHandle | null = null;
+  #pendingNotificationSubscription: SubscriptionHandle | null = null;
   #config: SessionConfig | null = null;
   #nextGeneration = 0;
   #snapshotQueued = false;
   #applyInFlight = false;
   readonly #queuedGroups = new Set<SnapshotGroup>();
   readonly #pendingGroups = new Set<SnapshotGroup>();
+  #queuedNotificationGeneration: number | null = null;
+  #pendingNotificationGeneration: number | null = null;
   #listenersAttached = false;
+  #staticApplied = false;
+  #notificationListener: ((...args: unknown[]) => void) | null = null;
+  #notificationScopeGeneration = 0;
+  #notificationAppliedGeneration = 0;
+  #notificationRequestedIds: string[] = [];
+  #notificationAppliedIds: string[] = [];
+  #pendingNotificationResolve: ((applied: boolean) => void) | null = null;
   readonly #catalogChanged = () => this.#queueSnapshot("catalogs");
   readonly #regionChanged = () => this.#queueSnapshot("region");
   readonly #foundryChanged = () => this.#queueSnapshot("empire-foundries");
@@ -157,6 +209,13 @@ export class RelayGlobalCatalogSession {
     applied: false,
     lastAppliedAt: null as string | null,
     lastError: null as string | null,
+    notifications: {
+      applied: true,
+      requestedEmpireIds: [] as string[],
+      appliedEmpireIds: [] as string[],
+      lastAppliedAt: null as string | null,
+      lastError: null as string | null,
+    },
   };
 
   constructor(dependencies: SessionDependencies) {
@@ -182,6 +241,13 @@ export class RelayGlobalCatalogSession {
       applied: false,
       lastAppliedAt: null,
       lastError: null,
+      notifications: {
+        applied: this.#notificationRequestedIds.length === 0,
+        requestedEmpireIds: [...this.#notificationRequestedIds],
+        appliedEmpireIds: [],
+        lastAppliedAt: null,
+        lastError: null,
+      },
     };
 
     const bindings = await this.#loadBindings();
@@ -194,8 +260,16 @@ export class RelayGlobalCatalogSession {
         this.#health.lastError = null;
         this.#subscription = connection.subscriptionBuilder()
           .onApplied(() => {
+            this.#staticApplied = true;
             this.#applySnapshot(connection, new Set(["catalogs", "region", "empire-foundries"]));
             this.#attachTableListeners(connection);
+            if (this.#notificationRequestedIds.length) {
+              void this.#subscribeToNotificationScope(
+                connection,
+                this.#notificationRequestedIds,
+                this.#notificationScopeGeneration,
+              );
+            }
           })
           .onError((_context, error) => this.#recordError(error))
           .subscribe([...GLOBAL_CATALOG_QUERIES]);
@@ -212,11 +286,131 @@ export class RelayGlobalCatalogSession {
       .build();
   }
 
-  #applySnapshot(connection: BindingConnection, changed: Set<SnapshotGroup>): void {
+  async setEmpireNotificationScope(empireIds: string[]): Promise<boolean> {
+    const normalized = normalizeEmpireNotificationScope(empireIds);
+    if (sameScope(normalized, this.#notificationRequestedIds)) return false;
+
+    this.#pendingNotificationResolve?.(false);
+    this.#pendingNotificationResolve = null;
+    this.#pendingNotificationSubscription?.unsubscribe();
+    this.#pendingNotificationSubscription = null;
+    const scopeGeneration = ++this.#notificationScopeGeneration;
+    this.#notificationRequestedIds = normalized;
+    this.#health.notifications.requestedEmpireIds = [...normalized];
+    this.#health.notifications.lastError = null;
+
+    if (normalized.length === 0) {
+      this.#removeNotificationListener();
+      this.#notificationSubscription?.unsubscribe();
+      this.#notificationSubscription = null;
+      this.#notificationAppliedIds = [];
+      this.#notificationAppliedGeneration = scopeGeneration;
+      this.#health.notifications.applied = true;
+      this.#health.notifications.appliedEmpireIds = [];
+      this.#health.notifications.lastAppliedAt = this.#now().toISOString();
+      if (this.#connection && this.#staticApplied) {
+        this.#applySnapshot(
+          this.#connection,
+          new Set(["empire-notifications"]),
+          scopeGeneration,
+        );
+      }
+      return true;
+    }
+
+    this.#health.notifications.applied = false;
+    const connection = this.#connection;
+    if (!connection || !this.#staticApplied) return true;
+    return await this.#subscribeToNotificationScope(connection, normalized, scopeGeneration);
+  }
+
+  #subscribeToNotificationScope(
+    connection: BindingConnection,
+    empireIds: string[],
+    scopeGeneration: number,
+  ): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      this.#pendingNotificationResolve = resolve;
+      let handle: SubscriptionHandle | null = null;
+      handle = connection.subscriptionBuilder()
+        .onApplied(() => {
+          if (
+            scopeGeneration !== this.#notificationScopeGeneration
+            || connection !== this.#connection
+          ) {
+            handle?.unsubscribe();
+            resolve(false);
+            return;
+          }
+          const previous = this.#notificationSubscription;
+          this.#removeNotificationListener();
+          this.#notificationSubscription = handle;
+          this.#pendingNotificationSubscription = null;
+          this.#notificationAppliedIds = [...empireIds];
+          this.#notificationAppliedGeneration = scopeGeneration;
+          this.#health.notifications.applied = true;
+          this.#health.notifications.appliedEmpireIds = [...empireIds];
+          this.#health.notifications.lastAppliedAt = this.#now().toISOString();
+          this.#health.notifications.lastError = null;
+          previous?.unsubscribe();
+          this.#attachNotificationListener(connection, scopeGeneration);
+          this.#applySnapshot(
+            connection,
+            new Set(["empire-notifications"]),
+            scopeGeneration,
+          );
+          if (this.#pendingNotificationResolve === resolve) {
+            this.#pendingNotificationResolve = null;
+          }
+          resolve(true);
+        })
+        .onError((_context, error) => {
+          if (scopeGeneration !== this.#notificationScopeGeneration) {
+            handle?.unsubscribe();
+            resolve(false);
+            return;
+          }
+          handle?.unsubscribe();
+          this.#pendingNotificationSubscription = null;
+          this.#notificationRequestedIds = [...this.#notificationAppliedIds];
+          this.#health.notifications.applied = this.#notificationSubscription != null
+            || this.#notificationAppliedIds.length === 0;
+          this.#health.notifications.requestedEmpireIds = [...this.#notificationAppliedIds];
+          this.#health.notifications.lastError = error instanceof Error
+            ? error.message
+            : String(error);
+          if (this.#pendingNotificationResolve === resolve) {
+            this.#pendingNotificationResolve = null;
+          }
+          resolve(false);
+        })
+        .subscribe(notificationQueries(empireIds));
+      this.#pendingNotificationSubscription = handle;
+    });
+  }
+
+  #applySnapshot(
+    connection: BindingConnection,
+    changed: Set<SnapshotGroup>,
+    notificationGeneration?: number,
+  ): void {
     const config = this.#config;
     if (!config) return;
+    if (
+      changed.has("empire-notifications")
+      && (
+        notificationGeneration !== this.#notificationAppliedGeneration
+        || notificationGeneration !== this.#notificationScopeGeneration
+      )
+    ) {
+      changed.delete("empire-notifications");
+      if (!changed.size) return;
+    }
     if (this.#applyInFlight) {
       for (const group of changed) this.#pendingGroups.add(group);
+      if (changed.has("empire-notifications")) {
+        this.#pendingNotificationGeneration = notificationGeneration ?? null;
+      }
       return;
     }
     try {
@@ -245,6 +439,16 @@ export class RelayGlobalCatalogSession {
       const foundries = changed.has("empire-foundries")
         ? normalizeGlobalEmpireFoundries([...connection.db.empireFoundryState.iter()])
         : { data: [], warnings: [] };
+      const notificationScope = new Set(this.#notificationAppliedIds);
+      const siegeNotifications = changed.has("empire-notifications")
+        ? normalizeAndPairSiegeNotifications(
+            [...connection.db.empireNotificationDesc.iter()],
+            [...connection.db.empireNotificationState.iter()].filter((row) => {
+              const empireId = notificationRowEmpireId(row);
+              return empireId == null || notificationScope.has(empireId);
+            }),
+          )
+        : { notifications: [], outcomes: [], warnings: [] };
       const receivedAt = this.#now().toISOString();
       const generation = this.#nextGeneration;
       this.#nextGeneration += 1;
@@ -255,6 +459,7 @@ export class RelayGlobalCatalogSession {
         regions,
         foundries: foundries.data,
         foundryWarnings: foundries.warnings,
+        siegeNotifications,
         changed: [...changed],
         database: config.database,
         schemaFingerprint: config.schemaFingerprint,
@@ -262,10 +467,24 @@ export class RelayGlobalCatalogSession {
         receivedAt,
       });
       Promise.resolve(result).then(() => {
-        this.#health.applied = true;
-        this.#health.lastAppliedAt = receivedAt;
-        this.#health.lastError = null;
-      }).catch((error: unknown) => this.#recordError(error))
+        if (changed.has("empire-notifications")) {
+          this.#health.notifications.applied = true;
+          this.#health.notifications.lastAppliedAt = receivedAt;
+          this.#health.notifications.lastError = null;
+        }
+        if ([...changed].some((group) => group !== "empire-notifications")) {
+          this.#health.applied = true;
+          this.#health.lastAppliedAt = receivedAt;
+          this.#health.lastError = null;
+        }
+      }).catch((error: unknown) => {
+        if (changed.has("empire-notifications")) {
+          this.#recordNotificationError(error);
+        }
+        if ([...changed].some((group) => group !== "empire-notifications")) {
+          this.#recordError(error);
+        }
+      })
         .finally(() => this.#completeApply(connection));
     } catch (error) {
       this.#applyInFlight = false;
@@ -279,8 +498,22 @@ export class RelayGlobalCatalogSession {
     if (!this.#pendingGroups.size) return;
     const changed = new Set(this.#pendingGroups);
     this.#pendingGroups.clear();
+    const notificationGeneration = this.#pendingNotificationGeneration;
+    this.#pendingNotificationGeneration = null;
+    if (
+      changed.has("empire-notifications")
+      && (
+        notificationGeneration !== this.#notificationAppliedGeneration
+        || notificationGeneration !== this.#notificationScopeGeneration
+      )
+    ) {
+      changed.delete("empire-notifications");
+    }
+    if (!changed.size) return;
     queueMicrotask(() => {
-      if (this.#connection === connection) this.#applySnapshot(connection, changed);
+      if (this.#connection === connection) {
+        this.#applySnapshot(connection, changed, notificationGeneration ?? undefined);
+      }
     });
   }
 
@@ -320,6 +553,37 @@ export class RelayGlobalCatalogSession {
     this.#listenersAttached = false;
   }
 
+  #attachNotificationListener(
+    connection: BindingConnection,
+    scopeGeneration: number,
+  ): void {
+    const listener = () => {
+      if (
+        scopeGeneration !== this.#notificationScopeGeneration
+        || scopeGeneration !== this.#notificationAppliedGeneration
+      ) return;
+      this.#queueSnapshot("empire-notifications", scopeGeneration);
+    };
+    connection.db.empireNotificationState.onInsert?.(listener);
+    connection.db.empireNotificationState.onUpdate?.(listener);
+    connection.db.empireNotificationState.onDelete?.(listener);
+    connection.db.empireNotificationDesc.onInsert?.(listener);
+    connection.db.empireNotificationDesc.onUpdate?.(listener);
+    connection.db.empireNotificationDesc.onDelete?.(listener);
+    this.#notificationListener = listener;
+  }
+
+  #removeNotificationListener(): void {
+    if (!this.#notificationListener || !this.#connection) return;
+    this.#connection.db.empireNotificationState.removeOnInsert?.(this.#notificationListener);
+    this.#connection.db.empireNotificationState.removeOnUpdate?.(this.#notificationListener);
+    this.#connection.db.empireNotificationState.removeOnDelete?.(this.#notificationListener);
+    this.#connection.db.empireNotificationDesc.removeOnInsert?.(this.#notificationListener);
+    this.#connection.db.empireNotificationDesc.removeOnUpdate?.(this.#notificationListener);
+    this.#connection.db.empireNotificationDesc.removeOnDelete?.(this.#notificationListener);
+    this.#notificationListener = null;
+  }
+
   #catalogTables(connection: BindingConnection): CachedTable[] {
     return [
       connection.db.itemDesc,
@@ -336,16 +600,31 @@ export class RelayGlobalCatalogSession {
     ];
   }
 
-  #queueSnapshot(group: SnapshotGroup): void {
+  #queueSnapshot(group: SnapshotGroup, notificationGeneration?: number): void {
     if (!this.#connection) return;
+    if (
+      group === "empire-notifications"
+      && notificationGeneration !== this.#notificationAppliedGeneration
+    ) return;
     this.#queuedGroups.add(group);
+    if (group === "empire-notifications") {
+      this.#queuedNotificationGeneration = notificationGeneration ?? null;
+    }
     if (this.#snapshotQueued) return;
     this.#snapshotQueued = true;
     queueMicrotask(() => {
       this.#snapshotQueued = false;
       const changed = new Set(this.#queuedGroups);
       this.#queuedGroups.clear();
-      if (this.#connection) this.#applySnapshot(this.#connection, changed);
+      const queuedNotificationGeneration = this.#queuedNotificationGeneration;
+      this.#queuedNotificationGeneration = null;
+      if (this.#connection) {
+        this.#applySnapshot(
+          this.#connection,
+          changed,
+          queuedNotificationGeneration ?? undefined,
+        );
+      }
     });
   }
 
@@ -353,23 +632,48 @@ export class RelayGlobalCatalogSession {
     this.#health.lastError = error instanceof Error ? error.message : String(error);
   }
 
+  #recordNotificationError(error: unknown): void {
+    this.#health.notifications.lastError = error instanceof Error ? error.message : String(error);
+  }
+
   health() {
-    return { ...this.#health };
+    return {
+      ...this.#health,
+      notifications: {
+        ...this.#health.notifications,
+        requestedEmpireIds: [...this.#health.notifications.requestedEmpireIds],
+        appliedEmpireIds: [...this.#health.notifications.appliedEmpireIds],
+      },
+    };
   }
 
   async stop(): Promise<void> {
     this.#removeTableListeners();
+    this.#removeNotificationListener();
+    this.#pendingNotificationResolve?.(false);
+    this.#pendingNotificationResolve = null;
+    this.#pendingNotificationSubscription?.unsubscribe();
+    this.#pendingNotificationSubscription = null;
+    this.#notificationSubscription?.unsubscribe();
+    this.#notificationSubscription = null;
     this.#subscription?.unsubscribe();
     this.#subscription = null;
     this.#connection?.disconnect();
     this.#connection = null;
     this.#config = null;
     this.#nextGeneration = 0;
+    this.#staticApplied = false;
     this.#snapshotQueued = false;
     this.#applyInFlight = false;
     this.#queuedGroups.clear();
     this.#pendingGroups.clear();
+    this.#queuedNotificationGeneration = null;
+    this.#pendingNotificationGeneration = null;
+    this.#notificationAppliedIds = [];
+    this.#notificationAppliedGeneration = 0;
     this.#health.state = "stopped";
     this.#health.connected = false;
+    this.#health.notifications.applied = this.#notificationRequestedIds.length === 0;
+    this.#health.notifications.appliedEmpireIds = [];
   }
 }

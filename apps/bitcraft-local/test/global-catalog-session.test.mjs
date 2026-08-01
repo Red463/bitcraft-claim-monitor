@@ -14,27 +14,61 @@ function fakeBindings() {
     queries: null,
     onApplied: null,
     onSubscriptionError: null,
+    subscriptions: [],
     disconnected: false,
     unsubscribed: false,
     tableCallbacks: new Map(),
   };
   const cachedTable = (rows) => {
-    let updateCallback = null;
+    const callbacks = {
+      insert: new Set(),
+      update: new Set(),
+      delete: new Set(),
+    };
+    const callbackHistory = {
+      insert: [],
+      update: [],
+      delete: [],
+    };
     return {
     iter: () => rows[Symbol.iterator](),
-    onInsert: (callback) => state.tableCallbacks.set("insert", callback),
+    onInsert: (callback) => {
+      callbacks.insert.add(callback);
+      callbackHistory.insert.push(callback);
+      state.tableCallbacks.set("insert", callback);
+    },
     onUpdate: (callback) => {
-      updateCallback = callback;
+      callbacks.update.add(callback);
+      callbackHistory.update.push(callback);
       state.tableCallbacks.set("update", callback);
     },
-    onDelete: (callback) => state.tableCallbacks.set("delete", callback),
-    removeOnInsert: () => state.tableCallbacks.delete("insert"),
-    removeOnUpdate: () => {
-      updateCallback = null;
+    onDelete: (callback) => {
+      callbacks.delete.add(callback);
+      callbackHistory.delete.push(callback);
+      state.tableCallbacks.set("delete", callback);
+    },
+    removeOnInsert: (callback) => {
+      callbacks.insert.delete(callback);
+      state.tableCallbacks.delete("insert");
+    },
+    removeOnUpdate: (callback) => {
+      callbacks.update.delete(callback);
       state.tableCallbacks.delete("update");
     },
-    removeOnDelete: () => state.tableCallbacks.delete("delete"),
-    triggerUpdate: () => updateCallback?.({}, {}, {}),
+    removeOnDelete: (callback) => {
+      callbacks.delete.delete(callback);
+      state.tableCallbacks.delete("delete");
+    },
+    triggerInsert: () => {
+      for (const callback of callbacks.insert) callback({}, {});
+    },
+    triggerUpdate: () => {
+      for (const callback of callbacks.update) callback({}, {}, {});
+    },
+    triggerDelete: () => {
+      for (const callback of callbacks.delete) callback({}, {});
+    },
+    callbackHistory,
     };
   };
   const connection = {
@@ -152,20 +186,71 @@ function fakeBindings() {
         playerFacingName: "Zephra",
         moduleNamePrefix: "bitcraft-live-",
       }]),
+      empireNotificationDesc: cachedTable([
+        { id: 1, notificationType: { tag: "SuccessfulSiege" } },
+        { id: 2, notificationType: { tag: "FailedDefense" } },
+      ]),
+      empireNotificationState: cachedTable([
+        {
+          entityId: 1001n,
+          empireEntityId: 3n,
+          notificationType: { tag: "SuccessfulSiege" },
+          timestamp: 1_767_225_600,
+          textReplacement: ["Northwatch", "19:4:5"],
+        },
+        {
+          entityId: 1002n,
+          empireEntityId: 20n,
+          notificationType: { tag: "FailedDefense" },
+          timestamp: 1_767_225_600,
+          textReplacement: ["Northwatch", "19:4:5"],
+        },
+        {
+          entityId: 1003n,
+          empireEntityId: 30n,
+          notificationType: { tag: "SuccessfulSiege" },
+          timestamp: 1_767_312_000,
+          textReplacement: ["Southwatch", "19:6:7"],
+        },
+        {
+          entityId: 1004n,
+          empireEntityId: 40n,
+          notificationType: { tag: "FailedDefense" },
+          timestamp: 1_767_312_000,
+          textReplacement: ["Southwatch", "19:6:7"],
+        },
+      ]),
     },
     subscriptionBuilder() {
+      const subscription = {
+        queries: null,
+        onApplied: null,
+        onError: null,
+        unsubscribed: false,
+      };
       const subscriptionBuilder = {
         onApplied(callback) {
-          state.onApplied = callback;
+          subscription.onApplied = callback;
           return subscriptionBuilder;
         },
         onError(callback) {
-          state.onSubscriptionError = callback;
+          subscription.onError = callback;
           return subscriptionBuilder;
         },
         subscribe(queries) {
+          subscription.queries = queries;
+          state.subscriptions.push(subscription);
+          if (state.subscriptions.length === 1) {
+            state.onApplied = subscription.onApplied;
+            state.onSubscriptionError = subscription.onError;
+          }
           state.queries = queries;
-          return { unsubscribe: () => { state.unsubscribed = true; } };
+          return {
+            unsubscribe: () => {
+              subscription.unsubscribed = true;
+              state.unsubscribed = true;
+            },
+          };
         },
       };
       return subscriptionBuilder;
@@ -257,6 +342,7 @@ test("typed global catalog session subscribes narrowly and emits normalized item
     "SELECT * FROM region_population_info",
     "SELECT * FROM region_control_info",
     "SELECT * FROM world_region_name_state",
+    "SELECT * FROM empire_notification_desc",
   ]);
 
   fake.state.onApplied({});
@@ -375,6 +461,11 @@ test("typed global catalog session subscribes narrowly and emits normalized item
       startedAt: "2026-06-04T17:55:57.807Z",
     }],
     foundryWarnings: [],
+    siegeNotifications: {
+      notifications: [],
+      outcomes: [],
+      warnings: [],
+    },
     changed: ["catalogs", "region", "empire-foundries"],
     database: "relay-mirror-bc-global",
     schemaFingerprint: "global-v1",
@@ -393,6 +484,11 @@ test("typed global catalog session subscribes narrowly and emits normalized item
   assert.deepEqual(snapshots[1].entities, []);
   assert.deepEqual(snapshots[1].descriptions, {});
   assert.deepEqual(snapshots[1].foundries, []);
+  assert.deepEqual(snapshots[1].siegeNotifications, {
+    notifications: [],
+    outcomes: [],
+    warnings: [],
+  });
 
   fake.connection.db.empireFoundryState.triggerUpdate();
   await Promise.resolve();
@@ -409,6 +505,147 @@ test("typed global catalog session subscribes narrowly and emits normalized item
   assert.equal(fake.state.unsubscribed, true);
   assert.equal(fake.state.disconnected, true);
   assert.equal(fake.state.tableCallbacks.size, 0);
+});
+
+test("typed global catalog session replaces exact Empire notification scopes without publishing stale callbacks", async () => {
+  assert.ok(sessionModule, "global catalog session module must exist");
+  const fake = fakeBindings();
+  const snapshots = [];
+  let currentTime = "2026-08-01T12:00:00.000Z";
+  const session = new sessionModule.RelayGlobalCatalogSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+    now: () => new Date(currentTime),
+  });
+  await session.start({
+    uri: "wss://relay.example:3000",
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    manifest: readyManifest,
+    generation: 30,
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.subscriptions[0].onApplied({});
+  await new Promise((resolve) => setImmediate(resolve));
+  snapshots.length = 0;
+
+  await assert.rejects(
+    session.setEmpireNotificationScope(["3 OR 1 = 1"]),
+    /decimal/i,
+  );
+  const firstApply = session.setEmpireNotificationScope(["20", "3", "20"]);
+  assert.deepEqual(fake.state.subscriptions[1].queries, [
+    "SELECT * FROM empire_notification_state WHERE empire_entity_id = 3",
+    "SELECT * FROM empire_notification_state WHERE empire_entity_id = 20",
+  ]);
+  const notificationQueries = fake.state.subscriptions
+    .flatMap(({ queries }) => queries ?? [])
+    .filter((query) => query.includes("empire_notification_state"));
+  assert.ok(
+    notificationQueries.every((query) => (
+      /^SELECT \* FROM empire_notification_state WHERE empire_entity_id = \d+$/.test(query)
+    )),
+    "every notification-state query must use one exact indexed Empire-ID equality",
+  );
+  assert.equal(snapshots.length, 0, "replacement data must wait for onApplied");
+  fake.state.subscriptions[1].onApplied({});
+  assert.equal(await firstApply, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 1);
+  assert.deepEqual(snapshots[0].changed, ["empire-notifications"]);
+  assert.deepEqual(
+    snapshots[0].siegeNotifications.outcomes,
+    [{
+      eventKey: "2026-01-01T00:00:00.000Z\u0000Northwatch\u000019:4:5",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      watchtowerLabel: "Northwatch",
+      encodedLocation: "19:4:5",
+      attackerEmpireEntityId: "3",
+      defenderEmpireEntityId: "20",
+      outcome: "attacker_won",
+    }],
+  );
+  assert.equal(await session.setEmpireNotificationScope(["20", "3"]), false);
+  assert.equal(fake.state.subscriptions.length, 2, "identical normalized scope is a no-op");
+
+  const staleCallback = fake.connection.db.empireNotificationState.callbackHistory.update.at(-1);
+  fake.connection.db.regionPopulationInfo.triggerUpdate();
+  fake.connection.db.empireNotificationState.triggerUpdate();
+  const replacementApply = session.setEmpireNotificationScope(["30"]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 2, "unrelated static updates continue while replacement applies");
+  assert.deepEqual(snapshots[1].changed, ["region"]);
+  fake.state.subscriptions[2].onApplied({});
+  assert.equal(await replacementApply, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fake.state.subscriptions[1].unsubscribed, true);
+  assert.deepEqual(
+    snapshots[2].siegeNotifications.notifications.map(({ empireEntityId }) => empireEntityId),
+    ["30"],
+  );
+
+  staleCallback({}, {}, {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 3, "an unsubscribed scope callback cannot publish");
+
+  currentTime = "2026-08-01T12:05:00.000Z";
+  fake.connection.db.regionPopulationInfo.triggerUpdate();
+  fake.connection.db.empireNotificationState.triggerInsert();
+  fake.connection.db.empireNotificationState.triggerUpdate();
+  fake.connection.db.empireNotificationState.triggerDelete();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 4, "insert/update/delete are coalesced into one snapshot");
+  assert.deepEqual(snapshots[3].changed, ["region", "empire-notifications"]);
+  assert.equal(session.health().lastAppliedAt, currentTime);
+  assert.equal(session.health().notifications.lastAppliedAt, currentTime);
+
+  fake.connection.db.empireNotificationDesc.triggerUpdate();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 5, "description changes refresh the normalized notification projection");
+
+  assert.equal(await session.setEmpireNotificationScope([]), true);
+  assert.equal(fake.state.subscriptions[2].unsubscribed, true);
+  assert.equal(fake.state.subscriptions[0].unsubscribed, false);
+  assert.deepEqual(session.health().notifications.appliedEmpireIds, []);
+  await session.stop();
+  assert.equal(fake.state.subscriptions[0].unsubscribed, true);
+});
+
+test("typed global catalog session keeps catalog health independent when a replacement notification scope fails", async () => {
+  const fake = fakeBindings();
+  const snapshots = [];
+  const session = new sessionModule.RelayGlobalCatalogSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+  });
+  await session.start({
+    uri: "wss://relay.example:3000",
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    manifest: readyManifest,
+    generation: 40,
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.subscriptions[0].onApplied({});
+  await new Promise((resolve) => setImmediate(resolve));
+  const firstApply = session.setEmpireNotificationScope(["3", "20"]);
+  fake.state.subscriptions[1].onApplied({});
+  await firstApply;
+  await new Promise((resolve) => setImmediate(resolve));
+  const snapshotCount = snapshots.length;
+
+  const failedApply = session.setEmpireNotificationScope(["30"]);
+  fake.state.subscriptions[2].onError({}, new Error("scope rejected"));
+  assert.equal(await failedApply, false);
+  assert.equal(snapshots.length, snapshotCount);
+  assert.equal(session.health().applied, true);
+  assert.equal(session.health().lastError, null);
+  assert.match(session.health().notifications.lastError, /scope rejected/i);
+  assert.deepEqual(session.health().notifications.appliedEmpireIds, ["3", "20"]);
+
+  await session.stop();
+  assert.equal(fake.state.subscriptions[1].unsubscribed, true);
+  assert.equal(fake.connection.db.empireNotificationState.callbackHistory.update.length > 0, true);
 });
 
 test("typed global catalog session refuses schema mismatch before opening a connection", async () => {

@@ -436,3 +436,111 @@ test("healthy global catalog runtime replaces its session when the discovered so
   assert.equal(runtime.health().source.database, "relay-global-2");
   assert.equal(discoveryCount, 3);
 });
+
+test("global catalog runtime normalizes and retains Empire notification scope across reconnects", async () => {
+  const sessions = [];
+  const notificationSnapshots = [];
+  let discoveryCount = 0;
+  const runtime = new runtimeModule.RelayGlobalCatalogRuntime({
+    manifest: { schemas: { global: { fingerprint: "global-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => {
+      discoveryCount += 1;
+      return {
+        cacheReady: true,
+        global: {
+          sourceKey: "global",
+          database: `relay-global-${discoveryCount}`,
+          port: 3000 + discoveryCount,
+          schemaFingerprint: "global-v1",
+          ready: true,
+        },
+        regions: new Map(),
+        discoveredAt: "2026-08-01T12:00:00.000Z",
+      };
+    },
+    createSession: (options) => {
+      const scopes = [];
+      const state = {
+        connected: true,
+        applied: true,
+        lastAppliedAt: "2026-08-01T12:00:00.000Z",
+        lastError: null,
+        notifications: {
+          applied: true,
+          requestedEmpireIds: [],
+          appliedEmpireIds: [],
+          lastAppliedAt: null,
+          lastError: null,
+        },
+      };
+      const session = {
+        scopes,
+        state,
+        options,
+        async start() {},
+        async setEmpireNotificationScope(ids) {
+          scopes.push([...ids]);
+          state.notifications.requestedEmpireIds = [...ids];
+          state.notifications.appliedEmpireIds = [...ids];
+          return true;
+        },
+        health: () => structuredClone(state),
+        async stop() {},
+      };
+      sessions.push(session);
+      return session;
+    },
+    catalogRepository: {
+      getSourceState: () => null,
+      replaceCatalogSnapshot: () => {},
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+    onEmpireNotifications: (snapshot) => notificationSnapshots.push(snapshot),
+  });
+
+  assert.equal(await runtime.setEmpireNotificationScope(["20", "3", "20"]), true);
+  await runtime.start({ relayBaseUrl: "https://relay.example", claimId: "1" });
+  assert.deepEqual(sessions[0].scopes, [["3", "20"]]);
+  assert.equal(await runtime.setEmpireNotificationScope(["20", "3"]), false);
+
+  await sessions[0].options.onSnapshot({
+    entities: [],
+    descriptions: {},
+    regions: [],
+    foundries: [],
+    foundryWarnings: [],
+    siegeNotifications: {
+      notifications: [{
+        entityId: "1001",
+        empireEntityId: "3",
+        kind: "attack_won",
+        occurredAt: "2026-01-01T00:00:00.000Z",
+        replacements: ["Northwatch", "19:4:5"],
+      }],
+      outcomes: [],
+      warnings: ["Unmatched siege outcome notification."],
+    },
+    changed: ["empire-notifications"],
+    database: "relay-global-1",
+    schemaFingerprint: "global-v1",
+    generation: 1,
+    receivedAt: "2026-08-01T12:00:00.000Z",
+  });
+  assert.equal(notificationSnapshots.length, 1);
+  assert.deepEqual(notificationSnapshots[0].siegeNotifications.warnings, [
+    "Unmatched siege outcome notification.",
+  ]);
+  assert.equal(runtime.health().subscription.notifications.applied, true);
+  assert.equal(runtime.health().lastError, null);
+
+  sessions[0].state.connected = false;
+  sessions[0].state.lastError = "socket closed";
+  assert.equal(
+    await runtime.reconcile({ relayBaseUrl: "https://relay.example", claimId: "1" }),
+    true,
+  );
+  assert.deepEqual(sessions[1].scopes, [["3", "20"]]);
+});
