@@ -114,7 +114,7 @@ test("regional Town Bank inventories join through the bank building and preserve
   });
 });
 
-test("regional empires retain exact identities and join members, settlements, nodes, chunks, and unresolved siege roles", () => {
+test("regional empires retain exact identities and join proven attacker and defender siege roles", () => {
   assert.deepEqual(normalizeRegionalEmpires({
     regionId: "19",
     worldRegionRows: [{
@@ -279,16 +279,15 @@ test("regional empires retain exact identities and join members, settlements, no
           entityId: "7000001",
           buildingEntityId: "1369094286736703520",
           empireEntityId: "8000001",
-          role: "unknown",
+          role: "attacker",
+          defenderEmpireEntityId: "9007199254740993",
           energy: "300",
           active: true,
           startTimestamp: "2026-07-30T17:00:00.000Z",
         }],
       }],
     },
-    warnings: [
-      "Regional siege 7000001 empire role is unresolved; attacker/defender is not inferred.",
-    ],
+    warnings: [],
   });
 });
 

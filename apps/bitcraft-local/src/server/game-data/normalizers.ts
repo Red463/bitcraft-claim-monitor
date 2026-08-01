@@ -838,6 +838,22 @@ export function normalizeRegionalEmpires(options: {
     chunkCountByEmpire.set(empireEntityId, (chunkCountByEmpire.get(empireEntityId) ?? 0) + 1);
   }
 
+  const nodeOwnerByBuilding = new Map<string, string>();
+  for (const [index, value] of localNodeRows.entries()) {
+    const row = record(value, `Regional local empire_node_state row ${index}`);
+    const buildingEntityId = decimalString(
+      row.entityId ?? row.entity_id,
+      `Regional local empire node row ${index} entity id`,
+    );
+    nodeOwnerByBuilding.set(
+      buildingEntityId,
+      decimalString(
+        row.empireEntityId ?? row.empire_entity_id,
+        `Regional empire node ${buildingEntityId} empire id`,
+      ),
+    );
+  }
+
   const siegesByBuilding = new Map<string, Array<Record<string, unknown>>>();
   for (const [index, value] of localSiegeRows.entries()) {
     const row = record(value, `Regional empire_node_siege_state row ${index}`);
@@ -849,6 +865,13 @@ export function normalizeRegionalEmpires(options: {
       row.buildingEntityId ?? row.building_entity_id,
       `Regional empire siege ${entityId} building id`,
     );
+    const defenderEmpireEntityId = nodeOwnerByBuilding.get(buildingEntityId);
+    if (!defenderEmpireEntityId) {
+      warnings.push(
+        `Regional siege ${entityId} has no node owner for building ${buildingEntityId}; the siege was rejected.`,
+      );
+      continue;
+    }
     const startTimestamp = row.startTimestamp ?? row.start_timestamp;
     const normalizedStartTimestamp = startTimestamp == null
       ? undefined
@@ -867,7 +890,8 @@ export function normalizeRegionalEmpires(options: {
         row.empireEntityId ?? row.empire_entity_id,
         `Regional empire siege ${entityId} empire id`,
       ),
-      role: "unknown",
+      role: "attacker",
+      defenderEmpireEntityId,
       energy: decimalString(row.energy ?? 0, `Regional empire siege ${entityId} energy`),
       active: row.active === true,
       ...(normalizedStartTimestamp ? { startTimestamp: normalizedStartTimestamp } : {}),
@@ -875,9 +899,6 @@ export function normalizeRegionalEmpires(options: {
     const existing = siegesByBuilding.get(buildingEntityId) ?? [];
     existing.push(siege);
     siegesByBuilding.set(buildingEntityId, existing);
-    warnings.push(
-      `Regional siege ${entityId} empire role is unresolved; attacker/defender is not inferred.`,
-    );
   }
 
   const nodes = localNodeRows.map((value, index) => {
