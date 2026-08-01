@@ -78,7 +78,7 @@ import { cooldownRemainingMs, createManualRefreshRequest, createManualRefreshTas
  */
 
 const LOCAL_API = "/api/local";
-const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
+const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor-relay";
 const CHANGELOG_URL = `${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md`;
 const DISCORD_URL = "https://discord.gg/ET4bteqbG5";
 const APP_VERSION = packageJson.version;

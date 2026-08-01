@@ -7,7 +7,7 @@ import { Dialog } from "./Dialog";
 import type { ActivePanel } from "../../types/app";
 import { routeHelpFor } from "../../navigation/routeHelp";
 
-const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
+const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor-relay";
 const APP_VERSION = packageJson.version;
 const DEFAULT_LEGAL_POLICY = legalPolicyForEnvironment({});
 type AnalyticsConsent = "accepted" | "declined" | null;

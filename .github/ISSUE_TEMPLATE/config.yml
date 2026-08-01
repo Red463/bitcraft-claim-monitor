@@ -2,9 +2,9 @@ blank_issues_enabled: false
 
 contact_links:
   - name: Discussions
-    url: https://github.com/Red463/bitcraft-claim-monitor/discussions
+    url: https://github.com/Red463/bitcraft-claim-monitor-relay/discussions
     about: Please use GitHub Discussions for ideas, suggestions, and general conversation
 
   - name: Documentation
-    url: https://github.com/Red463/bitcraft-claim-monitor/blob/main/README.md
+    url: https://github.com/Red463/bitcraft-claim-monitor-relay/blob/main/README.md
     about: Check the README and documentation before opening an issue

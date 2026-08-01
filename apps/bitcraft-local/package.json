@@ -16,7 +16,7 @@
     "build:bindings": "tsc -p tsconfig.bindings.json && vite build --config vite.bindings.config.ts",
     "build:server": "corepack pnpm run build:provider && corepack pnpm run build:bindings",
     "verify:assets": "node scripts/verify-game-assets.mjs",
-    "build": "corepack pnpm run build:server && corepack pnpm run verify:assets && tsc -p tsconfig.json --noEmit && vite build",
+    "build": "corepack pnpm run build:server && corepack pnpm run verify:assets && tsc -p tsconfig.json --noEmit && vite build && node scripts/verify-relay-runtime-boundaries.mjs",
     "pretest": "corepack pnpm run build:server",
     "test": "node --experimental-strip-types --test test/*.test.mjs",
     "prestart": "corepack pnpm run build:server",

@@ -282,7 +282,9 @@ cannot delay the current-data path.
 
 See [evidence-baseline.md](./evidence-baseline.md),
 [diagnostic-findings.md](./diagnostic-findings.md), and
-[parity-matrix.md](./parity-matrix.md). The required freshness budgets,
+[parity-matrix.md](./parity-matrix.md). The latest internal preview-eligibility
+verdict and remaining external gates are recorded in
+[internal-acceptance-audit.md](./internal-acceptance-audit.md). The required freshness budgets,
 scheduled-job boundary, and table-retirement gates are defined in
 [live-first-data-policy.md](./live-first-data-policy.md). Current SQL ownership
 and retirement decisions are tracked in

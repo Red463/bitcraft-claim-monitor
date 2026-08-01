@@ -97,6 +97,7 @@ type SessionConfig = {
   claimId: string;
   members: Member[];
   contributionTargets?: CraftContributionTarget[];
+  contributionWarnings?: string[];
 };
 
 type SessionDependencies = {
@@ -119,6 +120,7 @@ export type RegionalPlayerSnapshot = {
   recruitmentWarnings: string[];
   bankInventories: ReturnType<typeof normalizeRegionalBankInventories>["data"];
   bankInventoryWarnings: string[];
+  contributionWarnings?: string[];
   database: string;
   regionId: string;
   schemaFingerprint: string;
@@ -351,6 +353,7 @@ export class RelayPrimaryRegionPlayerSession {
         recruitmentWarnings: recruitment.warnings,
         bankInventories: bankInventories.data,
         bankInventoryWarnings: bankInventories.warnings,
+        contributionWarnings: [...(config.contributionWarnings ?? [])],
         database: config.database,
         regionId: config.regionId,
         schemaFingerprint: config.schemaFingerprint,

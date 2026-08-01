@@ -146,7 +146,8 @@ identities:
 - preview API port: `19430`
 - preview host: `relay.timbersteeltrade.com`
 
-The `relay-preview` GitHub environment deploys exact tested SHAs. Preview units
+The **Deploy Relay preview** workflow uses the `relay-preview` GitHub
+environment to deploy exact tested SHAs. Preview units
 force Discord record mode and disable startup/command registration. Only an
 authenticated manual test can post to the configured sandbox Discord channel.
 Caddy routing is a one-time supervised bootstrap and the updater never

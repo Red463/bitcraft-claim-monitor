@@ -20,6 +20,7 @@ import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/htt
 import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
 import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySettings.mjs";
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
+import { projectCraftContributionEnvelope } from "./src/server/craftContributionProjection.mjs";
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { gameTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
@@ -357,7 +358,7 @@ const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "ut
 const appVersion = String(packageJson.version ?? "0.0.0-dev");
 const appIdentifier = process.env.BITCRAFT_APP_IDENTIFIER ?? "BitCraft Claim Monitor Relay (github.com/Red463/bitcraft-claim-monitor-relay)";
 const ipHash = createIpHasher(appIdentifier);
-const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
+const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor-relay/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
 const repoRoot = path.resolve(root, "..", "..");
 const brandingDir = path.join(dataDir, "branding");
@@ -5563,9 +5564,11 @@ function enrichRelayCraftsForSideEffects(crafts) {
 
 function relayCraftContributionTargets(craftsPayload) {
   const catalog = craftOutputCatalog(craftsPayload);
-  return unwrap(craftsPayload, "craftResults", [])
-    .filter((craft) => craft?.entityId && craft.completed !== true)
-    .map((craft) => {
+  const targets = [];
+  const warnings = [];
+  for (const craft of unwrap(craftsPayload, "craftResults", [])) {
+    if (!craft?.entityId || craft.completed === true) continue;
+    try {
       const craftEntityId = String(craft.entityId).trim();
       if (!/^\d+$/.test(craftEntityId)) {
         throw new Error("Relay craft contribution target has an invalid craft entity id");
@@ -5575,7 +5578,7 @@ function relayCraftContributionTargets(craftsPayload) {
         throw new Error(`Relay craft ${craftEntityId} has invalid experience per progress`);
       }
       const item = craftContributionOutputItem(craft, catalog);
-      return {
+      targets.push({
         craftEntityId,
         profession: craftPrimarySkill(craft) || null,
         craftLabel: String(item.name ?? craft.recipeName ?? craft.craftedItemName ?? "Unknown craft"),
@@ -5584,8 +5587,12 @@ function relayCraftContributionTargets(craftsPayload) {
           ? (craft.tier == null ? null : String(craft.tier))
           : String(item.tier),
         xpPerProgress: String(xpPerProgress),
-      };
-    });
+      });
+    } catch (error) {
+      warnings.push(errorMessage(error));
+    }
+  }
+  return { targets, warnings };
 }
 
 async function runScheduledSupplyReport(claimId) {
@@ -6198,6 +6205,23 @@ function contributionLeaderboard(claimId) {
   };
 }
 
+function currentCraftContributions(claimId) {
+  return projectCraftContributionEnvelope(db.prepare(`
+    SELECT
+      craft_entity_id,
+      contributor_entity_id,
+      contributor_name,
+      contributed_progress,
+      contributed_xp,
+      contribution_count,
+      first_contributed_at,
+      last_contributed_at
+    FROM production_contributions
+    WHERE claim_id = ?
+    ORDER BY last_contributed_at DESC, contributor_name
+  `).all(claimId));
+}
+
 function dashboardHistory(claimId) {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -6686,7 +6710,7 @@ function discordHelpCommand() {
     { name: "/price", value: "Shows current Relay sell and buy orders for an item.", inline: false },
     { name: "/craftwatch", value: "Shows and clears your profession notification roles.", inline: false },
     { name: "/craft-plan", value: "Shows Craft Planner progress. Choose a profession for a focused report.", inline: false },
-    { name: "Links", value: `[App](${appUrl}) | [Feature requests](https://github.com/Red463/bitcraft-claim-monitor/issues)`, inline: false },
+    { name: "Links", value: `[App](${appUrl}) | [Feature requests](https://github.com/Red463/bitcraft-claim-monitor-relay/issues)`, inline: false },
   ], 0x5865f2);
 }
 
@@ -7307,6 +7331,13 @@ const server = createServer(async (req, res) => {
                 (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
                 (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
               ),
+            };
+          }
+          if (domain === "contributions") {
+            const projected = currentCraftContributions(claimId);
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
             };
           }
           if (domain === "public-crafts") {
@@ -9426,16 +9457,20 @@ function startBackgroundTasks() {
         return;
       }
       let contributionTargets = [];
+      let contributionWarnings = [];
       try {
         const crafts = currentStateRepository.read(claimId, "crafts")?.data;
         if (crafts) {
-          contributionTargets = relayCraftContributionTargets(
+          const contributionScope = relayCraftContributionTargets(
             enrichRelayCraftsForSideEffects(crafts),
           );
+          contributionTargets = contributionScope.targets;
+          contributionWarnings = contributionScope.warnings;
         }
       } catch (error) {
+        contributionWarnings = [`Relay craft-contribution targets unavailable: ${errorMessage(error)}`];
         if (!isTestRuntime) {
-          console.warn(`Relay craft-contribution targets unavailable: ${errorMessage(error)}`);
+          console.warn(contributionWarnings[0]);
         }
       }
       if (!relayPrimaryRegionStarted) {
@@ -9445,6 +9480,7 @@ function startBackgroundTasks() {
           regionId,
           members,
           contributionTargets,
+          contributionWarnings,
         });
         relayPrimaryRegionStarted = true;
       } else {
@@ -9453,6 +9489,7 @@ function startBackgroundTasks() {
           regionId,
           members,
           contributionTargets,
+          contributionWarnings,
         });
       }
     };
