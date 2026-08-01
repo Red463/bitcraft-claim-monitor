@@ -124,6 +124,9 @@ export function SiegeDetailsDialog({ tower, onClose, onViewEmpire }: SiegeDetail
         {!attackers.length && !defenders.length && !unknown.length ? (
           <div className="empty-state compact">Active siege participant details are unavailable.</div>
         ) : null}
+        <p className="siege-availability-note">
+          Cancelled or removed sieges are unavailable from Relay.
+        </p>
       </div>
     </Dialog>
   );

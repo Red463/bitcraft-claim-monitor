@@ -160,6 +160,17 @@ test("siege and empire details use shared accessible dialogs with complete drill
   assert.match(siegeDialog, /Attacking Empire/);
   assert.match(siegeDialog, /Defending Empire/);
   assert.match(siegeDialog, /onViewEmpire/);
+  assert.match(siegeDialog, /Cancelled or removed sieges are unavailable from Relay/);
+  assert.match(
+    readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8"),
+    /Recent Siege Outcomes/,
+  );
+  assert.match(
+    readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8"),
+    /attacker_won/,
+  );
+  assert.match(empiresCss, /\.siege-outcomes-panel/);
+  assert.match(empiresCss, /\.siege-outcome-list/);
 
   assert.match(empireDialog, /\/empires\/details\?/);
   assert.match(empireDialog, /AbortController/);

@@ -195,13 +195,36 @@ function activityForMembers(members, now) {
 }
 
 function towerView(node, empire, allEmpires, inactivity) {
-  const activeSieges = list(node?.sieges).filter((siege) => siege?.active === true);
+  const nodeOwnerEmpireEntityId = text(node?.empireEntityId);
+  const activeSieges = list(node?.sieges).filter((siege) => (
+    siege?.active === true
+    && siege?.role === "attacker"
+    && text(siege?.empireEntityId)
+    && text(siege?.defenderEmpireEntityId) === nodeOwnerEmpireEntityId
+  ));
   const empireNames = new Map(allEmpires.map((row) => [text(row?.entityId), text(row?.name)]));
-  const activeSiegeParticipants = activeSieges.map((siege) => ({
+  const attackers = activeSieges.map((siege) => ({
     ...siege,
     empireName: empireNames.get(text(siege?.empireEntityId)) || "Unknown empire",
-    attacker: siege?.role === "attacker" ? true : siege?.role === "defender" ? false : null,
+    attacker: true,
   }));
+  const defenders = new Map();
+  for (const siege of activeSieges) {
+    const defenderEmpireEntityId = nodeOwnerEmpireEntityId;
+    if (!defenderEmpireEntityId || defenders.has(defenderEmpireEntityId)) continue;
+    defenders.set(defenderEmpireEntityId, {
+      entityId: `defender:${text(node?.entityId)}:${defenderEmpireEntityId}`,
+      buildingEntityId: text(node?.entityId),
+      empireEntityId: defenderEmpireEntityId,
+      empireName: empireNames.get(defenderEmpireEntityId) || "Unknown empire",
+      role: "defender",
+      attacker: false,
+      energy: node?.energy ?? null,
+      active: true,
+      startTimestamp: siege?.startTimestamp ?? siege?.startedAt ?? null,
+    });
+  }
+  const activeSiegeParticipants = [...attackers, ...defenders.values()];
   return {
     id: text(node?.entityId),
     towerId: text(node?.entityId),
@@ -220,6 +243,49 @@ function towerView(node, empire, allEmpires, inactivity) {
     activeSiegeParticipants,
     ...inactivity,
   };
+}
+
+function recentSiegeOutcomes(data, regionId, allEmpires) {
+  const empireNames = new Map(allEmpires.map((row) => [text(row?.entityId), text(row?.name)]));
+  const nodes = regionRows(data, "nodes", regionId);
+  const localEmpireIds = new Set([
+    ...regionRows(data, "settlements", regionId).map((row) => text(row?.empireEntityId)),
+    ...nodes.map((row) => text(row?.empireEntityId)),
+    ...nodes.flatMap((node) => list(node?.sieges).flatMap((siege) => [
+      text(siege?.empireEntityId),
+      text(siege?.defenderEmpireEntityId),
+    ])),
+  ].filter(Boolean));
+  return list(record(data).siegeOutcomes)
+    .filter((row) => {
+      const attackerEmpireEntityId = text(row?.attackerEmpireEntityId);
+      const defenderEmpireEntityId = text(row?.defenderEmpireEntityId);
+      return (
+        (row?.outcome === "attacker_won" || row?.outcome === "defender_won")
+        && (localEmpireIds.has(attackerEmpireEntityId) || localEmpireIds.has(defenderEmpireEntityId))
+        && Number.isFinite(Date.parse(text(row?.occurredAt)))
+      );
+    })
+    .map((row) => {
+      const attackerEmpireEntityId = text(row?.attackerEmpireEntityId);
+      const defenderEmpireEntityId = text(row?.defenderEmpireEntityId);
+      return {
+        eventKey: text(row?.eventKey),
+        occurredAt: text(row?.occurredAt),
+        watchtowerLabel: text(row?.watchtowerLabel) || "Watchtower",
+        encodedLocation: text(row?.encodedLocation),
+        attackerEmpireEntityId,
+        attackerEmpireName: empireNames.get(attackerEmpireEntityId) || "Unknown empire",
+        defenderEmpireEntityId,
+        defenderEmpireName: empireNames.get(defenderEmpireEntityId) || "Unknown empire",
+        outcome: row.outcome,
+      };
+    })
+    .sort((left, right) => (
+      Date.parse(right.occurredAt) - Date.parse(left.occurredAt)
+      || left.eventKey.localeCompare(right.eventKey)
+    ))
+    .slice(0, 20);
 }
 
 function regionProjection(data, regionId, options = {}) {
@@ -333,6 +399,11 @@ export function empireDetailsView(data, regionIdValue, empireIdValue, inactiveDa
   const selected = byEmpire.find(({ empire }) => empire.entityId === empireId);
   if (!selected) return null;
   const errors = list(metadata?.warnings).map(String);
+  const outcomes = recentSiegeOutcomes(data, regionId, list(record(data).empires))
+    .filter((outcome) => (
+      outcome.attackerEmpireEntityId === empireId
+      || outcome.defenderEmpireEntityId === empireId
+    ));
   return {
     empire: {
       ...selected.empire,
@@ -344,6 +415,8 @@ export function empireDetailsView(data, regionIdValue, empireIdValue, inactiveDa
     claims: selected.claims,
     towers: selected.towers,
     activity: activityForMembers(selected.rawMembers, now),
+    recentSiegeOutcomes: outcomes,
+    cancellationSemantics: "unavailable",
     errors,
     partial: errors.length > 0,
     fetchedAt: metadata?.receivedAt ?? null,
@@ -370,6 +443,12 @@ export function empireWatchtowersView(data, regionIdValue, inactiveDays = 14, op
     fetchedAt: metadata?.receivedAt ?? null,
     empires,
     towers,
+    recentSiegeOutcomes: recentSiegeOutcomes(
+      data,
+      regionId,
+      list(record(data).empires),
+    ),
+    cancellationSemantics: "unavailable",
     summary: {
       towerCount: towers.length,
       inactiveRiskEmpires: empires.filter((empire) => empire.inactiveRisk === true).length,

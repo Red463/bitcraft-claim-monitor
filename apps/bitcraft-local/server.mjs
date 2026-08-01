@@ -496,14 +496,19 @@ const relayBindingManifest = JSON.parse(readFileSync(
   path.join(root, "src", "server", "game-data", "bindings", "schema-manifest.json"),
   "utf8",
 ));
+let relayEmpireRuntimeReady = null;
+let relayGlobalCatalogRuntimeReady = null;
 const relayGlobalCatalogRuntime = new RelayGlobalCatalogRuntime({
   manifest: relayBindingManifest,
   catalogRepository: providerCatalogRepository,
   currentStateRepository,
-  onEmpireFoundries: (snapshot) => relayEmpireRuntime.updateGlobalFoundries({
-    ...snapshot,
-    warnings: snapshot.foundryWarnings,
-  }),
+  onEmpireFoundries: (snapshot) => relayEmpireRuntimeReady?.updateGlobalFoundries({
+      ...snapshot,
+      warnings: snapshot.foundryWarnings,
+    }),
+  onEmpireNotifications: (snapshot) => (
+    relayEmpireRuntimeReady?.updateGlobalSiegeNotifications(snapshot)
+  ),
 });
 const relayPrimaryRegionRuntime = new RelayPrimaryRegionRuntime({
   manifest: relayBindingManifest,
@@ -577,6 +582,20 @@ const relayEmpireRuntime = new RelayEmpireRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
   onSnapshotCommitted: syncEmpireMembershipFromRelaySnapshot,
+  onNotificationScopeChanged: async (empireIds) => {
+    const runtime = relayGlobalCatalogRuntimeReady;
+    if (!runtime) throw new Error("Relay global notification runtime is not initialized");
+    await runtime.setEmpireNotificationScope(empireIds);
+    const health = runtime.health();
+    const notificationHealth = health.subscription?.notifications;
+    const lastError = health.notificationLastError
+      ?? notificationHealth?.lastError
+      ?? null;
+    if (lastError) throw new Error(lastError);
+    if (empireIds.length && notificationHealth?.applied !== true) {
+      throw new Error("Relay siege notification scope is waiting for the global connection");
+    }
+  },
   rotationMs: Math.max(1_000, Number(process.env.RELAY_EMPIRE_REGION_ROTATION_MS ?? 15_000)),
   poolOptions: {
     maxSessions: Math.max(1, Number(process.env.RELAY_EMPIRE_REGION_MAX_SESSIONS ?? 4)),
@@ -584,6 +603,8 @@ const relayEmpireRuntime = new RelayEmpireRuntime({
     staggerMs: Math.max(0, Number(process.env.RELAY_EMPIRE_REGION_STAGGER_MS ?? 250)),
   },
 });
+relayGlobalCatalogRuntimeReady = relayGlobalCatalogRuntime;
+relayEmpireRuntimeReady = relayEmpireRuntime;
 const relayRegionalMarketStaleMs = Math.max(
   5_000,
   Number(process.env.RELAY_MARKET_REGION_STALE_MS) || 60_000,

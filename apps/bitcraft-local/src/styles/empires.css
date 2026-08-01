@@ -571,6 +571,54 @@
   background: rgba(10, 65, 40, .18);
 }
 
+.siege-outcomes-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--card-top), var(--card-bottom));
+}
+
+.siege-availability-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.siege-outcome-list {
+  display: grid;
+  gap: 6px;
+}
+
+.siege-outcome-list article {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(148, 163, 184, .18);
+  border-radius: 8px;
+  background: rgba(4, 8, 14, .42);
+}
+
+.siege-outcome-list strong,
+.siege-outcome-list small {
+  display: block;
+}
+
+.siege-outcome-list small,
+.siege-outcome-list time {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.siege-outcome-list time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .siege-participant-head,
 .empire-detail-heading {
   display: flex;
@@ -785,6 +833,9 @@
   .siege-active-summary dd,
   .siege-participant-card dd {
     text-align: left;
+  }
+  .siege-outcome-list article {
+    grid-template-columns: 1fr;
   }
 }
 

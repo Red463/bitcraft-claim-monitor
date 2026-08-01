@@ -35,6 +35,19 @@ test("groupSiegeParticipants separates roles and uses the earliest valid start",
   assert.equal(grouped.startedAt, "2026-07-18T23:55:20.000Z");
 });
 
+test("groupSiegeParticipants keeps one proven defender alongside every attacker", () => {
+  const grouped = groupSiegeParticipants({
+    activeSiegeParticipants: [
+      { active: true, attacker: true, empireEntityId: "11", empireName: "Attacker one" },
+      { active: true, attacker: true, empireEntityId: "12", empireName: "Attacker two" },
+      { active: true, attacker: false, empireEntityId: "10", empireName: "Defender" },
+    ],
+  });
+  assert.deepEqual(grouped.attackers.map((entry) => entry.empireEntityId), ["11", "12"]);
+  assert.deepEqual(grouped.defenders.map((entry) => entry.empireEntityId), ["10"]);
+  assert.deepEqual(grouped.unknown, []);
+});
+
 test("siegeDurationLabel is deterministic and handles missing values", () => {
   assert.equal(siegeDurationLabel("2026-07-18T23:55:20.000Z", Date.parse("2026-07-19T15:40:20.000Z")), "15h 45m");
   assert.equal(siegeDurationLabel(null, Date.now()), "Unavailable");

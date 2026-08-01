@@ -8,6 +8,7 @@ import {
 } from "./empireRegionSession.ts";
 import { relayWebSocketUri } from "./globalCatalogRuntime.ts";
 import { AdaptiveRegionSessionPool } from "./regionSessionPool.ts";
+import type { SiegeOutcome } from "./siegeNotifications.ts";
 import { discoverRelayTopology, type RelayTopology } from "./topology.ts";
 
 type BindingManifest = Parameters<RelayEmpireRegionSession["start"]>[0]["manifest"];
@@ -60,6 +61,7 @@ type RuntimeDependencies = {
     currentData: EmpireCombinedData;
     observedAt: string;
   }) => Promise<void> | void;
+  onNotificationScopeChanged?: (empireIds: string[]) => Promise<void> | void;
 };
 type EmpireRow = Record<string, unknown> & { entityId: string; regionId: string };
 type MemberRow = Record<string, unknown> & {
@@ -135,6 +137,7 @@ export type EmpireCombinedData = {
   claimMembers: ClaimMemberRow[];
   nodes: NodeRow[];
   foundries: FoundryRow[] | null;
+  siegeOutcomes: SiegeOutcome[] | null;
   hexite: HexiteCombinedData | null;
   regions: Array<{
     regionId: string;
@@ -231,6 +234,83 @@ function scopedEntity(
   return { ...row, [key]: entityId, ...(empireEntityId == null ? {} : { empireEntityId }), regionId };
 }
 
+function sameDecimalIds(left: string[], right: string[]): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
+}
+
+function notificationScopeFor(data: Pick<
+  EmpireCombinedData,
+  "settlements" | "nodes"
+>): string[] {
+  const empireIds = new Set<string>();
+  for (const settlement of data.settlements) {
+    empireIds.add(decimalInteger(
+      settlement.empireEntityId,
+      "Relay Empire notification settlement owner",
+    ));
+  }
+  for (const node of data.nodes) {
+    empireIds.add(decimalInteger(
+      node.empireEntityId,
+      "Relay Empire notification node owner",
+    ));
+    const sieges = Array.isArray(node.sieges) ? node.sieges : [];
+    for (const [index, value] of sieges.entries()) {
+      const siege = asRecord(value);
+      empireIds.add(decimalInteger(
+        siege.empireEntityId,
+        `Relay Empire notification siege ${index} attacker`,
+      ));
+    }
+  }
+  return [...empireIds].sort(numericStringOrder);
+}
+
+function normalizeSiegeOutcomes(values: unknown[]): SiegeOutcome[] {
+  const eventKeys = new Set<string>();
+  const outcomes = values.map((value, index) => {
+    const row = asRecord(value);
+    const eventKey = typeof row.eventKey === "string" ? row.eventKey : "";
+    if (!eventKey) throw new TypeError(`Relay siege outcome ${index} event key is invalid`);
+    if (eventKeys.has(eventKey)) {
+      throw new TypeError(`Relay siege outcome ${index} duplicates event key ${eventKey}`);
+    }
+    eventKeys.add(eventKey);
+    const occurredAt = typeof row.occurredAt === "string" ? row.occurredAt : "";
+    const occurredMs = Date.parse(occurredAt);
+    if (!Number.isFinite(occurredMs) || new Date(occurredMs).toISOString() !== occurredAt) {
+      throw new TypeError(`Relay siege outcome ${index} timestamp is invalid`);
+    }
+    if (typeof row.watchtowerLabel !== "string" || typeof row.encodedLocation !== "string") {
+      throw new TypeError(`Relay siege outcome ${index} replacements are invalid`);
+    }
+    const outcome = row.outcome;
+    if (outcome !== "attacker_won" && outcome !== "defender_won") {
+      throw new TypeError(`Relay siege outcome ${index} result is invalid`);
+    }
+    return {
+      eventKey,
+      occurredAt,
+      watchtowerLabel: row.watchtowerLabel,
+      encodedLocation: row.encodedLocation,
+      attackerEmpireEntityId: decimalInteger(
+        row.attackerEmpireEntityId,
+        `Relay siege outcome ${index} attacker Empire id`,
+      ),
+      defenderEmpireEntityId: decimalInteger(
+        row.defenderEmpireEntityId,
+        `Relay siege outcome ${index} defender Empire id`,
+      ),
+      outcome,
+    } satisfies SiegeOutcome;
+  });
+  return outcomes.sort((left, right) => (
+    Date.parse(right.occurredAt) - Date.parse(left.occurredAt)
+    || left.eventKey.localeCompare(right.eventKey)
+  )).slice(0, 50);
+}
+
 export class RelayEmpireRuntime {
   readonly #manifest: BindingManifest;
   readonly #currentStateRepository: CurrentStateRepository;
@@ -242,10 +322,17 @@ export class RelayEmpireRuntime {
   readonly #now: () => number;
   readonly #scheduleRotation: NonNullable<RuntimeDependencies["scheduleRotation"]>;
   readonly #onSnapshotCommitted: RuntimeDependencies["onSnapshotCommitted"];
+  readonly #onNotificationScopeChanged: RuntimeDependencies["onNotificationScopeChanged"];
   readonly #regions = new Map<string, RegionState>();
   readonly #sourceErrors = new Map<string, string>();
   #globalFoundries: FoundryRow[] | null = null;
   #globalFoundryWarnings: string[] = [];
+  #globalSiegeOutcomes: SiegeOutcome[] | null = null;
+  #globalSiegeWarnings: string[] = [];
+  #notificationScopeRequested: string[] = [];
+  #notificationScopeApplied: string[] = [];
+  #notificationScopeApplying = false;
+  #notificationScopeLastError: string | null = null;
   readonly #activeSessionIds = new Map<string, number>();
   #pool: AdaptiveRegionSessionPool | null = null;
   #relayBaseUrl: string | null = null;
@@ -256,6 +343,7 @@ export class RelayEmpireRuntime {
   #rotationCursor = 0;
   #commitTail: Promise<void> = Promise.resolve();
   #transitionTail: Promise<void> = Promise.resolve();
+  #notificationScopeTail: Promise<void> = Promise.resolve();
   #warmPromise: Promise<void> | null = null;
   #cancelRotation: (() => void) | null = null;
   #lastError: string | null = null;
@@ -284,6 +372,7 @@ export class RelayEmpireRuntime {
       return () => clearInterval(timer);
     });
     this.#onSnapshotCommitted = dependencies.onSnapshotCommitted;
+    this.#onNotificationScopeChanged = dependencies.onNotificationScopeChanged;
   }
 
   #normalizeConfig(config: RuntimeConfig): RuntimeConfig {
@@ -387,6 +476,31 @@ export class RelayEmpireRuntime {
     await commit;
   }
 
+  async updateGlobalSiegeNotifications(snapshot: {
+    siegeNotifications: {
+      notifications: unknown[];
+      outcomes: unknown[];
+      warnings: string[];
+    };
+    database: string;
+    schemaFingerprint: string;
+    generation: number;
+    receivedAt: string;
+  }): Promise<void> {
+    const outcomes = normalizeSiegeOutcomes(snapshot.siegeNotifications.outcomes);
+    const warnings = snapshot.siegeNotifications.warnings.map(String);
+    this.#globalSiegeOutcomes = outcomes;
+    this.#globalSiegeWarnings = warnings;
+    this.#notificationScopeApplied = [...this.#notificationScopeRequested];
+    this.#notificationScopeApplying = false;
+    this.#notificationScopeLastError = null;
+    await this.#commitSiegeProjection({
+      database: snapshot.database,
+      schemaFingerprint: snapshot.schemaFingerprint,
+      receivedAt: snapshot.receivedAt,
+    });
+  }
+
   async start(config: RuntimeConfig): Promise<void> {
     if (this.#started || this.#pool) throw new Error("Relay Empire runtime is already started");
     const normalized = this.#normalizeConfig(config);
@@ -396,6 +510,10 @@ export class RelayEmpireRuntime {
     this.#activeRegionIds = normalized.activeRegionIds;
     this.#rotationCursor = 0;
     this.#sourceErrors.clear();
+    this.#notificationScopeRequested = [];
+    this.#notificationScopeApplied = [];
+    this.#notificationScopeApplying = false;
+    this.#notificationScopeLastError = null;
     const stored = this.#currentStateRepository.read?.(normalized.claimId, "empires") ?? null;
     this.#hydrateLastGood(stored);
     await this.#publishScopeFenceIfNeeded(stored);
@@ -718,6 +836,7 @@ export class RelayEmpireRuntime {
         (nextRegions.get(regionId)?.warnings ?? []).map((warning) => `Region ${regionId}: ${warning}`)
       )),
       ...this.#globalFoundryWarnings.map((warning) => `Global Foundry: ${warning}`),
+      ...this.#siegeWarnings(),
     ];
     const sortEntities = <T extends { regionId: string }>(
       values: T[],
@@ -747,6 +866,7 @@ export class RelayEmpireRuntime {
       claimMembers: sortEntities(claimMembers, (row) => row.entityId),
       nodes: sortEntities(nodes, (row) => row.entityId),
       foundries: this.#globalFoundries == null ? null : [...this.#globalFoundries],
+      siegeOutcomes: this.#globalSiegeOutcomes == null ? null : [...this.#globalSiegeOutcomes],
       hexite: combineHexiteRegions(this.#activeRegionIds, nextRegions),
       regions: this.#activeRegionIds.flatMap((regionId) => {
         const region = nextRegions.get(regionId);
@@ -795,6 +915,7 @@ export class RelayEmpireRuntime {
     if (snapshot.regionId === this.#primaryRegionId) {
       this.#enqueueTransition({ claimId, currentData, observedAt: snapshot.receivedAt });
     }
+    this.#enqueueNotificationScope(notificationScopeFor(currentData));
     await this.#persistHealth(snapshot.regionId, snapshot.generation, null);
   }
 
@@ -836,6 +957,7 @@ export class RelayEmpireRuntime {
       claimMembers,
       nodes,
       foundries: this.#globalFoundries == null ? null : [...this.#globalFoundries],
+      siegeOutcomes: this.#globalSiegeOutcomes == null ? null : [...this.#globalSiegeOutcomes],
       hexite: combineHexiteRegions(this.#activeRegionIds, this.#regions),
       regions: this.#activeRegionIds.flatMap((regionId) => {
         const region = this.#regions.get(regionId);
@@ -899,12 +1021,115 @@ export class RelayEmpireRuntime {
     });
   }
 
+  #siegeWarnings(): string[] {
+    return [
+      ...(this.#notificationScopeApplying
+        ? ["Global Siege: notification scope is updating; retained last-good outcomes."]
+        : []),
+      ...(this.#notificationScopeLastError
+        ? [`Global Siege: ${this.#notificationScopeLastError}`]
+        : []),
+      ...this.#globalSiegeWarnings.map((warning) => `Global Siege: ${warning}`),
+    ];
+  }
+
+  #enqueueNotificationScope(empireIds: string[]): void {
+    if (!this.#onNotificationScopeChanged) return;
+    if (
+      sameDecimalIds(empireIds, this.#notificationScopeRequested)
+      && (this.#notificationScopeApplying || this.#notificationScopeLastError == null)
+    ) return;
+    this.#notificationScopeRequested = [...empireIds];
+    this.#notificationScopeApplying = true;
+    const requested = [...empireIds];
+    const scopeUpdate = this.#notificationScopeTail.then(async () => {
+      const replacement = Promise.resolve().then(async () => {
+        try {
+          await this.#onNotificationScopeChanged?.(requested);
+          return null;
+        } catch (error) {
+          return error;
+        }
+      });
+      await this.#commitSiegeProjection();
+      const error = await replacement;
+      if (error == null) {
+        if (!sameDecimalIds(requested, this.#notificationScopeRequested)) return;
+        this.#notificationScopeApplied = requested;
+        this.#notificationScopeApplying = false;
+        this.#notificationScopeLastError = null;
+      } else {
+        if (!sameDecimalIds(requested, this.#notificationScopeRequested)) return;
+        this.#notificationScopeApplying = false;
+        this.#notificationScopeLastError = error instanceof Error ? error.message : String(error);
+      }
+      await this.#commitSiegeProjection();
+    });
+    this.#notificationScopeTail = scopeUpdate.catch(() => {});
+  }
+
+  async #commitSiegeProjection(metadata?: {
+    database: string;
+    schemaFingerprint: string;
+    receivedAt: string;
+  }): Promise<void> {
+    if (!this.#started || !this.#claimId) return;
+    const claimId = this.#claimId;
+    const commit = this.#commitTail.then(async () => {
+      if (!this.#started || this.#claimId !== claimId) return;
+      const stored = this.#currentStateRepository.read?.(claimId, "empires");
+      if (!stored) return;
+      const storedData = asRecord(stored.data);
+      const warnings = [
+        ...(stored.warnings ?? []).filter(
+          (warning) => !String(warning).startsWith("Global Siege:"),
+        ),
+        ...this.#siegeWarnings(),
+      ];
+      await this.#currentStateRepository.commitGeneration({
+        claimId,
+        generation: this.#currentStateRepository.nextGeneration(claimId),
+        domains: {
+          empires: {
+            data: {
+              ...storedData,
+              siegeOutcomes: this.#globalSiegeOutcomes == null
+                ? null
+                : [...this.#globalSiegeOutcomes],
+            },
+            confidence: warnings.length ? "partial" : "authoritative",
+            provenance: metadata ? {
+              provider: "relay",
+              sourceKey: "global",
+              regionId: null,
+              database: metadata.database,
+              schemaFingerprint: metadata.schemaFingerprint,
+              sourceObservedAt: null,
+              receivedAt: metadata.receivedAt,
+            } : stored.provenance,
+            warnings,
+          },
+        },
+      });
+    });
+    this.#commitTail = commit.catch(() => {});
+    await commit;
+  }
+
   #hydrateLastGood(stored?: StoredDomainSnapshot | null): void {
     this.#regions.clear();
     const claimId = this.#claimId;
     if (!claimId || !this.#currentStateRepository.read) return;
     stored ??= this.#currentStateRepository.read(claimId, "empires");
     const data = asRecord(stored?.data);
+    try {
+      this.#globalSiegeOutcomes = Array.isArray(data.siegeOutcomes)
+        ? normalizeSiegeOutcomes(data.siegeOutcomes)
+        : null;
+    } catch {
+      this.#globalSiegeOutcomes = null;
+      this.#globalSiegeWarnings = ["Stored last-good siege outcomes were malformed and rejected."];
+    }
     const metadata = Array.isArray(data.regions) ? data.regions : [];
     const storedHexite = asRecord(data.hexite);
     const storedHexiteRegionIds = new Set(
@@ -1007,6 +1232,13 @@ export class RelayEmpireRuntime {
       loadedRegionIds: [...this.#regions.keys()].sort(numericStringOrder),
       lastError: this.#lastError,
       transition: { lastError: this.#transitionLastError },
+      notifications: {
+        requestedEmpireIds: [...this.#notificationScopeRequested],
+        appliedEmpireIds: [...this.#notificationScopeApplied],
+        applying: this.#notificationScopeApplying,
+        lastError: this.#notificationScopeLastError,
+        outcomeCount: this.#globalSiegeOutcomes?.length ?? 0,
+      },
       sourceErrors: Object.fromEntries(this.#sourceErrors),
       pool: this.#pool?.health() ?? null,
     };
@@ -1023,6 +1255,10 @@ export class RelayEmpireRuntime {
     this.#activeSessionIds.clear();
     await this.#commitTail;
     await this.#transitionTail;
+    await this.#notificationScopeTail;
+    if (this.#onNotificationScopeChanged && this.#notificationScopeRequested.length) {
+      await Promise.resolve(this.#onNotificationScopeChanged([])).catch(() => {});
+    }
     this.#relayBaseUrl = null;
     this.#claimId = null;
     this.#primaryRegionId = null;
@@ -1030,5 +1266,11 @@ export class RelayEmpireRuntime {
     this.#rotationCursor = 0;
     this.#regions.clear();
     this.#sourceErrors.clear();
+    this.#globalSiegeOutcomes = null;
+    this.#globalSiegeWarnings = [];
+    this.#notificationScopeRequested = [];
+    this.#notificationScopeApplied = [];
+    this.#notificationScopeApplying = false;
+    this.#notificationScopeLastError = null;
   }
 }

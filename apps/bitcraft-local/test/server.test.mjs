@@ -764,20 +764,22 @@ test("server collection paginates listings and protects production mutations", a
       sieges: [{
         entityId: "601",
         buildingEntityId: "60",
-        empireEntityId: "10",
-        role: "unknown",
-        energy: "281",
-        active: true,
-        startTimestamp: "2026-07-18T23:55:20.000Z",
-      }, {
-        entityId: "602",
-        buildingEntityId: "60",
         empireEntityId: "11",
-        role: "unknown",
+        defenderEmpireEntityId: "10",
+        role: "attacker",
         energy: "6710",
         active: true,
         startTimestamp: "2026-07-18T23:55:20.000Z",
       }],
+    }],
+    siegeOutcomes: [{
+      eventKey: "outcome-1",
+      occurredAt: "2026-07-18T23:59:20.000Z",
+      watchtowerLabel: "North Tower",
+      encodedLocation: "19:111:222",
+      attackerEmpireEntityId: "11",
+      defenderEmpireEntityId: "10",
+      outcome: "attacker_won",
     }],
     regions: [{
       regionId: "19",
@@ -863,11 +865,19 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(regionalWatchtowers.towers[0].inactiveRisk, true);
   assert.equal(regionalWatchtowers.towers[0].locationX, 111);
   assert.equal(regionalWatchtowers.towers[0].underSiege, true);
-  assert.equal(regionalWatchtowers.towers[0].siegeCount, 2);
+  assert.equal(regionalWatchtowers.towers[0].siegeCount, 1);
   assert.deepEqual(
     regionalWatchtowers.towers[0].activeSiegeParticipants.map((entry) => entry.empireName),
-    ["Test Empire", "Verdant"],
+    ["Verdant", "Test Empire"],
   );
+  assert.deepEqual(
+    regionalWatchtowers.towers[0].activeSiegeParticipants.map((entry) => entry.attacker),
+    [true, false],
+  );
+  assert.equal(regionalWatchtowers.recentSiegeOutcomes[0].outcome, "attacker_won");
+  assert.equal(regionalWatchtowers.recentSiegeOutcomes[0].attackerEmpireName, "Verdant");
+  assert.equal(regionalWatchtowers.recentSiegeOutcomes[0].defenderEmpireName, "Test Empire");
+  assert.equal(regionalWatchtowers.cancellationSemantics, "unavailable");
   assert.equal(regionalWatchtowers.summary.underSiege, 1);
   assert.equal(regionalWatchtowers.towers[0].accessMembers, undefined);
   assert.equal(regionalWatchtowers.empires[0].accessMembers.length, 2);

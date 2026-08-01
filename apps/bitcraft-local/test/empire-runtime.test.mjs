@@ -256,6 +256,282 @@ test("Empire runtime atomically merges only configured regional generations", as
   await runtime.stop();
 });
 
+test("Empire runtime publishes exact committed Empire notification scopes without delaying base generations", async () => {
+  const handlers = new Map();
+  const writes = [];
+  const scopes = [];
+  let releaseFirstScope;
+  const firstScopePending = new Promise((resolve) => {
+    releaseFirstScope = resolve;
+  });
+  const runtime = new runtimeModule.RelayEmpireRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: (options) => ({
+      start: async (config) => handlers.set(config.regionId, options.onSnapshot),
+      stop: async () => {},
+      health: () => ({ connected: true, applied: true, stage: "live" }),
+    }),
+    currentStateRepository: {
+      read: () => writes.at(-1)?.domains.empires ?? null,
+      nextGeneration: () => writes.length + 1,
+      commitGeneration: (batch) => writes.push(batch),
+    },
+    onNotificationScopeChanged: (ids) => {
+      scopes.push(ids);
+      return scopes.length === 1 ? firstScopePending : undefined;
+    },
+    poolOptions: {
+      maxSessions: 2,
+      staggerMs: 0,
+      idleCloseMs: 60_000,
+      sleep: async () => {},
+      scheduleSweep: () => () => {},
+    },
+    scheduleRotation: () => () => {},
+  });
+
+  await runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    primaryRegionId: "19",
+    activeRegionIds: ["7", "19"],
+  });
+  await runtime.warmActiveRegions();
+  const primary = regionData("19", "190");
+  primary.empires.push({ entityId: "800", regionId: "19", name: "Attacker" });
+  primary.empires.push({ entityId: "999", regionId: "19", name: "Unrelated identity" });
+  primary.nodes[0].sieges = [{
+    entityId: "1905",
+    buildingEntityId: primary.nodes[0].entityId,
+    empireEntityId: "800",
+    defenderEmpireEntityId: "190",
+    role: "attacker",
+    active: true,
+  }];
+
+  const primaryCommit = handlers.get("19")({
+    data: primary,
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 1,
+    receivedAt: "2026-07-30T18:01:00.000Z",
+  });
+  assert.equal(
+    await Promise.race([
+      primaryCommit.then(() => "committed"),
+      new Promise((resolve) => setTimeout(() => resolve("blocked"), 100)),
+    ]),
+    "committed",
+    "notification scope replacement must not delay the regional generation",
+  );
+  assert.deepEqual(scopes[0], ["190", "800"]);
+  for (let index = 0; index < 10 && !writes.at(-1).domains.empires.warnings.some((warning) => /scope is updating/.test(warning)); index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.match(
+    writes.at(-1).domains.empires.warnings.join("\n"),
+    /notification scope is updating; retained last-good outcomes/i,
+  );
+
+  releaseFirstScope();
+  const secondary = regionData("7", "70");
+  secondary.nodes[0].sieges = [{
+    entityId: "705",
+    buildingEntityId: secondary.nodes[0].entityId,
+    empireEntityId: "701",
+    defenderEmpireEntityId: "70",
+    role: "attacker",
+    active: true,
+  }];
+  await handlers.get("7")({
+    data: secondary,
+    warnings: [],
+    database: "relay-region-7",
+    regionId: "7",
+    schemaFingerprint: "regional-v1",
+    generation: 1,
+    receivedAt: "2026-07-30T18:02:00.000Z",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(scopes.at(-1), ["70", "190", "701", "800"]);
+
+  await handlers.get("7")({
+    data: { ...secondary, settlements: [], claimMembers: [], nodes: [] },
+    warnings: [],
+    database: "relay-region-7",
+    regionId: "7",
+    schemaFingerprint: "regional-v1",
+    generation: 2,
+    receivedAt: "2026-07-30T18:03:00.000Z",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(scopes.at(-1), ["190", "800"]);
+  assert.equal(scopes.flat().includes("999"), false);
+  await runtime.stop();
+});
+
+test("Empire runtime atomically retains compact last-good siege outcomes and records notification failures", async () => {
+  const handlers = new Map();
+  const writes = [];
+  let stored = null;
+  let failScope = false;
+  const runtime = new runtimeModule.RelayEmpireRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: (options) => ({
+      start: async (config) => handlers.set(config.regionId, options.onSnapshot),
+      stop: async () => {},
+      health: () => ({ connected: true, applied: true, stage: "live" }),
+    }),
+    currentStateRepository: {
+      read: () => stored,
+      nextGeneration: () => writes.length + 1,
+      commitGeneration: (batch) => {
+        writes.push(batch);
+        stored = batch.domains.empires;
+      },
+    },
+    onNotificationScopeChanged: async () => {
+      if (failScope) throw new Error("notification scope unavailable");
+    },
+    poolOptions: {
+      maxSessions: 1,
+      staggerMs: 0,
+      idleCloseMs: 60_000,
+      sleep: async () => {},
+      scheduleSweep: () => () => {},
+    },
+    scheduleRotation: () => () => {},
+  });
+  await runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    primaryRegionId: "19",
+    activeRegionIds: ["19"],
+  });
+  const primary = regionData("19", "190");
+  primary.nodes[0].sieges = [{
+    entityId: "1905",
+    buildingEntityId: primary.nodes[0].entityId,
+    empireEntityId: "800",
+    defenderEmpireEntityId: "190",
+    role: "attacker",
+    active: true,
+  }];
+  await handlers.get("19")({
+    data: primary,
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 1,
+    receivedAt: "2026-07-30T18:01:00.000Z",
+  });
+
+  await runtime.updateGlobalSiegeNotifications({
+    siegeNotifications: {
+      notifications: [{ entityId: "raw-normalized-row-must-not-be-stored" }],
+      outcomes: [{
+        eventKey: "event-1",
+        occurredAt: "2026-07-30T18:00:00.000Z",
+        watchtowerLabel: "North Watch",
+        encodedLocation: "19:1:2",
+        attackerEmpireEntityId: "800",
+        defenderEmpireEntityId: "190",
+        outcome: "attacker_won",
+      }],
+      warnings: ["Unmatched siege outcome notifications at 2026-07-30T17:00:00.000Z."],
+    },
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 2,
+    receivedAt: "2026-07-30T18:02:00.000Z",
+  });
+  assert.deepEqual(stored.data.siegeOutcomes, [{
+    eventKey: "event-1",
+    occurredAt: "2026-07-30T18:00:00.000Z",
+    watchtowerLabel: "North Watch",
+    encodedLocation: "19:1:2",
+    attackerEmpireEntityId: "800",
+    defenderEmpireEntityId: "190",
+    outcome: "attacker_won",
+  }]);
+  assert.equal(JSON.stringify(stored.data).includes("raw-normalized-row-must-not-be-stored"), false);
+  assert.match(stored.warnings.join("\n"), /Global Siege: Unmatched siege outcome/);
+
+  await assert.rejects(
+    runtime.updateGlobalSiegeNotifications({
+      siegeNotifications: {
+        notifications: [],
+        outcomes: [{
+          ...stored.data.siegeOutcomes[0],
+          attackerEmpireEntityId: "not-decimal",
+        }],
+        warnings: [],
+      },
+      database: "relay-global",
+      schemaFingerprint: "global-v1",
+      generation: 3,
+      receivedAt: "2026-07-30T18:03:00.000Z",
+    }),
+    /attacker/i,
+  );
+  assert.equal(stored.data.siegeOutcomes[0].eventKey, "event-1");
+
+  failScope = true;
+  const expandedPrimary = {
+    ...primary,
+    nodes: [{
+      ...primary.nodes[0],
+      sieges: [
+        ...primary.nodes[0].sieges,
+        {
+          entityId: "1906",
+          buildingEntityId: primary.nodes[0].entityId,
+          empireEntityId: "801",
+          defenderEmpireEntityId: "190",
+          role: "attacker",
+          active: true,
+        },
+      ],
+    }],
+  };
+  await handlers.get("19")({
+    data: expandedPrimary,
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 2,
+    receivedAt: "2026-07-30T18:04:00.000Z",
+  });
+  for (let index = 0; index < 10 && !stored.warnings.some((warning) => /scope unavailable/.test(warning)); index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(stored.data.siegeOutcomes[0].eventKey, "event-1");
+  assert.match(stored.warnings.join("\n"), /notification scope unavailable/);
+
+  failScope = false;
+  await handlers.get("19")({
+    data: expandedPrimary,
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 3,
+    receivedAt: "2026-07-30T18:05:00.000Z",
+  });
+  for (let index = 0; index < 10 && stored.warnings.some((warning) => /scope unavailable/.test(warning)); index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.doesNotMatch(stored.warnings.join("\n"), /notification scope unavailable/);
+  assert.deepEqual(runtime.health().notifications.appliedEmpireIds, ["190", "800", "801"]);
+  await runtime.stop();
+});
+
 test("Empire runtime reconciles scope and never carries a rejected regional candidate forward", async () => {
   assert.ok(runtimeModule, "Empire runtime module must exist");
   const handlers = new Map();

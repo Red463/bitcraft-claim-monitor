@@ -23,6 +23,10 @@ const snapshot = {
     locationX: 1,
     locationZ: 2,
     locationDimension: "1",
+  }, {
+    regionId: "19",
+    entityId: "11",
+    name: "Verdant",
   }],
   members: [{
     regionId: "19",
@@ -74,16 +78,34 @@ const snapshot = {
       entityId: "80",
       buildingEntityId: "60",
       empireEntityId: "11",
-      role: "unknown",
+      defenderEmpireEntityId: "10",
+      role: "attacker",
       energy: "7",
       active: true,
       startTimestamp: "2026-07-30T16:00:00.000Z",
     }],
   }],
+  siegeOutcomes: [{
+    eventKey: "outcome-1",
+    occurredAt: "2026-07-29T16:00:00.000Z",
+    watchtowerLabel: "North Watch",
+    encodedLocation: "19:5:6",
+    attackerEmpireEntityId: "11",
+    defenderEmpireEntityId: "10",
+    outcome: "defender_won",
+  }, {
+    eventKey: "outcome-outside-region",
+    occurredAt: "2026-07-28T16:00:00.000Z",
+    watchtowerLabel: "Elsewhere",
+    encodedLocation: "7:1:2",
+    attackerEmpireEntityId: "12",
+    defenderEmpireEntityId: "13",
+    outcome: "attacker_won",
+  }],
   regions: [{
     regionId: "19",
     receivedAt: "2026-07-30T18:00:00.000Z",
-    warnings: ["Regional siege 80 empire role is unresolved; attacker/defender is not inferred."],
+    warnings: [],
   }],
 };
 
@@ -120,7 +142,7 @@ test("Empire overview is composed directly from the current regional generation"
   assert.equal(view.fetchedAt, "2026-07-30T18:00:00.000Z");
 });
 
-test("Empire details and watchtowers preserve unresolved siege roles without inventing an attacker", () => {
+test("Empire details and watchtowers expose proven current roles and paired outcomes", () => {
   const details = empireDetailsView(snapshot, "19", "10", 14, {
     regionalClaims,
     now: () => Date.parse("2026-07-30T18:00:00.000Z"),
@@ -129,8 +151,18 @@ test("Empire details and watchtowers preserve unresolved siege roles without inv
   assert.equal(details.members[0].canAddHexite, true);
   assert.equal(details.members[0].permissions.supplyNode, true);
   assert.equal(details.towers[0].underSiege, true);
-  assert.equal(details.towers[0].activeSiegeParticipants[0].attacker, null);
-  assert.match(details.errors.join(" "), /role is unresolved/);
+  assert.deepEqual(
+    details.towers[0].activeSiegeParticipants.map((participant) => [
+      participant.empireEntityId,
+      participant.empireName,
+      participant.attacker,
+    ]),
+    [["11", "Verdant", true], ["10", "Timbersteel Empire", false]],
+  );
+  assert.equal(details.recentSiegeOutcomes[0].attackerEmpireName, "Verdant");
+  assert.equal(details.recentSiegeOutcomes[0].defenderEmpireName, "Timbersteel Empire");
+  assert.equal(details.recentSiegeOutcomes[0].outcome, "defender_won");
+  assert.equal(details.cancellationSemantics, "unavailable");
 
   const towers = empireWatchtowersView(snapshot, "19", 14, {
     now: () => Date.parse("2026-07-30T18:00:00.000Z"),
@@ -139,6 +171,10 @@ test("Empire details and watchtowers preserve unresolved siege roles without inv
   assert.equal(towers.summary.underSiege, 1);
   assert.equal(towers.towers[0].towerId, "60");
   assert.equal(towers.empires[0].members[0].hasStorage, true);
+  assert.equal(towers.recentSiegeOutcomes.length, 1);
+  assert.equal(towers.recentSiegeOutcomes[0].occurredAt, "2026-07-29T16:00:00.000Z");
+  assert.equal(towers.cancellationSemantics, "unavailable");
+  assert.equal(JSON.stringify(towers).includes("cancelled"), false);
 });
 
 test("claim member view joins claim permissions with the live Empire rank", () => {
