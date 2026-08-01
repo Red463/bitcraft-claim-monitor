@@ -247,6 +247,30 @@ Implementation is dependency-ordered:
 7. collectors, Discord parity, and zero-BitJita closure;
 8. seven-day preview soak, operator approval, and controlled cutover.
 
+Steps 2-7 each include a mandatory live-first storage pass. For every feature
+delivered in that step, implementation must:
+
+1. identify any legacy SQL table, cache, refresh ledger, or scheduled job that
+   supplied its current data;
+2. remove it when the committed Relay generation or an existing normalized
+   index supplies the same current state;
+3. retain SQL only for independently durable behavior or when a representative
+   benchmark proves that an event-driven local projection is required to meet
+   the interactive latency budget;
+4. update any retained projection from the same Relay generation or domain
+   event, never from an hourly, daily, or multi-minute ingestion schedule;
+5. verify the feature remains current and usable with scheduled ingestion
+   disabled; and
+6. record the decision, owner, update trigger, benchmark evidence, and removal
+   status in the table inventory before the vertical is accepted.
+
+This makes “as live as possible” a cutover condition: while Relay is healthy,
+users read the latest complete local generation immediately and open pages
+receive committed changes without waiting for a page reload, collector run,
+cache rebuild, or scheduler tick. Slow history aggregation, notification
+delivery, reporting, backups, and reconciliation continue asynchronously and
+cannot delay the current-data path.
+
 See [evidence-baseline.md](./evidence-baseline.md),
 [diagnostic-findings.md](./diagnostic-findings.md), and
 [parity-matrix.md](./parity-matrix.md). The required freshness budgets,

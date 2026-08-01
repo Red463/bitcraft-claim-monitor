@@ -144,9 +144,12 @@ the provider name as evidence, but they are not executable dependencies.
   compilation and the local-asset digest check. The complete suite passed
   1,504 tests before the SQL ownership boundary added two further passing
   tests.
-- The remaining functional evidence gates are the approved Buy Order Finder
-  presentation, authoritative siege completion semantics, production Relay
-  operator confirmation, and the seven-day preview soak/cutover drill.
+- The remaining functional evidence gates are explicit approval and
+  implementation of the proposed Buy Order Finder presentation, authoritative
+  siege completion semantics, production Relay operator confirmation, and the
+  seven-day preview soak/cutover drill. Same-region confirmed local sale
+  history now makes the finder technically implementable without restoring a
+  scheduled price cache, but presentation approval has not yet been recorded.
 
 ## Implemented foundation evidence
 
