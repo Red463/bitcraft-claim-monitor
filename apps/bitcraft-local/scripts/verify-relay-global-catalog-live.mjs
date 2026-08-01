@@ -9,6 +9,7 @@ import {
 import { buildWorkstationPresets } from "../src/server/craftPlanWorkstationPresets.mjs";
 import { createProviderCatalogRepository } from "../src/server/catalogRepository.mjs";
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
+import { gameIconUrl } from "../src/utils/gameAssets.mjs";
 
 const relayBaseUrl = String(
   process.env.BITCRAFT_RELAY_ORIGIN ?? "https://relay.bitcraftsync.app",
@@ -68,6 +69,11 @@ try {
       `Relay catalog snapshot was incomplete: ${itemCount} items, ${cargoCount} cargo`,
     );
   }
+  const entityIconUrls = snapshot.entities
+    .map((entity) => gameIconUrl(entity))
+    .filter(Boolean);
+  const uniqueEntityIconUrls = new Set(entityIconUrls);
+  const missingEntityIconCount = snapshot.entities.length - entityIconUrls.length;
   const descriptionCounts = Object.fromEntries(
     Object.entries(snapshot.descriptions).map(([kind, rows]) => [kind, rows.length]),
   );
@@ -145,6 +151,10 @@ try {
     receivedAt: snapshot.receivedAt,
     itemCount,
     cargoCount,
+    uniqueEntityIconCount: uniqueEntityIconUrls.size,
+    missingEntityIconCount,
+    sharedEntityIconCount: entityIconUrls.length - uniqueEntityIconUrls.size,
+    sampleEntityIconUrls: [...uniqueEntityIconUrls].slice(0, 5),
     descriptionCounts,
     workstationPresetCount: workstationPresets.length,
     workstationCount,

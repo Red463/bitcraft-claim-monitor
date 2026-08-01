@@ -1,4 +1,5 @@
 export * from "./contracts.ts";
+export * from "./assetManifest.ts";
 export * from "./claimMarketRegionSession.ts";
 export * from "./claimMarketRuntime.ts";
 export * from "./constructionProjection.ts";
