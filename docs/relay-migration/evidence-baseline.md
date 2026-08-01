@@ -140,16 +140,23 @@ the provider name as evidence, but they are not executable dependencies.
 - Relay preview web, worker, collector, backup, environment, data, and Caddy
   configuration use the isolated relay service identity and port `19430`.
   Preview Discord delivery is record-only.
-- The latest full production build passed, including server/provider
-  compilation and the local-asset digest check. The complete suite passed
-  1,504 tests before the SQL ownership boundary added two further passing
-  tests.
-- The remaining functional evidence gates are explicit approval and
-  implementation of the proposed Buy Order Finder presentation, authoritative
-  siege completion semantics, production Relay operator confirmation, and the
-  seven-day preview soak/cutover drill. Same-region confirmed local sale
-  history now makes the finder technically implementable without restoring a
-  scheduled price cache, but presentation approval has not yet been recorded.
+- The 2026-08-01 Buy Order Finder verification passed: 39 focused tests across
+  sale-baseline, regional-market, finder-boundary, and server coverage; the
+  production build completed server/provider compilation, asset verification,
+  TypeScript checking, and Vite output; and the complete application suite
+  passed 1,523 tests. The zero-BitJita/ownership subset passed 10 tests, the
+  runtime source scan returned no BitJita matches, and the schema/server scan
+  returned no retired market current/snapshot table matches.
+- The dedicated finder consumes committed current `regional-market` buy orders
+  and performs a bounded exact seven-day same-region read of authoritative
+  confirmed `market_trades` on request. It requires three confirmed records
+  and a strictly positive exact premium before qualifying an opportunity;
+  unavailable history leaves current orders visible. No legacy current-order,
+  regional-average, price-snapshot, or scheduled-insight table/job was
+  restored as a render prerequisite.
+- The remaining functional evidence gates are authoritative siege completion
+  semantics, production Relay operator confirmation, and the seven-day preview
+  soak/cutover drill.
 
 ## Implemented foundation evidence
 
