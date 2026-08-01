@@ -79,8 +79,182 @@ test("regional market view filters and enriches the live generation without SQL 
     salesCount: 0,
     premiumPercent: null,
     opportunityEligible: false,
+    baselineObservedSince: null,
+    baselineLastSoldAt: null,
   });
   assert.deepEqual(result.opportunities, []);
+});
+
+test("buy-order view applies exact same-region baselines before paging", () => {
+  const saleBaselines = new Map([
+    ["19:cargo:43", {
+      regionId: "19", itemType: "cargo", itemId: "43",
+      salesCount: 3, unitsSold: "3", totalValue: "60",
+      observedSince: "2026-07-28T00:00:00.000Z",
+      lastSoldAt: "2026-07-31T00:00:00.000Z",
+    }],
+  ]);
+  const result = views.regionalBuyOrdersView({
+    orders: [
+      { ...snapshot.orders[0], entityId: "low", price: "20" },
+      { ...snapshot.orders[0], entityId: "high", price: "25" },
+    ],
+  }, {
+    regionId: "19",
+    page: 1,
+    pageSize: 25,
+    sort: "premium",
+    direction: "desc",
+    saleBaselines,
+    historyObservedSince: "2026-07-28T00:00:00.000Z",
+    getEntity: () => null,
+  });
+  assert.equal(result.rows[0].orderKey, "high");
+  assert.equal(result.rows[0].averageUnitPrice, "20");
+  assert.equal(result.rows[0].premiumPercent, "25");
+  assert.equal(result.rows[0].opportunityEligible, true);
+  assert.equal(result.rows[1].premiumPercent, "0");
+  assert.equal(result.rows[1].opportunityEligible, false);
+  assert.deepEqual(result.opportunities.map((row) => row.orderKey), ["high"]);
+  assert.equal(result.baselineWindowDays, 7);
+  assert.equal(result.minimumSales, 3);
+  assert.equal(result.historyObservedSince, "2026-07-28T00:00:00.000Z");
+});
+
+test("buy-order view displays a premium below the minimum confirmed-sale threshold without qualifying it", () => {
+  const result = views.regionalBuyOrdersView(snapshot, {
+    regionId: "19",
+    saleBaselines: new Map([["19:cargo:43", {
+      regionId: "19", itemType: "cargo", itemId: "43",
+      salesCount: 2, unitsSold: "3", totalValue: "60",
+      observedSince: "2026-07-28T00:00:00.000Z",
+      lastSoldAt: "2026-07-31T00:00:00.000Z",
+    }]]),
+    getEntity: () => null,
+  });
+
+  assert.equal(result.rows[0].averageUnitPrice, "20");
+  assert.equal(result.rows[0].premiumPercent, "25");
+  assert.equal(result.rows[0].salesCount, 2);
+  assert.equal(result.rows[0].opportunityEligible, false);
+  assert.deepEqual(result.opportunities, []);
+});
+
+test("buy-order view keeps item and cargo sale baselines separate for colliding IDs", () => {
+  const result = views.regionalBuyOrdersView({
+    orders: [
+      { ...snapshot.orders[0], entityId: "cargo", itemType: "cargo", itemId: "43", price: "25" },
+      { ...snapshot.orders[0], entityId: "item", itemType: "item", itemId: "43", price: "30" },
+    ],
+  }, {
+    regionId: "19",
+    sort: "item",
+    direction: "asc",
+    saleBaselines: new Map([
+      ["19:cargo:43", { regionId: "19", itemType: "cargo", itemId: "43", salesCount: 3, unitsSold: "3", totalValue: "60" }],
+      ["19:item:43", { regionId: "19", itemType: "item", itemId: "43", salesCount: 3, unitsSold: "2", totalValue: "30" }],
+    ]),
+    getEntity: (key) => key === "cargo:43" ? { name: "Cargo" } : { name: "Item" },
+  });
+
+  assert.deepEqual(result.rows.map((row) => ({ orderKey: row.orderKey, averageUnitPrice: row.averageUnitPrice, premiumPercent: row.premiumPercent })), [
+    { orderKey: "cargo", averageUnitPrice: "20", premiumPercent: "25" },
+    { orderKey: "item", averageUnitPrice: "15", premiumPercent: "100" },
+  ]);
+});
+
+test("buy-order view sorts fractional premiums by their exact values beyond display rounding", () => {
+  const result = views.regionalBuyOrdersView({
+    orders: [
+      { ...snapshot.orders[0], entityId: "lower", itemType: "item", itemId: "1", price: "100" },
+      { ...snapshot.orders[0], entityId: "higher", itemType: "item", itemId: "2", price: "100" },
+    ],
+  }, {
+    regionId: "19",
+    sort: "premium",
+    direction: "desc",
+    saleBaselines: new Map([
+      ["19:item:1", { regionId: "19", itemType: "item", itemId: "1", salesCount: 3, unitsSold: "10000", totalValue: "999955" }],
+      ["19:item:2", { regionId: "19", itemType: "item", itemId: "2", salesCount: 3, unitsSold: "10000", totalValue: "999954" }],
+    ]),
+    getEntity: () => null,
+  });
+
+  assert.deepEqual(result.rows.map((row) => row.orderKey), ["higher", "lower"]);
+  assert.deepEqual(result.rows.map((row) => row.premiumPercent), ["0", "0"]);
+});
+
+test("buy-order view displays negative premiums but never qualifies them", () => {
+  const result = views.regionalBuyOrdersView({
+    orders: [{ ...snapshot.orders[0], entityId: "below", price: "19" }],
+  }, {
+    regionId: "19",
+    saleBaselines: new Map([["19:cargo:43", {
+      regionId: "19", itemType: "cargo", itemId: "43", salesCount: 3, unitsSold: "3", totalValue: "60",
+    }]]),
+    getEntity: () => null,
+  });
+
+  assert.equal(result.rows[0].premiumPercent, "-5");
+  assert.equal(result.rows[0].opportunityEligible, false);
+  assert.deepEqual(result.opportunities, []);
+});
+
+test("buy-order view caps opportunities before paginating its table", () => {
+  const eligibleOrders = Array.from({ length: 11 }, (_, index) => ({
+    ...snapshot.orders[0],
+    entityId: `eligible-${index}`,
+    itemType: "item",
+    itemId: String(index + 1),
+    price: String(index + 10),
+  }));
+  const ineligibleOrders = Array.from({ length: 15 }, (_, index) => ({
+    ...snapshot.orders[0],
+    entityId: `ineligible-${index}`,
+    itemType: "item",
+    itemId: String(index + 20),
+    price: "1000",
+  }));
+  const saleBaselines = new Map(eligibleOrders.map((order) => [
+    `19:item:${order.itemId}`,
+    { regionId: "19", itemType: "item", itemId: order.itemId, salesCount: 3, unitsSold: "1", totalValue: "1" },
+  ]));
+  const result = views.regionalBuyOrdersView({ orders: [...eligibleOrders, ...ineligibleOrders] }, {
+    regionId: "19",
+    page: 2,
+    pageSize: 25,
+    sort: "unitPrice",
+    direction: "desc",
+    saleBaselines,
+    getEntity: () => null,
+  });
+
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].orderKey, "eligible-0");
+  assert.deepEqual(result.opportunities.map((row) => row.orderKey), [
+    "eligible-10", "eligible-9", "eligible-8", "eligible-7", "eligible-6",
+    "eligible-5", "eligible-4", "eligible-3", "eligible-2", "eligible-1",
+  ]);
+});
+
+test("buy-order opportunities honor the text-filtered result", () => {
+  const result = views.regionalBuyOrdersView({
+    orders: [
+      { ...snapshot.orders[0], entityId: "shown", itemType: "item", itemId: "1", price: "20" },
+      { ...snapshot.orders[0], entityId: "hidden", itemType: "item", itemId: "2", price: "30" },
+    ],
+  }, {
+    regionId: "19",
+    search: "visible",
+    saleBaselines: new Map([
+      ["19:item:1", { regionId: "19", itemType: "item", itemId: "1", salesCount: 3, unitsSold: "1", totalValue: "10" }],
+      ["19:item:2", { regionId: "19", itemType: "item", itemId: "2", salesCount: 3, unitsSold: "1", totalValue: "10" }],
+    ]),
+    getEntity: (key) => key === "items:1" ? { name: "Visible item" } : { name: "Hidden item" },
+  });
+
+  assert.deepEqual(result.rows.map((row) => row.orderKey), ["shown"]);
+  assert.deepEqual(result.opportunities.map((row) => row.orderKey), ["shown"]);
 });
 
 test("regional market view preserves exact decimal quantities and sorts before paging", () => {

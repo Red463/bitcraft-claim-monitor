@@ -21,6 +21,47 @@ function multiply(left, right) {
   return (BigInt(decimal(left)) * BigInt(decimal(right))).toString();
 }
 
+function baselineKey(row) {
+  return `${row.regionId}:${row.itemType}:${row.itemId}`;
+}
+
+function divideRoundedHalfUp(numerator, denominator) {
+  if (denominator <= 0n) return null;
+  return ((2n * numerator + denominator) / (2n * denominator)).toString();
+}
+
+function premiumHundredths(unitPrice, baseline) {
+  const units = BigInt(decimal(baseline.unitsSold));
+  const total = BigInt(decimal(baseline.totalValue));
+  if (units <= 0n || total <= 0n) return null;
+  const delta = BigInt(decimal(unitPrice)) * units - total;
+  const magnitude = delta < 0n ? -delta : delta;
+  const rounded = (magnitude * 10_000n * 2n + total) / (2n * total);
+  return delta < 0n ? -rounded : rounded;
+}
+
+function formatHundredths(value) {
+  if (value == null) return null;
+  const sign = value < 0n ? "-" : "";
+  const magnitude = value < 0n ? -value : value;
+  const whole = magnitude / 100n;
+  const fraction = String(magnitude % 100n).padStart(2, "0").replace(/0+$/, "");
+  return `${sign}${whole}${fraction ? `.${fraction}` : ""}`;
+}
+
+function comparePremium(left, right) {
+  if (left._premiumNumerator == null) return right._premiumNumerator == null ? 0 : -1;
+  if (right._premiumNumerator == null) return 1;
+  const leftScaled = left._premiumNumerator * right._premiumDenominator;
+  const rightScaled = right._premiumNumerator * left._premiumDenominator;
+  return leftScaled < rightScaled ? -1 : leftScaled > rightScaled ? 1 : 0;
+}
+
+function publicBuyOrderRow(row) {
+  const { _premiumNumerator, _premiumDenominator, ...visible } = row;
+  return visible;
+}
+
 function regionIds(value) {
   return [...new Set(
     (Array.isArray(value) ? value : [])
@@ -284,6 +325,7 @@ export function regionalBuyOrdersView(snapshot, options = {}) {
   const sort = String(options.sort ?? "unitPrice");
   const observedAt = options.observedAt == null ? null : String(options.observedAt);
   const getEntity = typeof options.getEntity === "function" ? options.getEntity : () => null;
+  const saleBaselines = options.saleBaselines instanceof Map ? options.saleBaselines : new Map();
   const receivedAtByRegion = new Map(
     (Array.isArray(source.regions) ? source.regions : [])
       .map(record)
@@ -301,8 +343,8 @@ export function regionalBuyOrdersView(snapshot, options = {}) {
     const quantity = decimal(order.quantity);
     const unitPrice = decimal(order.price ?? order.priceThreshold);
     const listedAt = order.timestamp == null ? null : String(order.timestamp);
-    return {
-      orderKey: decimal(order.entityId),
+    const baseRow = {
+      orderKey: String(order.entityId ?? ""),
       regionId: decimal(order.regionId),
       regionName: String(order.regionName ?? `R${decimal(order.regionId)}`),
       marketClaimId: decimal(order.claimEntityId),
@@ -323,10 +365,35 @@ export function regionalBuyOrdersView(snapshot, options = {}) {
       listedAt,
       firstSeen: listedAt,
       lastSeen: receivedAtByRegion.get(decimal(order.regionId)) ?? observedAt ?? listedAt,
-      averageUnitPrice: null,
-      salesCount: 0,
-      premiumPercent: null,
-      opportunityEligible: false,
+    };
+    const baseline = saleBaselines.get(baselineKey(baseRow));
+    if (!baseline) {
+      return {
+        ...baseRow,
+        averageUnitPrice: null,
+        salesCount: 0,
+        premiumPercent: null,
+        opportunityEligible: false,
+        baselineObservedSince: null,
+        baselineLastSoldAt: null,
+        _premiumNumerator: null,
+        _premiumDenominator: null,
+      };
+    }
+    const units = BigInt(decimal(baseline.unitsSold));
+    const total = BigInt(decimal(baseline.totalValue));
+    const validBaseline = units > 0n && total > 0n;
+    const numerator = validBaseline ? BigInt(unitPrice) * units - total : null;
+    return {
+      ...baseRow,
+      averageUnitPrice: divideRoundedHalfUp(total, units),
+      salesCount: Number(baseline.salesCount) || 0,
+      premiumPercent: formatHundredths(premiumHundredths(unitPrice, baseline)),
+      opportunityEligible: Number(baseline.salesCount) >= 3 && numerator != null && numerator > 0n,
+      baselineObservedSince: baseline.observedSince ?? null,
+      baselineLastSoldAt: baseline.lastSoldAt ?? null,
+      _premiumNumerator: numerator,
+      _premiumDenominator: validBaseline ? total : null,
     };
     });
   const regionalRows = rows.filter((row) => (
@@ -354,22 +421,36 @@ export function regionalBuyOrdersView(snapshot, options = {}) {
     quantity: (row) => row.quantity,
     unitPrice: (row) => row.unitPrice,
     totalValue: (row) => row.totalValue,
-    premium: () => "0",
+    premium: (row) => row.premiumPercent ?? "0",
     lastSeen: (row) => row.lastSeen ?? "",
   };
   const numericSorts = new Set(["tier", "region", "quantity", "unitPrice", "totalValue", "premium"]);
   const sorter = sorters[sort] ?? sorters.unitPrice;
   filteredRows.sort((left, right) => {
-    const result = numericSorts.has(sort)
-      ? compareBigInt(sorter(left), sorter(right))
-      : compareText(sorter(left), sorter(right));
+    const result = sort === "premium"
+      ? comparePremium(left, right)
+      : numericSorts.has(sort)
+        ? compareBigInt(sorter(left), sorter(right))
+        : compareText(sorter(left), sorter(right));
     return direction === "asc" ? result : -result;
   });
   const total = filteredRows.length;
   const offset = (page - 1) * pageSize;
+  const opportunities = filteredRows
+    .filter((row) => row.opportunityEligible)
+    .sort((left, right) => (
+      comparePremium(right, left)
+      || compareBigInt(right.unitPrice, left.unitPrice)
+      || compareText(left.orderKey, right.orderKey)
+    ))
+    .slice(0, 10)
+    .map(publicBuyOrderRow);
   return {
-    rows: filteredRows.slice(offset, offset + pageSize),
-    opportunities: [],
+    rows: filteredRows.slice(offset, offset + pageSize).map(publicBuyOrderRow),
+    opportunities,
+    baselineWindowDays: 7,
+    minimumSales: 3,
+    historyObservedSince: options.historyObservedSince ?? null,
     total,
     unfilteredRegionRows,
     page,
