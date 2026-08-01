@@ -544,3 +544,243 @@ test("global catalog runtime normalizes and retains Empire notification scope ac
   );
   assert.deepEqual(sessions[1].scopes, [["3", "20"]]);
 });
+
+test("global catalog runtime retries the same desired notification scope after a session failure", async () => {
+  let scopeCalls = 0;
+  const notificationHealth = {
+    applied: false,
+    requestedEmpireIds: [],
+    appliedEmpireIds: [],
+    lastAppliedAt: null,
+    lastError: null,
+  };
+  const runtime = new runtimeModule.RelayGlobalCatalogRuntime({
+    manifest: { schemas: { global: { fingerprint: "global-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({
+      cacheReady: true,
+      global: {
+        sourceKey: "global",
+        database: "relay-global",
+        port: 3000,
+        schemaFingerprint: "global-v1",
+        ready: true,
+      },
+      regions: new Map(),
+      discoveredAt: "2026-08-01T12:00:00.000Z",
+    }),
+    createSession: () => ({
+      async start() {},
+      async setEmpireNotificationScope(ids) {
+        scopeCalls += 1;
+        notificationHealth.requestedEmpireIds = [...ids];
+        notificationHealth.lastError = scopeCalls === 1 ? "scope failed" : null;
+        return scopeCalls > 1;
+      },
+      health: () => ({
+        state: "connected",
+        connected: true,
+        applied: true,
+        lastAppliedAt: "2026-08-01T12:00:00.000Z",
+        lastError: null,
+        notifications: structuredClone(notificationHealth),
+      }),
+      async stop() {},
+    }),
+    catalogRepository: {
+      getSourceState: () => null,
+      replaceCatalogSnapshot: () => {},
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+  });
+  await runtime.start({ relayBaseUrl: "https://relay.example", claimId: "1" });
+  assert.equal(await runtime.setEmpireNotificationScope(["3"]), false);
+  assert.equal(await runtime.setEmpireNotificationScope(["3"]), true);
+  assert.equal(scopeCalls, 2);
+});
+
+test("global catalog runtime always exposes notification health and notification success preserves a catalog error", async () => {
+  let snapshotHandler;
+  const session = {
+    async start() {},
+    async setEmpireNotificationScope() { return true; },
+    health: () => ({
+      state: "connected",
+      connected: true,
+      applied: true,
+      lastAppliedAt: "2026-08-01T12:00:00.000Z",
+      lastError: null,
+      notifications: {
+        applied: true,
+        requestedEmpireIds: [],
+        appliedEmpireIds: [],
+        lastAppliedAt: null,
+        lastError: null,
+      },
+    }),
+    async stop() {},
+  };
+  const runtime = new runtimeModule.RelayGlobalCatalogRuntime({
+    manifest: { schemas: { global: { fingerprint: "global-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({
+      cacheReady: true,
+      global: {
+        sourceKey: "global",
+        database: "relay-global",
+        port: 3000,
+        schemaFingerprint: "global-v1",
+        ready: true,
+      },
+      regions: new Map(),
+      discoveredAt: "2026-08-01T12:00:00.000Z",
+    }),
+    createSession: (options) => {
+      snapshotHandler = options.onSnapshot;
+      return session;
+    },
+    catalogRepository: {
+      getSourceState: () => null,
+      replaceCatalogSnapshot: () => { throw new Error("catalog write failed"); },
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+    onEmpireNotifications: () => {},
+  });
+
+  assert.deepEqual(runtime.health().subscription.notifications, {
+    applied: true,
+    requestedEmpireIds: [],
+    appliedEmpireIds: [],
+    lastAppliedAt: null,
+    lastError: null,
+  });
+  await runtime.start({ relayBaseUrl: "https://relay.example", claimId: "1" });
+  await assert.rejects(snapshotHandler({
+    entities: [],
+    descriptions: {},
+    regions: [],
+    foundries: [],
+    foundryWarnings: [],
+    siegeNotifications: { notifications: [], outcomes: [], warnings: [] },
+    changed: ["catalogs"],
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 1,
+    receivedAt: "2026-08-01T12:00:00.000Z",
+  }), /catalog write failed/i);
+  assert.match(runtime.health().lastError, /catalog write failed/i);
+
+  await snapshotHandler({
+    entities: [],
+    descriptions: {},
+    regions: [],
+    foundries: [],
+    foundryWarnings: [],
+    siegeNotifications: { notifications: [], outcomes: [], warnings: [] },
+    changed: ["empire-notifications"],
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    generation: 2,
+    receivedAt: "2026-08-01T12:01:00.000Z",
+  });
+  assert.match(runtime.health().lastError, /catalog write failed/i);
+});
+
+test("global catalog runtime fences late and deferred notification snapshots from a replaced session", async () => {
+  const sessions = [];
+  const notificationSnapshots = [];
+  const healthWrites = [];
+  let releaseNotification;
+  const deferredNotification = new Promise((resolve) => {
+    releaseNotification = resolve;
+  });
+  let discoveryCount = 0;
+  const runtime = new runtimeModule.RelayGlobalCatalogRuntime({
+    manifest: { schemas: { global: { fingerprint: "global-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => {
+      discoveryCount += 1;
+      return {
+        cacheReady: true,
+        global: {
+          sourceKey: "global",
+          database: `relay-global-${discoveryCount}`,
+          port: 3000 + discoveryCount,
+          schemaFingerprint: "global-v1",
+          ready: true,
+        },
+        regions: new Map(),
+        discoveredAt: "2026-08-01T12:00:00.000Z",
+      };
+    },
+    createSession: (options) => {
+      const state = {
+        connected: true,
+        applied: true,
+        lastAppliedAt: "2026-08-01T12:00:00.000Z",
+        lastError: null,
+        notifications: {
+          applied: true,
+          requestedEmpireIds: [],
+          appliedEmpireIds: [],
+          lastAppliedAt: null,
+          lastError: null,
+        },
+      };
+      const session = {
+        options,
+        state,
+        async start() {},
+        async setEmpireNotificationScope() { return true; },
+        health: () => structuredClone(state),
+        async stop() {},
+      };
+      sessions.push(session);
+      return session;
+    },
+    catalogRepository: {
+      getSourceState: () => null,
+      replaceCatalogSnapshot: () => {},
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+      recordSubscriptionHealth: (health) => healthWrites.push(health),
+    },
+    onEmpireNotifications: async (snapshot) => {
+      notificationSnapshots.push(snapshot);
+      if (notificationSnapshots.length === 1) await deferredNotification;
+    },
+  });
+  await runtime.start({ relayBaseUrl: "https://relay.example", claimId: "1" });
+  const oldSnapshot = {
+    entities: [],
+    descriptions: {},
+    regions: [],
+    foundries: [],
+    foundryWarnings: [],
+    siegeNotifications: { notifications: [], outcomes: [], warnings: [] },
+    changed: ["empire-notifications"],
+    database: "relay-global-1",
+    schemaFingerprint: "global-v1",
+    generation: 1,
+    receivedAt: "2026-08-01T12:00:00.000Z",
+  };
+  const deferredCommit = sessions[0].options.onSnapshot(oldSnapshot);
+  sessions[0].state.connected = false;
+  sessions[0].state.lastError = "socket closed";
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", claimId: "1" });
+  releaseNotification();
+  await deferredCommit;
+  assert.equal(healthWrites.length, 0, "a deferred old-session commit cannot mutate health");
+
+  await sessions[0].options.onSnapshot({
+    ...oldSnapshot,
+    generation: 2,
+    receivedAt: "2026-08-01T12:02:00.000Z",
+  });
+  assert.equal(notificationSnapshots.length, 1, "a late old-session callback cannot publish");
+});

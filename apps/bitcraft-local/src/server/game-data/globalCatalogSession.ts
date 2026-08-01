@@ -10,6 +10,7 @@ import {
   schemaBindingsReady,
 } from "./schemaManifest.ts";
 import { normalizeAndPairSiegeNotifications } from "./siegeNotifications.ts";
+import { equalitySubscriptionQueries } from "./publicCraftRegionSession.ts";
 
 export const GLOBAL_CATALOG_QUERIES = [
   "SELECT * FROM item_desc",
@@ -161,8 +162,10 @@ function sameScope(left: readonly string[], right: readonly string[]): boolean {
 }
 
 function notificationQueries(empireIds: readonly string[]): string[] {
-  return empireIds.map(
-    (empireId) => `SELECT * FROM empire_notification_state WHERE empire_entity_id = ${empireId}`,
+  return equalitySubscriptionQueries(
+    "empire_notification_state",
+    "empire_entity_id",
+    empireIds,
   );
 }
 
@@ -200,6 +203,8 @@ export class RelayGlobalCatalogSession {
   #notificationRequestedIds: string[] = [];
   #notificationAppliedIds: string[] = [];
   #pendingNotificationResolve: ((applied: boolean) => void) | null = null;
+  #lifecycleGeneration = 0;
+  #connectionGeneration = 0;
   readonly #catalogChanged = () => this.#queueSnapshot("catalogs");
   readonly #regionChanged = () => this.#queueSnapshot("region");
   readonly #foundryChanged = () => this.#queueSnapshot("empire-foundries");
@@ -226,6 +231,7 @@ export class RelayGlobalCatalogSession {
 
   async start(config: SessionConfig): Promise<void> {
     if (this.#connection) throw new Error("Relay global catalog session is already started");
+    const lifecycleGeneration = ++this.#lifecycleGeneration;
     assertSchemaFingerprint(config.manifest, "global", config.schemaFingerprint);
     if (!schemaBindingsReady(config.manifest, "global")) {
       throw new Error("Relay global schema bindings are not generated");
@@ -251,36 +257,80 @@ export class RelayGlobalCatalogSession {
     };
 
     const bindings = await this.#loadBindings();
+    if (lifecycleGeneration !== this.#lifecycleGeneration || this.#config !== config) {
+      throw new Error("Relay global catalog session was stopped during startup");
+    }
     this.#connection = bindings.DbConnection.builder()
       .withUri(config.uri)
       .withDatabaseName(config.database)
       .onConnect((connection) => {
+        if (
+          lifecycleGeneration !== this.#lifecycleGeneration
+          || connection !== this.#connection
+        ) return;
+        const connectionGeneration = ++this.#connectionGeneration;
         this.#health.state = "connected";
         this.#health.connected = true;
         this.#health.lastError = null;
         this.#subscription = connection.subscriptionBuilder()
           .onApplied(() => {
+            if (
+              lifecycleGeneration !== this.#lifecycleGeneration
+              || connectionGeneration !== this.#connectionGeneration
+              || connection !== this.#connection
+              || !this.#health.connected
+            ) return;
             this.#staticApplied = true;
-            this.#applySnapshot(connection, new Set(["catalogs", "region", "empire-foundries"]));
+            this.#applySnapshot(
+              connection,
+              new Set(["catalogs", "region", "empire-foundries"]),
+              undefined,
+              lifecycleGeneration,
+              connectionGeneration,
+            );
             this.#attachTableListeners(connection);
             if (this.#notificationRequestedIds.length) {
               void this.#subscribeToNotificationScope(
                 connection,
                 this.#notificationRequestedIds,
                 this.#notificationScopeGeneration,
+                lifecycleGeneration,
+                connectionGeneration,
               );
             }
           })
-          .onError((_context, error) => this.#recordError(error))
+          .onError((_context, error) => {
+            if (
+              lifecycleGeneration === this.#lifecycleGeneration
+              && connectionGeneration === this.#connectionGeneration
+              && connection === this.#connection
+            ) this.#recordError(error);
+          })
           .subscribe([...GLOBAL_CATALOG_QUERIES]);
       })
       .onConnectError((_context, error) => {
+        if (lifecycleGeneration !== this.#lifecycleGeneration) return;
         this.#health.state = "disconnected";
         this.#recordError(error);
       })
       .onDisconnect((_context, error) => {
+        if (
+          lifecycleGeneration !== this.#lifecycleGeneration
+          || this.#connection == null
+        ) return;
+        this.#connectionGeneration += 1;
         this.#health.state = "disconnected";
         this.#health.connected = false;
+        this.#staticApplied = false;
+        this.#invalidatePendingNotificationAttempt();
+        this.#removeNotificationListener();
+        this.#health.notifications.applied = false;
+        this.#snapshotQueued = false;
+        this.#applyInFlight = false;
+        this.#queuedGroups.clear();
+        this.#pendingGroups.clear();
+        this.#queuedNotificationGeneration = null;
+        this.#pendingNotificationGeneration = null;
         if (error) this.#recordError(error);
       })
       .build();
@@ -288,12 +338,18 @@ export class RelayGlobalCatalogSession {
 
   async setEmpireNotificationScope(empireIds: string[]): Promise<boolean> {
     const normalized = normalizeEmpireNotificationScope(empireIds);
-    if (sameScope(normalized, this.#notificationRequestedIds)) return false;
+    const sameDesiredScope = sameScope(normalized, this.#notificationRequestedIds);
+    if (
+      sameDesiredScope
+      && (
+        sameScope(normalized, this.#notificationAppliedIds)
+        || this.#pendingNotificationSubscription != null
+        || !this.#connection
+        || !this.#staticApplied
+      )
+    ) return false;
 
-    this.#pendingNotificationResolve?.(false);
-    this.#pendingNotificationResolve = null;
-    this.#pendingNotificationSubscription?.unsubscribe();
-    this.#pendingNotificationSubscription = null;
+    this.#invalidatePendingNotificationAttempt();
     const scopeGeneration = ++this.#notificationScopeGeneration;
     this.#notificationRequestedIds = normalized;
     this.#health.notifications.requestedEmpireIds = [...normalized];
@@ -313,95 +369,135 @@ export class RelayGlobalCatalogSession {
           this.#connection,
           new Set(["empire-notifications"]),
           scopeGeneration,
+          this.#lifecycleGeneration,
+          this.#connectionGeneration,
         );
       }
       return true;
     }
 
-    this.#health.notifications.applied = false;
+    this.#health.notifications.applied = this.#notificationSubscription != null;
     const connection = this.#connection;
     if (!connection || !this.#staticApplied) return true;
-    return await this.#subscribeToNotificationScope(connection, normalized, scopeGeneration);
+    return await this.#subscribeToNotificationScope(
+      connection,
+      normalized,
+      scopeGeneration,
+      this.#lifecycleGeneration,
+      this.#connectionGeneration,
+    );
   }
 
   #subscribeToNotificationScope(
     connection: BindingConnection,
     empireIds: string[],
     scopeGeneration: number,
+    lifecycleGeneration: number,
+    connectionGeneration: number,
   ): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       this.#pendingNotificationResolve = resolve;
       let handle: SubscriptionHandle | null = null;
-      handle = connection.subscriptionBuilder()
-        .onApplied(() => {
-          if (
-            scopeGeneration !== this.#notificationScopeGeneration
-            || connection !== this.#connection
-          ) {
-            handle?.unsubscribe();
-            resolve(false);
-            return;
-          }
-          const previous = this.#notificationSubscription;
-          this.#removeNotificationListener();
-          this.#notificationSubscription = handle;
+      const attemptIsCurrent = () => (
+        scopeGeneration === this.#notificationScopeGeneration
+        && lifecycleGeneration === this.#lifecycleGeneration
+        && connectionGeneration === this.#connectionGeneration
+        && connection === this.#connection
+        && this.#health.connected
+        && this.#staticApplied
+      );
+      const finish = (applied: boolean) => {
+        if (this.#pendingNotificationResolve === resolve) {
+          this.#pendingNotificationResolve = null;
+        }
+        resolve(applied);
+      };
+      const fail = (error: unknown) => {
+        handle?.unsubscribe();
+        if (attemptIsCurrent()) {
           this.#pendingNotificationSubscription = null;
-          this.#notificationAppliedIds = [...empireIds];
-          this.#notificationAppliedGeneration = scopeGeneration;
-          this.#health.notifications.applied = true;
-          this.#health.notifications.appliedEmpireIds = [...empireIds];
-          this.#health.notifications.lastAppliedAt = this.#now().toISOString();
-          this.#health.notifications.lastError = null;
-          previous?.unsubscribe();
-          this.#attachNotificationListener(connection, scopeGeneration);
-          this.#applySnapshot(
-            connection,
-            new Set(["empire-notifications"]),
-            scopeGeneration,
-          );
-          if (this.#pendingNotificationResolve === resolve) {
-            this.#pendingNotificationResolve = null;
-          }
-          resolve(true);
-        })
-        .onError((_context, error) => {
-          if (scopeGeneration !== this.#notificationScopeGeneration) {
-            handle?.unsubscribe();
-            resolve(false);
-            return;
-          }
-          handle?.unsubscribe();
-          this.#pendingNotificationSubscription = null;
-          this.#notificationRequestedIds = [...this.#notificationAppliedIds];
-          this.#health.notifications.applied = this.#notificationSubscription != null
-            || this.#notificationAppliedIds.length === 0;
-          this.#health.notifications.requestedEmpireIds = [...this.#notificationAppliedIds];
+          this.#health.notifications.applied = this.#notificationSubscription != null;
           this.#health.notifications.lastError = error instanceof Error
             ? error.message
             : String(error);
-          if (this.#pendingNotificationResolve === resolve) {
-            this.#pendingNotificationResolve = null;
-          }
-          resolve(false);
-        })
-        .subscribe(notificationQueries(empireIds));
-      this.#pendingNotificationSubscription = handle;
+        }
+        finish(false);
+      };
+      try {
+        handle = connection.subscriptionBuilder()
+          .onApplied(() => {
+            if (!attemptIsCurrent()) {
+              handle?.unsubscribe();
+              finish(false);
+              return;
+            }
+            const previous = this.#notificationSubscription;
+            this.#removeNotificationListener();
+            this.#notificationSubscription = handle;
+            this.#pendingNotificationSubscription = null;
+            this.#notificationAppliedIds = [...empireIds];
+            this.#notificationAppliedGeneration = scopeGeneration;
+            this.#health.notifications.applied = true;
+            this.#health.notifications.appliedEmpireIds = [...empireIds];
+            this.#health.notifications.lastAppliedAt = this.#now().toISOString();
+            this.#health.notifications.lastError = null;
+            previous?.unsubscribe();
+            this.#attachNotificationListener(
+              connection,
+              scopeGeneration,
+              lifecycleGeneration,
+              connectionGeneration,
+            );
+            this.#applySnapshot(
+              connection,
+              new Set(["empire-notifications"]),
+              scopeGeneration,
+              lifecycleGeneration,
+              connectionGeneration,
+            );
+            finish(true);
+          })
+          .onError((_context, error) => {
+            if (!attemptIsCurrent()) {
+              handle?.unsubscribe();
+              finish(false);
+              return;
+            }
+            fail(error);
+          })
+          .subscribe(notificationQueries(empireIds));
+        this.#pendingNotificationSubscription = handle;
+      } catch (error) {
+        fail(error);
+      }
     });
+  }
+
+  #invalidatePendingNotificationAttempt(): void {
+    this.#pendingNotificationResolve?.(false);
+    this.#pendingNotificationResolve = null;
+    this.#pendingNotificationSubscription?.unsubscribe();
+    this.#pendingNotificationSubscription = null;
+    this.#notificationScopeGeneration += 1;
   }
 
   #applySnapshot(
     connection: BindingConnection,
     changed: Set<SnapshotGroup>,
     notificationGeneration?: number,
+    lifecycleGeneration = this.#lifecycleGeneration,
+    connectionGeneration = this.#connectionGeneration,
   ): void {
     const config = this.#config;
-    if (!config) return;
+    if (
+      !config
+      || lifecycleGeneration !== this.#lifecycleGeneration
+      || connectionGeneration !== this.#connectionGeneration
+      || connection !== this.#connection
+    ) return;
     if (
       changed.has("empire-notifications")
-      && (
-        notificationGeneration !== this.#notificationAppliedGeneration
-        || notificationGeneration !== this.#notificationScopeGeneration
-      )
+      && notificationGeneration !== this.#notificationAppliedGeneration
     ) {
       changed.delete("empire-notifications");
       if (!changed.size) return;
@@ -445,7 +541,7 @@ export class RelayGlobalCatalogSession {
             [...connection.db.empireNotificationDesc.iter()],
             [...connection.db.empireNotificationState.iter()].filter((row) => {
               const empireId = notificationRowEmpireId(row);
-              return empireId == null || notificationScope.has(empireId);
+              return empireId != null && notificationScope.has(empireId);
             }),
           )
         : { notifications: [], outcomes: [], warnings: [] };
@@ -467,6 +563,11 @@ export class RelayGlobalCatalogSession {
         receivedAt,
       });
       Promise.resolve(result).then(() => {
+        if (
+          lifecycleGeneration !== this.#lifecycleGeneration
+          || connectionGeneration !== this.#connectionGeneration
+          || connection !== this.#connection
+        ) return;
         if (changed.has("empire-notifications")) {
           this.#health.notifications.applied = true;
           this.#health.notifications.lastAppliedAt = receivedAt;
@@ -478,6 +579,11 @@ export class RelayGlobalCatalogSession {
           this.#health.lastError = null;
         }
       }).catch((error: unknown) => {
+        if (
+          lifecycleGeneration !== this.#lifecycleGeneration
+          || connectionGeneration !== this.#connectionGeneration
+          || connection !== this.#connection
+        ) return;
         if (changed.has("empire-notifications")) {
           this.#recordNotificationError(error);
         }
@@ -485,15 +591,39 @@ export class RelayGlobalCatalogSession {
           this.#recordError(error);
         }
       })
-        .finally(() => this.#completeApply(connection));
+        .finally(() => {
+          if (
+            lifecycleGeneration === this.#lifecycleGeneration
+            && connectionGeneration === this.#connectionGeneration
+            && connection === this.#connection
+          ) this.#completeApply(connection, lifecycleGeneration, connectionGeneration);
+        });
     } catch (error) {
       this.#applyInFlight = false;
-      this.#recordError(error);
-      this.#completeApply(connection);
+      if (
+        lifecycleGeneration === this.#lifecycleGeneration
+        && connectionGeneration === this.#connectionGeneration
+        && connection === this.#connection
+      ) {
+        if (changed.has("empire-notifications")) this.#recordNotificationError(error);
+        if ([...changed].some((group) => group !== "empire-notifications")) {
+          this.#recordError(error);
+        }
+        this.#completeApply(connection, lifecycleGeneration, connectionGeneration);
+      }
     }
   }
 
-  #completeApply(connection: BindingConnection): void {
+  #completeApply(
+    connection: BindingConnection,
+    lifecycleGeneration: number,
+    connectionGeneration: number,
+  ): void {
+    if (
+      lifecycleGeneration !== this.#lifecycleGeneration
+      || connectionGeneration !== this.#connectionGeneration
+      || connection !== this.#connection
+    ) return;
     this.#applyInFlight = false;
     if (!this.#pendingGroups.size) return;
     const changed = new Set(this.#pendingGroups);
@@ -502,17 +632,20 @@ export class RelayGlobalCatalogSession {
     this.#pendingNotificationGeneration = null;
     if (
       changed.has("empire-notifications")
-      && (
-        notificationGeneration !== this.#notificationAppliedGeneration
-        || notificationGeneration !== this.#notificationScopeGeneration
-      )
+      && notificationGeneration !== this.#notificationAppliedGeneration
     ) {
       changed.delete("empire-notifications");
     }
     if (!changed.size) return;
     queueMicrotask(() => {
       if (this.#connection === connection) {
-        this.#applySnapshot(connection, changed, notificationGeneration ?? undefined);
+        this.#applySnapshot(
+          connection,
+          changed,
+          notificationGeneration ?? undefined,
+          lifecycleGeneration,
+          connectionGeneration,
+        );
       }
     });
   }
@@ -556,13 +689,24 @@ export class RelayGlobalCatalogSession {
   #attachNotificationListener(
     connection: BindingConnection,
     scopeGeneration: number,
+    lifecycleGeneration: number,
+    connectionGeneration: number,
   ): void {
     const listener = () => {
       if (
-        scopeGeneration !== this.#notificationScopeGeneration
+        lifecycleGeneration !== this.#lifecycleGeneration
+        || connectionGeneration !== this.#connectionGeneration
+        || connection !== this.#connection
+        || !this.#health.connected
         || scopeGeneration !== this.#notificationAppliedGeneration
       ) return;
-      this.#queueSnapshot("empire-notifications", scopeGeneration);
+      this.#queueSnapshot(
+        "empire-notifications",
+        scopeGeneration,
+        connection,
+        lifecycleGeneration,
+        connectionGeneration,
+      );
     };
     connection.db.empireNotificationState.onInsert?.(listener);
     connection.db.empireNotificationState.onUpdate?.(listener);
@@ -600,8 +744,19 @@ export class RelayGlobalCatalogSession {
     ];
   }
 
-  #queueSnapshot(group: SnapshotGroup, notificationGeneration?: number): void {
-    if (!this.#connection) return;
+  #queueSnapshot(
+    group: SnapshotGroup,
+    notificationGeneration?: number,
+    connection = this.#connection,
+    lifecycleGeneration = this.#lifecycleGeneration,
+    connectionGeneration = this.#connectionGeneration,
+  ): void {
+    if (
+      !connection
+      || connection !== this.#connection
+      || lifecycleGeneration !== this.#lifecycleGeneration
+      || connectionGeneration !== this.#connectionGeneration
+    ) return;
     if (
       group === "empire-notifications"
       && notificationGeneration !== this.#notificationAppliedGeneration
@@ -618,11 +773,17 @@ export class RelayGlobalCatalogSession {
       this.#queuedGroups.clear();
       const queuedNotificationGeneration = this.#queuedNotificationGeneration;
       this.#queuedNotificationGeneration = null;
-      if (this.#connection) {
+      if (
+        connection === this.#connection
+        && lifecycleGeneration === this.#lifecycleGeneration
+        && connectionGeneration === this.#connectionGeneration
+      ) {
         this.#applySnapshot(
-          this.#connection,
+          connection,
           changed,
           queuedNotificationGeneration ?? undefined,
+          lifecycleGeneration,
+          connectionGeneration,
         );
       }
     });
@@ -648,12 +809,11 @@ export class RelayGlobalCatalogSession {
   }
 
   async stop(): Promise<void> {
+    this.#lifecycleGeneration += 1;
+    this.#connectionGeneration += 1;
     this.#removeTableListeners();
     this.#removeNotificationListener();
-    this.#pendingNotificationResolve?.(false);
-    this.#pendingNotificationResolve = null;
-    this.#pendingNotificationSubscription?.unsubscribe();
-    this.#pendingNotificationSubscription = null;
+    this.#invalidatePendingNotificationAttempt();
     this.#notificationSubscription?.unsubscribe();
     this.#notificationSubscription = null;
     this.#subscription?.unsubscribe();

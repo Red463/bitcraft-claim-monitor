@@ -130,6 +130,7 @@ export class RelayGlobalCatalogRuntime {
   #empireNotificationScope: string[] = [];
   #reconcileInFlight: Promise<boolean> | null = null;
   #lastTopologyCheckedAt = 0;
+  #lifecycleGeneration = 0;
 
   constructor(dependencies: RuntimeDependencies) {
     this.#manifest = dependencies.manifest;
@@ -147,6 +148,7 @@ export class RelayGlobalCatalogRuntime {
 
   async start(config: { relayBaseUrl: string; claimId: string }): Promise<void> {
     if (this.#session) throw new Error("Relay global catalog runtime is already started");
+    const lifecycleGeneration = ++this.#lifecycleGeneration;
     this.#relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
     this.#claimId = String(config.claimId).trim();
     try {
@@ -157,7 +159,7 @@ export class RelayGlobalCatalogRuntime {
       this.#lastTopologyCheckedAt = this.#now();
       const generation = Number(this.#catalogRepository.getSourceState()?.generation ?? 0) + 1;
       this.#session = this.#createSession({
-        onSnapshot: (snapshot) => this.#commitSnapshot(snapshot),
+        onSnapshot: (snapshot) => this.#commitSnapshot(snapshot, lifecycleGeneration),
       });
       await this.#session.start({
         ...this.#source,
@@ -167,9 +169,11 @@ export class RelayGlobalCatalogRuntime {
       if (this.#empireNotificationScope.length) {
         await this.#session.setEmpireNotificationScope(this.#empireNotificationScope);
       }
-      this.#lastError = null;
+      if (lifecycleGeneration === this.#lifecycleGeneration) this.#lastError = null;
     } catch (error) {
-      this.#lastError = error instanceof Error ? error.message : String(error);
+      if (lifecycleGeneration === this.#lifecycleGeneration) {
+        this.#lastError = error instanceof Error ? error.message : String(error);
+      }
       try {
         await this.#session?.stop();
       } catch {
@@ -184,8 +188,10 @@ export class RelayGlobalCatalogRuntime {
     const normalized = normalizeEmpireNotificationScope(empireIds);
     const identical = normalized.length === this.#empireNotificationScope.length
       && normalized.every((value, index) => value === this.#empireNotificationScope[index]);
-    if (identical) return false;
-    this.#empireNotificationScope = normalized;
+    const retryFailedScope = identical
+      && this.#session?.health().notifications.lastError != null;
+    if (identical && !retryFailedScope) return false;
+    if (!identical) this.#empireNotificationScope = normalized;
     this.#notificationLastError = null;
     if (!this.#session) return true;
     try {
@@ -232,9 +238,19 @@ export class RelayGlobalCatalogRuntime {
     });
   }
 
-  async #commitSnapshot(snapshot: GlobalCatalogSnapshot): Promise<void> {
+  async #commitSnapshot(
+    snapshot: GlobalCatalogSnapshot,
+    lifecycleGeneration: number,
+  ): Promise<void> {
+    if (
+      lifecycleGeneration !== this.#lifecycleGeneration
+      || this.#session == null
+    ) return;
     const claimId = this.#claimId;
     if (!claimId) throw new Error("Relay global catalog runtime has no configured claim");
+    const hasCatalogChanges = snapshot.changed.some(
+      (group) => group !== "empire-notifications",
+    );
     if (snapshot.changed.includes("empire-notifications")) {
       try {
         await this.#onEmpireNotifications?.({
@@ -244,11 +260,20 @@ export class RelayGlobalCatalogRuntime {
           generation: snapshot.generation,
           receivedAt: snapshot.receivedAt,
         });
+        if (
+          lifecycleGeneration !== this.#lifecycleGeneration
+          || this.#session == null
+        ) return;
         this.#notificationLastError = null;
       } catch (error) {
+        if (
+          lifecycleGeneration !== this.#lifecycleGeneration
+          || this.#session == null
+        ) return;
         this.#notificationLastError = error instanceof Error ? error.message : String(error);
       }
     }
+    if (!hasCatalogChanges) return;
     try {
       const provenance = {
         provider: "relay" as const,
@@ -315,6 +340,10 @@ export class RelayGlobalCatalogRuntime {
           generation: this.#currentStateRepository.nextGeneration(claimId),
           domains,
         });
+        if (
+          lifecycleGeneration !== this.#lifecycleGeneration
+          || this.#session == null
+        ) return;
       }
       if (snapshot.changed.includes("empire-foundries")) {
         await this.#onEmpireFoundries?.({
@@ -325,6 +354,10 @@ export class RelayGlobalCatalogRuntime {
           generation: snapshot.generation,
           receivedAt: snapshot.receivedAt,
         });
+        if (
+          lifecycleGeneration !== this.#lifecycleGeneration
+          || this.#session == null
+        ) return;
       }
       const health = this.#session?.health();
       await this.#currentStateRepository.recordSubscriptionHealth?.({
@@ -334,8 +367,15 @@ export class RelayGlobalCatalogRuntime {
         connected: health?.connected === true && !health.lastError,
         lastError: health?.lastError ?? null,
       }, snapshot.receivedAt);
-      this.#lastError = null;
+      if (
+        lifecycleGeneration === this.#lifecycleGeneration
+        && this.#session != null
+      ) this.#lastError = null;
     } catch (error) {
+      if (
+        lifecycleGeneration !== this.#lifecycleGeneration
+        || this.#session == null
+      ) return;
       this.#lastError = error instanceof Error ? error.message : String(error);
       throw error;
     }
@@ -353,6 +393,13 @@ export class RelayGlobalCatalogRuntime {
         applied: false,
         lastAppliedAt: null,
         lastError: null,
+        notifications: {
+          applied: true,
+          requestedEmpireIds: [...this.#empireNotificationScope],
+          appliedEmpireIds: [],
+          lastAppliedAt: null,
+          lastError: this.#notificationLastError,
+        },
       },
       lastError: this.#lastError,
       notificationLastError: this.#notificationLastError,
@@ -360,6 +407,7 @@ export class RelayGlobalCatalogRuntime {
   }
 
   async stop(): Promise<void> {
+    this.#lifecycleGeneration += 1;
     await this.#session?.stop();
     this.#session = null;
     this.#relayBaseUrl = null;

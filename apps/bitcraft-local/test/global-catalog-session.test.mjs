@@ -18,6 +18,8 @@ function fakeBindings() {
     disconnected: false,
     unsubscribed: false,
     tableCallbacks: new Map(),
+    subscriptionBuilderError: null,
+    subscribeError: null,
   };
   const cachedTable = (rows) => {
     const callbacks = {
@@ -31,6 +33,7 @@ function fakeBindings() {
       delete: [],
     };
     return {
+    rows,
     iter: () => rows[Symbol.iterator](),
     onInsert: (callback) => {
       callbacks.insert.add(callback);
@@ -222,6 +225,11 @@ function fakeBindings() {
       ]),
     },
     subscriptionBuilder() {
+      if (state.subscriptionBuilderError) {
+        const error = state.subscriptionBuilderError;
+        state.subscriptionBuilderError = null;
+        throw error;
+      }
       const subscription = {
         queries: null,
         onApplied: null,
@@ -238,6 +246,11 @@ function fakeBindings() {
           return subscriptionBuilder;
         },
         subscribe(queries) {
+          if (state.subscribeError) {
+            const error = state.subscribeError;
+            state.subscribeError = null;
+            throw error;
+          }
           subscription.queries = queries;
           state.subscriptions.push(subscription);
           if (state.subscriptions.length === 1) {
@@ -533,19 +546,25 @@ test("typed global catalog session replaces exact Empire notification scopes wit
     session.setEmpireNotificationScope(["3 OR 1 = 1"]),
     /decimal/i,
   );
+  fake.connection.db.empireNotificationState.rows.push({
+    entityId: 9999n,
+    empireEntityId: "malformed",
+    notificationType: { tag: "SuccessfulSiege" },
+    timestamp: 1_767_225_600,
+    textReplacement: ["Must be filtered", "19:0:0"],
+  });
   const firstApply = session.setEmpireNotificationScope(["20", "3", "20"]);
   assert.deepEqual(fake.state.subscriptions[1].queries, [
-    "SELECT * FROM empire_notification_state WHERE empire_entity_id = 3",
-    "SELECT * FROM empire_notification_state WHERE empire_entity_id = 20",
+    "SELECT * FROM empire_notification_state WHERE empire_entity_id = 3 OR empire_entity_id = 20",
   ]);
   const notificationQueries = fake.state.subscriptions
     .flatMap(({ queries }) => queries ?? [])
     .filter((query) => query.includes("empire_notification_state"));
   assert.ok(
     notificationQueries.every((query) => (
-      /^SELECT \* FROM empire_notification_state WHERE empire_entity_id = \d+$/.test(query)
+      /^SELECT \* FROM empire_notification_state WHERE empire_entity_id = \d+(?: OR empire_entity_id = \d+)*$/.test(query)
     )),
-    "every notification-state query must use one exact indexed Empire-ID equality",
+    "every notification-state query must contain only exact indexed Empire-ID equalities",
   );
   assert.equal(snapshots.length, 0, "replacement data must wait for onApplied");
   fake.state.subscriptions[1].onApplied({});
@@ -565,6 +584,7 @@ test("typed global catalog session replaces exact Empire notification scopes wit
       outcome: "attacker_won",
     }],
   );
+  assert.deepEqual(snapshots[0].siegeNotifications.warnings, []);
   assert.equal(await session.setEmpireNotificationScope(["20", "3"]), false);
   assert.equal(fake.state.subscriptions.length, 2, "identical normalized scope is a no-op");
 
@@ -573,8 +593,8 @@ test("typed global catalog session replaces exact Empire notification scopes wit
   fake.connection.db.empireNotificationState.triggerUpdate();
   const replacementApply = session.setEmpireNotificationScope(["30"]);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(snapshots.length, 2, "unrelated static updates continue while replacement applies");
-  assert.deepEqual(snapshots[1].changed, ["region"]);
+  assert.equal(snapshots.length, 2, "the active last-good scope continues while replacement applies");
+  assert.deepEqual(snapshots[1].changed, ["region", "empire-notifications"]);
   fake.state.subscriptions[2].onApplied({});
   assert.equal(await replacementApply, true);
   await new Promise((resolve) => setImmediate(resolve));
@@ -641,11 +661,200 @@ test("typed global catalog session keeps catalog health independent when a repla
   assert.equal(session.health().applied, true);
   assert.equal(session.health().lastError, null);
   assert.match(session.health().notifications.lastError, /scope rejected/i);
+  assert.deepEqual(session.health().notifications.requestedEmpireIds, ["30"]);
   assert.deepEqual(session.health().notifications.appliedEmpireIds, ["3", "20"]);
 
+  fake.connection.db.empireNotificationState.triggerUpdate();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, snapshotCount + 1, "failed replacement keeps the active listener live");
+  assert.deepEqual(
+    snapshots.at(-1).siegeNotifications.outcomes.map(({ attackerEmpireEntityId }) => attackerEmpireEntityId),
+    ["3"],
+  );
+
+  const retry = session.setEmpireNotificationScope(["30"]);
+  assert.equal(fake.state.subscriptions.length, 4, "the same desired scope retries after failure");
+  fake.state.subscriptions[3].onApplied({});
+  assert.equal(await retry, true);
   await session.stop();
   assert.equal(fake.state.subscriptions[1].unsubscribed, true);
   assert.equal(fake.connection.db.empireNotificationState.callbackHistory.update.length > 0, true);
+});
+
+test("typed global catalog session batches large exact Empire scopes into bounded equality queries", async () => {
+  const fake = fakeBindings();
+  const session = new sessionModule.RelayGlobalCatalogSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: () => {},
+  });
+  await session.start({
+    uri: "wss://relay.example:3000",
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    manifest: readyManifest,
+    generation: 50,
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.subscriptions[0].onApplied({});
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const ids = Array.from({ length: 205 }, (_, index) => String(index + 1)).reverse();
+  const apply = session.setEmpireNotificationScope(ids);
+  const queries = fake.state.subscriptions[1].queries;
+  assert.equal(queries.length, 3);
+  assert.deepEqual(
+    queries.map((query) => (query.match(/empire_entity_id =/g) ?? []).length),
+    [100, 100, 5],
+  );
+  assert.match(queries[0], /empire_entity_id = 1 OR empire_entity_id = 2/);
+  assert.match(queries[2], /empire_entity_id = 205$/);
+  fake.state.subscriptions[1].onError({}, new Error("fixture cleanup"));
+  assert.equal(await apply, false);
+  await session.stop();
+});
+
+test("typed global catalog session records synchronous scoped-subscription failures without rejecting", async () => {
+  const fake = fakeBindings();
+  const session = new sessionModule.RelayGlobalCatalogSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: () => {},
+  });
+  await session.start({
+    uri: "wss://relay.example:3000",
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    manifest: readyManifest,
+    generation: 60,
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.subscriptions[0].onApplied({});
+  await new Promise((resolve) => setImmediate(resolve));
+
+  fake.state.subscriptionBuilderError = new Error("builder failed synchronously");
+  assert.equal(await session.setEmpireNotificationScope(["3"]), false);
+  assert.match(session.health().notifications.lastError, /builder failed synchronously/i);
+  assert.deepEqual(session.health().notifications.requestedEmpireIds, ["3"]);
+
+  fake.state.subscribeError = new Error("subscribe failed synchronously");
+  assert.equal(await session.setEmpireNotificationScope(["3"]), false);
+  assert.match(session.health().notifications.lastError, /subscribe failed synchronously/i);
+  await session.stop();
+});
+
+test("typed global catalog session records auto-scope subscribe throws without an unhandled rejection", async () => {
+  const fake = fakeBindings();
+  const session = new sessionModule.RelayGlobalCatalogSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: () => {},
+  });
+  assert.equal(await session.setEmpireNotificationScope(["3"]), true);
+  await session.start({
+    uri: "wss://relay.example:3000",
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    manifest: readyManifest,
+    generation: 70,
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.subscribeError = new Error("auto scope failed synchronously");
+  fake.state.subscriptions[0].onApplied({});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(session.health().notifications.lastError, /auto scope failed synchronously/i);
+  assert.equal(session.health().lastError, null);
+  await session.stop();
+});
+
+test("typed global catalog session fences late scope callbacks after disconnect and stop", async () => {
+  const fake = fakeBindings();
+  const snapshots = [];
+  const session = new sessionModule.RelayGlobalCatalogSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+  });
+  await session.start({
+    uri: "wss://relay.example:3000",
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    manifest: readyManifest,
+    generation: 80,
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.subscriptions[0].onApplied({});
+  await new Promise((resolve) => setImmediate(resolve));
+  snapshots.length = 0;
+
+  const disconnectedApply = session.setEmpireNotificationScope(["3"]);
+  fake.state.onDisconnect({}, new Error("socket closed"));
+  fake.state.subscriptions[1].onApplied({});
+  assert.equal(await disconnectedApply, false);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots.length, 0);
+  await session.stop();
+
+  const stoppedFake = fakeBindings();
+  const stoppedSession = new sessionModule.RelayGlobalCatalogSession({
+    loadBindings: async () => stoppedFake.module,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+  });
+  await stoppedSession.start({
+    uri: "wss://relay.example:3000",
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    manifest: readyManifest,
+    generation: 81,
+  });
+  stoppedFake.state.onConnect(stoppedFake.connection);
+  stoppedFake.state.subscriptions[0].onApplied({});
+  await new Promise((resolve) => setImmediate(resolve));
+  const stoppedApply = stoppedSession.setEmpireNotificationScope(["20"]);
+  const lateSubscription = stoppedFake.state.subscriptions[1];
+  await stoppedSession.stop();
+  assert.equal(await stoppedApply, false);
+  const stoppedHealth = stoppedSession.health();
+  lateSubscription.onError({}, new Error("late error after stop"));
+  lateSubscription.onApplied({});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(stoppedSession.health(), stoppedHealth);
+});
+
+test("typed global catalog session invalidates a deferred notification publication when disconnected", async () => {
+  const fake = fakeBindings();
+  let rejectNotification;
+  const deferredNotification = new Promise((_resolve, reject) => {
+    rejectNotification = reject;
+  });
+  const publishedSnapshots = [];
+  const session = new sessionModule.RelayGlobalCatalogSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: (snapshot) => {
+      publishedSnapshots.push(snapshot);
+      return snapshot.changed.includes("empire-notifications") ? deferredNotification : undefined;
+    },
+  });
+  await session.start({
+    uri: "wss://relay.example:3000",
+    database: "relay-global",
+    schemaFingerprint: "global-v1",
+    manifest: readyManifest,
+    generation: 90,
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.subscriptions[0].onApplied({});
+  await new Promise((resolve) => setImmediate(resolve));
+  const apply = session.setEmpireNotificationScope(["3", "20"]);
+  fake.state.subscriptions[1].onApplied({});
+  assert.equal(await apply, true);
+  fake.state.onDisconnect({}, new Error("socket closed"));
+  const disconnectedHealth = session.health();
+  rejectNotification(new Error("late snapshot failure"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(session.health(), disconnectedHealth);
+
+  fake.state.onConnect(fake.connection);
+  fake.state.subscriptions[2].onApplied({});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(publishedSnapshots.length, 3, "a reconnect can apply after invalidating deferred work");
+  await session.stop();
 });
 
 test("typed global catalog session refuses schema mismatch before opening a connection", async () => {
