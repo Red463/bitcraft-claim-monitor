@@ -335,6 +335,7 @@ test("Empire response freshness requires both the selected and primary regional 
     warnings: [
       "Global Siege: Unmatched siege outcome notification.",
       "Global Siege: Unmatched siege outcome notification.",
+      "Global Foundry: ignored malformed global row.",
     ],
   }, "19", {
     now: () => Date.parse("2026-07-30T18:03:00.000Z"),
@@ -344,5 +345,33 @@ test("Empire response freshness requires both the selected and primary regional 
   assert.equal(
     warned.errors.filter((error) => error === "Global Siege: Unmatched siege outcome notification.").length,
     1,
+  );
+  assert.equal(warned.errors.includes("Global Foundry: ignored malformed global row."), true);
+
+  const unrelatedRegionPending = empireSnapshotStatus({
+    ...stored,
+    warnings: ["Relay empires have not loaded region 7 yet."],
+  }, "19", {
+    now: () => Date.parse("2026-07-30T18:03:00.000Z"),
+    staleAfterMs: 60_000,
+  });
+  assert.equal(unrelatedRegionPending.partial, false);
+  assert.deepEqual(unrelatedRegionPending.errors, []);
+
+  const requiredRegionPending = empireSnapshotStatus({
+    ...stored,
+    data: {
+      ...stored.data,
+      regions: stored.data.regions.filter((region) => region.regionId !== "19"),
+    },
+    warnings: ["Relay empires have not loaded region 19 yet."],
+  }, "19", {
+    now: () => Date.parse("2026-07-30T18:03:00.000Z"),
+    staleAfterMs: 60_000,
+  });
+  assert.equal(requiredRegionPending.partial, true);
+  assert.equal(
+    requiredRegionPending.errors.includes("Relay empires have not loaded region 19 yet."),
+    true,
   );
 });

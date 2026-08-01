@@ -36,6 +36,18 @@ function regionalMetadata(data, regionId) {
   return list(record(data).regions).find((row) => text(row?.regionId) === regionId) ?? null;
 }
 
+function empireWarningAffectsView(warning, requiredRegionIds) {
+  if (/^Global (?:Siege|Foundry):/.test(warning)) return true;
+  if (warning === "Relay Empire configured scope changed; retained rows were pruned before reconnecting.") {
+    return true;
+  }
+  const taggedRegionWarning = /^Region (\d+):/.exec(warning);
+  if (taggedRegionWarning) return requiredRegionIds.includes(taggedRegionWarning[1]);
+  const unloadedRegionWarning = /^Relay empires have not loaded region (\d+) yet\.$/.exec(warning);
+  if (unloadedRegionWarning) return requiredRegionIds.includes(unloadedRegionWarning[1]);
+  return false;
+}
+
 export function empireSnapshotStatus(snapshot, regionIdValue, options = {}) {
   const source = record(snapshot);
   const data = record(source.data);
@@ -55,11 +67,7 @@ export function empireSnapshotStatus(snapshot, regionIdValue, options = {}) {
   let partial = !hasRequiredRegionalMetadata && text(source.confidence) !== "authoritative";
   const snapshotWarnings = list(source.warnings)
     .map(String)
-    .filter((warning) => {
-      if (!warning) return false;
-      const taggedRegionWarning = /^Region (\d+):/.exec(warning);
-      return !taggedRegionWarning || requiredRegionIds.includes(taggedRegionWarning[1]);
-    });
+    .filter((warning) => warning && empireWarningAffectsView(warning, requiredRegionIds));
   if (snapshotWarnings.length) {
     partial = true;
     errors.push(...snapshotWarnings);
