@@ -69,7 +69,9 @@ export type RegionalClaimsSnapshot = {
 type WireRecord = Record<string, unknown>;
 
 const DEFAULT_MAX_CLAIMS = 5_000;
-const DEFAULT_MAX_IDS_PER_QUERY = 100;
+// Relay's current regional source applies indexed point subscriptions
+// reliably, while OR-combined username predicates can remain unapplied.
+const DEFAULT_MAX_IDS_PER_QUERY = 1;
 const DEFAULT_MAX_APPLY_ROWS = 12_000;
 
 async function loadBundledRegionalBindings(): Promise<RegionalBindingModule> {
@@ -116,14 +118,20 @@ export class RelayRegionClaimsSession {
   #applyInFlight = false;
   #applyPending = false;
   #listenersAttached = false;
+  #stopping = false;
   readonly #baseChanged = () => this.#queueOwnerRefresh();
   readonly #ownerChanged = () => this.#queueSnapshot();
   #health = {
     connected: false,
     applied: false,
+    stage: "idle",
     lastAppliedAt: null as string | null,
     lastApplyDurationMs: null as number | null,
     rowCount: 0,
+    claimRowCount: 0,
+    ownerIdCount: 0,
+    ownerQueryCount: 0,
+    ownerQueriesPending: 0,
     lastError: null as string | null,
   };
 
@@ -136,6 +144,7 @@ export class RelayRegionClaimsSession {
 
   async start(config: SessionConfig): Promise<void> {
     if (this.#connection) throw new Error("Relay regional-claims session is already started");
+    this.#stopping = false;
     assertSchemaFingerprint(config.manifest, "regional", config.schemaFingerprint);
     if (!schemaBindingsReady(config.manifest, "regional")) throw new Error("Relay regional schema bindings are not generated");
     this.#config = {
@@ -153,6 +162,7 @@ export class RelayRegionClaimsSession {
       .withDatabaseName(config.database)
       .onConnect((connection) => {
         this.#health.connected = true;
+        this.#health.stage = "base";
         this.#health.lastError = null;
         this.#baseSubscription = connection.subscriptionBuilder()
           .onApplied(() => this.#guard(() => {
@@ -166,10 +176,14 @@ export class RelayRegionClaimsSession {
             "SELECT * FROM building_claim_desc",
           ]);
       })
-      .onConnectError((_context, error) => this.#recordError(error))
+      .onConnectError((_context, error) => {
+        if (!this.#stopping) this.#recordError(error);
+      })
       .onDisconnect((_context, error) => {
         this.#health.connected = false;
-        this.#recordError(error ?? new Error("Relay regional-claims subscription disconnected."));
+        if (!this.#stopping) {
+          this.#recordError(error ?? new Error("Relay regional-claims subscription disconnected."));
+        }
       })
       .build();
   }
@@ -182,6 +196,8 @@ export class RelayRegionClaimsSession {
   #refreshOwners(connection: BindingConnection): void {
     const config = this.#requiredConfig();
     const claimRows = rows(connection.db.claimState);
+    this.#health.stage = "owners";
+    this.#health.claimRowCount = claimRows.length;
     if (claimRows.length > config.maxClaims) {
       throw new Error(`Relay regional-claims budget ${config.maxClaims} exceeded by ${claimRows.length} claims`);
     }
@@ -202,8 +218,12 @@ export class RelayRegionClaimsSession {
       ownerIds,
       config.maxIdsPerQuery,
     );
+    this.#health.ownerIdCount = new Set(ownerIds).size;
+    this.#health.ownerQueryCount = queries.length;
+    this.#health.ownerQueriesPending = queries.length;
     if (!queries.length) {
       this.#refreshingOwners = false;
+      this.#health.stage = "applying";
       this.#applySnapshot(connection);
       return;
     }
@@ -213,8 +233,10 @@ export class RelayRegionClaimsSession {
         .onApplied(() => this.#guard(() => {
           if (epoch !== this.#ownerEpoch) return;
           remaining -= 1;
+          this.#health.ownerQueriesPending = remaining;
           if (remaining === 0) {
             this.#refreshingOwners = false;
+            this.#health.stage = "applying";
             this.#applySnapshot(connection);
           }
         }))
@@ -264,6 +286,7 @@ export class RelayRegionClaimsSession {
         receivedAt,
       })).then(() => {
         this.#health.applied = true;
+        this.#health.stage = "applied";
         this.#health.lastAppliedAt = receivedAt;
         this.#health.lastError = null;
       }).catch((error: unknown) => this.#recordError(error))
@@ -359,6 +382,7 @@ export class RelayRegionClaimsSession {
   }
 
   async stop(): Promise<void> {
+    this.#stopping = true;
     this.#ownerEpoch += 1;
     this.#removeListeners();
     this.#clearOwnerSubscriptions();

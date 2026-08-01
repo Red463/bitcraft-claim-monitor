@@ -591,7 +591,7 @@ indexed base generation still applied and later changes remain live. Marker
 churn during staged enrichment now queues one coherent follow-up generation
 instead of unsubscribing a generation while the SDK is applying it.
 
-## Regional claim rankings — 2026-07-30
+## Regional claim rankings — 2026-08-01
 
 The regional database itself is the bounded source for `claim_state`,
 `claim_local_state`, and `building_claim_desc`. Claim identity joins on
@@ -602,9 +602,11 @@ metadata.
 
 Owner display names are the only unbounded secondary relation. The session
 collects the exact `owner_player_entity_id` values present in the regional
-claim rows and subscribes to `player_username_state` with chunked equality
-queries for those IDs only. It never opens an unfiltered username or location
-subscription.
+claim rows and subscribes to `player_username_state` with indexed point
+subscriptions for those IDs only. Live measurements found that Relay left
+OR-combined username predicates unapplied even with only ten IDs, while 121
+single-ID subscriptions applied the complete 1,115-claim projection in
+seconds. It never opens an unfiltered username or location subscription.
 
 The join is staged as a numbered `region-claims` generation and is published
 only after its required subscriptions validate. Insert, update, delete,
@@ -612,6 +614,16 @@ reconnect, and region changes rebuild the complete projection; last-good data
 remains available during failure. The Region page composes this current
 generation with global region metadata without a scheduled ingestion job or
 ranking-specific SQL table.
+
+The read-only reconnect verifier
+`apps/bitcraft-local/scripts/verify-relay-region-reconnect-live.mjs`
+published the initial region-19 generation, injected one simulated socket
+failure, then published a replacement generation through a second real
+session. It observed exactly two sessions, one reconnect, 1,115 claims before
+and after recovery, and repository generations 1 through 4 without
+cross-claim or cross-region leakage. Intentional session shutdown is now
+silent, so replacing a connection cannot schedule a second spurious
+reconnect.
 
 The legacy trade-volume values were scheduled BitJita aggregates, not fields
 present in these authoritative current rows. Their cards and payloads are
