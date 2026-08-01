@@ -16,6 +16,7 @@ SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 LOCK_FILE="${LOCK_FILE:-/run/lock/bitcraft-claim-monitor-relay-deploy.lock}"
 KEEP_RELEASES="${KEEP_RELEASES:-3}"
 RUN_USER="${RUN_USER:-bitcraft}"
+RUN_HOME="${RUN_HOME:-$APP_ROOT}"
 WEB_SERVICE="${WEB_SERVICE:-bitcraft-claim-monitor-relay.service}"
 WORKER_SERVICE="${WORKER_SERVICE:-bitcraft-claim-monitor-relay-worker.service}"
 COLLECTOR_TIMER="${COLLECTOR_TIMER:-bitcraft-claim-monitor-relay-collector.timer}"
@@ -142,6 +143,19 @@ run_logged() {
   printf "%s failed (exit %s)\n" "$label" "$status"
   print_log_tail
   return "$status"
+}
+
+run_git_as_user() {
+  sudo -u "$RUN_USER" env HOME="$RUN_HOME" git "$@"
+}
+
+sync_source_revision() {
+  run_logged "Fetching latest code" run_git_as_user \
+    -C "$SOURCE_DIR" fetch --prune origin main
+  run_git_as_user -C "$SOURCE_DIR" merge-base --is-ancestor "$REVISION" origin/main || {
+    echo "Requested revision is not reachable from origin/main."
+    return 1
+  }
 }
 
 service_summary() {
@@ -274,8 +288,8 @@ prepare_release() {
   local release_dir="$1"
   install -d -o "$RUN_USER" -g "$RUN_USER" "$RELEASES_DIR"
   if [[ ! -d "$release_dir" ]]; then
-    run_logged "Creating release worktree" sudo -u "$RUN_USER" \
-      git -C "$SOURCE_DIR" worktree add --detach "$release_dir" "$REVISION"
+    run_logged "Creating release worktree" run_git_as_user \
+      -C "$SOURCE_DIR" worktree add --detach "$release_dir" "$REVISION"
   fi
   run_logged "Installing dependencies" sudo -u "$RUN_USER" bash -lc \
     "cd '$release_dir' && corepack pnpm install --frozen-lockfile"
@@ -558,9 +572,9 @@ prune_releases() {
       continue
     fi
     run_logged "Removing old release $(basename "$path")" \
-      sudo -u "$RUN_USER" git -C "$SOURCE_DIR" worktree remove --force "$path" || status=1
+      run_git_as_user -C "$SOURCE_DIR" worktree remove --force "$path" || status=1
   done
-  sudo -u "$RUN_USER" git -C "$SOURCE_DIR" worktree prune || status=1
+  run_git_as_user -C "$SOURCE_DIR" worktree prune || status=1
   return "$status"
 }
 
@@ -633,12 +647,7 @@ main() {
   deploy_started="$(date +%s)"
 
   install -d -o "$RUN_USER" -g "$RUN_USER" "$SOURCE_DIR" "$RELEASES_DIR"
-  run_logged "Fetching latest code" sudo -u "$RUN_USER" \
-    git -C "$SOURCE_DIR" fetch --prune origin main
-  sudo -u "$RUN_USER" git -C "$SOURCE_DIR" merge-base --is-ancestor "$REVISION" origin/main || {
-    echo "Requested revision is not reachable from origin/main."
-    exit 1
-  }
+  sync_source_revision
 
   local release_dir="$RELEASES_DIR/$REVISION"
   local previous_release=""

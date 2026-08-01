@@ -4,9 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const script = new URL("../../deploy/update-bitcraft-claim-monitor-relay", import.meta.url);
 const hasBash = process.platform !== "win32" && spawnSync("bash", ["--version"]).status === 0;
+const gitHomeBash = process.env.BASH_PATH ?? "bash";
+const hasGitHomeBash = spawnSync(gitHomeBash, ["--version"]).status === 0;
 
 test("failure after unit installation restores every live artifact and prior runtime", { skip: !hasBash }, () => {
   const root = mkdtempSync(join(tmpdir(), "bitcraft-deploy-"));
@@ -286,6 +289,91 @@ test("schema backup selection distinguishes ordinary, migration, and forced depl
 
   try {
     const result = spawnSync("bash", ["-c", harness, "test", script.pathname, root], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("every runtime-user Git operation uses the Relay app root as HOME", { skip: !hasGitHomeBash }, () => {
+  const root = mkdtempSync(join(tmpdir(), "bitcraft-relay-git-home-"));
+  const harness = `
+    set -euo pipefail
+    normalize_path() {
+      if command -v cygpath >/dev/null 2>&1; then
+        cygpath -u "$1"
+      else
+        printf '%s\n' "$1"
+      fi
+    }
+    script_path="$(normalize_path "$1")"
+    test_root="$(normalize_path "$2")"
+    APP_ROOT="$test_root/relay"
+    SOURCE_DIR="$APP_ROOT/source"
+    RELEASES_DIR="$APP_ROOT/releases"
+    CURRENT_LINK="$APP_ROOT/current"
+    RUN_USER="fake-runtime"
+    HOME="$test_root/fake-passwd-home"
+    export HOME
+    source "$script_path"
+
+    TEST_ROOT="$test_root"
+    LOG_FILE="$TEST_ROOT/update.log"
+    GIT_LOG="$TEST_ROOT/git.log"
+    PATH="$TEST_ROOT/bin:$PATH"
+    export GIT_LOG PATH
+    mkdir -p "$SOURCE_DIR" "$RELEASES_DIR/active" "$TEST_ROOT/bin"
+    ln -s "releases/active" "$CURRENT_LINK"
+    : >"$LOG_FILE"
+    cat >"$TEST_ROOT/bin/git" <<'GIT'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$HOME" "$*" >>"$GIT_LOG"
+GIT
+    chmod +x "$TEST_ROOT/bin/git"
+
+    sudo() {
+      [[ "$1" == "-u" && "$2" == "$RUN_USER" ]]
+      shift 2
+      if [[ "$1" == "bash" ]]; then
+        return 0
+      fi
+      "$@"
+    }
+    install() {
+      mkdir -p "\${@: -1}"
+    }
+
+    REVISION="1111111111111111111111111111111111111111"
+    sync_source_revision
+    release_dir="$RELEASES_DIR/$REVISION"
+    prepare_release "$release_dir"
+    KEEP_RELEASES=1
+    prune_releases "$release_dir"
+
+    [[ "$(wc -l <"$GIT_LOG")" -eq 5 ]]
+    while IFS='|' read -r observed_home arguments; do
+      if [[ "$observed_home" != "$APP_ROOT" ]]; then
+        printf 'Git HOME mismatch: expected=%s actual=%s args=%s\n' \
+          "$APP_ROOT" "$observed_home" "$arguments" >&2
+        exit 42
+      fi
+      [[ "$observed_home" != "/opt/bitcraft-claim-monitor" ]]
+      [[ "$observed_home" != "/home/bitcraft" ]]
+      [[ "$arguments" == "-C $SOURCE_DIR"* ]]
+    done <"$GIT_LOG"
+    grep -Fq -- "-C $SOURCE_DIR fetch --prune origin main" "$GIT_LOG"
+    grep -Fq -- "-C $SOURCE_DIR merge-base --is-ancestor $REVISION origin/main" "$GIT_LOG"
+    grep -Fq "worktree add --detach $release_dir $REVISION" "$GIT_LOG"
+    grep -Fq "worktree remove --force $RELEASES_DIR/active" "$GIT_LOG"
+    grep -Fq "worktree prune" "$GIT_LOG"
+  `;
+
+  try {
+    const result = spawnSync(
+      gitHomeBash,
+      ["-c", harness, "test", fileURLToPath(script), root],
+      { encoding: "utf8" },
+    );
     assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -23,6 +23,7 @@ test("Relay updater has only isolated defaults", () => {
     /LOG_FILE="\$\{LOG_FILE:-\}"/,
     /UPDATER_PATH="\$\{UPDATER_PATH:-\/usr\/local\/bin\/update-bitcraft-claim-monitor-relay\}"/,
     /SYSTEMD_DIR="\$\{SYSTEMD_DIR:-\/etc\/systemd\/system\}"/,
+    /RUN_HOME="\$\{RUN_HOME:-\$APP_ROOT\}"/,
   ]) {
     assert.match(script, expected);
   }
@@ -51,7 +52,7 @@ test("Relay updater builds an immutable release before cutover", () => {
   assert.match(script, /SOURCE_DIR="\$\{SOURCE_DIR:-\$APP_ROOT\/source\}"/);
   assert.match(script, /RELEASES_DIR="\$\{RELEASES_DIR:-\$APP_ROOT\/releases\}"/);
   assert.match(script, /CURRENT_LINK="\$\{CURRENT_LINK:-\$APP_ROOT\/current\}"/);
-  assert.match(script, /git[^\n]+worktree add --detach/);
+  assert.match(script, /run_git_as_user[\s\\]+-C "\$SOURCE_DIR" worktree add --detach/);
   assert.match(
     script,
     /prepare_release "\$release_dir"[\s\S]*validate_release_config "\$release_dir"[\s\S]*schema_backup_kind[\s\S]*atomic_switch "\$release_dir"/,
@@ -74,8 +75,25 @@ test("Relay updater retains three releases only after success", () => {
   assert.match(script, /KEEP_RELEASES="\$\{KEEP_RELEASES:-3\}"/);
   assert.match(script, /prune_releases\(\)/);
   assert.match(script, /deployment_succeeded=1[\s\S]*post_commit_prune "\$release_dir"/);
-  assert.match(script, /sudo -u "\$RUN_USER" git -C "\$SOURCE_DIR" worktree remove --force/);
-  assert.match(script, /sudo -u "\$RUN_USER" git -C "\$SOURCE_DIR" worktree prune/);
+  assert.match(script, /run_git_as_user -C "\$SOURCE_DIR" worktree remove --force/);
+  assert.match(script, /run_git_as_user -C "\$SOURCE_DIR" worktree prune/);
+});
+
+test("every runtime-user Git boundary uses the isolated Relay HOME", () => {
+  assert.match(
+    script,
+    /run_git_as_user\(\) \{\s+sudo -u "\$RUN_USER" env HOME="\$RUN_HOME" git "\$@"/,
+  );
+  for (const operation of [
+    /run_git_as_user[\s\\]+-C "\$SOURCE_DIR" fetch --prune origin main/,
+    /run_git_as_user -C "\$SOURCE_DIR" merge-base --is-ancestor "\$REVISION" origin\/main/,
+    /run_git_as_user[\s\\]+-C "\$SOURCE_DIR" worktree add --detach/,
+    /run_git_as_user -C "\$SOURCE_DIR" worktree remove --force/,
+    /run_git_as_user -C "\$SOURCE_DIR" worktree prune/,
+  ]) {
+    assert.match(script, operation);
+  }
+  assert.doesNotMatch(script, /sudo -u "\$RUN_USER" git /);
 });
 
 test("Relay updater waits for service and release health", () => {
@@ -260,6 +278,18 @@ test("deployment docs bootstrap private GitHub access with a pinned read-only de
   assert.match(deployment, /known_hosts/);
   assert.match(deployment, /StrictHostKeyChecking yes/);
   assert.match(deployment, /UserKnownHostsFile/);
+  assert.match(deployment, /\/opt\/bitcraft-claim-monitor-relay\/\.ssh/);
+  assert.match(deployment, /HOME=\/opt\/bitcraft-claim-monitor-relay/);
+  assert.match(deployment, /already-generated private checkout key/i);
+  assert.match(deployment, /maintained account home.*not used or changed/i);
+  assert.doesNotMatch(
+    deployment,
+    /(?:install|sudo|IdentityFile|UserKnownHostsFile)[^\n]*\/home\/bitcraft\/\.ssh/,
+  );
+  assert.doesNotMatch(
+    deployment,
+    /(?:install|sudo|IdentityFile|UserKnownHostsFile)[^\n]*\/opt\/bitcraft-claim-monitor\/\.ssh/,
+  );
   assert.doesNotMatch(deployment, /https:\/\/[^/\s]*:[^@\s]+@github\.com/);
 });
 

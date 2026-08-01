@@ -51,6 +51,7 @@ Run as root in a supervised session:
 ```sh
 install -d -o bitcraft -g bitcraft -m 0755 /opt/bitcraft-claim-monitor-relay
 install -d -o bitcraft -g bitcraft -m 0755 /opt/bitcraft-claim-monitor-relay/releases
+install -d -o bitcraft -g bitcraft -m 0700 /opt/bitcraft-claim-monitor-relay/.ssh
 install -d -o bitcraft -g bitcraft -m 0700 /var/lib/bitcraft-claim-monitor-relay
 install -d -o bitcraft -g bitcraft -m 0700 /var/backups/bitcraft-claim-monitor-relay
 install -d -o root -g bitcraft -m 0750 /etc/bitcraft-claim-monitor-relay
@@ -72,19 +73,39 @@ Use fresh keys. Do not reuse the maintained deployment's key directory.
 ## Bootstrap a read-only GitHub deploy key
 
 The private standalone repository is fetched by the unprivileged `bitcraft`
-account over SSH. Create a dedicated read-only GitHub deploy key; do not put a
-personal access token in the remote URL.
+account over SSH. Its checkout home is explicitly
+`/opt/bitcraft-claim-monitor-relay`, regardless of the home recorded for that
+Unix account. The maintained account home is not used or changed: do not create
+or alter `/opt/bitcraft-claim-monitor/.ssh` or `/home/bitcraft/.ssh`.
+
+Use a dedicated read-only GitHub deploy key; do not put a personal access token
+in the remote URL. If an already-generated private checkout key has been
+delivered through a secure channel and its public half is registered as this
+repository's read-only deploy key, install it as follows:
 
 ```sh
-install -d -o bitcraft -g bitcraft -m 0700 /home/bitcraft/.ssh
-sudo -u bitcraft sh -c '
+install -d -o bitcraft -g bitcraft -m 0700 /opt/bitcraft-claim-monitor-relay/.ssh
+install -o bitcraft -g bitcraft -m 0600 /secure/input/relay-checkout-key \
+  /opt/bitcraft-claim-monitor-relay/.ssh/bitcraft-claim-monitor-relay-readonly
+install -o bitcraft -g bitcraft -m 0644 /secure/input/relay-checkout-key.pub \
+  /opt/bitcraft-claim-monitor-relay/.ssh/bitcraft-claim-monitor-relay-readonly.pub
+```
+
+Otherwise, generate the dedicated pair directly inside the Relay checkout
+home:
+
+```sh
+sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay sh -c '
   umask 077
   ssh-keygen -q -t ed25519 -N "" \
     -C bitcraft-claim-monitor-relay-readonly \
-    -f /home/bitcraft/.ssh/bitcraft-claim-monitor-relay-readonly
+    -f /opt/bitcraft-claim-monitor-relay/.ssh/bitcraft-claim-monitor-relay-readonly
 '
-chmod 0600 /home/bitcraft/.ssh/bitcraft-claim-monitor-relay-readonly
-chmod 0644 /home/bitcraft/.ssh/bitcraft-claim-monitor-relay-readonly.pub
+chown bitcraft:bitcraft \
+  /opt/bitcraft-claim-monitor-relay/.ssh/bitcraft-claim-monitor-relay-readonly \
+  /opt/bitcraft-claim-monitor-relay/.ssh/bitcraft-claim-monitor-relay-readonly.pub
+chmod 0600 /opt/bitcraft-claim-monitor-relay/.ssh/bitcraft-claim-monitor-relay-readonly
+chmod 0644 /opt/bitcraft-claim-monitor-relay/.ssh/bitcraft-claim-monitor-relay-readonly.pub
 ```
 
 In `Red463/bitcraft-claim-monitor-relay`, open **Settings → Deploy keys**, add
@@ -102,34 +123,43 @@ ssh-keyscan -t ed25519 github.com >"$GITHUB_HOST_KEYS"
 ssh-keygen -lf "$GITHUB_HOST_KEYS"
 # Stop here and compare the displayed fingerprint with GitHub's published value.
 install -o bitcraft -g bitcraft -m 0600 \
-  "$GITHUB_HOST_KEYS" /home/bitcraft/.ssh/known_hosts
+  "$GITHUB_HOST_KEYS" /opt/bitcraft-claim-monitor-relay/.ssh/known_hosts
 rm -f "$GITHUB_HOST_KEYS"
 
-install -o bitcraft -g bitcraft -m 0600 /dev/null /home/bitcraft/.ssh/config
-sudo -u bitcraft sh -c 'cat > /home/bitcraft/.ssh/config <<EOF
+install -o bitcraft -g bitcraft -m 0600 /dev/null \
+  /opt/bitcraft-claim-monitor-relay/.ssh/config
+sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay \
+  sh -c 'cat > /opt/bitcraft-claim-monitor-relay/.ssh/config <<EOF
 Host github.com
   HostName github.com
   User git
-  IdentityFile /home/bitcraft/.ssh/bitcraft-claim-monitor-relay-readonly
+  IdentityFile /opt/bitcraft-claim-monitor-relay/.ssh/bitcraft-claim-monitor-relay-readonly
   IdentitiesOnly yes
   StrictHostKeyChecking yes
-  UserKnownHostsFile /home/bitcraft/.ssh/known_hosts
+  UserKnownHostsFile /opt/bitcraft-claim-monitor-relay/.ssh/known_hosts
 EOF'
+chmod 0600 \
+  /opt/bitcraft-claim-monitor-relay/.ssh/config \
+  /opt/bitcraft-claim-monitor-relay/.ssh/known_hosts
 ```
 
 ## Clone and prepare the initial immutable release
 
 ```sh
-sudo -u bitcraft git clone \
+sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay git clone \
   git@github.com:Red463/bitcraft-claim-monitor-relay.git \
   /opt/bitcraft-claim-monitor-relay/source
-sudo -u bitcraft git -C /opt/bitcraft-claim-monitor-relay/source fetch --prune origin main
+sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay \
+  git -C /opt/bitcraft-claim-monitor-relay/source fetch --prune origin main
 
-REVISION="$(sudo -u bitcraft git -C /opt/bitcraft-claim-monitor-relay/source rev-parse origin/main)"
+REVISION="$(sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay \
+  git -C /opt/bitcraft-claim-monitor-relay/source rev-parse origin/main)"
 printf '%s\n' "$REVISION" | grep -Eq '^[0-9a-f]{40}$'
-sudo -u bitcraft git -C /opt/bitcraft-claim-monitor-relay/source \
+sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay \
+  git -C /opt/bitcraft-claim-monitor-relay/source \
   merge-base --is-ancestor "$REVISION" origin/main
-sudo -u bitcraft git -C /opt/bitcraft-claim-monitor-relay/source \
+sudo -u bitcraft env HOME=/opt/bitcraft-claim-monitor-relay \
+  git -C /opt/bitcraft-claim-monitor-relay/source \
   worktree add --detach "/opt/bitcraft-claim-monitor-relay/releases/$REVISION" "$REVISION"
 
 RELEASE="/opt/bitcraft-claim-monitor-relay/releases/$REVISION"
