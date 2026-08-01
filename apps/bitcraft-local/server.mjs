@@ -1282,7 +1282,6 @@ function getSettings() {
     marketDealWatch: marketDealWatchSettings(),
     branding,
     visitorSecurity: visitorSecuritySettings(),
-    browserSnapshotsEnabled: false,
     discord: publicDiscordSettings(),
   };
 }

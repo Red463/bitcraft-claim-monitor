@@ -8,6 +8,7 @@ import { Dialog } from "../components/main/Dialog";
 import { MiniStat } from "../components/main/Stats";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { useActiveRegions } from "../hooks/useActiveRegions";
+import { useGameDataGeneration } from "../hooks/useGameDataGeneration";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import { dateLabel, formatCompactNumber, formatGoldAmount, formatNumber, timeAgo } from "../utils/format";
 import { buildWatchtowerEmpireFilters, coordinateText, filterWatchtowerRows, presentWatchtowerRows } from "./empires/watchtowerPresentation";
@@ -94,7 +95,7 @@ function distanceLabel(distance: number | null): string {
   return distance == null ? "-" : `${formatNumber(distance)} tiles away`;
 }
 
-function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () => void }) {
+function ClaimMembersDialog({ claim, generation, onBack }: { claim: AnyRecord; generation: number; onBack: () => void }) {
   const { request, trackPromise } = useManualRefresh();
   const [state, setState] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: true, error: null });
   const [rankFilters, setRankFilters] = React.useState<string[]>([]);
@@ -109,7 +110,7 @@ function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () =>
         if (!controller.signal.aborted) setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
       });
     return () => controller.abort();
-  }, [claim.claimId, request?.sequence, trackPromise]);
+  }, [claim.claimId, generation, request?.sequence, trackPromise]);
   const members: AnyRecord[] = Array.isArray(state.data?.members) ? state.data.members : [];
   const rankOptions = React.useMemo(() => Array.from(new Set(members.map((member) => String(member.claimRole ?? "Member")))).sort((a, b) => a.localeCompare(b)), [members]);
   const visibleMembers = rankFilters.length ? members.filter((member) => rankFilters.includes(String(member.claimRole ?? "Member"))) : members;
@@ -151,7 +152,7 @@ function ClaimMembersDialog({ claim, onBack }: { claim: AnyRecord; onBack: () =>
   );
 }
 
-function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () => void }) {
+function TowerAccessDialog({ tower, generation, onClose }: { tower: AnyRecord; generation: number; onClose: () => void }) {
   const members: AnyRecord[] = Array.isArray(tower.members) ? tower.members : [];
   const claims: AnyRecord[] = Array.isArray(tower.claims) ? tower.claims : [];
   const [towerDialogTab, setTowerDialogTab] = React.useState<"members" | "claims">("members");
@@ -178,7 +179,7 @@ function TowerAccessDialog({ tower, onClose }: { tower: AnyRecord; onClose: () =
           <span><Landmark size={14} /> {tower.empireName ?? "Unknown empire"}</span>
           {mapHref(tower) ? <a className="toolbar-button" href={mapHref(tower) ?? "#"}><MapPin size={14} /> Open on map</a> : null}
         </div>
-        {selectedClaim ? <ClaimMembersDialog claim={selectedClaim} onBack={() => setSelectedClaim(null)} /> : (
+        {selectedClaim ? <ClaimMembersDialog claim={selectedClaim} generation={generation} onBack={() => setSelectedClaim(null)} /> : (
           <>
             <div className="tower-dialog-tabs" role="tablist" aria-label="Watchtower detail views">
               <button type="button" className={towerDialogTab === "members" ? "active" : ""} onClick={() => setTowerDialogTab("members")}>Empire Members <small>{formatNumber(members.length)}</small></button>
@@ -249,6 +250,7 @@ export function Empires({
   access?: EffectiveAccess | null;
 }) {
   const { request, trackPromise } = useManualRefresh();
+  const empireGeneration = useGameDataGeneration(monitoredClaimId, ["empires"]);
   const initialRegion = monitoredRegionId && /^\d+$/.test(String(monitoredRegionId)) ? String(monitoredRegionId) : "19";
   const [tab, setTab] = usePersistedState<EmpireTab>("empires.tab", "overview");
   const empireTabs = React.useMemo(() => [
@@ -289,7 +291,7 @@ export function Empires({
         if (!controller.signal.aborted) setOverview((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
       });
     return () => controller.abort();
-  }, [currentTab, regionId, request?.sequence, trackPromise]);
+  }, [currentTab, empireGeneration, regionId, request?.sequence, trackPromise]);
 
   React.useEffect(() => {
     if (currentTab !== "watchtowers") return;
@@ -303,7 +305,7 @@ export function Empires({
         if (!controller.signal.aborted) setWatchtowers((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
       });
     return () => controller.abort();
-  }, [currentTab, inactiveDays, regionId, request?.sequence, trackPromise]);
+  }, [currentTab, empireGeneration, inactiveDays, regionId, request?.sequence, trackPromise]);
 
   const overviewRows: AnyRecord[] = overview.data?.empires ?? [];
   const towerRows: AnyRecord[] = watchtowers.data?.towers ?? [];
@@ -541,7 +543,7 @@ export function Empires({
         </>
             )
       ) : <DepositsPanel data={providerData} loading={providerLoading} error={providerError} monitoredRegionId={monitoredRegionId} />}
-      {selectedTower ? <TowerAccessDialog tower={selectedTower} onClose={() => setSelectedTower(null)} /> : null}
+      {selectedTower ? <TowerAccessDialog tower={selectedTower} generation={empireGeneration} onClose={() => setSelectedTower(null)} /> : null}
       {selectedSiegeTower ? (
         <SiegeDetailsDialog
           tower={selectedSiegeTower}
@@ -554,6 +556,7 @@ export function Empires({
           empireId={selectedEmpireId}
           regionId={regionId}
           inactiveDays={inactiveDays}
+          generation={empireGeneration}
           onClose={() => {
             setSelectedEmpireId(null);
             setEmpireBackTarget(null);
