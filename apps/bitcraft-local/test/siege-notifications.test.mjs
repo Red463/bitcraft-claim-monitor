@@ -8,6 +8,16 @@ const {
 );
 
 const replacements = ["Ancient Dominion's Watchtower", "N:{0}, E:{1}|~8197|~8027"];
+const knownNonSiegeTags = [
+  "None",
+  "NewMember",
+  "MemberLeft",
+  "WatchtowerBuilt",
+  "ClaimJoined",
+  "ClaimLeft",
+  "Donation",
+  "DonationByProxy",
+];
 
 function description(tag, id) {
   return {
@@ -107,6 +117,81 @@ test("normalizes started attack and defense roles without creating a terminal ou
   assert.equal(result.notifications[0].occurredAt, "2026-07-30T17:00:00.000Z");
   assert.deepEqual(result.outcomes, []);
   assert.deepEqual(result.warnings, []);
+});
+
+test("silently ignores the complete known first-party non-siege notification set", () => {
+  const result = normalizeAndPairSiegeNotifications(
+    [
+      ...knownNonSiegeTags.map((tag, index) => description(tag, index)),
+      description("SuccessfulSiege", 100),
+      description("FailedDefense", 101),
+    ],
+    [
+      ...knownNonSiegeTags.map((tag, index) => ({
+        ...notification(BigInt(index + 1), 7000000n + BigInt(index), tag),
+        textReplacement: index % 2 === 0 ? [] : ["non-siege replacement"],
+      })),
+      notification(100n, 8000001n, "SuccessfulSiege"),
+      notification(101n, 7000001n, "FailedDefense"),
+    ],
+  );
+
+  assert.deepEqual(
+    result.notifications.map((row) => row.entityId),
+    ["100", "101"],
+  );
+  assert.equal(result.outcomes.length, 1);
+  assert.deepEqual(result.warnings, []);
+});
+
+test("rejects plain-string and whitespace-padded enum tags without pairing", () => {
+  const plainString = notification(11n, 8000001n, "SuccessfulSiege");
+  plainString.notificationType = "SuccessfulSiege";
+  const padded = notification(12n, 7000001n, "FailedDefense");
+  padded.notificationType = { tag: " FailedDefense " };
+  const malformed = notification(13n, 7000002n, "FailedDefense");
+  malformed.notificationType = { tag: 7 };
+  const result = normalizeAndPairSiegeNotifications(
+    [
+      description("SuccessfulSiege", 1),
+      description("FailedDefense", 2),
+    ],
+    [plainString, padded, malformed],
+  );
+
+  assert.deepEqual(result.notifications, []);
+  assert.deepEqual(result.outcomes, []);
+  assert.equal(result.warnings.filter((warning) => /enum object|exact tag|string tag/i.test(warning)).length, 3);
+});
+
+test("rejects non-generated and non-exact description enum tags", () => {
+  const plainDescription = description("SuccessfulSiege", 1);
+  plainDescription.notificationType = "SuccessfulSiege";
+  const paddedDescription = description("FailedDefense", 2);
+  paddedDescription.notificationType = { tag: "FailedDefense " };
+  const result = normalizeAndPairSiegeNotifications(
+    [plainDescription, paddedDescription],
+    [
+      notification(11n, 8000001n, "SuccessfulSiege"),
+      notification(12n, 7000001n, "FailedDefense"),
+    ],
+  );
+
+  assert.deepEqual(result.notifications, []);
+  assert.deepEqual(result.outcomes, []);
+  assert.equal(result.warnings.some((warning) => /generated enum object/i.test(warning)), true);
+  assert.equal(result.warnings.some((warning) => /exact tag/i.test(warning)), true);
+});
+
+test("warns and fails closed for a genuinely unknown description variant", () => {
+  const result = normalizeAndPairSiegeNotifications(
+    [description("CancelledSiege", 1)],
+    [],
+  );
+
+  assert.deepEqual(result.notifications, []);
+  assert.deepEqual(result.outcomes, []);
+  assert.match(result.warnings[0], /unsupported.*CancelledSiege/i);
 });
 
 test("rejects every row sharing a duplicate notification ID", () => {

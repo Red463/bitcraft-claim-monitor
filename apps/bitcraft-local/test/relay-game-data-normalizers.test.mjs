@@ -404,6 +404,45 @@ test("regional empires scope settlement and watchtower rows with authoritative r
   assert.equal(normalized.data.empires[0].territoryChunks, 1);
 });
 
+test("regional empires fail closed when a current siege node has no owner identity", () => {
+  assert.throws(() => normalizeRegionalEmpires({
+    regionId: "19",
+    worldRegionRows: [{
+      id: 0,
+      regionIndex: 19,
+      regionMinChunkX: 240,
+      regionMinChunkZ: 240,
+      regionWidthChunks: 80,
+      regionHeightChunks: 80,
+    }],
+    empireRows: [],
+    playerRows: [],
+    playerStateRows: [],
+    rankRows: [],
+    settlementRows: [],
+    nodeRows: [{
+      entityId: 300n,
+      chunkIndex: 242242n,
+      energy: 10,
+      active: true,
+      upkeep: 1,
+      location: { x: 23232, z: 23232, dimension: 1n },
+    }],
+    siegeRows: [{
+      entityId: 500n,
+      buildingEntityId: 300n,
+      empireEntityId: 11n,
+      energy: 1,
+      active: true,
+    }],
+    chunkRows: [],
+    claimRows: [],
+    claimMemberRows: [],
+    usernameRows: [],
+    nicknameRows: [],
+  }), /Regional empire node 300 empire id must be a non-negative decimal integer string/);
+});
+
 test("regional claims join live claim state, local metrics, tier, owner, and coordinates exactly", () => {
   assert.deepEqual(normalizeRegionalClaims({
     regionId: "19",

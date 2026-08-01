@@ -37,6 +37,17 @@ const SIEGE_KINDS: Readonly<Record<string, SiegeNotificationKind>> = {
   FailedDefense: "defense_failed",
 };
 
+const KNOWN_NON_SIEGE_TYPES = new Set([
+  "None",
+  "NewMember",
+  "MemberLeft",
+  "WatchtowerBuilt",
+  "ClaimJoined",
+  "ClaimLeft",
+  "Donation",
+  "DonationByProxy",
+]);
+
 function record(value: unknown, label: string): WireRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object.`);
@@ -45,10 +56,17 @@ function record(value: unknown, label: string): WireRecord {
 }
 
 function enumTag(value: unknown, label: string): string {
-  if (typeof value === "string" && value.trim()) return value.trim();
-  const row = record(value, label);
-  const tag = typeof row.tag === "string" ? row.tag.trim() : "";
-  if (!tag) throw new TypeError(`${label} must have a tag.`);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be a generated enum object.`);
+  }
+  const row = value as WireRecord;
+  const tag = row.tag;
+  if (typeof tag !== "string" || !tag) {
+    throw new TypeError(`${label} must be a generated enum object with a string tag.`);
+  }
+  if (tag !== tag.trim()) {
+    throw new TypeError(`${label} must use an exact tag without surrounding whitespace.`);
+  }
   return tag;
 }
 
@@ -78,12 +96,13 @@ function normalizeNotification(
   value: unknown,
   index: number,
   availableDescriptionTags: ReadonlySet<string>,
-): NormalizedSiegeNotification {
+): NormalizedSiegeNotification | null {
   const row = record(value, `Siege notification row ${index}`);
   const tag = enumTag(
     row.notificationType ?? row.notification_type,
     `Siege notification row ${index} type`,
   );
+  if (KNOWN_NON_SIEGE_TYPES.has(tag)) return null;
   const kind = SIEGE_KINDS[tag];
   if (!kind) throw new TypeError(`Siege notification row ${index} has unsupported type ${tag}.`);
   if (!availableDescriptionTags.has(tag)) {
@@ -131,6 +150,8 @@ export function normalizeAndPairSiegeNotifications(
       );
       if (SIEGE_KINDS[tag]) {
         descriptionCounts.set(tag, (descriptionCounts.get(tag) ?? 0) + 1);
+      } else if (!KNOWN_NON_SIEGE_TYPES.has(tag)) {
+        warnings.push(`Empire notification description row ${index} has unsupported type ${tag}.`);
       }
     } catch (error) {
       warnings.push(error instanceof Error ? error.message : String(error));
@@ -149,6 +170,11 @@ export function normalizeAndPairSiegeNotifications(
   for (const [index, value] of values.entries()) {
     try {
       const row = record(value, `Siege notification row ${index}`);
+      const tag = enumTag(
+        row.notificationType ?? row.notification_type,
+        `Siege notification row ${index} type`,
+      );
+      if (!SIEGE_KINDS[tag]) continue;
       const entityId = decimalId(
         row.entityId ?? row.entity_id,
         `Siege notification row ${index} entity id`,
@@ -161,7 +187,8 @@ export function normalizeAndPairSiegeNotifications(
   const parsedNotifications: NormalizedSiegeNotification[] = [];
   for (const [index, value] of values.entries()) {
     try {
-      parsedNotifications.push(normalizeNotification(value, index, availableDescriptionTags));
+      const notification = normalizeNotification(value, index, availableDescriptionTags);
+      if (notification) parsedNotifications.push(notification);
     } catch (error) {
       warnings.push(error instanceof Error ? error.message : String(error));
     }
