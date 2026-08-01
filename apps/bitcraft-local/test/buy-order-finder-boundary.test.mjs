@@ -13,7 +13,12 @@ test("global Buy Orders renders the dedicated live Relay finder", () => {
   assert.match(finder, /useGameDataGeneration\(\s*claimId,\s*\["catalogs",\s*"regional-market"\]\s*,?\s*\)/);
   assert.match(finder, /Best Opportunities/);
   assert.match(finder, /locally observed confirmed sales/i);
-  assert.match(finder, /setState\(\(current\) => \(\{\s*\.\.\.current,[\s\S]*?error:/);
+  assert.match(finder, /React\.useEffect\(\(\) => \{[\s\S]*?buyOrderSearchTransition\(appliedLocationQuery\.current,\s*locationSearch\)[\s\S]*?setSearch\(transition\.search\)[\s\S]*?setPage\(1\)[\s\S]*?\}, \[locationSearch\]\)/);
+  assert.match(finder, /\.catch\(\(error\) => \{[\s\S]*?setState\(\(current\) => \(\{\s*\.\.\.current,[\s\S]*?error:/);
+  assert.doesNotMatch(finder, /\.catch\(\(error\) => \{[\s\S]{0,500}?data:\s*null/);
+  assert.match(finder, /formatExactDecimalInteger/);
+  assert.match(finder, /sumExactDecimalIntegers/);
+  assert.doesNotMatch(finder, /formatCompactNumber|toNumber\(order\.(?:quantity|totalValue)\)|formatNumber\(order\.(?:quantity|unitPrice|totalValue|averageUnitPrice)\)/);
   assert.match(finder, /refreshSequence/);
   assert.match(finder, /refreshHeaders/);
   assert.match(finder, /trackRefresh/);

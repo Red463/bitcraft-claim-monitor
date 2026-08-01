@@ -9,7 +9,13 @@ import { usePersistedState } from "../../hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "../../main-app-data";
 import { updateQueryState } from "../../navigation";
 import type { LoadState } from "../../types/app";
-import { formatCompactNumber, formatNumber, timeAgo } from "../../utils/format";
+import { formatNumber, timeAgo } from "../../utils/format";
+import {
+  buyOrderQueryFromLocation,
+  buyOrderSearchTransition,
+  formatExactDecimalInteger,
+  sumExactDecimalIntegers,
+} from "./buyOrderFinderUtils";
 import type { MarketRefreshProps } from "./globalMarket";
 
 type BuyOrderFinderProps = MarketRefreshProps & {
@@ -36,10 +42,7 @@ export function BuyOrderFinder({
   refreshHeaders,
   trackRefresh,
 }: BuyOrderFinderProps) {
-  const initial = React.useMemo(
-    () => new URLSearchParams(locationSearch).get("buyQ") ?? "",
-    [locationSearch],
-  );
+  const initial = buyOrderQueryFromLocation(locationSearch);
   const [search, setSearch] = React.useState(initial);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = usePersistedState("market.buyOrders.pageSize", "50");
@@ -50,14 +53,29 @@ export function BuyOrderFinder({
     error: null,
     loading: true,
   });
+  const appliedLocationQuery = React.useRef(initial);
+  const suppressQueryWrite = React.useRef<string | null>(null);
   const generationSequence = useGameDataGeneration(
     claimId,
     ["catalogs", "regional-market"],
   );
 
   React.useEffect(() => {
+    const transition = buyOrderSearchTransition(appliedLocationQuery.current, locationSearch);
+    if (!transition.changed) return;
+    appliedLocationQuery.current = transition.search;
+    suppressQueryWrite.current = transition.search;
+    setSearch(transition.search);
+    setPage(1);
+  }, [locationSearch]);
+
+  React.useEffect(() => {
     const timer = window.setTimeout(() => {
-      const current = new URLSearchParams(window.location.search).get("buyQ") ?? "";
+      if (suppressQueryWrite.current === search) {
+        suppressQueryWrite.current = null;
+        return;
+      }
+      const current = buyOrderQueryFromLocation(window.location.search);
       if (current === search) return;
       updateQueryState({ buyQ: search || null });
       onQueryStateChange();
@@ -120,6 +138,8 @@ export function BuyOrderFinder({
   const total = toNumber(state.data?.total);
   const pageCount = toNumber(state.data?.pageCount) || 1;
   const bestOrder = rows[0];
+  const visibleDemand = sumExactDecimalIntegers(rows.map((order) => order.quantity));
+  const visibleBuyValue = sumExactDecimalIntegers(rows.map((order) => order.totalValue));
   const marketCount = new Set(rows.map((order) => order.marketClaimId || order.marketClaimName)).size;
   const regionLabel = regionId ? `R${regionId}` : "All active regions";
   const freshness = String(state.data?.freshness ?? "unavailable");
@@ -181,9 +201,9 @@ export function BuyOrderFinder({
       ) : null}
       <div className="metric-grid">
         <MiniStat icon={<ShoppingBag />} label="Current Buy Orders" value={formatNumber(total)} />
-        <MiniStat icon={<CircleDollarSign />} label="Best Unit Price" value={bestOrder ? `${formatNumber(bestOrder.unitPrice)}g` : "—"} />
-        <MiniStat icon={<Package />} label="Visible Demand" value={formatNumber(rows.reduce((sum, order) => sum + toNumber(order.quantity), 0))} />
-        <MiniStat icon={<TrendingUp />} label="Visible Buy Value" value={formatCompactNumber(rows.reduce((sum, order) => sum + toNumber(order.totalValue), 0))} />
+        <MiniStat icon={<CircleDollarSign />} label="Best Unit Price" value={bestOrder ? `${formatExactDecimalInteger(bestOrder.unitPrice)}g` : "—"} />
+        <MiniStat icon={<Package />} label="Visible Demand" value={formatExactDecimalInteger(visibleDemand)} />
+        <MiniStat icon={<TrendingUp />} label="Visible Buy Value" value={`${formatExactDecimalInteger(visibleBuyValue)}g`} />
         <MiniStat icon={<ShoppingCart />} label="Markets Visible" value={formatNumber(marketCount)} />
       </div>
       <section className="buy-order-opportunities">
@@ -203,8 +223,8 @@ export function BuyOrderFinder({
                 <ItemIcon item={order} />
                 <div>
                   <strong>{order.itemName}</strong>
-                  <span>{formatNumber(order.unitPrice)}g buy order vs {formatNumber(order.averageUnitPrice)}g local average</span>
-                  <small>{formatNumber(order.quantity)} wanted at {order.marketClaimName || `R${order.regionId}`}</small>
+                  <span>{formatExactDecimalInteger(order.unitPrice)}g buy order vs {formatExactDecimalInteger(order.averageUnitPrice)}g local average</span>
+                  <small>{formatExactDecimalInteger(order.quantity)} wanted at {order.marketClaimName || `R${order.regionId}`}</small>
                 </div>
                 <b>{order.premiumPercent}% above 7d average</b>
               </article>
@@ -245,9 +265,9 @@ export function BuyOrderFinder({
                   <td>{order.regionName || (order.regionId ? `R${order.regionId}` : "—")}</td>
                   <td>{order.buyerName || "—"}</td>
                   <td>{order.marketClaimName || "—"}</td>
-                  <td>{formatNumber(order.quantity)}</td>
-                  <td>{formatNumber(order.unitPrice)}g</td>
-                  <td>{formatNumber(order.totalValue)}g</td>
+                  <td>{formatExactDecimalInteger(order.quantity)}</td>
+                  <td>{formatExactDecimalInteger(order.unitPrice)}g</td>
+                  <td>{formatExactDecimalInteger(order.totalValue)}g</td>
                   <td>{order.premiumPercent == null ? <span className="muted">Insufficient local sales history</span> : `${order.premiumPercent}%`}</td>
                   <td>{order.lastSeen ? timeAgo(order.lastSeen) : "—"}</td>
                 </tr>
