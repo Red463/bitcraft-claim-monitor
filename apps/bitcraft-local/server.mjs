@@ -8952,7 +8952,10 @@ const server = createServer(async (req, res) => {
         200,
         marketBuyOrders(
           claimId,
-          Object.fromEntries(url.searchParams.entries()),
+          {
+            ...Object.fromEntries(url.searchParams.entries()),
+            regionId,
+          },
           allowedRegionIds,
         ),
       );

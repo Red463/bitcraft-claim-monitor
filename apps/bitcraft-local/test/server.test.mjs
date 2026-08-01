@@ -2364,6 +2364,13 @@ test("server collection paginates listings and protects production mutations", a
   );
   assert.equal(buyOrdersAfterSales.baselineWindowDays, 7);
   assert.equal(buyOrdersAfterSales.minimumSales, 3);
+  const paddedRegionBuyOrders = await fetch(
+    `${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=%2019%20&search=Leather&pageSize=25&sort=premium&direction=desc`,
+  ).then((response) => response.json());
+  assert.equal(paddedRegionBuyOrders.rows[0].salesCount, 3);
+  assert.equal(paddedRegionBuyOrders.rows[0].averageUnitPrice, "20");
+  assert.equal(paddedRegionBuyOrders.rows[0].premiumPercent, "25");
+  assert.equal(paddedRegionBuyOrders.rows[0].opportunityEligible, true);
 
   await writeDatabaseWithRetry(
     path.join(dataDir, "bitcraft-local.sqlite"),
