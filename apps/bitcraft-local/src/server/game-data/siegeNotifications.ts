@@ -174,7 +174,7 @@ export function normalizeAndPairSiegeNotifications(
         row.notificationType ?? row.notification_type,
         `Siege notification row ${index} type`,
       );
-      if (!SIEGE_KINDS[tag]) continue;
+      if (!SIEGE_KINDS[tag] && !KNOWN_NON_SIEGE_TYPES.has(tag)) continue;
       const entityId = decimalId(
         row.entityId ?? row.entity_id,
         `Siege notification row ${index} entity id`,

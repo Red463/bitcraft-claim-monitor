@@ -230,6 +230,28 @@ test("rejects a valid row when a malformed row reuses its notification ID", () =
   assert.equal(result.warnings.some((warning) => /duplicate.*11/i.test(warning)), true);
 });
 
+test("rejects a siege row whose notification ID is reused by a known non-siege row", () => {
+  const result = normalizeAndPairSiegeNotifications(
+    [
+      description("Donation", 1),
+      description("SuccessfulSiege", 2),
+      description("FailedDefense", 3),
+    ],
+    [
+      notification(11n, 9000001n, "Donation"),
+      notification(11n, 8000001n, "SuccessfulSiege"),
+      notification(12n, 7000001n, "FailedDefense"),
+    ],
+  );
+
+  assert.deepEqual(
+    result.notifications.map((row) => row.entityId),
+    ["12"],
+  );
+  assert.deepEqual(result.outcomes, []);
+  assert.equal(result.warnings.some((warning) => /duplicate.*11/i.test(warning)), true);
+});
+
 test("rejects malformed decimal notification and empire IDs", () => {
   const badEntity = notification("01", 8000001n, "SuccessfulSiege");
   const badEmpire = notification(12n, "-1", "FailedDefense");
