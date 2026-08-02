@@ -46,6 +46,7 @@ export function gameDataResponse(options: {
   };
   now?: Date;
   freshForMs?: number;
+  liveForMs?: number;
 }) {
   if (options.claimId !== options.configuredClaimId) {
     return {
@@ -55,6 +56,7 @@ export function gameDataResponse(options: {
   }
   const now = options.now ?? new Date();
   const freshForMs = options.freshForMs ?? 90_000;
+  const liveForMs = options.liveForMs ?? 45_000;
   const domains: Partial<Record<DomainKey, DomainEnvelope<unknown>>> = {};
   const partialErrors: string[] = [];
   let availableCount = 0;
@@ -71,6 +73,20 @@ export function gameDataResponse(options: {
     const observedMs = Date.parse(observedAt);
     const ageMs = Number.isFinite(observedMs) ? Math.max(0, now.getTime() - observedMs) : null;
     const stale = snapshot.lastError != null || ageMs == null || ageMs > freshForMs;
+    const subscriptionHealth = options.repository.readSubscriptionHealth?.(
+      snapshot.provenance.sourceKey,
+      domain,
+    );
+    const heartbeatMs = Date.parse(subscriptionHealth?.updatedAt ?? "");
+    const heartbeatAgeMs = Number.isFinite(heartbeatMs)
+      ? Math.max(0, now.getTime() - heartbeatMs)
+      : null;
+    const live = snapshot.lastError == null
+      && subscriptionHealth?.connected === true
+      && subscriptionHealth.lastError == null
+      && subscriptionHealth.generation >= snapshot.generation
+      && heartbeatAgeMs != null
+      && heartbeatAgeMs <= liveForMs;
     const transformed = options.transformDomain
       ? options.transformDomain(domain, snapshot.data)
       : {
@@ -83,7 +99,7 @@ export function gameDataResponse(options: {
     const confidence = transformed.confidence ?? snapshot.confidence;
     domains[domain] = {
       data: transformed.data,
-      freshness: stale ? "stale" : "fresh",
+      freshness: live ? "live" : stale ? "stale" : "fresh",
       confidence,
       ageMs,
       provenance: snapshot.provenance,

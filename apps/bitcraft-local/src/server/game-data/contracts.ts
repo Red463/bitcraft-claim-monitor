@@ -128,4 +128,10 @@ export type StoredDomainSnapshot<T = unknown> = PendingDomainSnapshot<T> & {
 
 export interface CurrentStateReader {
   read(claimId: EntityId, domain: DomainKey): StoredDomainSnapshot | null;
+  readSubscriptionHealth?(sourceKey: string, domain: DomainKey): {
+    generation: number;
+    connected: boolean;
+    lastError: string | null;
+    updatedAt: string;
+  } | null;
 }

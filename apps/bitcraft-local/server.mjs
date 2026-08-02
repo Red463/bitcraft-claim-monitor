@@ -753,6 +753,36 @@ async function persistGlobalRegionSubscriptionHealth() {
     lastError: subscription.lastError ?? runtime.lastError ?? null,
   }, new Date().toISOString());
 }
+const relayPrimaryRegionHeartbeatDomains = [
+  "players",
+  "equipment",
+  "construction",
+  "research",
+  "recruitment",
+  "inventory-banks",
+  "contributions",
+];
+async function persistRelayRuntimeDomainHeartbeats(runtimeHealth, domains) {
+  const subscription = runtimeHealth?.subscription ?? {};
+  const connected = runtimeHealth?.running === true
+    && subscription.connected === true
+    && subscription.applied === true
+    && !subscription.lastError
+    && !runtimeHealth?.lastError;
+  const lastError = subscription.lastError ?? runtimeHealth?.lastError ?? null;
+  const observedAt = new Date().toISOString();
+  for (const domain of domains) {
+    const snapshot = currentStateRepository.read(currentClaimId(), domain);
+    if (!snapshot) continue;
+    await currentStateRepository.recordSubscriptionHealth({
+      sourceKey: snapshot.provenance.sourceKey,
+      domain,
+      generation: snapshot.generation,
+      connected,
+      lastError,
+    }, observedAt);
+  }
+}
 const craftPlanProgressAudit = createCraftPlanProgressAuditRepository(db, {
   statements,
   retentionDays: 14,
@@ -7304,6 +7334,7 @@ const server = createServer(async (req, res) => {
         claimId,
         domains,
         repository: currentStateRepository,
+        liveForMs: Math.max(relayHttpRefreshMs * 3, 30_000),
         transformDomain: (domain, data) => {
           if (domain === "inventories") {
             const bankSnapshot = currentStateRepository.read(claimId, "inventory-banks");
@@ -9438,6 +9469,11 @@ function startBackgroundTasks() {
         }
       } catch (error) {
         if (!isTestRuntime) console.warn(`Relay claim-market startup failed: ${errorMessage(error)}`);
+      } finally {
+        await persistRelayRuntimeDomainHeartbeats(
+          relayClaimMarketRuntime.health(),
+          ["market"],
+        );
       }
       try {
         if (!relayRegionClaimsStarted) {
@@ -9473,24 +9509,31 @@ function startBackgroundTasks() {
           console.warn(contributionWarnings[0]);
         }
       }
-      if (!relayPrimaryRegionStarted) {
-        await relayPrimaryRegionRuntime.start({
-          relayBaseUrl,
-          claimId,
-          regionId,
-          members,
-          contributionTargets,
-          contributionWarnings,
-        });
-        relayPrimaryRegionStarted = true;
-      } else {
-        await relayPrimaryRegionRuntime.reconcile({
-          claimId,
-          regionId,
-          members,
-          contributionTargets,
-          contributionWarnings,
-        });
+      try {
+        if (!relayPrimaryRegionStarted) {
+          await relayPrimaryRegionRuntime.start({
+            relayBaseUrl,
+            claimId,
+            regionId,
+            members,
+            contributionTargets,
+            contributionWarnings,
+          });
+          relayPrimaryRegionStarted = true;
+        } else {
+          await relayPrimaryRegionRuntime.reconcile({
+            claimId,
+            regionId,
+            members,
+            contributionTargets,
+            contributionWarnings,
+          });
+        }
+      } finally {
+        await persistRelayRuntimeDomainHeartbeats(
+          relayPrimaryRegionRuntime.health(),
+          relayPrimaryRegionHeartbeatDomains,
+        );
       }
     };
     const refreshRelay = async (reason = "scheduled") => {
