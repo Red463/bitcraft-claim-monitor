@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.50.0-beta.2] - 2026-08-02
+
+### Fixed
+
+- Kept unchanged subscription-backed data marked live while the Relay worker heartbeat remains healthy.
+
 ## [0.50.0-beta.1] - 2026-08-01
 
 ### Added

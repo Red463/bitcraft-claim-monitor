@@ -677,6 +677,96 @@ test("game-data route serves last-good data as stale with age and partial errors
   ]);
 });
 
+test("game-data route reports an old unchanged snapshot as live while its subscription heartbeat is healthy", () => {
+  const snapshot = {
+    data: [{ playerEntityId: "1", signedIn: true }],
+    confidence: "authoritative",
+    generation: 8,
+    lastError: null,
+    provenance: {
+      ...relayProvenance("2026-07-29T10:00:00.000Z"),
+      sourceKey: "region:19",
+    },
+    warnings: [],
+  };
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["players"],
+    repository: {
+      read: () => snapshot,
+      readSubscriptionHealth: () => ({
+        sourceKey: "region:19",
+        domain: "players",
+        generation: 8,
+        connected: true,
+        applyDurationMs: 12,
+        lagMs: 0,
+        reconnects: 0,
+        malformedRows: 0,
+        lastError: null,
+        updatedAt: "2026-07-29T10:04:50.000Z",
+      }),
+    },
+    now: new Date("2026-07-29T10:05:00.000Z"),
+    freshForMs: 60_000,
+    liveForMs: 45_000,
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.domains.players.freshness, "live");
+  assert.equal(result.body.domains.players.ageMs, 300_000);
+});
+
+test("game-data route does not trust a stale or disconnected subscription heartbeat", () => {
+  const snapshot = {
+    data: [{ playerEntityId: "1", signedIn: true }],
+    confidence: "authoritative",
+    generation: 8,
+    lastError: null,
+    provenance: {
+      ...relayProvenance("2026-07-29T10:00:00.000Z"),
+      sourceKey: "region:19",
+    },
+    warnings: [],
+  };
+  for (const health of [
+    {
+      connected: true,
+      lastError: null,
+      updatedAt: "2026-07-29T10:03:00.000Z",
+    },
+    {
+      connected: false,
+      lastError: "Relay subscription disconnected.",
+      updatedAt: "2026-07-29T10:04:59.000Z",
+    },
+  ]) {
+    const result = gameDataResponse({
+      configuredClaimId: "1369094286777412590",
+      claimId: "1369094286777412590",
+      domains: ["players"],
+      repository: {
+        read: () => snapshot,
+        readSubscriptionHealth: () => ({
+          sourceKey: "region:19",
+          domain: "players",
+          generation: 8,
+          applyDurationMs: null,
+          lagMs: null,
+          reconnects: 0,
+          malformedRows: 0,
+          ...health,
+        }),
+      },
+      now: new Date("2026-07-29T10:05:00.000Z"),
+      freshForMs: 60_000,
+      liveForMs: 45_000,
+    });
+    assert.equal(result.body.domains.players.freshness, "stale");
+  }
+});
+
 test("game-data route surfaces partial-domain warnings to browser status", () => {
   const result = gameDataResponse({
     configuredClaimId: "1369094286777412590",
