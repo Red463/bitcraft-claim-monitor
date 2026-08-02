@@ -121,9 +121,11 @@ import {
   buildCatalogItemDetail,
   buildResearchTierPresets,
   browserVisibleChangedDomains,
+  canonicalF32Decimal,
+  canonicalNonNegativeDecimal,
   enrichConstructionWithCatalog,
+  enrichCraftsDomain,
   enrichCraftsForPlanning,
-  enrichCraftsWithCatalog,
   enrichEquipmentWithCatalog,
   enrichInventoryWithCatalog,
   enrichMarketWithCatalog,
@@ -5052,10 +5054,28 @@ function craftPrimarySkill(craft) {
   return productionMetrics(craft).skillName;
 }
 
+function canonicalRelayIdentifier(value, label) {
+  if (typeof value !== "string" || !/^\d+$/.test(value.trim())) {
+    throw new Error(`${label} must be a decimal string identifier`);
+  }
+  return canonicalNonNegativeDecimal(value, label);
+}
+
 function craftExperiencePerProgress(craft) {
-  const skillId = toNumber(craft.levelRequirements?.[0]?.skill_id ?? craft.experiencePerProgress?.[0]?.skill_id);
-  const match = craft.experiencePerProgress?.find?.((entry) => toNumber(entry.skill_id) === skillId);
-  return toNumber(match?.quantity ?? craft.experiencePerProgress?.[0]?.quantity);
+  const skillId = canonicalRelayIdentifier(
+    craft.levelRequirements?.[0]?.skillId
+    ?? craft.levelRequirements?.[0]?.skill_id
+    ?? craft.experiencePerProgress?.[0]?.skillId
+    ?? craft.experiencePerProgress?.[0]?.skill_id,
+    "Relay craft skill id",
+  );
+  const match = craft.experiencePerProgress?.find?.(
+    (entry) => canonicalRelayIdentifier(
+      entry.skillId ?? entry.skill_id,
+      "Relay craft experience skill id",
+    ) === skillId,
+  );
+  return match?.quantity ?? craft.experiencePerProgress?.[0]?.quantity;
 }
 
 function craftContributionOutputItem(craft, catalog) {
@@ -5603,24 +5623,34 @@ function relayCraftContributionTargets(craftsPayload) {
   for (const craft of unwrap(craftsPayload, "craftResults", [])) {
     if (!craft?.entityId || craft.completed === true) continue;
     try {
-      const craftEntityId = String(craft.entityId).trim();
-      if (!/^\d+$/.test(craftEntityId)) {
-        throw new Error("Relay craft contribution target has an invalid craft entity id");
-      }
-      const xpPerProgress = craftExperiencePerProgress(craft);
-      if (!Number.isSafeInteger(xpPerProgress) || xpPerProgress < 0) {
-        throw new Error(`Relay craft ${craftEntityId} has invalid experience per progress`);
-      }
+      const craftEntityId = canonicalRelayIdentifier(
+        craft.entityId,
+        "Relay craft contribution target craft entity id",
+      );
+      const xpPerProgress = canonicalF32Decimal(
+        craftExperiencePerProgress(craft),
+        `Relay craft ${craftEntityId} experience per progress`,
+      );
+      const buildingEntityId = canonicalRelayIdentifier(
+        craft.buildingEntityId ?? craft.building_entity_id,
+        `Relay craft ${craftEntityId} building entity id`,
+      );
+      const recipeId = canonicalRelayIdentifier(
+        craft.recipeId ?? craft.recipe_id,
+        `Relay craft ${craftEntityId} recipe id`,
+      );
       const item = craftContributionOutputItem(craft, catalog);
       targets.push({
         craftEntityId,
+        buildingEntityId,
+        recipeId,
         profession: craftPrimarySkill(craft) || null,
         craftLabel: String(item.name ?? craft.recipeName ?? craft.craftedItemName ?? "Unknown craft"),
         structureName: String(craft.buildingName ?? craft.structureName ?? "Unknown structure"),
         itemTier: item.tier == null
           ? (craft.tier == null ? null : String(craft.tier))
           : String(item.tier),
-        xpPerProgress: String(xpPerProgress),
+        xpPerProgress,
       });
     } catch (error) {
       warnings.push(errorMessage(error));
@@ -6145,7 +6175,14 @@ function contributionLeaderboard(claimId) {
   `).all(claimId);
   const contributors = new Map();
   const professions = new Map();
+  let totalProgress = 0;
+  let totalXp = 0;
   for (const row of rows) {
+    totalProgress += toNumber(row.contributed_progress);
+    totalXp += toNumber(row.contributed_xp);
+    const namedContributor = row.contributor_entity_id != null
+      && row.attribution_confidence !== "unknown";
+    if (!namedContributor) continue;
     const contributorKey = String(row.contributor_entity_id || row.contributor_name);
     const profession = String(row.profession || "Unknown");
     const contributor = contributors.get(contributorKey) ?? {
@@ -6210,8 +6247,8 @@ function contributionLeaderboard(claimId) {
     summary: {
       contributorCount: contributorList.length,
       professionCount: professionList.length,
-      totalProgress: contributorList.reduce((sum, row) => sum + row.totalProgress, 0),
-      totalXp: contributorList.reduce((sum, row) => sum + row.totalXp, 0),
+      totalProgress,
+      totalXp,
       recordedCrafts: new Set(rows.map((row) => row.craft_entity_id)).size,
       lastContributedAt: rows[0]?.last_contributed_at ?? null,
     },
@@ -6227,6 +6264,7 @@ function contributionLeaderboard(claimId) {
       totalProgress: toNumber(row.contributed_progress),
       totalXp: toNumber(row.contributed_xp),
       contributionCount: toNumber(row.contribution_count),
+      attributionConfidence: row.attribution_confidence,
       firstContributedAt: row.first_contributed_at,
       lastContributedAt: row.last_contributed_at,
     })),
@@ -6245,6 +6283,7 @@ function currentCraftContributions(claimId) {
       craft_entity_id,
       contributor_entity_id,
       contributor_name,
+      attribution_confidence,
       contributed_progress,
       contributed_xp,
       contribution_count,
@@ -7360,13 +7399,13 @@ const server = createServer(async (req, res) => {
             };
           }
           if (domain === "crafts") {
-            return {
-              data: enrichCraftsWithCatalog(
-                data,
-                (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
-                (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
-              ),
-            };
+            const publicCraftSnapshot = currentStateRepository.read(claimId, "public-crafts");
+            return enrichCraftsDomain(
+              data,
+              publicCraftSnapshot,
+              (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+              (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
+            );
           }
           if (domain === "contributions") {
             const projected = currentCraftContributions(claimId);
