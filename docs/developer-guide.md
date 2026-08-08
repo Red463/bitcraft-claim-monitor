@@ -119,11 +119,12 @@ Discord messages.
 
 ## Assets
 
-Use the local resolver for every game icon. Runtime code must not construct
-remote icon URLs.
+Use the local resolver for every game icon. Browser runtime code must not
+construct remote icon URLs; the only approved runtime exception is the bounded
+server-side `/api/local/game-icon/:itemType/:itemId` fallback.
 
 `apps/bitcraft-local/assets/game-icons-manifest.json` is the explicit exception
-to provider-name scans: it is immutable build-time provenance and is never
+to provider-name scans: it is immutable build-time provenance and is not
 fetched at runtime. Preserve original URL, local path, SHA-256 digest, retrieval
 date, catalog identity, and permission reference. The asset verifier must fail
 for missing files, duplicate identities, and digest mismatches.
