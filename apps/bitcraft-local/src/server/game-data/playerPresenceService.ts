@@ -38,6 +38,17 @@ function optionalTimestamp(value: unknown, label: string): string | undefined {
     : normalizeTimestamp(decimalId(value, label), "seconds");
 }
 
+function newestValidTimestamp(...values: unknown[]): string | undefined {
+  let newest: { value: string; time: number } | null = null;
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const time = Date.parse(value);
+    if (!Number.isFinite(time) || (newest && time <= newest.time)) continue;
+    newest = { value, time };
+  }
+  return newest?.value;
+}
+
 function normalizePlayerDetail(value: unknown, expectedPlayerEntityId: string): PlayerDetail {
   const payload = record(value, "Relay player detail payload");
   const player = record(payload.player ?? payload, "Relay player detail");
@@ -91,14 +102,16 @@ export class RelayPlayerPresenceService {
       const playerEntityId = decimalId(player.playerEntityId, "unavailable player entity id");
       try {
         const detail = await this.#detail(playerEntityId);
+        const lastActiveTimestamp = newestValidTimestamp(
+          player.lastActiveTimestamp,
+          detail.lastActiveTimestamp,
+        );
         return {
           ...player,
           signedIn: detail.signedIn,
           presenceRegionId: detail.presenceRegionId,
           presenceSource: "relay-player",
-          ...(detail.lastActiveTimestamp == null ? {} : {
-            lastActiveTimestamp: detail.lastActiveTimestamp,
-          }),
+          ...(lastActiveTimestamp == null ? {} : { lastActiveTimestamp }),
           ...(detail.lastLoginTimestamp == null ? {} : {
             lastLoginTimestamp: detail.lastLoginTimestamp,
           }),

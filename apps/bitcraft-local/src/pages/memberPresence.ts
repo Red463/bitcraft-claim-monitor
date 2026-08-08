@@ -2,12 +2,25 @@ type MemberPresence = {
   signedIn?: unknown;
   presenceSource?: unknown;
   lastActiveTimestamp?: unknown;
+  lastActiveTimestamps?: unknown[];
   lastLoginTimestamp?: unknown;
 };
 
 function validTimestamp(value: unknown): string | null {
   if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) return null;
   return value;
+}
+
+function newestValidTimestamp(values: unknown[]): string | null {
+  let newest: { value: string; time: number } | null = null;
+  for (const value of values) {
+    const timestamp = validTimestamp(value);
+    if (!timestamp) continue;
+    const time = Date.parse(timestamp);
+    if (newest && time <= newest.time) continue;
+    newest = { value: timestamp, time };
+  }
+  return newest?.value ?? null;
 }
 
 export function memberPresenceStatus(member: MemberPresence): {
@@ -18,7 +31,10 @@ export function memberPresenceStatus(member: MemberPresence): {
   if (member.signedIn === true) {
     return { kind: "online", timestamp: null, label: "Online now" };
   }
-  const lastActiveTimestamp = validTimestamp(member.lastActiveTimestamp);
+  const lastActiveTimestamp = newestValidTimestamp([
+    member.lastActiveTimestamp,
+    ...(member.lastActiveTimestamps ?? []),
+  ]);
   if (lastActiveTimestamp) {
     return { kind: "last-seen", timestamp: lastActiveTimestamp, label: "Last seen" };
   }

@@ -188,7 +188,10 @@ export function Members({
                   const status = memberPresenceStatus({
                     ...m,
                     ...m.player,
-                    lastActiveTimestamp: m.player?.lastActiveTimestamp ?? m.lastActiveTimestamp,
+                    lastActiveTimestamps: [
+                      m.player?.lastActiveTimestamp,
+                      m.lastActiveTimestamp,
+                    ],
                     lastLoginTimestamp: m.player?.lastLoginTimestamp ?? m.lastLoginTimestamp,
                   });
                   return status.timestamp ? `${status.label} ${timeAgo(status.timestamp)}` : status.label;

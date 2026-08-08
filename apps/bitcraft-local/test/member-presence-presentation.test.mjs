@@ -42,6 +42,25 @@ test("member status prefers confirmed online then newest last-active then last-l
   }
 });
 
+test("member status selects the newest valid last-active timestamp across presentation sources", () => {
+  assert.ok(presentation, "expected the member-presence presentation module");
+  assert.deepEqual(presentation.memberPresenceStatus({
+    signedIn: false,
+    lastActiveTimestamp: "2026-07-30T11:00:00.000Z",
+    lastActiveTimestamps: [
+      "2026-07-30T11:00:00.000Z",
+      "not-a-timestamp",
+      null,
+      "2026-07-30T12:00:00.000Z",
+    ],
+    lastLoginTimestamp: "2026-07-30T13:00:00.000Z",
+  }), {
+    kind: "last-seen",
+    timestamp: "2026-07-30T12:00:00.000Z",
+    label: "Last seen",
+  });
+});
+
 test("unknown presence does not render an offline session", () => {
   assert.ok(presentation, "expected the member-presence presentation module");
   assert.equal(presentation.memberSessionStatus({

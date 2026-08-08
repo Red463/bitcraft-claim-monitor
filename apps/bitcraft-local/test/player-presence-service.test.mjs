@@ -61,6 +61,36 @@ test("omitted monitored members are enriched with exact Relay player presence", 
   assert.equal(players[1].presenceSource, "regional");
 });
 
+test("player enrichment keeps the newest valid last-active timestamp across member and Relay sources", async () => {
+  assert.ok(presenceModule, "expected the player-presence service module");
+  const service = new presenceModule.RelayPlayerPresenceService({
+    http: { player: async (entityId) => detail(entityId) },
+  });
+
+  const players = await service.enrich([{
+    playerEntityId: "1224979098660030450",
+    presenceSource: "unavailable",
+    signedIn: null,
+    lastActiveTimestamp: "2026-07-30T12:00:00.000Z",
+  }, {
+    playerEntityId: "1224979098660030451",
+    presenceSource: "unavailable",
+    signedIn: null,
+    lastActiveTimestamp: "not-a-timestamp",
+  }, {
+    playerEntityId: "1224979098660030452",
+    presenceSource: "unavailable",
+    signedIn: null,
+    lastActiveTimestamp: null,
+  }]);
+
+  assert.deepEqual(players.map((player) => player.lastActiveTimestamp), [
+    "2026-07-30T12:00:00.000Z",
+    "2026-07-30T11:00:00.000Z",
+    "2026-07-30T11:00:00.000Z",
+  ]);
+});
+
 test("player presence cache is reused before 60 seconds and expires at 60 seconds", async () => {
   assert.ok(presenceModule, "expected the player-presence service module");
   let now = 1_000;
