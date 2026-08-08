@@ -30,6 +30,7 @@ import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { recruitmentSummary } from "./recruitmentView.ts";
 import { memberPresenceStatus, memberSessionStatus } from "./memberPresence.ts";
+import { memberPassiveCraftQuantityLabel } from "./production/passiveCraftPresentation.ts";
 
 /**
  * Settlement roster and member-detail view.
@@ -320,7 +321,7 @@ export function Members({
                         </div>
                         <p>
                           <span className={`status-pill ${craft.status === "complete" ? "complete" : ""}`}>{formatEquipmentSlot(craft.status)}</span>
-                          <b>{formatNumber(craft.quantity)} crafted</b>
+                          <b>{memberPassiveCraftQuantityLabel(craft.quantity)}</b>
                         </p>
                         <small>{craft.structure} - {timeAgo(craft.timestamp)}</small>
                       </article>

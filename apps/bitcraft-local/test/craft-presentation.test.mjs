@@ -73,6 +73,10 @@ test("craft presentation does not infer item catalog identity when item type is 
   assert.ok(presentationModule, "expected the shared craft presentation projection");
   const projected = presentationModule.projectCraftPresentation({
     recipeName: "Craft {0}",
+    outputName: "Wrong output name",
+    itemName: "Wrong item name",
+    tier: 9,
+    itemTier: 8,
     craftedItem: [{ itemId: "42", quantity: "3" }],
   }, payload);
 
@@ -81,5 +85,6 @@ test("craft presentation does not infer item catalog identity when item type is 
   assert.equal(projected.outputItemId, null);
   assert.equal(projected.outputName, "crafted item");
   assert.equal(projected.item.name, "crafted item");
+  assert.equal(projected.item.tier, null);
   assert.notEqual(projected.item, payload.catalog["items:42"]);
 });

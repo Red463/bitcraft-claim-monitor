@@ -3,3 +3,7 @@ import { formatDecimalQuantity } from "../../server/game-data/inventoryProjectio
 export function passiveCraftQuantityLabel(value: unknown): string {
   return value == null ? "Unavailable" : formatDecimalQuantity(value);
 }
+
+export function memberPassiveCraftQuantityLabel(value: unknown): string {
+  return value == null ? "Unavailable" : `${formatDecimalQuantity(value)} crafted`;
+}

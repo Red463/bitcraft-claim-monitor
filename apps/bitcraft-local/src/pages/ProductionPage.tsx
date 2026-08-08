@@ -214,7 +214,10 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
   }).length;
   const totalProductionXp = jobs.reduce((sum, job) => sum + productionMetrics(job, itemLookup).totalXp, 0);
   const remainingProductionXp = jobs.reduce((sum, job) => sum + productionMetrics(job, itemLookup).remainingXp, 0);
-  const highestTier = Math.max(...jobs.map((job) => productionMetrics(job, itemLookup).tier), 0);
+  const highestTier = Math.max(
+    ...jobs.map((job) => productionMetrics(job, itemLookup).tier).filter((tier): tier is number => tier !== null),
+    0,
+  );
 
   return (
     <div className="panel production-page">

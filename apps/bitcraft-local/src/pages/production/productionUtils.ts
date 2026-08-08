@@ -1,5 +1,5 @@
 import { parseDateValue, toNumber, type AnyRecord } from "../../main-app-data.ts";
-import { inventoryStackKey } from "../../server/game-data/inventoryProjection.ts";
+import { explicitInventoryStackKey } from "../../server/game-data/inventoryProjection.ts";
 
 const ACTIVE_CRAFT_WINDOW_MS = 30 * 1000;
 
@@ -15,14 +15,15 @@ export function craftProgressKey(job: AnyRecord): string {
   return String(job.entityId ?? job.id ?? job.craftEntityId ?? `${job.buildingName ?? "structure"}:${job.recipeId ?? ""}:${job.craftedItem?.[0]?.itemId ?? job.craftedItem?.[0]?.item_id ?? ""}`);
 }
 export function productionMetrics(job: AnyRecord, itemLookup: Map<string, AnyRecord>) {
-  const output = job.craftedItem?.[0] ?? {};
-  let outputKey = "";
+  const output = job.craftedItem?.[0];
+  let outputKey: string | null = null;
   try {
-    outputKey = inventoryStackKey(output);
+    outputKey = output ? explicitInventoryStackKey(output) : null;
   } catch {
-    outputKey = String(output.itemId ?? output.item_id ?? "");
+    // Malformed or partial output identity remains unresolved.
   }
-  const item = itemLookup.get(outputKey) ?? itemLookup.get(String(output.itemId ?? output.item_id ?? "")) ?? {};
+  const item = outputKey ? itemLookup.get(outputKey) ?? {} : {};
+  const partialOutputIdentity = Boolean(output) && outputKey === null;
   const skillId = toNumber(job.levelRequirements?.[0]?.skillId ?? job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skillId ?? job.experiencePerProgress?.[0]?.skill_id);
   const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skillId ?? xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
   const total = toNumber(job.totalActionsRequired);
@@ -35,10 +36,10 @@ export function productionMetrics(job: AnyRecord, itemLookup: Map<string, AnyRec
     total,
     progress,
     remaining,
-    tier: toNumber(item.tier ?? job.tier),
+    tier: partialOutputIdentity ? null : toNumber(item.tier ?? job.tier),
     totalXp: total * experiencePerEffort,
     remainingXp: remaining * experiencePerEffort,
     completion: total > 0 ? progress / total : 0,
-    name: String(item.name ?? job.recipeName ?? ""),
+    name: partialOutputIdentity ? "" : String(item.name ?? job.recipeName ?? ""),
   };
 }

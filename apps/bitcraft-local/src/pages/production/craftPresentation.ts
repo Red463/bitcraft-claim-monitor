@@ -30,13 +30,14 @@ export function projectCraftPresentation(job: AnyRecord, payload: AnyRecord = {}
   }
   const [kind, outputItemId = null] = outputIdentity?.split(":") ?? [];
   const item = catalogEntity(outputIdentity, payload);
+  const partialOutputIdentity = Boolean(output) && outputIdentity === null;
   const outputItemType = kind === "cargo" ? "cargo" : kind === "items" ? "item" : null;
-  const outputName = String(
-    item?.name
+  const outputName = partialOutputIdentity
+    ? "crafted item"
+    : String(item?.name
       ?? job.outputName
       ?? job.itemName
-      ?? (outputItemId ? `${outputItemType === "cargo" ? "Cargo" : "Item"} #${outputItemId}` : "crafted item"),
-  );
+      ?? (outputItemId ? `${outputItemType === "cargo" ? "Cargo" : "Item"} #${outputItemId}` : "crafted item"));
   return {
     outputIdentity,
     outputItemType,
@@ -48,7 +49,7 @@ export function projectCraftPresentation(job: AnyRecord, payload: AnyRecord = {}
     item: item ?? {
       ...(outputItemId ? { id: outputItemId, itemId: outputItemId, itemType: outputItemType } : {}),
       name: outputName,
-      tier: job.tier ?? job.itemTier ?? null,
+      tier: partialOutputIdentity ? null : job.tier ?? job.itemTier ?? null,
       iconAssetName: job.iconAssetName ?? null,
     },
   };

@@ -80,6 +80,31 @@ corepack pnpm --filter @workspace/bitcraft-local run build
 
 Observed: exit 0. Server/provider TypeScript, bindings, asset verification, frontend TypeScript, Vite client build, and Relay runtime boundaries passed.
 
+## Controller fix round 2 — Remaining active/member presentation boundaries
+
+- Active crafts with an output ID but no item type no longer use the inventory default or a legacy bare-ID lookup. Their output catalog entity, tier, and name stay unresolved for sorting, highest-tier summary, and card presentation.
+- Members’ passive-craft details now render missing quantity evidence as `Unavailable`; a real zero remains `0 crafted`.
+
+### Red evidence
+
+```powershell
+corepack pnpm --filter @workspace/bitcraft-local exec node --test test/production-utils.test.mjs test/passive-craft-presentation.test.mjs
+```
+
+Observed before implementation: exit 1, 4 passed / 2 failed. The active craft resolved the guessed item catalog, and the Members nullable-quantity presenter was absent.
+
+The two-axis review then found that the active card could still use fallback tier/name metadata. A focused presentation/metrics run observed exit 1, 6 passed / 2 failed before that correction.
+
+### Green evidence
+
+The final focused command, adding `test/craft-presentation.test.mjs`, observed exit 0, 10 passed / 0 failed.
+
+```powershell
+corepack pnpm --filter @workspace/bitcraft-local run build
+```
+
+Observed: exit 0. Server/provider TypeScript, bindings, asset verification, frontend TypeScript, Vite client build, and Relay runtime boundaries passed.
+
 ```powershell
 corepack pnpm --filter @workspace/bitcraft-local test
 ```
