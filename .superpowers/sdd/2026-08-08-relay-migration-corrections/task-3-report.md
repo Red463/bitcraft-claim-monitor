@@ -98,3 +98,32 @@ Observed: exit 0, 1,659 passed / 0 failed.
 
 - Live Relay contribution actions were intentionally not exercised. Runtime behavior is covered with generated binding fixtures and no real Discord or game action was sent.
 - Historic unknown events remain intentionally unattributed and visible only as an admin diagnostic count; the migration does not guess ownership.
+
+## Controller fix round 1 — Partial evidence and fallback ordering
+
+Corrected the reviewed partial-evidence boundaries without changing other task areas:
+
+- A reducer caller that cannot be resolved now continues through unique player-action matching before exact owner fallback.
+- Missing craft output type no longer defaults to an item identity or resolves either catalog.
+- Passive rows missing output quantity or craft count retain nullable measures as distinct partial rows and do not merge into exact groups.
+- Missing progressive-row owner identity is optional at the session boundary, allowing authoritative reducer and unique action evidence to survive; owner remains the final fallback.
+
+### Red evidence
+
+```powershell
+corepack pnpm --filter @workspace/bitcraft-local exec node --test test/craft-contribution-attribution.test.mjs test/primary-region-player-session.test.mjs test/craft-provider-projection.test.mjs test/craft-presentation.test.mjs
+```
+
+Observed before implementation: exit 1, 25 passed / 5 failed. Failures were the reducer-to-owner short circuit, presentation and projection item-type inference, partial passive-measure merging, and owner-required session parsing.
+
+The spec review then identified that Craft Monitor still formatted a projected `null` quantity as `0`. A focused presentation-helper test observed exit 1, 0 passed / 1 failed before the UI fix.
+
+### Green evidence
+
+The focused command, including `test/passive-craft-presentation.test.mjs`, observed exit 0, 31 passed / 0 failed after implementation. The follow-up spec review reported no remaining findings; the standards review reported no hard violations and one deferred low duplication judgement.
+
+```powershell
+corepack pnpm --filter @workspace/bitcraft-local run build
+```
+
+Observed: exit 0. Server/provider TypeScript, bindings, asset verification, frontend TypeScript, Vite client build, and Relay runtime boundaries passed.

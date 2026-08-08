@@ -68,3 +68,18 @@ test("craft presentation keeps partial output data explicit without throwing dur
     item: { name: "crafted item", tier: null, iconAssetName: null },
   });
 });
+
+test("craft presentation does not infer item catalog identity when item type is missing", () => {
+  assert.ok(presentationModule, "expected the shared craft presentation projection");
+  const projected = presentationModule.projectCraftPresentation({
+    recipeName: "Craft {0}",
+    craftedItem: [{ itemId: "42", quantity: "3" }],
+  }, payload);
+
+  assert.equal(projected.outputIdentity, null);
+  assert.equal(projected.outputItemType, null);
+  assert.equal(projected.outputItemId, null);
+  assert.equal(projected.outputName, "crafted item");
+  assert.equal(projected.item.name, "crafted item");
+  assert.notEqual(projected.item, payload.catalog["items:42"]);
+});

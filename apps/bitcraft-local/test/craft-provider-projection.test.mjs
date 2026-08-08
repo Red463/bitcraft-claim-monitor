@@ -208,12 +208,17 @@ test("passive craft projection groups only identical member, output, structure, 
 });
 
 test("partial passive crafts do not invent typed ids or merge unrelated rows", () => {
+  const requestedCatalogKeys = [];
   const projected = enrichCraftsWithCatalog({ craftResults: [
-    { entityId: "91", recipeId: "10", ownerUsername: "Unknown", buildingName: "Unknown", completed: false, craftCount: "1", craftedItem: [] },
+    { entityId: "91", recipeId: "10", ownerUsername: "Unknown", buildingName: "Unknown", completed: false, craftCount: "1", craftedItem: [{ itemId: "42", quantity: "3" }] },
     { entityId: "92", recipeId: "10", ownerUsername: "Unknown", buildingName: "Unknown", completed: false, craftCount: "1", craftedItem: [] },
-  ] }, () => null, (id) => ({ id, name: "Craft {0}", isPassive: true }));
+  ] }, (key) => {
+    requestedCatalogKeys.push(key);
+    return { id: "42", name: "Wrong inferred item" };
+  }, (id) => ({ id, name: "Craft {0}", isPassive: true }));
 
   assert.equal(projected.passiveCraftResults.length, 2);
+  assert.deepEqual(requestedCatalogKeys, []);
   assert.deepEqual(projected.passiveCraftResults.map((row) => ({
     memberEntityId: row.memberEntityId,
     outputIdentity: row.outputIdentity,
@@ -221,6 +226,25 @@ test("partial passive crafts do not invent typed ids or merge unrelated rows", (
   })), [
     { memberEntityId: null, outputIdentity: null, structureEntityId: null },
     { memberEntityId: null, outputIdentity: null, structureEntityId: null },
+  ]);
+});
+
+test("passive crafts with missing quantities or counts stay partial and out of exact groups", () => {
+  const projected = enrichCraftsWithCatalog({ craftResults: [
+    { entityId: "101", recipeId: "10", ownerEntityId: "1", buildingEntityId: "2", completed: false, craftCount: "2", craftedItem: [{ itemId: "42", itemType: "item", quantity: "3" }] },
+    { entityId: "102", recipeId: "10", ownerEntityId: "1", buildingEntityId: "2", completed: false, craftCount: "2", craftedItem: [{ itemId: "42", itemType: "item" }] },
+    { entityId: "103", recipeId: "10", ownerEntityId: "1", buildingEntityId: "2", completed: false, craftedItem: [{ itemId: "42", itemType: "item", quantity: "3" }] },
+  ] }, () => ({ id: "42", name: "Iron Ore" }), (id) => ({ id, name: "Craft {0}", isPassive: true }));
+
+  assert.equal(projected.passiveCraftResults.length, 3);
+  assert.deepEqual(projected.passiveCraftResults.map((row) => ({
+    entityId: row.entityId,
+    quantity: row.quantity,
+    craftCount: row.craftCount,
+  })), [
+    { entityId: "101", quantity: "6", craftCount: "2" },
+    { entityId: "102", quantity: null, craftCount: "2" },
+    { entityId: "103", quantity: null, craftCount: null },
   ]);
 });
 

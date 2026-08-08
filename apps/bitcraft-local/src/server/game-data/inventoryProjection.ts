@@ -48,6 +48,12 @@ export function inventoryStackKey(stack: CatalogStack): string {
   return `${catalogKind(stack.itemType ?? stack.item_type ?? stack.kind)}:${id}`;
 }
 
+export function explicitInventoryStackKey(stack: CatalogStack): string | null {
+  const type = String(stack.itemType ?? stack.item_type ?? stack.kind ?? "").trim().toLowerCase();
+  if (!["item", "items", "0", "cargo", "1"].includes(type)) return null;
+  return inventoryStackKey(stack);
+}
+
 export function mergeClaimInventoryWithBanks(
   claimInventory: unknown,
   bankInventories: unknown,

@@ -221,10 +221,18 @@ export function resolveCraftContributionAttribution(input: {
   const event = asRecord(input.event);
   if (!event) return ownerAttribution(input.craftOwnerEntityId, input.members);
   if (normalizedEnumTag(event.tag) === "reducer") {
-    const attribution = reducerAttribution(event, target, input.members);
-    return attribution.confidence === "authoritative"
-      ? attribution
-      : ownerAttribution(input.craftOwnerEntityId, input.members, attribution.evidenceKey);
+    const reducer = reducerAttribution(event, target, input.members);
+    if (reducer.confidence === "authoritative") return reducer;
+    const action = matchedActionAttribution(
+      input.actionRows,
+      target,
+      input.members,
+      input.observedAtMs,
+      input.fallbackWindowMs ?? DEFAULT_FALLBACK_WINDOW_MS,
+    );
+    return action.confidence === "matched_action"
+      ? action
+      : ownerAttribution(input.craftOwnerEntityId, input.members, reducer.evidenceKey);
   }
   if (normalizedEnumTag(event.tag) !== "transaction") {
     return ownerAttribution(input.craftOwnerEntityId, input.members);

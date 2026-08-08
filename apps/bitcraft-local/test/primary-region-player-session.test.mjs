@@ -423,7 +423,7 @@ test("primary-region session filters member, settlement, and Town Bank state bef
   assert.equal(fake.state.callbacks.size, 0);
 });
 
-test("primary-region session attributes every exact live craft progress owner and deduplicates evidence", async () => {
+test("primary-region session attributes authoritative and matched-action updates without owner rows and deduplicates evidence", async () => {
   assert.ok(sessionModule, "primary-region player session module must exist");
   const playerActionRows = [{
     autoId: 94295n,
@@ -527,18 +527,18 @@ test("primary-region session attributes every exact live craft progress owner an
   };
   update(
     reducerContext,
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16056 },
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16080 },
+    { entityId: 1369094287428103662n, progress: 16056 },
+    { entityId: 1369094287428103662n, progress: 16080 },
   );
   update(
     reducerContext,
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16056 },
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16080 },
+    { entityId: 1369094287428103662n, progress: 16056 },
+    { entityId: 1369094287428103662n, progress: 16080 },
   );
   update(
     { event: { tag: "Transaction" } },
-    { entityId: 1369094287428103662n, ownerEntityId: 999n, progress: 16080 },
-    { entityId: 1369094287428103662n, ownerEntityId: 999n, progress: 16104 },
+    { entityId: 1369094287428103662n, progress: 16080 },
+    { entityId: 1369094287428103662n, progress: 16104 },
   );
   playerActionRows.push({
     ...playerActionRows[0],

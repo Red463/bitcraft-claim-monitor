@@ -20,6 +20,7 @@ import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { craftProgressKey, hasRecentCraftContribution, productionMetrics } from "./production/productionUtils";
 import { projectCraftPresentation } from "./production/craftPresentation";
+import { passiveCraftQuantityLabel } from "./production/passiveCraftPresentation";
 import { evaluateCraftEligibility } from "./production/toolEligibility";
 
 function formatObservedSince(value: unknown): string {
@@ -45,7 +46,7 @@ export function MemberPassiveCrafts({ rows }: { rows: AnyRecord[] }) {
         ["Member", (row) => row.memberName],
         ["Structure", (row) => row.structure],
         ["Status", (row) => <span className={`status-pill ${row.status === "complete" ? "complete" : ""}`}>{formatEquipmentSlot(row.status)}</span>],
-        ["Quantity", (row) => formatDecimalQuantity(row.quantity)],
+        ["Quantity", (row) => passiveCraftQuantityLabel(row.quantity)],
         ["Latest", (row) => row.timestamp ? timeAgo(row.timestamp) : "Current Relay snapshot"],
       ]} /> : null}
     </section>

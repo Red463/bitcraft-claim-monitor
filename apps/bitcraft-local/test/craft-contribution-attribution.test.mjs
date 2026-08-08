@@ -233,6 +233,30 @@ test("does not coerce an unresolved reducer identity into a contributor", () => 
   });
 });
 
+test("an unresolved reducer caller continues to the unique matching action", () => {
+  const attribution = resolveCraftContributionAttribution({
+    event: {
+      tag: "Reducer",
+      value: {
+        callerIdentity: { unknown: "object" },
+        reducer: craftContinueEvent().value.reducer,
+      },
+    },
+    target,
+    members,
+    actionRows: [eligibleActionRow()],
+    craftOwnerEntityId: "576460752388321999",
+    observedAtMs: 1785675249000,
+  });
+
+  assert.deepEqual(attribution, {
+    confidence: "matched_action",
+    contributorEntityId: "576460752388321942",
+    contributorName: "Ada",
+    evidenceKey: "action:94295",
+  });
+});
+
 test("rejects an unsafe numeric target identifier", () => {
   assert.throws(() => resolveCraftContributionAttribution({
     event: { tag: "Transaction" },

@@ -1,5 +1,5 @@
 import type { AnyRecord } from "../../main-app-data.ts";
-import { inventoryStackKey } from "../../server/game-data/inventoryProjection.ts";
+import { explicitInventoryStackKey } from "../../server/game-data/inventoryProjection.ts";
 
 function catalogEntity(outputIdentity: string | null, payload: AnyRecord): AnyRecord | null {
   if (!outputIdentity) return null;
@@ -23,7 +23,7 @@ export function projectCraftPresentation(job: AnyRecord, payload: AnyRecord = {}
   let outputIdentity: string | null = null;
   if (output && typeof output === "object") {
     try {
-      outputIdentity = inventoryStackKey(output);
+      outputIdentity = explicitInventoryStackKey(output);
     } catch {
       // Partial Relay craft rows must remain renderable while their output is unavailable.
     }

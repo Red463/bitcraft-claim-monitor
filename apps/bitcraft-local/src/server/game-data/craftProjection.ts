@@ -1,4 +1,4 @@
-import { inventoryStackKey } from "./inventoryProjection.ts";
+import { explicitInventoryStackKey } from "./inventoryProjection.ts";
 
 type CatalogEntity = {
   id?: unknown;
@@ -59,11 +59,17 @@ function decimalInteger(value: unknown, label: string): string {
   return normalized;
 }
 
-function outputQuantity(stack: CraftStack | undefined, craftCount: unknown): string {
-  return (
-    BigInt(decimalInteger(stack?.quantity ?? 0, "craft output quantity"))
-    * BigInt(decimalInteger(craftCount ?? 0, "craft count"))
-  ).toString();
+function optionalDecimalCounter(value: unknown, label: string): string | null {
+  if (value == null) return null;
+  return decimalInteger(value, label);
+}
+
+function outputQuantity(stack: CraftStack | undefined, craftCount: unknown): string | null {
+  const quantity = optionalDecimalCounter(stack?.quantity, "craft output quantity");
+  const count = optionalDecimalCounter(craftCount, "craft count");
+  return quantity === null || count === null
+    ? null
+    : (BigInt(quantity) * BigInt(count)).toString();
 }
 
 function optionalDecimalIdentifier(value: unknown): string | null {
@@ -76,7 +82,7 @@ function optionalDecimalIdentifier(value: unknown): string | null {
 function optionalOutputIdentity(output: CraftStack | undefined): string | null {
   if (!output) return null;
   try {
-    return inventoryStackKey(output);
+    return explicitInventoryStackKey(output);
   } catch {
     return null;
   }
@@ -152,7 +158,8 @@ export function enrichCraftsForPlanning(
       warnings.push(`Craft ${String(craft.entityId ?? "unknown")} references unavailable recipe ${recipeId || "unknown"}.`);
     }
     for (const output of Array.isArray(craft.craftedItem) ? craft.craftedItem : []) {
-      const key = inventoryStackKey(output);
+      const key = optionalOutputIdentity(output);
+      if (!key) continue;
       if (catalog[key]) continue;
       const entity = getEntity(key);
       if (entity) catalog[key] = entity;
@@ -216,16 +223,16 @@ export function enrichCraftsWithCatalog(
       const memberEntityId = optionalDecimalIdentifier(craft.ownerEntityId ?? craft.owner_entity_id);
       const structureEntityId = optionalDecimalIdentifier(craft.buildingEntityId ?? craft.building_entity_id);
       const status = craft.completed === true ? "complete" : "processing";
-      const key = memberEntityId && outputIdentity && structureEntityId
-        ? [memberEntityId, outputIdentity, structureEntityId, status].join("|")
-        : `partial:${exactEntityId ?? rowIndex}`;
       const quantity = outputQuantity(output, craft.craftCount);
-      const craftCount = decimalInteger(craft.craftCount ?? 0, "craft count");
+      const craftCount = optionalDecimalCounter(craft.craftCount, "craft count");
+      const key = memberEntityId && outputIdentity && structureEntityId && quantity !== null && craftCount !== null
+        ? [memberEntityId, outputIdentity, structureEntityId, status].join("|")
+        : `partial:${exactEntityId ?? "row"}:${rowIndex}`;
       const timestamp = latestValidTimestamp(craft.timestamp ?? craft.updatedAt ?? craft.updated_at);
       const current = passiveCrafts.get(key);
       if (current) {
-        current.quantity = (BigInt(String(current.quantity)) + BigInt(quantity)).toString();
-        current.craftCount = (BigInt(String(current.craftCount)) + BigInt(craftCount)).toString();
+        current.quantity = (BigInt(String(current.quantity)) + BigInt(quantity!)).toString();
+        current.craftCount = (BigInt(String(current.craftCount)) + BigInt(craftCount!)).toString();
         if (timestamp && (!current.timestamp || Date.parse(timestamp) > Date.parse(String(current.timestamp)))) {
           current.timestamp = timestamp;
         }

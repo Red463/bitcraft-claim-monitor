@@ -613,10 +613,10 @@ export class RelayPrimaryRegionPlayerSession {
       if (progressDelta <= 0n) return;
       const observedAt = this.#now();
       const occurredAt = observedAt.toISOString();
-      const craftOwnerEntityId = decimalInteger(
-        current.ownerEntityId ?? current.owner_entity_id,
-        "Relay craft contribution owner entity id",
-      );
+      const rawCraftOwnerEntityId = current.ownerEntityId ?? current.owner_entity_id;
+      const craftOwnerEntityId = rawCraftOwnerEntityId == null
+        ? undefined
+        : decimalInteger(rawCraftOwnerEntityId, "Relay craft contribution owner entity id");
       const attribution = resolveCraftContributionAttribution({
         event,
         target,
