@@ -289,6 +289,8 @@ test("primary-region session filters member, settlement, and Town Bank state bef
         playerEntityId: "101",
         username: "Ada",
         signedIn: true,
+        presenceRegionId: "19",
+        presenceSource: "regional",
         sessionSeconds: 5100,
         timePlayedSeconds: 7200,
         timeSignedInSeconds: 3600,
@@ -307,14 +309,16 @@ test("primary-region session filters member, settlement, and Town Bank state bef
         entityId: "202",
         playerEntityId: "202",
         username: "Grace",
-        signedIn: false,
+        signedIn: null,
+        presenceRegionId: null,
+        presenceSource: "unavailable",
         sessionSeconds: null,
         timePlayedSeconds: null,
         timeSignedInSeconds: null,
         tasks: { tasks: [] },
       },
     ],
-    warnings: ["Regional player_state omitted member 202."],
+    warnings: [],
     equipment: {
       members: [
         {
