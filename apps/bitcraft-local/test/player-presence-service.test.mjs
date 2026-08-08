@@ -171,3 +171,20 @@ test("HTTP and malformed player failures preserve unavailable presence without f
     assert.equal(player.presenceSource, "unavailable");
   }
 });
+
+test("bounded Relay player lookup resolves contribution names and falls back to the exact id", async () => {
+  assert.ok(presenceModule, "expected the player-presence service module");
+  const service = new presenceModule.RelayPlayerPresenceService({
+    http: {
+      player: async (entityId) => detail(entityId, {
+        username: entityId === "1224979098660030450" ? "Relay Owner" : "",
+      }),
+    },
+  });
+
+  assert.equal(await service.resolvePlayerName("1224979098660030450"), "Relay Owner");
+  assert.equal(
+    await service.resolvePlayerName("1224979098660030451"),
+    "Player 1224979098660030451",
+  );
+});

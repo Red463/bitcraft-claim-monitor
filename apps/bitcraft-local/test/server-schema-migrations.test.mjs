@@ -572,7 +572,7 @@ test("retired tables share cleanup ownership and are absent from a fresh schema"
   db.close();
 });
 
-test("production contribution migration preserves named rows while making attribution nullable", () => {
+test("production contribution migration retains unknown events without rebuilding guessed aggregates", () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`
     CREATE TABLE production_contributions (
@@ -662,21 +662,7 @@ test("production contribution migration preserves named rows while making attrib
       "idx_production_contrib_profession",
     ],
   );
-  assert.deepEqual(
-    { ...db.prepare(`
-      SELECT contribution_key, contributor_entity_id, contributor_name,
-        attribution_confidence, contributed_progress, contributed_xp
-      FROM production_contributions
-    `).get() },
-    {
-      contribution_key: "1:2:3",
-      contributor_entity_id: "3",
-      contributor_name: "Ada",
-      attribution_confidence: "unknown",
-      contributed_progress: "24",
-      contributed_xp: "42.24",
-    },
-  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM production_contributions").get().count, 0);
   assert.deepEqual(
     { ...db.prepare(`
       SELECT source_key, contributor_entity_id, attribution_confidence,
@@ -691,6 +677,77 @@ test("production contribution migration preserves named rows while making attrib
       contributed_xp: "42.24",
     },
   );
+  db.close();
+});
+
+test("production contribution migration maps joined evidence and rebuilds only exact durable attribution", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  const insertEvent = db.prepare(`
+    INSERT INTO production_contribution_events (
+      source_key, claim_id, region_id, craft_entity_id, contributor_entity_id,
+      attribution_confidence, contributed_progress, contributed_xp, occurred_at,
+      received_at, raw_json
+    ) VALUES (?, '1', '19', ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insertEvent.run(
+    "action:1", "100", "10", "joined", "2", "3.5",
+    "2026-08-08T10:00:00.000Z", "2026-08-08T10:00:01.000Z",
+    JSON.stringify({ contributorName: "Ada", profession: "Forestry", craftLabel: "Timber", structureName: "Forester", evidenceKey: "action:99" }),
+  );
+  insertEvent.run(
+    "owner:1", "101", "11", "unknown", "4", "5",
+    "2026-08-08T11:00:00.000Z", "2026-08-08T11:00:01.000Z",
+    JSON.stringify({ contributorName: "Grace", attributionConfidence: "owner_fallback", craftEntityId: "101", craftOwnerEntityId: "11", evidenceKey: "owner:11" }),
+  );
+  insertEvent.run(
+    "unknown:1", "102", null, "unknown", "8", "9",
+    "2026-08-08T12:00:00.000Z", "2026-08-08T12:00:01.000Z", "{}",
+  );
+  db.prepare(`
+    INSERT INTO production_contributions (
+      contribution_key, claim_id, craft_entity_id, contributor_entity_id,
+      contributor_name, attribution_confidence, contributed_progress,
+      contributed_xp, contribution_count, first_seen, updated_at, raw_json
+    ) VALUES ('stale', '1', '999', NULL, 'Unknown contributor', 'unknown',
+      '99', '99', '1', '2026-08-08T09:00:00.000Z',
+      '2026-08-08T09:00:00.000Z', '{}')
+  `).run();
+
+  applyProductionContributionExactAmountMigration(db);
+
+  assert.deepEqual(
+    db.prepare(`
+      SELECT source_key, attribution_confidence
+      FROM production_contribution_events
+      ORDER BY source_key
+    `).all().map((row) => ({ ...row })),
+    [
+      { source_key: "action:1", attribution_confidence: "matched_action" },
+      { source_key: "owner:1", attribution_confidence: "owner_fallback" },
+      { source_key: "unknown:1", attribution_confidence: "unknown" },
+    ],
+  );
+  assert.deepEqual(
+    db.prepare(`
+      SELECT craft_entity_id, contributor_entity_id, contributor_name,
+        attribution_confidence, contributed_progress, contributed_xp,
+        contribution_count
+      FROM production_contributions
+      ORDER BY craft_entity_id
+    `).all().map((row) => ({ ...row })),
+    [
+      { craft_entity_id: "100", contributor_entity_id: "10", contributor_name: "Ada", attribution_confidence: "matched_action", contributed_progress: "2", contributed_xp: "3.5", contribution_count: "1" },
+      { craft_entity_id: "101", contributor_entity_id: "11", contributor_name: "Grace", attribution_confidence: "owner_fallback", contributed_progress: "4", contributed_xp: "5", contribution_count: "1" },
+    ],
+  );
+  assert.throws(() => db.prepare(`
+    INSERT INTO production_contribution_events (
+      source_key, claim_id, region_id, craft_entity_id, contributor_entity_id,
+      attribution_confidence, contributed_progress, contributed_xp, occurred_at,
+      received_at, raw_json
+    ) VALUES ('joined-rejected', '1', '19', '1', '2', 'joined', '1', '1', 'now', 'now', '{}')
+  `).run(), /check constraint/i);
   db.close();
 });
 
