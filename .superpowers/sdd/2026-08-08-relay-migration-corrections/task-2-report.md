@@ -98,7 +98,7 @@ The first sandboxed full-suite attempt had one intentionally stale session fixtu
 ## Commits
 
 - `bd9ccaf` — Correct Relay member presence and warnings
-- Final report/test-fixture commit: recorded in Git immediately after this report was written.
+- `310fd86` — Document Task 2 verification and update the final session fixture
 
 ## Concerns
 
