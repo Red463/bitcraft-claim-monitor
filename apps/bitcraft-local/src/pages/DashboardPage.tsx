@@ -91,6 +91,7 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
   const confirmedMarketSales = marketIncome.salesCount;
   const confirmedMarketUnits = marketIncome.unitsSold;
   const confirmedMarketIncome = marketIncome.totalValue;
+  const hasConfirmedMarketIncome = confirmedMarketIncome !== "0";
   const marketIncomeDetail = confirmedMarketSales
     ? `${formatNumber(confirmedMarketSales, 0)} sale${confirmedMarketSales === 1 ? "" : "s"} - ${formatNumber(confirmedMarketUnits, 0)} units sold`
     : "No confirmed sales tracked yet";
@@ -192,8 +193,8 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
             )}
           />
           <div className="dashboard-money-row">
-            <strong>{confirmedMarketIncome ? `${formatNumber(confirmedMarketIncome)}g` : "0g"}</strong>
-            <span className={confirmedMarketIncome > 0 ? "positive" : ""}>{marketIncomeDetail}</span>
+            <strong>{hasConfirmedMarketIncome ? `${formatNumber(confirmedMarketIncome)}g` : "0g"}</strong>
+            <span className={hasConfirmedMarketIncome ? "positive" : ""}>{marketIncomeDetail}</span>
           </div>
           {marketIncome.partialRange && marketIncome.availableStartDay
             ? <p className="dashboard-chart-coverage">Stored sales begin {shortDateLabel(marketIncome.availableStartDay)}.</p>

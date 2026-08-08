@@ -91,7 +91,8 @@ export class RelayClaimMarketRuntime {
     if (this.#session) throw new Error("Relay claim-market runtime is already started");
     this.#relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
     this.#claimId = decimalInteger(config.claimId, "Relay claim-market claim id");
-    await this.#startSession(config.regionId);
+    this.#regionId = decimalInteger(config.regionId, "Relay claim-market region id");
+    await this.#startSession(this.#regionId);
   }
 
   async reconcile(config: { claimId?: string; regionId: string }): Promise<void> {
@@ -100,24 +101,32 @@ export class RelayClaimMarketRuntime {
       "Relay claim-market claim id",
     );
     const regionId = decimalInteger(config.regionId, "Relay claim-market region id");
-    const sameScope = this.#session && this.#claimId === claimId && this.#regionId === regionId;
-    if (sameScope) {
-      const health = this.#session?.health();
-      const unhealthy = health?.connected === false || Boolean(health?.lastError || this.#lastError);
-      if (!unhealthy) {
-        this.#connectionFailures = 0;
-        this.#nextReconnectAt = 0;
-        return;
-      }
+    const configuredScope = this.#claimId === claimId && this.#regionId === regionId;
+    const sameScope = Boolean(this.#session && configuredScope);
+    const health = this.#session?.health();
+    const unhealthy = configuredScope && (
+      this.#session
+        ? health?.connected === false || Boolean(health?.lastError || this.#lastError)
+        : Boolean(this.#lastError)
+    );
+    if (configuredScope && unhealthy) {
       if (this.#now() < this.#nextReconnectAt) return;
       this.#connectionFailures += 1;
       this.#nextReconnectAt = this.#now() + this.#reconnectDelayMs(this.#connectionFailures);
+    } else if (sameScope) {
+      this.#connectionFailures = 0;
+      this.#nextReconnectAt = 0;
+      return;
+    } else if (!configuredScope) {
+      this.#connectionFailures = 0;
+      this.#nextReconnectAt = 0;
     }
     this.#sessionEpoch += 1;
     await this.#session?.stop();
     await this.#commitTail;
     this.#session = null;
     this.#claimId = claimId;
+    this.#regionId = regionId;
     await this.#startSession(regionId);
   }
 

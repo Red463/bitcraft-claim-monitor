@@ -165,6 +165,11 @@ export class RelayPrimaryRegionRuntime {
     if (this.#session) throw new Error("Relay primary-region runtime is already started");
     this.#relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
     this.#claimId = String(config.claimId).trim();
+    this.#membershipSignature = membershipSignature(config.regionId, config.members);
+    this.#contributionSignature = contributionSessionSignature(
+      config.contributionTargets ?? [],
+      config.contributionWarnings ?? [],
+    );
     await this.#startSession(
       config.regionId,
       config.members,
@@ -189,29 +194,32 @@ export class RelayPrimaryRegionRuntime {
       contributionWarnings,
     );
     const session = this.#session;
-    const sameScope = session
-      && claimId === this.#claimId
+    const configuredScope = claimId === this.#claimId
       && nextSignature === this.#membershipSignature;
+    const sameScope = Boolean(session && configuredScope);
     const health = session?.health();
-    const unhealthy = Boolean(sameScope && (
-      health?.connected === false
-      || health?.lastError
-      || this.#lastError
+    const unhealthy = Boolean(configuredScope && (
+      session
+        ? health?.connected === false || health?.lastError || this.#lastError
+        : this.#lastError
     ));
-    if (sameScope && nextContributionSignature !== this.#contributionSignature) {
+    if (session && configuredScope && nextContributionSignature !== this.#contributionSignature) {
       session.updateContributionScope(
         contributionTargets,
         contributionWarnings,
       );
       this.#contributionSignature = nextContributionSignature;
     }
-    if (sameScope && unhealthy && this.#now() < this.#nextReconnectAt) {
+    if (configuredScope && unhealthy && this.#now() < this.#nextReconnectAt) {
       return Promise.resolve();
     }
-    if (sameScope && unhealthy) {
+    if (configuredScope && unhealthy) {
       this.#connectionFailures += 1;
       this.#nextReconnectAt = this.#now() + this.#reconnectDelayMs(this.#connectionFailures);
     } else if (sameScope) {
+      this.#connectionFailures = 0;
+      this.#nextReconnectAt = 0;
+    } else if (!configuredScope) {
       this.#connectionFailures = 0;
       this.#nextReconnectAt = 0;
     }
@@ -241,9 +249,9 @@ export class RelayPrimaryRegionRuntime {
       await this.#commitTail;
       await this.#eventTail;
       this.#session = null;
-      this.#membershipSignature = null;
-      this.#contributionSignature = null;
       this.#claimId = claimId;
+      this.#membershipSignature = nextSignature;
+      this.#contributionSignature = nextContributionSignature;
       await this.#startSession(config.regionId, config.members, contributionTargets, contributionWarnings);
     })();
     this.#reconcileInFlight = reconcile;

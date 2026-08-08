@@ -290,7 +290,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
   const confirmedSales = marketRange.totals.confirmedSales;
   const confirmedRevenue = marketRange.totals.trackedValue;
   const unitsSold = marketRange.totals.confirmedUnits;
-  const averageSaleValue = confirmedSales ? confirmedRevenue / confirmedSales : 0;
+  const averageSaleValue = confirmedSales ? toNumber(confirmedRevenue) / confirmedSales : 0;
   const listingValue = all.reduce((total, listing) => total + toNumber(listing.price) * Math.max(1, toNumber(listing.quantity)), 0);
   const maxDailyValue = Math.max(...daily.map((row: AnyRecord) => toNumber(row.totalValue)), 1);
   const trendRange = daily.length ? `${formatMarketDay(daily[0].day)} to ${formatMarketDay(daily[daily.length - 1].day)}` : "No confirmed sales";
