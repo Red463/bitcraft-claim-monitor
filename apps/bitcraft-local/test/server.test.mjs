@@ -582,6 +582,11 @@ test("server collection paginates listings and protects production mutations", a
   const missingLocalGameIcon = await fetch(`${origin}/game-icons/GeneratedIcons/Items/Missing.webp`);
   assert.equal(missingLocalGameIcon.status, 404);
   assert.match(missingLocalGameIcon.headers.get("content-type") ?? "", /^application\/json/);
+  const rateLimitedIcons = await Promise.all(Array.from({ length: 601 }, (_, index) => fetch(
+    `${origin}/api/local/game-icon/item/${1000 + index}`,
+  )));
+  assert.equal(rateLimitedIcons.every((response) => response.status === 404 || response.status === 429), true);
+  assert.equal(rateLimitedIcons.filter((response) => response.status === 429).length > 0, true);
   await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (catalogDb) => {
     const receivedAt = new Date().toISOString();
     const insert = catalogDb.prepare(`

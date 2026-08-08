@@ -2,6 +2,14 @@ import { sendBinary, sendJson } from "./httpResponses.mjs";
 
 const ROUTE_PREFIX = "/api/local/game-icon/";
 const DEFAULT_CACHE_CONTROL = "public, max-age=86400, stale-while-revalidate=604800";
+const DEFAULT_TIMEOUT_MS = 5_000;
+const MAX_TIMEOUT_MS = 15_000;
+const DEFAULT_MAX_BYTES = 512 * 1024;
+const MAX_BYTES = 1024 * 1024;
+const DEFAULT_CACHE_TTL_MS = 60 * 60 * 1000;
+const MAX_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_CACHE_MAX_ENTRIES = 500;
+const MAX_CACHE_ENTRIES = 2_000;
 
 function validTarget(itemType, itemId) {
   return (itemType === "item" || itemType === "cargo") && /^\d+$/.test(itemId);
@@ -22,7 +30,15 @@ function metadataIconValue(payload, itemType) {
   ).trim();
 }
 
-function approvedUrl(value, baseOrigin, approvedHosts) {
+function boundedPositiveNumber(value, fallback, maximum) {
+  const numeric = Number(value);
+  if (numeric === Number.POSITIVE_INFINITY) return maximum;
+  return Number.isFinite(numeric) && numeric > 0
+    ? Math.min(Math.floor(numeric), maximum)
+    : fallback;
+}
+
+function approvedUrl(value, baseOrigin, approvedHosts, { appendWebp = false } = {}) {
   if (!value || value === "\uFFEE" || /[\u0000-\u001f\u007f]/.test(value)) return null;
   const normalized = value.replaceAll("\\", "/");
   const relativePath = normalized.startsWith("Items/")
@@ -35,6 +51,8 @@ function approvedUrl(value, baseOrigin, approvedHosts) {
     return null;
   }
   if (url.protocol !== "https:" || !approvedHosts.has(url.hostname.toLowerCase())) return null;
+  const filename = url.pathname.split("/").at(-1) ?? "";
+  if (appendWebp && !/\.[a-z0-9]{2,5}$/i.test(filename)) url.pathname = `${url.pathname}.webp`;
   return url;
 }
 
@@ -64,28 +82,51 @@ export function createGameIconFallbackService(options = {}) {
   const approvedHosts = new Set((options.approvedHosts ?? ["bitjita.com", "cdn.bitjita.com"])
     .map((host) => String(host).trim().toLowerCase())
     .filter(Boolean));
-  const timeoutMs = Math.max(1, Number(options.timeoutMs ?? 5_000));
-  const maxBytes = Math.max(1, Number(options.maxBytes ?? 512 * 1024));
+  const timeoutMs = boundedPositiveNumber(options.timeoutMs, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
+  const maxBytes = boundedPositiveNumber(options.maxBytes, DEFAULT_MAX_BYTES, MAX_BYTES);
+  const cacheTtlMs = boundedPositiveNumber(options.cacheTtlMs, DEFAULT_CACHE_TTL_MS, MAX_CACHE_TTL_MS);
+  const cacheMaxEntries = boundedPositiveNumber(options.cacheMaxEntries, DEFAULT_CACHE_MAX_ENTRIES, MAX_CACHE_ENTRIES);
+  const timeoutSignal = options.timeoutSignal ?? AbortSignal.timeout;
+  const now = options.now ?? Date.now;
+  const cache = options.cache ?? new Map();
+  const inflight = options.inflight ?? new Map();
   const appIdentifier = String(options.appIdentifier ?? "BitCraft Claim Monitor Relay");
   const metadataBase = approvedUrl("/", metadataOrigin, approvedHosts);
+
+  function pruneCache(pruneAt = now()) {
+    for (const [key, entry] of cache) {
+      if (entry.expiresAt <= pruneAt) cache.delete(key);
+    }
+    while (cache.size > cacheMaxEntries) cache.delete(cache.keys().next().value);
+  }
+
+  function cacheResult(key, value) {
+    cache.delete(key);
+    cache.set(key, {
+      value,
+      expiresAt: now() + (value ? cacheTtlMs : Math.min(cacheTtlMs, 5 * 60 * 1000)),
+    });
+    pruneCache();
+  }
 
   async function request(url, accept) {
     return fetcher(url, {
       headers: { accept, "x-app-identifier": appIdentifier },
       redirect: "error",
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: timeoutSignal(timeoutMs),
     });
   }
 
-  async function fetchIcon(itemType, itemId) {
-    if (!validTarget(itemType, itemId) || !metadataBase) return null;
+  async function fetchIconUncached(itemType, itemId) {
     try {
       const metadataKind = itemType === "item" ? "items" : "cargo";
       const metadataUrl = new URL(`/api/${metadataKind}/${itemId}`, metadataBase);
       const metadataResponse = await request(metadataUrl, "application/json");
       if (!metadataResponse.ok) return null;
-      const metadata = await metadataResponse.json();
-      const iconUrl = approvedUrl(metadataIconValue(metadata, itemType), metadataBase.origin, approvedHosts);
+      const metadataBody = await readBounded(metadataResponse, maxBytes);
+      if (!metadataBody) return null;
+      const metadata = JSON.parse(metadataBody.toString("utf8"));
+      const iconUrl = approvedUrl(metadataIconValue(metadata, itemType), metadataBase.origin, approvedHosts, { appendWebp: true });
       if (!iconUrl) return null;
 
       const imageResponse = await request(iconUrl, "image/*");
@@ -100,7 +141,26 @@ export function createGameIconFallbackService(options = {}) {
     }
   }
 
-  return { fetchIcon };
+  async function fetchIcon(itemType, itemId) {
+    if (!validTarget(itemType, itemId) || !metadataBase) return null;
+    const key = `${itemType}:${itemId}`;
+    pruneCache();
+    const cached = cache.get(key);
+    if (cached) return cached.value;
+    const pending = inflight.get(key);
+    if (pending) return pending;
+    const requestPromise = fetchIconUncached(itemType, itemId);
+    inflight.set(key, requestPromise);
+    try {
+      const result = await requestPromise;
+      cacheResult(key, result);
+      return result;
+    } finally {
+      inflight.delete(key);
+    }
+  }
+
+  return { cacheSize: () => cache.size, fetchIcon };
 }
 
 export async function serveGameIconRequest(pathname, res, service) {

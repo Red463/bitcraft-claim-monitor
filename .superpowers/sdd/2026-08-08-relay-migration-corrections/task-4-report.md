@@ -85,3 +85,36 @@ Observed: exit 0, 1,674 passed / 0 failed.
 - The BitJita fallback was verified with deterministic mocked metadata/image responses and unavailable-route integration. No live BitJita request was sent.
 - Browser smoke verification was structurally clean but data-limited as described above.
 - No production/VPS action is required from this implementation task; rollout remains with the controller.
+
+## Controller fix round 1
+
+Addressed every P1/P2 controller finding:
+
+- Applied `RATE_LIMITS.proxy` before the public game-icon handler.
+- Added a bounded response cache and in-flight request coalescing keyed by `itemType:itemId`.
+- Normalized timeout, response-byte, cache-TTL, and cache-size settings to positive bounded values; metadata is byte-bounded before JSON parsing and redirects remain rejected.
+- Appended `.webp` to extensionless BitJita icon assets while preserving approved existing extensions.
+- Made game-icon identity selection atomic at one record level, including Inventory's existing `type: Item|Cargo` shape, without mixing top-level and nested identity fields.
+- Narrowed the runtime provider policy to the exact approved origin literals and call sites, and removed the dead `readSourceTree` helper.
+
+### Round 1 RED evidence
+
+- Fallback/resolver/policy tests: 9 passed / 5 failed before production changes. Failures covered extensionless assets, metadata bounds, invalid-limit normalization, missing request coalescing/cache, and Inventory identity handling.
+- Server integration: 3 passed / 1 failed before route limiting; all 601 game-icon requests returned 404 instead of producing a local 429.
+
+### Round 1 GREEN evidence
+
+```powershell
+node --experimental-strip-types --test test/game-icon-fallback.test.mjs
+node --experimental-strip-types --test test/game-icon-resolver.test.mjs
+node --experimental-strip-types --test test/relay-current-documentation-boundary.test.mjs
+node --experimental-strip-types --test test/server.test.mjs
+```
+
+Observed: 8 / 8 fallback, 3 / 3 resolver, 3 / 3 policy, and 4 / 4 server tests passed. The server limiter test avoids a synthetic forwarded address because that would deliberately create an unrelated second GeoIP cache entry later in the integration test.
+
+```powershell
+corepack pnpm --filter @workspace/bitcraft-local run build
+```
+
+Observed: exit 0. Server/provider TypeScript, generated bindings, asset verification, frontend TypeScript, Vite client build, and Relay runtime-boundary verification passed. The first 120-second wrapper attempt timed out without a build error; the fresh 300-second run completed successfully in 120.4 seconds.

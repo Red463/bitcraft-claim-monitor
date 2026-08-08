@@ -36,3 +36,26 @@ test("game icon sources prefer the Relay catalog asset, then the same-origin met
   );
   assert.deepEqual(gameAssets.gameIconSources({ id: "not-decimal", itemType: "item" }), []);
 });
+
+test("game icon identity stays atomic at one record level and supports Inventory display types", () => {
+  assert.deepEqual(
+    gameAssets.gameIconSources({ itemId: "42", type: "Cargo" }),
+    ["/api/local/game-icon/cargo/42"],
+  );
+  assert.deepEqual(
+    gameAssets.gameIconSources({ id: "42", contents: { itemId: "84", itemType: "cargo" } }),
+    ["/api/local/game-icon/cargo/84"],
+  );
+  assert.deepEqual(
+    gameAssets.gameIconSources({ id: "42", contents: { itemType: "cargo" } }),
+    [],
+  );
+  assert.deepEqual(
+    gameAssets.gameIconSources({ itemType: "item", contents: { itemId: "84" } }),
+    [],
+  );
+  assert.deepEqual(
+    gameAssets.gameIconSources({ id: "42", type: "Item" }),
+    ["/api/local/game-icon/item/42"],
+  );
+});

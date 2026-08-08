@@ -37,23 +37,27 @@ export function gameIconUrl(item) {
   return `/game-icons/${segments.map((segment) => encodeURIComponent(segment)).join("/")}.webp`;
 }
 
-function gameIconIdentity(item) {
+function itemTypeValue(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (value === 0 || normalized === "0" || normalized === "item" || normalized === "items") return "item";
+  if (value === 1 || normalized === "1" || normalized === "cargo") return "cargo";
+  return null;
+}
+
+function gameIconIdentityAtLevel(item) {
   const itemId = String(
     item?.itemId
       ?? item?.item_id
       ?? item?.id
-      ?? item?.contents?.itemId
-      ?? item?.contents?.item_id
       ?? "",
   ).trim();
   if (!/^\d+$/.test(itemId)) return null;
-  const rawType = item?.itemType ?? item?.item_type ?? item?.kind ?? item?.contents?.itemType ?? item?.contents?.item_type;
-  const itemType = rawType === 0 || rawType === "0" || rawType === "item" || rawType === "items"
-    ? "item"
-    : rawType === 1 || rawType === "1" || rawType === "cargo"
-      ? "cargo"
-      : null;
+  const itemType = itemTypeValue(item?.itemType ?? item?.item_type ?? item?.kind ?? item?.type);
   return itemType ? { itemType, itemId } : null;
+}
+
+function gameIconIdentity(item) {
+  return gameIconIdentityAtLevel(item) ?? gameIconIdentityAtLevel(item?.contents);
 }
 
 export function gameIconSources(item) {

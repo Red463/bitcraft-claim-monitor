@@ -5,6 +5,7 @@ export type GameAssetIdentity = {
   itemType?: unknown;
   item_type?: unknown;
   kind?: unknown;
+  type?: unknown;
   iconAssetName?: unknown;
   icon_asset_name?: unknown;
   iconAddress?: unknown;

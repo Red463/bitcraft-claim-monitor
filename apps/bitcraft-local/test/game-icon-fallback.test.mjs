@@ -25,7 +25,7 @@ function service(fetcher, overrides = {}) {
     metadataOrigin: "https://bitjita.com",
     approvedHosts: ["bitjita.com", "cdn.bitjita.com"],
     timeoutMs: 50,
-    maxBytes: 16,
+    maxBytes: 256,
     appIdentifier: "Claim Monitor tests",
     ...overrides,
   });
@@ -36,9 +36,9 @@ test("public game icon route resolves item and cargo metadata before returning b
   const iconBytes = Uint8Array.from([0x52, 0x49, 0x46, 0x46]);
   const iconService = service(async (input, init) => {
     const url = String(input);
-    requests.push({ url, accept: init?.headers?.accept });
-    if (url === "https://bitjita.com/api/items/42") return Response.json({ item: { iconAssetName: "GeneratedIcons/Items/Test.webp" } });
-    if (url === "https://bitjita.com/api/cargo/42") return Response.json({ cargo: { iconUrl: "https://cdn.bitjita.com/cargo/Test.webp" } });
+    requests.push({ url, accept: init?.headers?.accept, redirect: init?.redirect });
+    if (url === "https://bitjita.com/api/items/42") return Response.json({ item: { iconAssetName: "GeneratedIcons/Items/Test" } });
+    if (url === "https://bitjita.com/api/cargo/42") return Response.json({ cargo: { iconUrl: "https://cdn.bitjita.com/cargo/Test.png" } });
     return new Response(iconBytes, { headers: { "content-type": "image/webp", "content-length": String(iconBytes.length) } });
   });
 
@@ -55,9 +55,10 @@ test("public game icon route resolves item and cargo metadata before returning b
     "https://bitjita.com/api/items/42",
     "https://bitjita.com/GeneratedIcons/Items/Test.webp",
     "https://bitjita.com/api/cargo/42",
-    "https://cdn.bitjita.com/cargo/Test.webp",
+    "https://cdn.bitjita.com/cargo/Test.png",
   ]);
   assert.deepEqual(requests.map(({ accept }) => accept), ["application/json", "image/*", "application/json", "image/*"]);
+  assert.deepEqual(requests.map(({ redirect }) => redirect), ["error", "error", "error", "error"]);
 });
 
 test("public game icon route rejects malformed item type and decimal identity", async () => {
@@ -96,9 +97,79 @@ test("game icon fallback rejects non-image content and oversized image responses
       return requestCount === 1
         ? Response.json({ item: { iconAssetName: "GeneratedIcons/Items/Test.webp" } })
         : imageResponse;
-    });
+    }, { maxBytes: 16 });
     assert.equal(await iconService.fetchIcon("item", "42"), null);
   }
+});
+
+test("game icon fallback byte-bounds metadata before parsing JSON", async () => {
+  const requests = [];
+  const oversizedMetadata = JSON.stringify({
+    item: { iconAssetName: "GeneratedIcons/Items/Test.webp", description: "x".repeat(128) },
+  });
+  const iconService = service(async (input) => {
+    requests.push(String(input));
+    return new Response(oversizedMetadata, { headers: { "content-type": "application/json" } });
+  }, { maxBytes: 64 });
+
+  assert.equal(await iconService.fetchIcon("item", "42"), null);
+  assert.deepEqual(requests, ["https://bitjita.com/api/items/42"]);
+});
+
+test("game icon fallback normalizes invalid limits and caps timeout and response bytes", async () => {
+  const requestedTimeouts = [];
+  let requestCount = 0;
+  const invalidLimitService = service(async () => {
+    requestCount += 1;
+    return requestCount === 1
+      ? Response.json({ item: { iconAssetName: "GeneratedIcons/Items/Test.webp" } })
+      : new Response(new Uint8Array([1]), { headers: { "content-type": "image/webp" } });
+  }, {
+    timeoutMs: Number.NaN,
+    maxBytes: Number.NaN,
+  });
+  assert.ok(await invalidLimitService.fetchIcon("item", "42"));
+
+  requestCount = 0;
+  const boundedService = service(async () => {
+    requestCount += 1;
+    return requestCount === 1
+      ? Response.json({ item: { iconAssetName: "GeneratedIcons/Items/Test.webp" } })
+      : new Response(new Uint8Array(1024 * 1024 + 1), { headers: { "content-type": "image/webp" } });
+  }, {
+    timeoutMs: Number.POSITIVE_INFINITY,
+    maxBytes: Number.POSITIVE_INFINITY,
+    timeoutSignal: (timeoutMs) => {
+      requestedTimeouts.push(timeoutMs);
+      return new AbortController().signal;
+    },
+  });
+  assert.equal(await boundedService.fetchIcon("item", "42"), null);
+  assert.deepEqual(requestedTimeouts, [15_000, 15_000]);
+});
+
+test("game icon fallback coalesces in-flight work and reuses a bounded response cache", async () => {
+  const requests = [];
+  const iconService = service(async (input) => {
+    const url = String(input);
+    requests.push(url);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    if (url.includes("/api/items/")) return Response.json({ item: { iconAssetName: "GeneratedIcons/Items/Test" } });
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/webp" } });
+  }, { cacheTtlMs: 1_000, cacheMaxEntries: 2 });
+
+  const [first, second] = await Promise.all([
+    iconService.fetchIcon("item", "42"),
+    iconService.fetchIcon("item", "42"),
+  ]);
+  const cached = await iconService.fetchIcon("item", "42");
+
+  assert.deepEqual(first, second);
+  assert.deepEqual(cached, first);
+  assert.deepEqual(requests, [
+    "https://bitjita.com/api/items/42",
+    "https://bitjita.com/GeneratedIcons/Items/Test.webp",
+  ]);
 });
 
 test("game icon fallback times out and maps unavailable metadata or images to 404", async () => {

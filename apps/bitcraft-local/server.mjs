@@ -7185,7 +7185,10 @@ const server = createServer(async (req, res) => {
       });
     }
     if (req.method === "OPTIONS") return send(res, 204, {});
-    if (req.method === "GET" && await serveGameIconRequest(url.pathname, res, gameIconFallbackService)) return;
+    if (req.method === "GET" && url.pathname.startsWith("/api/local/game-icon/")) {
+      if (!rateLimit(req, res, "game-icon", RATE_LIMITS.proxy)) return;
+      if (await serveGameIconRequest(url.pathname, res, gameIconFallbackService)) return;
+    }
     if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, {
       ok: true,
       version: appVersion,

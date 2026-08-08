@@ -14,15 +14,6 @@ const currentDocs = [
   "docs/developer-guide.md",
 ];
 
-const readSourceTree = (path) => {
-  const url = new URL(path, rootUrl);
-  return readdirSync(url, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .filter((entry) => /\.(?:mjs|ts|tsx|js|jsx)$/.test(entry.name))
-    .map((entry) => readFileSync(`${entry.parentPath}/${entry.name}`, "utf8"))
-    .join("\n");
-};
-
 const sourceFiles = (path) => {
   const url = new URL(path, rootUrl);
   const basePath = fileURLToPath(url);
@@ -98,19 +89,22 @@ test("only the audited same-origin icon fallback may contact the approved BitJit
   assert.match(currentDocsText, /build-time provenance/i);
   assert.match(currentDocsText, /\/api\/local\/game-icon/);
 
-  const runtimeSources = [
-    ...sourceFiles("apps/bitcraft-local/src/"),
-    { path: "apps/bitcraft-local/server.mjs", contents: readRoot("apps/bitcraft-local/server.mjs") },
+  const server = readRoot("apps/bitcraft-local/server.mjs");
+  const fallback = readRoot("apps/bitcraft-local/src/server/gameIconFallback.mjs");
+  const approvedServerOrigin = 'metadataOrigin: process.env.BITJITA_ICON_API_ORIGIN ?? "https://bitjita.com",';
+  const approvedServerHosts = 'approvedHosts: String(process.env.BITJITA_ICON_APPROVED_HOSTS ?? "bitjita.com,cdn.bitjita.com").split(","),';
+  const approvedFallbackOrigin = 'const metadataOrigin = String(options.metadataOrigin ?? "https://bitjita.com").replace(/\\/+$/, "");';
+  const approvedFallbackHosts = 'const approvedHosts = new Set((options.approvedHosts ?? ["bitjita.com", "cdn.bitjita.com"])';
+  assert.equal(server.split(approvedServerOrigin).length - 1, 1);
+  assert.equal(server.split(approvedServerHosts).length - 1, 1);
+  assert.equal(fallback.split(approvedFallbackOrigin).length - 1, 1);
+  assert.equal(fallback.split(approvedFallbackHosts).length - 1, 1);
+  assert.doesNotMatch(server.replace(approvedServerOrigin, "").replace(approvedServerHosts, ""), /bitjita\.com/i);
+  assert.doesNotMatch(fallback.replace(approvedFallbackOrigin, "").replace(approvedFallbackHosts, ""), /bitjita\.com/i);
+
+  const unapprovedRuntimeSources = [
+    ...sourceFiles("apps/bitcraft-local/src/").filter(({ path }) => path !== "apps/bitcraft-local/src/server/gameIconFallback.mjs"),
     { path: "apps/bitcraft-local/vite.config.ts", contents: readRoot("apps/bitcraft-local/vite.config.ts") },
-  ];
-  assert.deepEqual(
-    runtimeSources
-      .filter(({ contents }) => /https:\/\/bitjita\.com/i.test(contents))
-      .map(({ path }) => path.replace(/\/{2,}/g, "/"))
-      .sort(),
-    [
-      "apps/bitcraft-local/server.mjs",
-      "apps/bitcraft-local/src/server/gameIconFallback.mjs",
-    ],
-  );
+  ].map(({ contents }) => contents).join("\n");
+  assert.doesNotMatch(unapprovedRuntimeSources, /bitjita\.com/i);
 });
