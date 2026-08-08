@@ -359,15 +359,10 @@ export function createCurrentStateRepository(
             );
             const count = requiredDecimal("contributionCount");
             const attributionConfidence = requiredText("attributionConfidence");
-            if (!["authoritative", "joined", "unknown"].includes(attributionConfidence)) {
+            if (!["authoritative", "matched_action", "owner_fallback"].includes(attributionConfidence)) {
               throw new TypeError("Durable craft contribution attribution confidence is invalid");
             }
-            const contributorId = attributionConfidence === "unknown"
-              ? null
-              : requiredDecimal("contributorEntityId");
-            if (attributionConfidence === "unknown" && payload.contributorEntityId != null) {
-              throw new TypeError("Unknown durable craft contributions cannot identify a contributor");
-            }
+            const contributorId = requiredDecimal("contributorEntityId");
             if (BigInt(progress) <= 0n || BigInt(count) <= 0n) {
               throw new TypeError("Durable craft contribution deltas must be positive");
             }

@@ -9,6 +9,7 @@ import { usePersistedState } from "../hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "../main-app-data";
 import {
   groupResearchTechnologies,
+  researchLanes,
   researchSettlementCaps,
 } from "./researchView.ts";
 import { unique } from "../utils/array";
@@ -25,17 +26,10 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
     if (tier !== "All" && String(item.tier) !== tier) return false;
     return true;
   });
-  const matchingGroups = groupResearchTechnologies(matching);
   const allGroups = groupResearchTechnologies(data.research);
-  const {
-    researched,
-    researching,
-    available,
-    locked,
-  } = matchingGroups;
+  const lanes = researchLanes(matching);
   const tiers = unique(data.research.map((item) => String(item.tier)).filter(Boolean)).sort();
   const totalResearched = allGroups.researched.length;
-  const totalResearching = allGroups.researching.length;
   const totalAvailable = allGroups.available.length;
   const totalLocked = allGroups.locked.length;
   const completion = data.research.length ? Math.round((totalResearched / data.research.length) * 100) : 0;
@@ -55,11 +49,14 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
         {item.name ?? item.techName ?? item.id ?? "Unknown Technology"}
         <small>
           {state === "locked" && item.missingRequirementIds?.length
-            ? `${formatNumber(item.missingRequirementIds.length)} prerequisite${item.missingRequirementIds.length === 1 ? "" : "s"} missing`
+            ? <span className="research-prerequisite-badge">{formatNumber(item.missingRequirementIds.length)} prerequisite{item.missingRequirementIds.length === 1 ? "" : "s"} missing</span>
             : item.suppliesCost ? `${formatNumber(item.suppliesCost)} supplies` : ""}
         </small>
       </strong>
-      {item.tier ? <TierBadge tier={item.tier} /> : null}
+      <div className="research-card-badges">
+        {state === "locked" ? <span className="status-pill">Locked</span> : null}
+        {item.tier ? <TierBadge tier={item.tier} /> : null}
+      </div>
     </div>
   );
   return (
@@ -70,7 +67,6 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
         meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><CheckCircle2 size={14} /> {formatNumber(totalResearched)} researched</span>
-            <span>{totalResearching ? `${formatNumber(totalResearching)} researching` : "No active research"}</span>
             <span>{formatNumber(totalAvailable)} ready</span>
           </div>
           <div className="dashboard-settlement-pill">
@@ -111,10 +107,8 @@ export function Research({ data }: { data: ReturnType<typeof normalizeData> }) {
         </div>
       </section>
       <div className="two-col research-lanes">
-        <section><h3><CheckCircle2 size={17} /> Completed Technology <small>{researched.length}</small></h3>{researched.map((item) => card(item, "researched"))}</section>
-        <section><h3><LoaderCircle size={17} /> Current Research <small>{researching.length}</small></h3>{researching.map((item) => card(item, "researching"))}</section>
-        <section><h3><Circle size={17} /> Available Research <small>{available.length}</small></h3>{available.map((item) => card(item, "available"))}</section>
-        <section><h3><Lock size={17} /> Locked Technology <small>{locked.length}</small></h3>{locked.map((item) => card(item, "locked"))}</section>
+        <section><h3><CheckCircle2 size={17} /> Completed Technology <small>{lanes.completed.length}</small></h3>{lanes.completed.map(({ item, state }) => card(item, state))}</section>
+        <section><h3><Circle size={17} /> Available Research <small>{lanes.available.length}</small></h3>{lanes.available.map(({ item, state }) => card(item, state))}</section>
       </div>
     </div>
   );

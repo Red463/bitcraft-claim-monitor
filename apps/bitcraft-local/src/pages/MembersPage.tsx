@@ -29,6 +29,8 @@ import { memberClaimRole } from "../utils/ownership";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { recruitmentSummary } from "./recruitmentView.ts";
+import { memberPresenceStatus, memberSessionStatus } from "./memberPresence.ts";
+import { memberPassiveCraftQuantityLabel } from "./production/passiveCraftPresentation.ts";
 
 /**
  * Settlement roster and member-detail view.
@@ -183,7 +185,18 @@ export function Members({
             ["Username", (m) => (
               <span className="member-name-cell">
                 <span className="member-row-avatar">{String(m.username ?? "?").slice(0, 1).toUpperCase()}<i className={`online-dot ${m.player?.signedIn ? "is-online" : ""}`} /></span>
-                <span className="member-row-copy"><strong><TrackedOwnerName name={m.username} claim={data.claim} members={data.members} /></strong><small>{m.player?.signedIn ? "Online now" : `Last seen ${timeAgo(m.lastLoginTimestamp)}`}</small></span>
+                <span className="member-row-copy"><strong><TrackedOwnerName name={m.username} claim={data.claim} members={data.members} /></strong><small>{(() => {
+                  const status = memberPresenceStatus({
+                    ...m,
+                    ...m.player,
+                    lastActiveTimestamps: [
+                      m.player?.lastActiveTimestamp,
+                      m.lastActiveTimestamp,
+                    ],
+                    lastLoginTimestamp: m.player?.lastLoginTimestamp ?? m.lastLoginTimestamp,
+                  });
+                  return status.timestamp ? `${status.label} ${timeAgo(status.timestamp)}` : status.label;
+                })()}</small></span>
               </span>
             )],
             ["Role", (m) => {
@@ -193,7 +206,9 @@ export function Members({
             ["Total Levels", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
             ["Session", (m) => {
               const sessionLabel = formatCurrentSession(m.player?.sessionSeconds);
-              return m.player?.signedIn ? <span className="online-text">{sessionLabel ? `Playing ${sessionLabel}` : "Online"}</span> : <span className="muted-cell">Offline</span>;
+              return m.player?.signedIn
+                ? <span className="online-text">{sessionLabel ? `Playing ${sessionLabel}` : "Online"}</span>
+                : <span className="muted-cell">{memberSessionStatus(m.player ?? { presenceSource: "unavailable" })}</span>;
             }],
             ["Permissions", (m) => (
               <span
@@ -306,7 +321,7 @@ export function Members({
                         </div>
                         <p>
                           <span className={`status-pill ${craft.status === "complete" ? "complete" : ""}`}>{formatEquipmentSlot(craft.status)}</span>
-                          <b>{formatNumber(craft.quantity)} crafted</b>
+                          <b>{memberPassiveCraftQuantityLabel(craft.quantity)}</b>
                         </p>
                         <small>{craft.structure} - {timeAgo(craft.timestamp)}</small>
                       </article>

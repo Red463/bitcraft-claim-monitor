@@ -35,6 +35,8 @@ type RuntimeDependencies = {
     currentData: RegionalClaimMarketSnapshot["data"];
     observedAt: string;
   }) => Promise<void> | void;
+  now?: () => number;
+  reconnectDelayMs?: (failureCount: number) => number;
 };
 
 function decimalInteger(value: unknown, label: string): string {
@@ -49,6 +51,8 @@ export class RelayClaimMarketRuntime {
   readonly #discoverTopology: (baseUrl: string) => Promise<RelayTopology>;
   readonly #createSession: ClaimMarketSessionFactory;
   readonly #onSnapshotCommitted: RuntimeDependencies["onSnapshotCommitted"];
+  readonly #now: () => number;
+  readonly #reconnectDelayMs: (failureCount: number) => number;
   #session: ClaimMarketSession | null = null;
   #relayBaseUrl: string | null = null;
   #claimId: string | null = null;
@@ -65,6 +69,8 @@ export class RelayClaimMarketRuntime {
   } | null = null;
   #lastError: string | null = null;
   #transitionLastError: string | null = null;
+  #connectionFailures = 0;
+  #nextReconnectAt = 0;
 
   constructor(dependencies: RuntimeDependencies) {
     this.#manifest = dependencies.manifest;
@@ -73,6 +79,8 @@ export class RelayClaimMarketRuntime {
     this.#createSession = dependencies.createSession
       ?? ((options) => new RelayClaimMarketRegionSession(options));
     this.#onSnapshotCommitted = dependencies.onSnapshotCommitted;
+    this.#now = dependencies.now ?? Date.now;
+    this.#reconnectDelayMs = dependencies.reconnectDelayMs ?? (() => 1_000);
   }
 
   async start(config: {
@@ -83,7 +91,8 @@ export class RelayClaimMarketRuntime {
     if (this.#session) throw new Error("Relay claim-market runtime is already started");
     this.#relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
     this.#claimId = decimalInteger(config.claimId, "Relay claim-market claim id");
-    await this.#startSession(config.regionId);
+    this.#regionId = decimalInteger(config.regionId, "Relay claim-market region id");
+    await this.#startSession(this.#regionId);
   }
 
   async reconcile(config: { claimId?: string; regionId: string }): Promise<void> {
@@ -92,12 +101,32 @@ export class RelayClaimMarketRuntime {
       "Relay claim-market claim id",
     );
     const regionId = decimalInteger(config.regionId, "Relay claim-market region id");
-    if (this.#session && this.#claimId === claimId && this.#regionId === regionId) return;
+    const configuredScope = this.#claimId === claimId && this.#regionId === regionId;
+    const sameScope = Boolean(this.#session && configuredScope);
+    const health = this.#session?.health();
+    const unhealthy = configuredScope && (
+      this.#session
+        ? health?.connected === false || Boolean(health?.lastError || this.#lastError)
+        : Boolean(this.#lastError)
+    );
+    if (configuredScope && unhealthy) {
+      if (this.#now() < this.#nextReconnectAt) return;
+      this.#connectionFailures += 1;
+      this.#nextReconnectAt = this.#now() + this.#reconnectDelayMs(this.#connectionFailures);
+    } else if (sameScope) {
+      this.#connectionFailures = 0;
+      this.#nextReconnectAt = 0;
+      return;
+    } else if (!configuredScope) {
+      this.#connectionFailures = 0;
+      this.#nextReconnectAt = 0;
+    }
     this.#sessionEpoch += 1;
     await this.#session?.stop();
     await this.#commitTail;
     this.#session = null;
     this.#claimId = claimId;
+    this.#regionId = regionId;
     await this.#startSession(regionId);
   }
 
@@ -244,5 +273,7 @@ export class RelayClaimMarketRuntime {
     this.#claimId = null;
     this.#regionId = null;
     this.#source = null;
+    this.#connectionFailures = 0;
+    this.#nextReconnectAt = 0;
   }
 }

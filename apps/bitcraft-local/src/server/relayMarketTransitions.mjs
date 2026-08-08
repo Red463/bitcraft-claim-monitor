@@ -115,6 +115,33 @@ function optionalDecimalInteger(value, label) {
   return decimalInteger(value, label);
 }
 
+function assertSnapshotClaimScope(snapshot, label, configuredClaimId) {
+  const source = record(snapshot, label);
+  const topLevelClaimId = optionalDecimalInteger(source.claimId, `${label} claim id`);
+  const observedClaims = [];
+  if (topLevelClaimId != null) observedClaims.push([`${label}.claimId`, topLevelClaimId]);
+  for (const [index, listing] of snapshotListings(source, label).entries()) {
+    const claimId = optionalDecimalInteger(
+      listing.claimEntityId,
+      `${label}.listings[${index}].claimEntityId`,
+    );
+    if (claimId != null) observedClaims.push([`${label}.listings[${index}].claimEntityId`, claimId]);
+  }
+  for (const [index, evidence] of snapshotClosedListings(source, label).entries()) {
+    const claimId = optionalDecimalInteger(
+      evidence.claimEntityId,
+      `${label}.closedListings[${index}].claimEntityId`,
+    );
+    if (claimId != null) observedClaims.push([`${label}.closedListings[${index}].claimEntityId`, claimId]);
+  }
+  const foreign = observedClaims.find(([, claimId]) => claimId !== configuredClaimId);
+  if (foreign) {
+    throw new TypeError(
+      `Relay market claim scope rejected foreign ${foreign[0]} ${foreign[1]}; configured claim is ${configuredClaimId}`,
+    );
+  }
+}
+
 function correlateClosedListingEvidence({
   transitions,
   previousSnapshot,
@@ -364,6 +391,10 @@ export function createRelayMarketTransitionWriter(db, {
   return {
     apply({ claimId, previous, current, observedAt }) {
       const normalizedClaimId = decimalInteger(claimId, "Relay market transition claim id");
+      if (previous != null) {
+        assertSnapshotClaimScope(previous, "previous Relay market snapshot", normalizedClaimId);
+      }
+      assertSnapshotClaimScope(current, "current Relay market snapshot", normalizedClaimId);
       const transitions = deriveRelayMarketTransitions({
         previous,
         current,

@@ -11,7 +11,8 @@ test("dashboard market income exposes three accessible ranges", () => {
   assert.match(dashboardPage, /useState<MarketIncomeRangeDays>\(7\)/);
   assert.match(dashboardPage, /<Segmented/);
   assert.match(dashboardPage, /label="Market income range"/);
-  assert.match(dashboardPage, /marketTotals\.trackedValue/);
+  assert.match(dashboardPage, /buildMarketRangeAnalytics/);
+  assert.doesNotMatch(dashboardPage, /marketTotals\.trackedValue/);
 });
 
 test("dashboard market income labels partial coverage and the Y axis", () => {

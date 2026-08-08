@@ -530,7 +530,7 @@ Important backend constraints:
 * Public BitCraft game data can be shown to ordinary users unless it is app configuration, secrets, or admin-only testing data.
 * Production Relay subscriptions, collection, history, and notifications must continue without any browser open.
 * Normal page requests compose the latest complete normalized Relay generation through provider-neutral `/api/local/*` routes. Preserve last-good generations during source outages and expose their freshness, age, and warnings.
-* Do not add upstream-specific browser routes, direct browser fetches, legacy API fallbacks, remote asset requests, or runtime configuration for the retired provider.
+* Do not add upstream-specific browser routes, direct browser fetches, legacy API fallbacks, remote asset requests, or runtime configuration for the retired provider. The sole audited exception is the server-only, same-origin `/api/local/game-icon/:itemType/:itemId` image fallback: browsers never contact BitJita directly, and callers cannot supply a remote URL.
 * Do not create scheduled feature-cache tables when a current Relay generation or bounded live service can answer the feature. SQLite remains appropriate for atomic last-good provider generations, observed history/events, notification outbox and deduplication, settings, analytics, and diagnostics.
 * Settlement-specific history should be filtered to the configured claim/settlement where relevant.
 

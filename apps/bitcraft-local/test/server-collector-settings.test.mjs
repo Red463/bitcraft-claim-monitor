@@ -101,10 +101,18 @@ test("completed sales are Relay-native and have no BitJita reconciler or schedul
   assert.match(session, /closed_listing_state/);
   assert.match(regionalSession, /closed_listing_state/);
   assert.match(regionalSession, /this\.#applySnapshot\(connection, true\)/);
-  assert.match(source, /regionalMarketTransitionSnapshot/);
-  assert.match(source, /onSnapshotCommitted:[\s\S]*relayMarketTransitionWriter\.apply/);
-  assert.match(source, /onCurrentPublished:[\s\S]*queueMarketDealWatchEvaluation/);
-  assert.match(source, /previous:\s*previousData == null[\s\S]*regionalMarketTransitionSnapshot/);
+  const claimRuntimeStart = source.indexOf("const relayClaimMarketRuntime = new RelayClaimMarketRuntime");
+  const regionalRuntimeStart = source.indexOf("const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime");
+  const nextRuntimeStart = source.indexOf("const relayEmpireRuntime", regionalRuntimeStart);
+  const claimRuntime = source.slice(claimRuntimeStart, regionalRuntimeStart);
+  const regionalRuntime = source.slice(regionalRuntimeStart, nextRuntimeStart);
+
+  assert.ok(claimRuntimeStart > -1);
+  assert.ok(regionalRuntimeStart > claimRuntimeStart);
+  assert.match(claimRuntime, /onSnapshotCommitted:[\s\S]*relayMarketTransitionWriter\.apply/);
+  assert.match(regionalRuntime, /onCurrentPublished:[\s\S]*queueMarketDealWatchEvaluation/);
+  assert.doesNotMatch(regionalRuntime, /onSnapshotCommitted/);
+  assert.doesNotMatch(source, /regionalMarketTransitionSnapshot/);
   assert.doesNotMatch(source, /\/market\/player\//);
   assert.doesNotMatch(source, /\b(?:runMarketTradeCollector|importMemberSellTrades|marketTradeBackfillKey)\b/);
   assert.doesNotMatch(source, /\bmarketTrades\b/);

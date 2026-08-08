@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mimeType, securityHeaders, staticCacheControl, routeGroup, shouldLogVisitor } from "../src/server/httpRoutes.mjs";
+import { mimeType, securityHeaders, staticCacheControl, routeGroup, shouldFallbackToFrontend, shouldLogVisitor } from "../src/server/httpRoutes.mjs";
 
 test("routeGroup classifies public API, admin, auth, Discord, static, and app routes", () => {
   assert.equal(routeGroup("/api/local/admin/settings"), "admin");
@@ -33,9 +33,14 @@ test("securityHeaders applies public release browser protections and preserves e
   assert.equal(headers["cross-origin-opener-policy"], "same-origin");
   assert.match(headers["content-security-policy"], /default-src 'self'/);
   assert.match(headers["content-security-policy"], /connect-src 'self'(?:;|$)/);
-  assert.match(headers["content-security-policy"], /img-src 'self' data:(?:;|$)/);
+  assert.match(headers["content-security-policy"], /img-src 'self' data: https:\/\/cdn\.discordapp\.com(?:;|$)/);
   assert.doesNotMatch(headers["content-security-policy"], /bitjita/i);
   assert.match(headers["content-security-policy"], /frame-ancestors 'self'/);
+});
+
+test("missing game icons never fall through to the frontend HTML shell", () => {
+  assert.equal(shouldFallbackToFrontend("/game-icons/GeneratedIcons/Items/Missing.webp"), false);
+  assert.equal(shouldFallbackToFrontend("/research"), true);
 });
 
 test("mimeType and staticCacheControl keep frontend asset responses predictable", () => {

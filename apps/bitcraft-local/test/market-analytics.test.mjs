@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { BEST_SELLER_SORTS, MARKET_INCOME_RANGES, bestSellerSortValue, buildMarketDaily, buildMarketIncomeSummary, buildMarketTopItems, formatMarketDay } from "../src/pages/market/marketAnalytics.ts";
+import { BEST_SELLER_SORTS, MARKET_INCOME_RANGES, bestSellerSortValue, buildMarketDaily, buildMarketIncomeSummary, buildMarketRangeAnalytics, buildMarketTopItems, formatMarketDay } from "../src/pages/market/marketAnalytics.ts";
 
 test("buildMarketTopItems aggregates sales by item and sorts by units then value", () => {
   const topItems = buildMarketTopItems([
@@ -12,11 +12,70 @@ test("buildMarketTopItems aggregates sales by item and sorts by units then value
   ]);
 
   assert.deepEqual(topItems.map((item) => [item.itemName, item.salesCount, item.unitsSold, item.totalValue, item.avgUnitPrice]), [
-    ["Leather", 2, 5, 36, 7.2],
-    ["Oak Plank", 1, 5, 20, 4],
-    ["Bronze Ingot", 1, 1, 100, 100],
+    ["Leather", 2, "5", "36", 7.2],
+    ["Oak Plank", 1, "5", "20", 4],
+    ["Bronze Ingot", 1, "1", "100", 100],
   ]);
   assert.equal(topItems[0].lastSoldAt, "2026-06-28T10:00:00.000Z");
+});
+
+test("Best Sellers preserves item and cargo identities with the same numeric id", () => {
+  const topItems = buildMarketTopItems([
+    { item_id: "42", item_type: "item", item_name: "Timber", quantity: 2, total_value: 12, occurred_at: "2026-08-08T10:00:00.000Z" },
+    { item_id: "42", item_type: "cargo", item_name: "Timber", quantity: 3, total_value: 30, occurred_at: "2026-08-08T11:00:00.000Z" },
+  ]);
+
+  assert.deepEqual(topItems.map((item) => [item.itemId, item.itemType, item.unitsSold]), [
+    ["42", "cargo", "3"],
+    ["42", "item", "2"],
+  ]);
+});
+
+test("market analytics aggregates quantities and revenue exactly above Number.MAX_SAFE_INTEGER", () => {
+  const trades = [
+    { item_id: "42", item_type: "item", item_name: "Timber", quantity: "9007199254740993", total_value: "9007199254740993", occurred_at: "2026-08-08T10:00:00.000Z" },
+    { item_id: "42", item_type: "item", item_name: "Timber", quantity: "2", total_value: "4", occurred_at: "2026-08-08T11:00:00.000Z" },
+  ];
+
+  const analytics = buildMarketRangeAnalytics(trades, "2026-08-08T12:00:00.000Z", 7);
+  assert.equal(analytics.topItems[0].unitsSold, "9007199254740995");
+  assert.equal(analytics.topItems[0].totalValue, "9007199254740997");
+  assert.equal(analytics.daily[0].unitsSold, "9007199254740995");
+  assert.equal(analytics.daily[0].totalValue, "9007199254740997");
+  assert.equal(analytics.totals.confirmedUnits, "9007199254740995");
+  assert.equal(analytics.totals.trackedValue, "9007199254740997");
+
+  const summary = buildMarketIncomeSummary(analytics.daily, "2026-08-08", 7);
+  assert.equal(summary.unitsSold, "9007199254740995");
+  assert.equal(summary.totalValue, "9007199254740997");
+});
+
+test("market range analytics uses inclusive UTC day boundaries for one trade source", () => {
+  const analytics = buildMarketRangeAnalytics([
+    { item_id: "1", item_type: "item", item_name: "Old", quantity: 1, total_value: 100, occurred_at: "2026-08-01T23:59:59.999Z" },
+    { item_id: "2", item_type: "item", item_name: "Boundary", quantity: 2, total_value: 20, occurred_at: "2026-08-02T00:00:00.000Z" },
+    { item_id: "3", item_type: "cargo", item_name: "Today", quantity: 3, total_value: 30, occurred_at: "2026-08-08T23:59:59.999Z" },
+    { item_id: "4", item_type: "item", item_name: "Future", quantity: 4, total_value: 40, occurred_at: "2026-08-09T00:00:00.000Z" },
+  ], "2026-08-08T12:00:00.000Z", 7);
+
+  assert.deepEqual(analytics.trades.map((trade) => trade.item_name), ["Boundary", "Today"]);
+  assert.deepEqual(analytics.totals, { confirmedSales: 2, confirmedUnits: "5", trackedValue: "50" });
+  assert.deepEqual(analytics.daily.map((row) => row.day), ["2026-08-02", "2026-08-08"]);
+  assert.deepEqual(analytics.topItems.map((row) => row.itemName), ["Today", "Boundary"]);
+});
+
+test("a 365-day market range does not truncate Revenue by Day to 30 buckets", () => {
+  const trades = Array.from({ length: 31 }, (_, index) => ({
+    item_id: String(index + 1),
+    item_type: "item",
+    item_name: `Item ${index + 1}`,
+    quantity: 1,
+    total_value: 1,
+    occurred_at: new Date(Date.UTC(2026, 6, index + 1, 12)).toISOString(),
+  }));
+
+  const analytics = buildMarketRangeAnalytics(trades, "2026-07-31T23:59:59.999Z", 365);
+  assert.equal(analytics.daily.length, 31);
 });
 
 test("buildMarketDaily groups sales into chronological day buckets", () => {
@@ -27,8 +86,8 @@ test("buildMarketDaily groups sales into chronological day buckets", () => {
   ]);
 
   assert.deepEqual(daily, [
-    { day: "2026-06-27", salesCount: 1, unitsSold: 1, totalValue: 9 },
-    { day: "2026-06-28", salesCount: 2, unitsSold: 5, totalValue: 42 },
+    { day: "2026-06-27", salesCount: 1, unitsSold: "1", totalValue: "9" },
+    { day: "2026-06-28", salesCount: 2, unitsSold: "5", totalValue: "42" },
   ]);
 });
 
@@ -38,9 +97,9 @@ test("buildMarketIncomeSummary totals confirmed daily market sales and plots cum
     { day: "2026-06-29", salesCount: 2, unitsSold: 5, totalValue: 42 },
   ], "2026-06-30");
 
-  assert.equal(summary.totalValue, 54);
+  assert.equal(summary.totalValue, "54");
   assert.equal(summary.salesCount, 3);
-  assert.equal(summary.unitsSold, 7);
+  assert.equal(summary.unitsSold, "7");
   assert.deepEqual(summary.trend, [
     { at: "2026-06-27", value: 12 },
     { at: "2026-06-28", value: 12 },
@@ -57,25 +116,28 @@ test("market income ranges expose stable dashboard choices", () => {
   ]);
 });
 
-test("buildMarketIncomeSummary anchors a seven-day range to lifetime income", () => {
+test("buildMarketIncomeSummary totals only the selected seven-day period", () => {
   const summary = buildMarketIncomeSummary([
     { day: "2026-06-01", salesCount: 1, unitsSold: 1, totalValue: 100 },
     { day: "2026-06-24", salesCount: 1, unitsSold: 2, totalValue: 10 },
     { day: "2026-06-25", salesCount: 1, unitsSold: 3, totalValue: 20 },
-  ], "2026-06-25", 7, 130);
+  ], "2026-06-25", 7);
 
   assert.equal(summary.partialRange, false);
   assert.equal(summary.requestedStartDay, "2026-06-19");
   assert.equal(summary.availableStartDay, "2026-06-01");
-  assert.deepEqual(summary.trend[0], { at: "2026-06-19", value: 100 });
-  assert.deepEqual(summary.trend.at(-1), { at: "2026-06-25", value: 130 });
+  assert.equal(summary.totalValue, "30");
+  assert.equal(summary.salesCount, 2);
+  assert.equal(summary.unitsSold, "5");
+  assert.deepEqual(summary.trend[0], { at: "2026-06-19", value: 0 });
+  assert.deepEqual(summary.trend.at(-1), { at: "2026-06-25", value: 30 });
 });
 
 test("buildMarketIncomeSummary does not invent observations before stored history", () => {
   const summary = buildMarketIncomeSummary([
     { day: "2026-06-24", salesCount: 1, unitsSold: 2, totalValue: 10 },
     { day: "2026-06-25", salesCount: 1, unitsSold: 3, totalValue: 20 },
-  ], "2026-06-25", 30, 30);
+  ], "2026-06-25", 30);
 
   assert.equal(summary.partialRange, true);
   assert.equal(summary.requestedStartDay, "2026-05-27");

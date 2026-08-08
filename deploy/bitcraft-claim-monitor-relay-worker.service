@@ -2,6 +2,8 @@
 Description=BitCraft Claim Monitor Relay Preview Worker
 After=network-online.target bitcraft-claim-monitor-relay.service
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -18,7 +20,7 @@ Environment=PRIVACY_LEDGER_KEY_FILE=/etc/bitcraft-claim-monitor-relay/privacy-le
 Environment=MALLOC_TRIM_THRESHOLD_=131072
 EnvironmentFile=-/etc/bitcraft-claim-monitor-relay.env
 ExecStart=/usr/bin/env DISCORD_DELIVERY_MODE=record ENABLE_DISCORD_STARTUP=false /usr/bin/node /opt/bitcraft-claim-monitor-relay/current/apps/bitcraft-local/worker.mjs
-Restart=on-failure
+Restart=always
 RestartSec=5
 UMask=0077
 NoNewPrivileges=true

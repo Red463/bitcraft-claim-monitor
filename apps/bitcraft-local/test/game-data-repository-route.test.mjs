@@ -567,7 +567,7 @@ test("repository durably deduplicates normalized Relay storage events", async ()
   db.close();
 });
 
-test("repository durably deduplicates exact unknown Relay craft contributions across restarts", async () => {
+test("repository rejects new unknown Relay craft contributions", async () => {
   const db = new DatabaseSync(":memory:");
   applySchemaBootstrap(db);
   applyAdditiveColumnMigrations(db);
@@ -599,39 +599,9 @@ test("repository durably deduplicates exact unknown Relay craft contributions ac
       currentProgress: "16080",
     },
   };
-  const laterEvent = {
-    ...event,
-    sourceKey: "relay-craft-contribution:19:unknown:unknown:no-match:1369094287428103662:16080:16104",
-    occurredAt: "2026-08-01T09:00:01.000Z",
-    data: {
-      ...event.data,
-      observedSince: "2026-08-01T09:00:01.000Z",
-      previousProgress: "16080",
-      currentProgress: "16104",
-    },
-  };
-
-  await repository.appendEvents([event, event]);
-  const restartedRepository = createCurrentStateRepository(db);
-  await restartedRepository.appendEvents([event, laterEvent]);
-
-  const eventRows = db.prepare("SELECT * FROM production_contribution_events").all();
-  assert.equal(eventRows.length, 2);
-  assert.equal(eventRows[0].source_key, event.sourceKey);
-  assert.equal(eventRows[0].contributed_progress, "24");
-  assert.equal(eventRows[0].contributor_entity_id, null);
-  assert.equal(eventRows[0].attribution_confidence, "unknown");
-
-  const contribution = db.prepare("SELECT * FROM production_contributions").get();
-  assert.equal(contribution.contribution_key, "1369094286777412590:1369094287428103662:unknown");
-  assert.equal(contribution.contributed_progress, "48");
-  assert.equal(contribution.contributed_xp, "84.48");
-  assert.equal(contribution.contribution_count, "2");
-  assert.equal(contribution.contributor_entity_id, null);
-  assert.equal(contribution.contributor_name, "Unknown contributor");
-  assert.equal(contribution.attribution_confidence, "unknown");
-  assert.equal(contribution.first_contributed_at, event.occurredAt);
-  assert.equal(contribution.last_contributed_at, laterEvent.occurredAt);
+  await assert.rejects(repository.appendEvents([event]), /attribution confidence is invalid/i);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM production_contribution_events").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM production_contributions").get().count, 0);
   db.close();
 });
 
@@ -790,30 +760,34 @@ test("game-data route does not trust a stale or disconnected subscription heartb
   }
 });
 
-test("game-data route surfaces partial-domain warnings to browser status", () => {
+test("game-data route does not emit a global warning for unavailable member presence", () => {
   const result = gameDataResponse({
     configuredClaimId: "1369094286777412590",
     claimId: "1369094286777412590",
     domains: ["players"],
     repository: {
       read: () => ({
-        data: [{ playerEntityId: "1", signedIn: false }],
-        confidence: "partial",
+        data: [{
+          playerEntityId: "1",
+          signedIn: null,
+          presenceRegionId: null,
+          presenceSource: "unavailable",
+        }],
+        confidence: "authoritative",
         generation: 5,
         lastError: null,
         provenance: {
           ...relayProvenance("2026-07-29T20:45:00.000Z"),
           sourceKey: "region:19",
         },
-        warnings: ["Regional player_state omitted member 1."],
+        warnings: [],
       }),
     },
     now: new Date("2026-07-29T20:45:10.000Z"),
   });
   assert.equal(result.status, 200);
-  assert.deepEqual(result.body.partialErrors, [
-    "players: Regional player_state omitted member 1.",
-  ]);
+  assert.deepEqual(result.body.partialErrors, []);
+  assert.equal(result.body.domains.players.data[0].presenceSource, "unavailable");
 });
 
 test("game-data route composes requested domains through a provider-neutral local projection", () => {

@@ -10,8 +10,9 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseMemberPermissions } from "./shared/member-permissions.mjs";
-import { mimeType, routeGroup, securityHeaders, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
+import { mimeType, routeGroup, securityHeaders, shouldFallbackToFrontend, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
+import { createGameIconFallbackService, serveGameIconRequest } from "./src/server/gameIconFallback.mjs";
 import { parseCookies, serializeHttpOnlyCookie } from "./src/server/httpCookies.mjs";
 import { originFromRequest as requestOriginFromRequest, requestLogPolicy, safeReturnPath, sameOriginRequest as requestSameOriginRequest } from "./src/server/httpRequests.mjs";
 import { appUserCsrfToken, csrfToken, validCsrfHeader } from "./src/server/httpCsrf.mjs";
@@ -21,6 +22,8 @@ import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/se
 import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySettings.mjs";
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
 import { projectCraftContributionEnvelope } from "./src/server/craftContributionProjection.mjs";
+import { projectCraftContributionLeaderboard } from "./src/server/craftContributionLeaderboard.mjs";
+import { partitionCraftContributionRows } from "./src/server/craftContributionVisibility.mjs";
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { gameTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
@@ -66,6 +69,7 @@ import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/s
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import {
+  createScheduledRelayReconciler,
   readRelayClaimBuildingsForPlanning,
   readRelayClaimForSupplyReport,
   readRelayCraftsForDiscord,
@@ -260,7 +264,12 @@ async function serverHealthResponse(url, { includeDiagnosticBundle = false } = {
   const overall = serverHealthState(files.snapshot, application);
   const logs = filterServerHealthLogs(files.snapshot?.logs ?? [], { service: url.searchParams.get("service") ?? "", severity: url.searchParams.get("severity") ?? "", search: url.searchParams.get("search") ?? "", cursor: url.searchParams.get("cursor") ?? 0, limit: url.searchParams.get("limit") ?? 50 });
   const incidents = db.prepare("SELECT * FROM server_health_incidents ORDER BY last_observed_at DESC LIMIT 100").all();
-  const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: false }, version: appVersion, buildId: currentAppBuildId() };
+  const contributionRows = db.prepare(`
+    SELECT contributor_entity_id, attribution_confidence
+    FROM production_contribution_events
+  `).all();
+  const craftContributionDiagnostics = partitionCraftContributionRows(contributionRows).adminDiagnostics;
+  const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), craftContributionDiagnostics, incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: false }, version: appVersion, buildId: currentAppBuildId() };
   return buildServerHealthResponse(response, { includeDiagnosticBundle });
 }
 
@@ -359,6 +368,13 @@ const readCachedServerHealthFiles = createCachedServerHealthReader(() => readSer
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const appVersion = String(packageJson.version ?? "0.0.0-dev");
 const appIdentifier = process.env.BITCRAFT_APP_IDENTIFIER ?? "BitCraft Claim Monitor Relay (github.com/Red463/bitcraft-claim-monitor-relay)";
+const gameIconFallbackService = createGameIconFallbackService({
+  metadataOrigin: process.env.BITJITA_ICON_API_ORIGIN ?? "https://bitjita.com",
+  approvedHosts: String(process.env.BITJITA_ICON_APPROVED_HOSTS ?? "bitjita.com,cdn.bitjita.com").split(","),
+  timeoutMs: Number(process.env.BITJITA_ICON_TIMEOUT_MS ?? 5_000),
+  maxBytes: Number(process.env.BITJITA_ICON_MAX_BYTES ?? 512 * 1024),
+  appIdentifier,
+});
 const ipHash = createIpHasher(appIdentifier);
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor-relay/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -516,6 +532,7 @@ const relayGlobalCatalogRuntime = new RelayGlobalCatalogRuntime({
 const relayPrimaryRegionRuntime = new RelayPrimaryRegionRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
+  reconnectDelayMs: relayReconnectDelayMs,
 });
 const relayRegionClaimsRuntime = new RelayRegionClaimsRuntime({
   manifest: relayBindingManifest,
@@ -529,6 +546,7 @@ const relayMarketTransitionWriter = createRelayMarketTransitionWriter(db, {
 const relayClaimMarketRuntime = new RelayClaimMarketRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
+  reconnectDelayMs: relayReconnectDelayMs,
   onSnapshotCommitted: ({ claimId, previousData, currentData, observedAt }) => (
     relayMarketTransitionWriter.apply({
       claimId,
@@ -552,19 +570,6 @@ const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
 const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
-  onSnapshotCommitted: ({
-    claimId,
-    previousData,
-    currentData,
-    observedAt,
-  }) => relayMarketTransitionWriter.apply({
-    claimId,
-    previous: previousData == null
-      ? null
-      : regionalMarketTransitionSnapshot(claimId, previousData),
-    current: regionalMarketTransitionSnapshot(claimId, currentData),
-    observedAt,
-  }),
   onCurrentPublished: ({
     claimId,
     currentData,
@@ -1561,36 +1566,6 @@ function enrichMarketSnapshot(claimId, data) {
     getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
     claim,
   }).data;
-}
-
-function regionalMarketTransitionSnapshot(claimId, data) {
-  const source = data && typeof data === "object" && !Array.isArray(data) ? data : {};
-  const listings = (Array.isArray(source.orders) ? source.orders : []).map((order) => {
-    const itemType = String(order?.itemType ?? "").toLowerCase() === "cargo"
-      ? "cargo"
-      : "item";
-    const itemId = String(order?.itemId ?? "").trim();
-    const entity = providerCatalogRepository.getEntity(
-      `${itemType === "cargo" ? "cargo" : "items"}:${itemId}`,
-    );
-    return {
-      ...order,
-      itemType,
-      itemId,
-      itemName: String(entity?.name ?? `${itemType === "cargo" ? "Cargo" : "Item"} #${itemId}`),
-      itemTier: entity?.tier ?? null,
-      itemRarityStr: entity?.rarity ?? entity?.rarityStr ?? null,
-    };
-  });
-  const activeRegionIds = Array.isArray(source.activeRegionIds)
-    ? source.activeRegionIds.map(String).filter((regionId) => /^\d+$/.test(regionId))
-    : [];
-  return {
-    claimId: String(claimId),
-    regionId: activeRegionIds[0] ?? String(getSettings().defaultRegion ?? "0"),
-    listings,
-    closedListings: Array.isArray(source.closedListings) ? source.closedListings : [],
-  };
 }
 
 function currentMarketProjection(claimId) {
@@ -5697,6 +5672,13 @@ function marketHistory(claimId, limit, owner = "") {
   const args = selectedOwner ? [claimId, selectedOwner] : [claimId];
   const tradeOwnerClause = selectedOwner ? " AND lower(COALESCE(seller_username, '')) = lower(?)" : "";
   const tradeArgs = selectedOwner ? [claimId, selectedOwner] : [claimId];
+  const marketRangeEndDate = new Date();
+  marketRangeEndDate.setUTCHours(0, 0, 0, 0);
+  marketRangeEndDate.setUTCDate(marketRangeEndDate.getUTCDate() + 1);
+  const marketRangeStartDate = new Date(marketRangeEndDate);
+  marketRangeStartDate.setUTCDate(marketRangeStartDate.getUTCDate() - MARKET_DAILY_HISTORY_LIMIT);
+  const marketRangeStart = marketRangeStartDate.toISOString();
+  const marketRangeEnd = marketRangeEndDate.toISOString();
   const eventLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
   const currentMarket = currentMarketProjection(claimId);
   const liveListings = currentMarketListings(currentMarket.data, {
@@ -5706,19 +5688,21 @@ function marketHistory(claimId, limit, owner = "") {
   const events = db.prepare(`SELECT * FROM market_events WHERE claim_id = ?${ownerClause} ORDER BY occurred_at DESC, id DESC LIMIT ?`).all(...args, eventLimit)
     .map((event) => event.event_type === "sold_or_removed" ? { ...event, event_type: "removed_or_cancelled" } : event);
   const sales = db.prepare(`
-    SELECT trade_id AS id, 'sale' AS event_type, order_entity_id AS listing_key, item_name, seller_username AS owner,
+    SELECT trade_id AS id, 'sale' AS event_type, order_entity_id AS listing_key,
+      item_id AS itemId, item_type AS itemType, item_name, seller_username AS owner,
       quantity, unit_price AS price, total_price AS total_value, tier, rarity, occurred_at, raw_json
     FROM market_trades
     WHERE claim_id = ?${tradeOwnerClause}
+      AND occurred_at >= ? AND occurred_at < ?
     ORDER BY occurred_at DESC, trade_id DESC
-    LIMIT ?
-  `).all(...tradeArgs, eventLimit);
+  `).all(...tradeArgs, marketRangeStart, marketRangeEnd);
   const topItems = db.prepare(`
-    SELECT item_name AS itemName, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue,
+    SELECT item_id AS itemId, item_type AS itemType, item_name AS itemName,
+      COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue,
       SUM(total_price) / NULLIF(SUM(quantity), 0) AS avgUnitPrice, MAX(occurred_at) AS lastSoldAt
     FROM market_trades
     WHERE claim_id = ?${tradeOwnerClause}
-    GROUP BY item_name
+    GROUP BY item_type, item_id, item_name
     ORDER BY unitsSold DESC, totalValue DESC
     LIMIT 20
   `).all(...tradeArgs);
@@ -6166,109 +6150,14 @@ function marketLeaderboard(claimId) {
 }
 
 function contributionLeaderboard(claimId) {
-  const rows = db.prepare(`
+  const storedRows = db.prepare(`
     SELECT *
     FROM production_contributions
     WHERE claim_id = ?
     ORDER BY last_contributed_at DESC, updated_at DESC
     LIMIT 5000
   `).all(claimId);
-  const contributors = new Map();
-  const professions = new Map();
-  let totalProgress = 0;
-  let totalXp = 0;
-  for (const row of rows) {
-    totalProgress += toNumber(row.contributed_progress);
-    totalXp += toNumber(row.contributed_xp);
-    const namedContributor = row.contributor_entity_id != null
-      && row.attribution_confidence !== "unknown";
-    if (!namedContributor) continue;
-    const contributorKey = String(row.contributor_entity_id || row.contributor_name);
-    const profession = String(row.profession || "Unknown");
-    const contributor = contributors.get(contributorKey) ?? {
-      contributorId: row.contributor_entity_id,
-      name: row.contributor_name,
-      totalProgress: 0,
-      totalXp: 0,
-      contributionCount: 0,
-      craftCount: 0,
-      lastContributedAt: null,
-      professions: {},
-    };
-    contributor.totalProgress += toNumber(row.contributed_progress);
-    contributor.totalXp += toNumber(row.contributed_xp);
-    contributor.contributionCount += toNumber(row.contribution_count);
-    contributor.craftCount += 1;
-    if (!contributor.lastContributedAt || String(row.last_contributed_at ?? row.updated_at) > contributor.lastContributedAt) contributor.lastContributedAt = row.last_contributed_at ?? row.updated_at;
-    contributor.professions[profession] = {
-      progress: toNumber(contributor.professions[profession]?.progress) + toNumber(row.contributed_progress),
-      xp: toNumber(contributor.professions[profession]?.xp) + toNumber(row.contributed_xp),
-      crafts: toNumber(contributor.professions[profession]?.crafts) + 1,
-    };
-    contributors.set(contributorKey, contributor);
-
-    const professionRow = professions.get(profession) ?? {
-      profession,
-      totalProgress: 0,
-      totalXp: 0,
-      craftCount: 0,
-      contributorCount: new Set(),
-      topContributor: "",
-      topContributorProgress: 0,
-      contributors: new Map(),
-    };
-    professionRow.totalProgress += toNumber(row.contributed_progress);
-    professionRow.totalXp += toNumber(row.contributed_xp);
-    professionRow.craftCount += 1;
-    professionRow.contributorCount.add(contributorKey);
-    const professionContributor = toNumber(professionRow.contributors.get(contributorKey)?.progress) + toNumber(row.contributed_progress);
-    professionRow.contributors.set(contributorKey, { name: row.contributor_name, progress: professionContributor });
-    if (professionContributor > professionRow.topContributorProgress) {
-      professionRow.topContributor = row.contributor_name;
-      professionRow.topContributorProgress = professionContributor;
-    }
-    professions.set(profession, professionRow);
-  }
-  const contributorList = Array.from(contributors.values())
-    .map((entry) => ({ ...entry, professions: Object.entries(entry.professions).map(([profession, values]) => ({ profession, ...values })).sort((a, b) => b.progress - a.progress) }))
-    .sort((a, b) => b.totalProgress - a.totalProgress);
-  const professionList = Array.from(professions.values())
-    .map((entry) => ({
-      profession: entry.profession,
-      totalProgress: entry.totalProgress,
-      totalXp: entry.totalXp,
-      craftCount: entry.craftCount,
-      contributorCount: entry.contributorCount.size,
-      topContributor: entry.topContributor,
-      topContributorProgress: entry.topContributorProgress,
-    }))
-    .sort((a, b) => b.totalProgress - a.totalProgress);
-  const contribution = {
-    summary: {
-      contributorCount: contributorList.length,
-      professionCount: professionList.length,
-      totalProgress,
-      totalXp,
-      recordedCrafts: new Set(rows.map((row) => row.craft_entity_id)).size,
-      lastContributedAt: rows[0]?.last_contributed_at ?? null,
-    },
-    contributors: contributorList.slice(0, 100),
-    professions: professionList,
-    recent: rows.slice(0, 50).map((row) => ({
-      contributorId: row.contributor_entity_id,
-      contributorName: row.contributor_name,
-      profession: row.profession,
-      craftLabel: row.craft_label,
-      structureName: row.structure_name,
-      itemTier: row.item_tier,
-      totalProgress: toNumber(row.contributed_progress),
-      totalXp: toNumber(row.contributed_xp),
-      contributionCount: toNumber(row.contribution_count),
-      attributionConfidence: row.attribution_confidence,
-      firstContributedAt: row.first_contributed_at,
-      lastContributedAt: row.last_contributed_at,
-    })),
-  };
+  const contribution = projectCraftContributionLeaderboard(storedRows);
   return {
     ...contribution,
     contribution,
@@ -6278,7 +6167,7 @@ function contributionLeaderboard(claimId) {
 }
 
 function currentCraftContributions(claimId) {
-  return projectCraftContributionEnvelope(db.prepare(`
+  const storedRows = db.prepare(`
     SELECT
       craft_entity_id,
       contributor_entity_id,
@@ -6292,7 +6181,10 @@ function currentCraftContributions(claimId) {
     FROM production_contributions
     WHERE claim_id = ?
     ORDER BY last_contributed_at DESC, contributor_name
-  `).all(claimId));
+  `).all(claimId);
+  return projectCraftContributionEnvelope(
+    partitionCraftContributionRows(storedRows).playerRows,
+  );
 }
 
 function dashboardHistory(claimId) {
@@ -7225,7 +7117,9 @@ async function serveBuiltFrontend(url, method, res) {
   const requestedPath = pathname === "/" ? "index.html" : pathname.slice(1);
   const assetPath = path.resolve(distDir, requestedPath);
   const isDistPath = assetPath === distDir || assetPath.startsWith(`${distDir}${path.sep}`);
-  const candidate = isDistPath && existsSync(assetPath) && statSync(assetPath).isFile() ? assetPath : path.join(distDir, "index.html");
+  const hasStaticFile = isDistPath && existsSync(assetPath) && statSync(assetPath).isFile();
+  if (!hasStaticFile && !shouldFallbackToFrontend(pathname)) return false;
+  const candidate = hasStaticFile ? assetPath : path.join(distDir, "index.html");
   if (!existsSync(candidate)) {
     send(res, 503, { error: "Frontend build is missing. Run the production build before starting the server." });
     return true;
@@ -7291,6 +7185,10 @@ const server = createServer(async (req, res) => {
       });
     }
     if (req.method === "OPTIONS") return send(res, 204, {});
+    if (req.method === "GET" && url.pathname.startsWith("/api/local/game-icon/")) {
+      if (!rateLimit(req, res, "game-icon", RATE_LIMITS.proxy)) return;
+      if (await serveGameIconRequest(url.pathname, res, gameIconFallbackService)) return;
+    }
     if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, {
       ok: true,
       version: appVersion,
@@ -9624,12 +9522,18 @@ function startBackgroundTasks() {
         if (!isTestRuntime) console.warn(`Relay provider refresh failed: ${errorMessage(error)}`);
       }
     };
+    const relayRuntimeReconciler = createScheduledRelayReconciler({
+      reconcile: refreshRelay,
+    });
     requestRelayRuntimeRefresh = (reason = "manual") => {
-      void refreshRelay(reason);
+      void relayRuntimeReconciler.request(reason);
     };
-    void refreshRelay("scheduled");
+    void relayRuntimeReconciler.request("scheduled");
     if (!relayProviderRefreshTimer) {
-      relayProviderRefreshTimer = setInterval(() => void refreshRelay(), relayHttpRefreshMs);
+      relayProviderRefreshTimer = setInterval(
+        () => void relayRuntimeReconciler.request("scheduled"),
+        relayHttpRefreshMs,
+      );
       relayProviderRefreshTimer.unref?.();
     }
     if (process.env.ENABLE_RELAY_GLOBAL_CATALOG !== "false") {

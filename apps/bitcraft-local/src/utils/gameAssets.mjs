@@ -36,3 +36,35 @@ export function gameIconUrl(item) {
 
   return `/game-icons/${segments.map((segment) => encodeURIComponent(segment)).join("/")}.webp`;
 }
+
+function itemTypeValue(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (value === 0 || normalized === "0" || normalized === "item" || normalized === "items") return "item";
+  if (value === 1 || normalized === "1" || normalized === "cargo") return "cargo";
+  return null;
+}
+
+function gameIconIdentityAtLevel(item) {
+  const itemId = String(
+    item?.itemId
+      ?? item?.item_id
+      ?? item?.id
+      ?? "",
+  ).trim();
+  if (!/^\d+$/.test(itemId)) return null;
+  const itemType = itemTypeValue(item?.itemType ?? item?.item_type ?? item?.kind ?? item?.type);
+  return itemType ? { itemType, itemId } : null;
+}
+
+function gameIconIdentity(item) {
+  return gameIconIdentityAtLevel(item) ?? gameIconIdentityAtLevel(item?.contents);
+}
+
+export function gameIconSources(item) {
+  const sources = [];
+  const localUrl = gameIconUrl(item);
+  if (localUrl) sources.push(localUrl);
+  const identity = gameIconIdentity(item);
+  if (identity) sources.push(`/api/local/game-icon/${identity.itemType}/${identity.itemId}`);
+  return [...new Set(sources)];
+}

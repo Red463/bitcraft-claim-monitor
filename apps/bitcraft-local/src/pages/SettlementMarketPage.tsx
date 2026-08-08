@@ -79,7 +79,7 @@ import type { ActivePanel, LoadState } from "../types/app";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { bitcraftMapUrl, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
-import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketDaily, buildMarketTopItems, formatMarketDay, type BestSellerSortKey } from "./market/marketAnalytics";
+import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketRangeAnalytics, formatMarketDay, type BestSellerSortKey } from "./market/marketAnalytics";
 import { displayItemName, listingDate, listingTrackingKey, liveDaysSince, safeDisplayJson, settlementListingState } from "./market/listingUtils";
 
 /*
@@ -228,6 +228,8 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
         id: event.id,
         itemName: event.item_name,
         name: event.item_name,
+        itemId: event.itemId ?? event.item_id,
+        itemType: event.itemType ?? event.item_type,
         iconAssetName: event.iconAssetName ?? raw.iconAssetName,
         quantity: event.quantity,
         unitPrice: event.price,
@@ -271,6 +273,10 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
   const saleEvents = apiTrades.map((trade: AnyRecord) => ({
     itemName: trade.itemName,
     item_name: trade.itemName,
+    itemId: trade.itemId,
+    item_id: trade.itemId,
+    itemType: trade.itemType,
+    item_type: trade.itemType,
     quantity: trade.quantity,
     price: trade.unitPrice,
     totalValue: trade.totalPrice,
@@ -278,12 +284,13 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
     occurredAt: trade.timestamp ?? trade.createdAt,
     occurred_at: trade.timestamp ?? trade.createdAt,
   }));
-  const topItems = analytics?.topItems ?? buildMarketTopItems(saleEvents);
-  const daily = analytics?.daily ?? buildMarketDaily(saleEvents);
-  const confirmedSales = toNumber(analytics?.totals?.confirmedSales ?? apiTrades.length);
-  const confirmedRevenue = toNumber(analytics?.totals?.trackedValue ?? apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.totalPrice), 0));
-  const unitsSold = toNumber(analytics?.totals?.confirmedUnits ?? apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.quantity), 0));
-  const averageSaleValue = confirmedSales ? confirmedRevenue / confirmedSales : 0;
+  const marketRange = buildMarketRangeAnalytics(saleEvents, new Date(), 365);
+  const topItems = marketRange.topItems;
+  const daily = marketRange.daily;
+  const confirmedSales = marketRange.totals.confirmedSales;
+  const confirmedRevenue = marketRange.totals.trackedValue;
+  const unitsSold = marketRange.totals.confirmedUnits;
+  const averageSaleValue = confirmedSales ? toNumber(confirmedRevenue) / confirmedSales : 0;
   const listingValue = all.reduce((total, listing) => total + toNumber(listing.price) * Math.max(1, toNumber(listing.quantity)), 0);
   const maxDailyValue = Math.max(...daily.map((row: AnyRecord) => toNumber(row.totalValue)), 1);
   const trendRange = daily.length ? `${formatMarketDay(daily[0].day)} to ${formatMarketDay(daily[daily.length - 1].day)}` : "No confirmed sales";

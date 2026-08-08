@@ -45,6 +45,10 @@ export class RelayHttpClient {
     return this.#request(`/claim/${encodeURIComponent(claimId)}/inventory`);
   }
 
+  player(playerId: string) {
+    return this.#request(`/player/${encodeURIComponent(playerId)}`);
+  }
+
   playerInventory(playerId: string) {
     return this.#request(`/player/${encodeURIComponent(playerId)}/inventory`);
   }

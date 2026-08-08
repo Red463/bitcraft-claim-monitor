@@ -26,10 +26,10 @@ test("craftProgressKey uses stable craft identifiers before recipe fallbacks", (
 });
 test("productionMetrics derives craft progress, XP, tier, and display item details", () => {
   const itemLookup = new Map([
-    ["42", { id: 42, name: "Brick", tier: "3" }],
+    ["items:42", { id: 42, name: "Brick", tier: "3" }],
   ]);
   const metrics = productionMetrics({
-    craftedItem: [{ item_id: 42 }],
+    craftedItem: [{ item_id: 42, item_type: "item" }],
     levelRequirements: [{ skill_id: "11" }],
     experiencePerProgress: [
       { skill_id: 7, quantity: 5 },
@@ -57,4 +57,24 @@ test("productionMetrics derives craft progress, XP, tier, and display item detai
 
   assert.equal(productionMetrics({ progress: 7, totalActionsRequired: 3, recipeName: "Overflow" }, new Map()).remaining, 0);
   assert.equal(productionMetrics({ recipeName: "No Item" }, new Map()).name, "No Item");
+});
+
+test("productionMetrics keeps active craft item, tier, and name unresolved when item type is missing", () => {
+  const itemLookup = new Map([
+    ["items:42", { id: 42, name: "Wrong item", tier: "9" }],
+    ["cargo:42", { id: 42, name: "Wrong cargo", tier: "8" }],
+    ["42", { id: 42, name: "Wrong legacy item", tier: "7" }],
+  ]);
+
+  const metrics = productionMetrics({
+    craftedItem: [{ item_id: 42 }],
+    tier: 6,
+    recipeName: "Craft {0}",
+    totalActionsRequired: 10,
+    progress: 2,
+  }, itemLookup);
+
+  assert.deepEqual(metrics.item, {});
+  assert.equal(metrics.tier, null);
+  assert.equal(metrics.name, "");
 });

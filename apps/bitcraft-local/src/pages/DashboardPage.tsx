@@ -25,8 +25,9 @@ import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import type { ActivePanel } from "../types/app";
 import { activityMetadata, signedDelta } from "./activity/activityUtils";
-import { MARKET_INCOME_RANGES, buildMarketIncomeSummary, type MarketIncomeRangeDays } from "./market/marketAnalytics";
+import { MARKET_INCOME_RANGES, buildMarketIncomeSummary, buildMarketRangeAnalytics, type MarketIncomeRangeDays } from "./market/marketAnalytics";
 import { hasRecentCraftContribution } from "./production/productionUtils";
+import { projectCraftPresentation } from "./production/craftPresentation";
 import { dashboardRegionWealth, formatExactCompactInteger } from "./dashboardView";
 import { researchSettlementCaps } from "./researchView";
 
@@ -78,21 +79,20 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
   const treasuryDeltasToday = treasuryEventsToday.map(({ metadata }) => toNumber(metadata.after) - toNumber(metadata.before));
   const fallbackTreasuryNetToday = treasuryDeltasToday.reduce((total, delta) => total + delta, 0);
   const treasuryNetToday = dashboardSummary?.treasuryNetToday == null ? fallbackTreasuryNetToday : toNumber(dashboardSummary.treasuryNetToday);
-  const marketTotals = marketHistory?.totals ?? {};
-  const storedMarketIncome = marketTotals.trackedValue ?? marketTotals.totalValue;
-  const marketIncome = buildMarketIncomeSummary(
-    Array.isArray(marketHistory?.daily) ? marketHistory.daily : [],
+  const marketRange = buildMarketRangeAnalytics(
+    Array.isArray(marketHistory?.sales) ? marketHistory.sales : [],
     lastUpdated ?? new Date(),
     marketIncomeRange,
-    storedMarketIncome == null ? undefined : toNumber(storedMarketIncome),
   );
-  const confirmedMarketSales = marketTotals.confirmedSales == null && marketTotals.salesCount == null
-    ? marketIncome.salesCount
-    : toNumber(marketTotals.confirmedSales ?? marketTotals.salesCount);
-  const confirmedMarketUnits = marketTotals.confirmedUnits == null && marketTotals.unitsSold == null
-    ? marketIncome.unitsSold
-    : toNumber(marketTotals.confirmedUnits ?? marketTotals.unitsSold);
-  const confirmedMarketIncome = storedMarketIncome == null ? marketIncome.totalValue : toNumber(storedMarketIncome);
+  const marketIncome = buildMarketIncomeSummary(
+    marketRange.daily,
+    lastUpdated ?? new Date(),
+    marketIncomeRange,
+  );
+  const confirmedMarketSales = marketIncome.salesCount;
+  const confirmedMarketUnits = marketIncome.unitsSold;
+  const confirmedMarketIncome = marketIncome.totalValue;
+  const hasConfirmedMarketIncome = confirmedMarketIncome !== "0";
   const marketIncomeDetail = confirmedMarketSales
     ? `${formatNumber(confirmedMarketSales, 0)} sale${confirmedMarketSales === 1 ? "" : "s"} - ${formatNumber(confirmedMarketUnits, 0)} units sold`
     : "No confirmed sales tracked yet";
@@ -131,20 +131,21 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
     };
   }).slice(0, 4);
   const rawData = (data as ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }).raw;
-  const craftItemLookup = new Map([...(rawData?.crafts?.items ?? []), ...(rawData?.crafts?.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]));
   const currentCrafts = crafts.map((job) => {
-    const item = craftItemLookup.get(String(job.craftedItem?.[0]?.item_id)) ?? {};
+    const presentation = projectCraftPresentation(job, rawData?.crafts ?? {});
+    const item = presentation.item;
     const progress = toNumber(job.progress);
     const total = toNumber(job.totalActionsRequired);
     const pct = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
     const skillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
     const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity ?? job.experiencePerEffort);
     const totalXp = toNumber(job.totalXp ?? job.totalXP) || total * experiencePerEffort;
-    const name = String(item.name ?? job.recipeName ?? job.craftName ?? job.buildingName ?? "Craft");
+    const name = presentation.displayName;
     return {
       id: String(job.entityId ?? `${job.recipeName}-${job.buildingName}`),
-      item: Object.keys(item).length ? item : { name },
+      item,
       name,
+      recipeName: presentation.recipeName,
       detail: job.buildingName ?? "Production",
       pct,
       totalXp,
@@ -194,8 +195,8 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
             )}
           />
           <div className="dashboard-money-row">
-            <strong>{confirmedMarketIncome ? `${formatNumber(confirmedMarketIncome)}g` : "0g"}</strong>
-            <span className={confirmedMarketIncome > 0 ? "positive" : ""}>{marketIncomeDetail}</span>
+            <strong>{hasConfirmedMarketIncome ? `${formatNumber(confirmedMarketIncome)}g` : "0g"}</strong>
+            <span className={hasConfirmedMarketIncome ? "positive" : ""}>{marketIncomeDetail}</span>
           </div>
           {marketIncome.partialRange && marketIncome.availableStartDay
             ? <p className="dashboard-chart-coverage">Stored sales begin {shortDateLabel(marketIncome.availableStartDay)}.</p>

@@ -285,3 +285,98 @@ test("claim-market runtime reports transition failures without rolling back curr
   assert.equal(writes.length, 1);
   assert.equal(runtime.health().transition.lastError, "history disk unavailable");
 });
+
+test("claim-market reconnects only for disconnected or errored subscription health", async () => {
+  let now = 0;
+  const healthStates = [
+    { connected: false, applied: true, lastAppliedAt: "2026-08-08T10:00:00.000Z", lastError: null },
+    { connected: true, applied: true, lastAppliedAt: "2026-08-08T10:00:00.000Z", lastError: "socket failed" },
+    { connected: true, applied: true, lastAppliedAt: "2026-08-08T10:00:00.000Z", lastError: null },
+  ];
+  const sessions = [];
+  const runtime = new runtimeModule.RelayClaimMarketRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    now: () => now,
+    reconnectDelayMs: () => 1_000,
+    discoverTopology: async () => topology(),
+    createSession: () => {
+      const index = sessions.length;
+      const session = {
+        async start() {},
+        health: () => healthStates[index],
+        async stop() {},
+      };
+      sessions.push(session);
+      return session;
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+  });
+  const config = { claimId: "100", regionId: "19" };
+
+  await runtime.start({ relayBaseUrl: "https://relay.example", ...config });
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 2, "disconnected health must restart");
+
+  now = 999;
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 2, "reconnect attempts must respect backoff");
+
+  now = 1_000;
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 3, "subscription errors must restart after backoff");
+
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 3, "healthy idle subscriptions must not restart");
+});
+
+test("claim-market applies escalating backoff after repeated rejected reconnect starts", async () => {
+  let now = 0;
+  const attempts = [];
+  const delays = [];
+  const runtime = new runtimeModule.RelayClaimMarketRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    now: () => now,
+    reconnectDelayMs: (failureCount) => {
+      delays.push(failureCount);
+      return failureCount * 1_000;
+    },
+    discoverTopology: async () => topology(),
+    createSession: () => {
+      const attempt = attempts.length;
+      const session = {
+        async start() {
+          attempts.push(attempt);
+          if (attempt > 0) throw new Error(`connection rejected ${attempt}`);
+        },
+        health: () => ({ connected: false, applied: true, lastAppliedAt: null, lastError: null }),
+        async stop() {},
+      };
+      return session;
+    },
+    currentStateRepository: { nextGeneration: () => 1, commitGeneration: () => {} },
+  });
+  const config = { claimId: "100", regionId: "19" };
+
+  await runtime.start({ relayBaseUrl: "https://relay.example", ...config });
+  await assert.rejects(runtime.reconcile(config), /connection rejected 1/);
+  assert.deepEqual(delays, [1]);
+
+  now = 999;
+  await runtime.reconcile(config);
+  assert.equal(attempts.length, 2, "rejected reconnect must remain inside its first delay");
+
+  now = 1_000;
+  await assert.rejects(runtime.reconcile(config), /connection rejected 2/);
+  assert.deepEqual(delays, [1, 2]);
+
+  now = 2_999;
+  await runtime.reconcile(config);
+  assert.equal(attempts.length, 3, "second rejection must receive an escalated delay");
+
+  now = 3_000;
+  await assert.rejects(runtime.reconcile(config), /connection rejected 3/);
+  assert.deepEqual(delays, [1, 2, 3]);
+});

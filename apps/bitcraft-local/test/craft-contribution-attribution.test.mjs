@@ -129,7 +129,7 @@ test("rejects a reducer event for a different craft", () => {
   });
 });
 
-test("joins the one eligible configured member action for a transaction", () => {
+test("matches the one eligible configured member action for a transaction", () => {
   const attribution = resolveCraftContributionAttribution({
     event: { tag: "Transaction" },
     target,
@@ -139,7 +139,7 @@ test("joins the one eligible configured member action for a transaction", () => 
   });
 
   assert.deepEqual(attribution, {
-    confidence: "joined",
+    confidence: "matched_action",
     contributorEntityId: "576460752388321942",
     contributorName: "Ada",
     evidenceKey: "action:94295",
@@ -168,7 +168,7 @@ test("ignores action rows that are cancelled, not craft, unsuccessful, or outsid
   });
 });
 
-test("returns unknown rather than guessing when two member actions are eligible", () => {
+test("falls back to the exact progressive craft owner when action evidence is ambiguous", () => {
   const attribution = resolveCraftContributionAttribution({
     event: { tag: "Transaction" },
     target,
@@ -180,31 +180,33 @@ test("returns unknown rather than guessing when two member actions are eligible"
       eligibleActionRow(),
       eligibleActionRow({ autoId: 94296n, entityId: 576460752388321943n }),
     ],
+    craftOwnerEntityId: "576460752388321942",
     observedAtMs: 1785675249000,
   });
 
   assert.deepEqual(attribution, {
-    confidence: "unknown",
-    contributorEntityId: null,
-    contributorName: "Unknown contributor",
-    evidenceKey: "unknown:ambiguous",
+    confidence: "owner_fallback",
+    contributorEntityId: "576460752388321942",
+    contributorName: "Ada",
+    evidenceKey: "owner:576460752388321942",
   });
 });
 
-test("returns unknown when no configured member action is eligible", () => {
+test("falls back to an exact owner id and displays the id when no name is available", () => {
   const attribution = resolveCraftContributionAttribution({
     event: { tag: "Transaction" },
     target,
     members,
     actionRows: [eligibleActionRow({ entityId: 576460752388321999n })],
+    craftOwnerEntityId: "576460752388321999",
     observedAtMs: 1785675249000,
   });
 
   assert.deepEqual(attribution, {
-    confidence: "unknown",
-    contributorEntityId: null,
-    contributorName: "Unknown contributor",
-    evidenceKey: "unknown:no-match",
+    confidence: "owner_fallback",
+    contributorEntityId: "576460752388321999",
+    contributorName: "Player 576460752388321999",
+    evidenceKey: "owner:576460752388321999",
   });
 });
 
@@ -228,6 +230,30 @@ test("does not coerce an unresolved reducer identity into a contributor", () => 
     contributorEntityId: null,
     contributorName: "Unknown contributor",
     evidenceKey: "unknown:unresolved-identity",
+  });
+});
+
+test("an unresolved reducer caller continues to the unique matching action", () => {
+  const attribution = resolveCraftContributionAttribution({
+    event: {
+      tag: "Reducer",
+      value: {
+        callerIdentity: { unknown: "object" },
+        reducer: craftContinueEvent().value.reducer,
+      },
+    },
+    target,
+    members,
+    actionRows: [eligibleActionRow()],
+    craftOwnerEntityId: "576460752388321999",
+    observedAtMs: 1785675249000,
+  });
+
+  assert.deepEqual(attribution, {
+    confidence: "matched_action",
+    contributorEntityId: "576460752388321942",
+    contributorName: "Ada",
+    evidenceKey: "action:94295",
   });
 });
 

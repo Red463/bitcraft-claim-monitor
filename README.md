@@ -75,13 +75,15 @@ Historical charts clearly describe their locally observed time window.
 
 ## Local icons and provenance
 
-All runtime game icons are local files under
+Runtime game icons prefer local files under
 `apps/bitcraft-local/public/game-icons/`; the browser never requests a remote
-icon host. `apps/bitcraft-local/assets/game-icons-manifest.json` is the one
+icon host. If a verified local icon is unavailable, the browser may request the
+bounded same-origin `/api/local/game-icon/:itemType/:itemId` fallback.
+`apps/bitcraft-local/assets/game-icons-manifest.json` is the one
 intentional historical-source exception: it records immutable build-time
 provenance including the original URL, local path, digest, retrieval time,
 catalog identity, and permission reference. Original URLs in that manifest are
-never fetched at runtime.
+not used as a runtime URL source.
 
 The build validates the manifest, SHA-256 digests, missing files, and duplicate
 catalog identities.

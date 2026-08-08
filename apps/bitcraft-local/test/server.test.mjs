@@ -470,6 +470,7 @@ test("server collection paginates listings and protects production mutations", a
       DISCORD_SANDBOX_CHANNEL_ID: "666666666666666666",
       DISCORD_OAUTH_CLIENT_ID: "1511277824525471826",
       DISCORD_OAUTH_CLIENT_SECRET: "test-discord-oauth-secret",
+      BITJITA_ICON_API_ORIGIN: "https://unapproved.example",
     },
     stdio: "ignore",
   });
@@ -549,7 +550,7 @@ test("server collection paginates listings and protects production mutations", a
           contributed_progress, contributed_xp, contribution_count,
           first_contributed_at, last_contributed_at, first_seen, updated_at,
           raw_json
-        ) VALUES (?, ?, ?, ?, 'Tester', 'joined', 'Carpentry', 'Simple Plank', ?, '2',
+        ) VALUES (?, ?, ?, ?, 'Tester', 'matched_action', 'Carpentry', 'Simple Plank', ?, '2',
           ?, ?, ?, '2026-05-20T12:00:00.000Z', ?, ?, ?, '{}')
       `).run(
         `${claimId}:${craftId}:1369094286777412591`,
@@ -575,6 +576,17 @@ test("server collection paginates listings and protects production mutations", a
   const retiredProxy = await fetch(`${origin}/api/bitjita/cache-test?same=1`);
   assert.equal(retiredProxy.status, 404);
   assert.equal(proxyCacheRequests, 0);
+  const unavailableGameIcon = await fetch(`${origin}/api/local/game-icon/item/42`);
+  assert.equal(unavailableGameIcon.status, 404);
+  assert.deepEqual(await unavailableGameIcon.json(), { error: "Game icon is unavailable." });
+  const missingLocalGameIcon = await fetch(`${origin}/game-icons/GeneratedIcons/Items/Missing.webp`);
+  assert.equal(missingLocalGameIcon.status, 404);
+  assert.match(missingLocalGameIcon.headers.get("content-type") ?? "", /^application\/json/);
+  const rateLimitedIcons = await Promise.all(Array.from({ length: 601 }, (_, index) => fetch(
+    `${origin}/api/local/game-icon/item/${1000 + index}`,
+  )));
+  assert.equal(rateLimitedIcons.every((response) => response.status === 404 || response.status === 429), true);
+  assert.equal(rateLimitedIcons.filter((response) => response.status === 429).length > 0, true);
   await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (catalogDb) => {
     const receivedAt = new Date().toISOString();
     const insert = catalogDb.prepare(`
@@ -2325,11 +2337,11 @@ test("server collection paginates listings and protects production mutations", a
   const contributionLeaderboard = await fetch(`${origin}/api/local/leaderboard?claimId=${claimId}`).then((response) => response.json());
   assert.equal(contributionLeaderboard.summary.contributorCount, 1);
   assert.equal(contributionLeaderboard.summary.recordedCrafts, 3);
-  assert.equal(contributionLeaderboard.summary.totalProgress, 78);
+  assert.equal(contributionLeaderboard.summary.totalProgress, "78");
   assert.equal(contributionLeaderboard.contributors[0].name, "Tester");
-  assert.equal(contributionLeaderboard.contributors[0].totalProgress, 78);
+  assert.equal(contributionLeaderboard.contributors[0].totalProgress, "78");
   assert.equal(contributionLeaderboard.contribution.summary.contributorCount, 1);
-  assert.equal(contributionLeaderboard.contribution.contributors[0].totalProgress, 78);
+  assert.equal(contributionLeaderboard.contribution.contributors[0].totalProgress, "78");
   assert.equal(contributionLeaderboard.market.summary.activeListings, 2);
   assert.equal(contributionLeaderboard.market.summary.confirmedSales, 1);
   assert.equal(contributionLeaderboard.market.summary.confirmedSaleValue, 50);

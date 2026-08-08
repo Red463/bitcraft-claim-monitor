@@ -19,6 +19,8 @@ import { formatDecimalQuantity } from "../server/game-data/inventoryProjection";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { craftProgressKey, hasRecentCraftContribution, productionMetrics } from "./production/productionUtils";
+import { projectCraftPresentation } from "./production/craftPresentation";
+import { passiveCraftQuantityLabel } from "./production/passiveCraftPresentation";
 import { evaluateCraftEligibility } from "./production/toolEligibility";
 
 function formatObservedSince(value: unknown): string {
@@ -26,6 +28,16 @@ function formatObservedSince(value: unknown): string {
   return Number.isFinite(observedAt.getTime())
     ? observedAt.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
     : "tracking became available";
+}
+
+function passiveCraftItem(row: AnyRecord): AnyRecord | null {
+  const itemId = String(row.outputItemId ?? "").trim();
+  const itemType = row.outputItemType === "item" || row.outputItemType === "cargo"
+    ? row.outputItemType
+    : null;
+  return itemType && /^\d+$/.test(itemId)
+    ? { ...(row.item ?? {}), id: itemId, itemId, itemType, name: row.outputName ?? row.recipe }
+    : null;
 }
 
 export function MemberPassiveCrafts({ rows }: { rows: AnyRecord[] }) {
@@ -39,12 +51,15 @@ export function MemberPassiveCrafts({ rows }: { rows: AnyRecord[] }) {
       </div>
       {rows.length === 0 ? <div className="empty-state"><Factory />No current passive crafts reported for this settlement.</div> : null}
       {rows.length ? <DataTable rows={rows} scrollLabel="Production jobs table" emptyState="No production jobs match the current filters." columns={[
-        ["Output", (row) => <strong>{row.recipe}</strong>],
+        ["Output", (row) => {
+          const item = passiveCraftItem(row);
+          return <span className="item-label">{item ? <ItemIcon item={item} /> : null}<strong>{row.recipe}</strong></span>;
+        }],
         ["Tier", (row) => row.tier ? <TierBadge tier={row.tier} /> : "-"],
         ["Member", (row) => row.memberName],
         ["Structure", (row) => row.structure],
         ["Status", (row) => <span className={`status-pill ${row.status === "complete" ? "complete" : ""}`}>{formatEquipmentSlot(row.status)}</span>],
-        ["Quantity", (row) => formatDecimalQuantity(row.quantity)],
+        ["Quantity", (row) => passiveCraftQuantityLabel(row.quantity)],
         ["Latest", (row) => row.timestamp ? timeAgo(row.timestamp) : "Current Relay snapshot"],
       ]} /> : null}
     </section>
@@ -212,7 +227,10 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
   }).length;
   const totalProductionXp = jobs.reduce((sum, job) => sum + productionMetrics(job, itemLookup).totalXp, 0);
   const remainingProductionXp = jobs.reduce((sum, job) => sum + productionMetrics(job, itemLookup).remainingXp, 0);
-  const highestTier = Math.max(...jobs.map((job) => productionMetrics(job, itemLookup).tier), 0);
+  const highestTier = Math.max(
+    ...jobs.map((job) => productionMetrics(job, itemLookup).tier).filter((tier): tier is number => tier !== null),
+    0,
+  );
 
   return (
     <div className="panel production-page">
@@ -289,8 +307,12 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
       {data.crafts.length > 0 && visibleCrafts.length === 0 && unknownVisibilityCrafts === 0 ? <div className="empty-state"><Lock />Private crafts are hidden by your Production controls.</div> : null}
       <div className="production-grid">
         {jobs.map((job, index) => {
-          const first = job.craftedItem?.[0] ?? {};
-          const { item, skillId, experiencePerEffort, total, progress, remaining, totalXp, remainingXp, tier } = productionMetrics(job, itemLookup);
+          const presentation = projectCraftPresentation(job, data.raw?.crafts ?? {});
+          const hasKnownItemIdentity = Boolean(presentation.outputItemType && presentation.outputItemId);
+          const shouldRenderItemIcon = hasKnownItemIdentity || Boolean(presentation.iconAssetName);
+          const { skillId, experiencePerEffort, total, progress, remaining, totalXp, remainingXp, tier: metricsTier } = productionMetrics(job, itemLookup);
+          const item = presentation.item;
+          const tier = toNumber(item.tier ?? metricsTier);
           const skillName = SKILL_NAMES[skillId] ?? job.levelRequirements?.[0]?.skillName ?? (skillId ? `Skill ${skillId}` : null);
           const pct = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
           const contributors: AnyRecord[] = data.contributions[String(job.entityId)] ?? [];
@@ -305,7 +327,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
                 <p><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
-                <div className={`craft-title ${item?.iconAssetName ? "has-icon" : ""}`}>{item?.iconAssetName ? <ItemIcon item={item} /> : null}<h3>{item?.name ?? job.recipeName ?? (skillName ? `${skillName} craft` : `${String(first.itemType ?? first.item_type).toLowerCase() === "cargo" ? "Cargo" : "Item"} #${first.itemId ?? first.item_id ?? "?"}`)}</h3>{tier ? <TierBadge tier={tier} /> : null}</div>
+                <div className={`craft-title ${shouldRenderItemIcon ? "has-icon" : ""}`}>{shouldRenderItemIcon ? <ItemIcon item={item} /> : null}<h3>{presentation.displayName}</h3>{tier ? <TierBadge tier={tier} /> : null}</div>
                 {!item.name && job.recipeId ? <small>recipe #{job.recipeId}</small> : null}
                 <div className="work-chips">
                   <span>{formatDecimalQuantity(job.craftCount)} craft{String(job.craftCount) === "1" ? "" : "s"}</span>
@@ -325,7 +347,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
                       const contributorName = unknownContributor
                         ? "Unknown contributor"
                         : person.contributorUsername;
-                      return <span key={person.contributorEntityId ?? `unknown:${job.entityId}`}><strong><TrackedOwnerName name={contributorName} claim={data.claim} members={data.members} /></strong> {formatDecimalQuantity(person.totalProgressContributed)} progress - {formatDecimalQuantity(person.totalXpContributed)} XP {person.attributionConfidence === "joined" ? <small>Inferred</small> : null}</span>;
+                      return <span key={person.contributorEntityId ?? `unknown:${job.entityId}`}><strong><TrackedOwnerName name={contributorName} claim={data.claim} members={data.members} /></strong> {formatDecimalQuantity(person.totalProgressContributed)} progress - {formatDecimalQuantity(person.totalXpContributed)} XP {person.attributionConfidence === "matched_action" ? <small>Matched action</small> : person.attributionConfidence === "owner_fallback" ? <small>Craft owner</small> : null}</span>;
                     })}
                   </div>
                 ) : data.contributionObservedSince ? <small>No contributor activity has been observed since {formatObservedSince(data.contributionObservedSince)}.</small> : <small>No contributor activity has been observed since tracking became available.</small>}

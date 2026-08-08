@@ -26,11 +26,45 @@ const {
   normalizeRegionalPlayers,
   normalizeRegionalRecruitment,
   normalizeRegionalResearch,
+  normalizeRelayCraftContributionRow,
+  normalizeRelayPlayerDetail,
   normalizeGlobalEmpireFoundries,
   normalizeGlobalRegions,
   normalizeStorageLogs,
   normalizeTimestamp,
 } = await import(new URL("../src/server/game-data/normalizers.ts", import.meta.url).href);
+
+test("Relay player detail wire fields normalize once into provider-neutral presence", () => {
+  assert.deepEqual(normalizeRelayPlayerDetail({
+    player: {
+      entity_id: "1224979098660030450",
+      username: "Allusion",
+      region: 14,
+      signed_in: false,
+      last_active_timestamp: 1785409200,
+      last_login_timestamp: 1785405600,
+    },
+  }), {
+    playerEntityId: "1224979098660030450",
+    username: "Allusion",
+    presenceRegionId: "14",
+    signedIn: false,
+    lastActiveTimestamp: "2026-07-30T11:00:00.000Z",
+    lastLoginTimestamp: "2026-07-30T10:00:00.000Z",
+  });
+});
+
+test("Relay craft contribution wire fields normalize once into provider-neutral state", () => {
+  assert.deepEqual(normalizeRelayCraftContributionRow({
+    entity_id: 9007199254740993n,
+    owner_entity_id: 1224979098660030450n,
+    progress: 16056n,
+  }), {
+    entityId: "9007199254740993",
+    ownerEntityId: "1224979098660030450",
+    progress: "16056",
+  });
+});
 
 test("regional Town Bank inventories join through the bank building and preserve personal item identities", () => {
   assert.deepEqual(normalizeRegionalBankInventories({
@@ -475,6 +509,9 @@ test("regional claims join live claim state, local metrics, tier, owner, and coo
   }), {
     data: {
       regionId: "19",
+      coverage: {
+        missingOwnerUsernameCount: 1,
+      },
       claims: [{
         entityId: "1369094286777412590",
         ownerPlayerEntityId: "1224979098736429551",
@@ -507,7 +544,6 @@ test("regional claims join live claim state, local metrics, tier, owner, and coo
     },
     warnings: [
       "Regional claim 1369094286777412591 has no claim_local_state row.",
-      "Regional claims missing owner usernames: 1.",
     ],
   });
 });
@@ -942,6 +978,7 @@ test("Relay member skills become citizen levels with exact player identity", () 
 
 test("regional player rows preserve exact IDs and derive bounded session activity", () => {
   assert.deepEqual(normalizeRegionalPlayers({
+    regionId: "19",
     members: [{
       playerEntityId: "1369094286756659093",
       userName: "Modular",
@@ -967,6 +1004,8 @@ test("regional player rows preserve exact IDs and derive bounded session activit
       playerEntityId: "1369094286756659093",
       username: "Modular",
       signedIn: true,
+      presenceRegionId: "19",
+      presenceSource: "regional",
       sessionSeconds: 300,
       timePlayedSeconds: 100000,
       timeSignedInSeconds: 80000,
@@ -976,13 +1015,15 @@ test("regional player rows preserve exact IDs and derive bounded session activit
       entityId: "1224979098736429551",
       playerEntityId: "1224979098736429551",
       username: "Texian1836",
-      signedIn: false,
+      signedIn: null,
+      presenceRegionId: null,
+      presenceSource: "unavailable",
       sessionSeconds: null,
       timePlayedSeconds: null,
       timeSignedInSeconds: null,
       lastLoginTimestamp: "2026-07-29T18:50:00.000Z",
     }],
-    warnings: ["Regional player_state omitted member 1224979098736429551."],
+    warnings: [],
   });
 });
 
@@ -1620,10 +1661,12 @@ test("claim craft and deposit payloads normalize into provider domain shapes", (
       progress: 2580,
       recipe_id: 209007,
       total_actions_required: 8125,
+      updated_at: "2026-08-08T11:00:00.000Z",
       crafted_item: [{ item_id: 2090008, item_type: "Item", quantity: 1 }],
     }],
   });
   assert.equal(crafts.craftResults[0].entityId, "1369094286813753789");
+  assert.equal(crafts.craftResults[0].updatedAt, "2026-08-08T11:00:00.000Z");
   assert.deepEqual(crafts.craftResults[0].craftedItem[0], {
     itemId: "2090008",
     itemType: "item",

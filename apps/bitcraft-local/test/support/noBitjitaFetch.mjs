@@ -4,6 +4,9 @@ export function createNoBitjitaFetch(fetcher = fetch) {
     if (url.hostname === "bitjita.com" || url.hostname.endsWith(".bitjita.com")) {
       throw new Error(`Forbidden BitJita test request: ${url.origin}${url.pathname}`);
     }
+    if (url.pathname.startsWith("/api/local/game-icon/") && !/^\/api\/local\/game-icon\/(?:item|cargo)\/\d+$/.test(url.pathname)) {
+      throw new Error(`Forbidden non-standard game icon fallback: ${url.pathname}`);
+    }
     return fetcher(input, init);
   };
 }

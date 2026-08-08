@@ -553,3 +553,66 @@ test("Relay transition history is idempotent and needs no current-listing table"
   );
   assert.equal(outboxKicks, 2);
 });
+
+function assertClaimScopeRejectionHasNoSideEffects(currentSnapshot) {
+  const sideEffects = { transactions: [], statements: 0, activities: 0, outbox: 0 };
+  const writer = transitionsModule.createRelayMarketTransitionWriter({
+    prepare: () => ({
+      run: () => {
+        sideEffects.statements += 1;
+        return { changes: 1 };
+      },
+    }),
+    exec: (sql) => sideEffects.transactions.push(sql),
+  }, {
+    addActivity: () => {
+      sideEffects.activities += 1;
+      return true;
+    },
+    processOutbox: () => { sideEffects.outbox += 1; },
+  });
+  const previousSnapshot = {
+    claimId: "100",
+    regionId: "19",
+    listings: [sellOrder({ claimEntityId: "100" })],
+    closedListings: [],
+  };
+
+  assert.throws(() => writer.apply({
+    claimId: "100",
+    previous: previousSnapshot,
+    current: currentSnapshot,
+    observedAt,
+  }), /claim.*(?:foreign|100|999)/i);
+  assert.deepEqual(sideEffects, { transactions: [], statements: 0, activities: 0, outbox: 0 });
+}
+
+test("transition writer rejects a foreign open listing before transaction side effects", () => {
+  assertClaimScopeRejectionHasNoSideEffects({
+    claimId: "100",
+    regionId: "19",
+    listings: [sellOrder({ claimEntityId: "999", quantity: "6" })],
+    closedListings: [],
+  });
+});
+
+test("transition writer rejects foreign closed-listing evidence before transaction side effects", () => {
+  assertClaimScopeRejectionHasNoSideEffects({
+    claimId: "100",
+    regionId: "19",
+    listings: [],
+    closedListings: [closedListing({ claimEntityId: "999" })],
+  });
+});
+
+test("transition writer rejects a mixed-claim snapshot atomically", () => {
+  assertClaimScopeRejectionHasNoSideEffects({
+    claimId: "100",
+    regionId: "19",
+    listings: [
+      sellOrder({ entityId: "10", claimEntityId: "100", quantity: "6" }),
+      sellOrder({ entityId: "11", claimEntityId: "999", quantity: "2" }),
+    ],
+    closedListings: [],
+  });
+});

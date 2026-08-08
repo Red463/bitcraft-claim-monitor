@@ -58,6 +58,82 @@ export function normalizeTimestamp(value: string | number | bigint, unit: Timest
   return new Date(numeric).toISOString();
 }
 
+function optionalSecondsTimestamp(value: unknown, label: string): string | undefined {
+  return value == null
+    ? undefined
+    : normalizeTimestamp(decimalString(value, label), "seconds");
+}
+
+function optionalIsoTimestamp(value: unknown, label: string): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value !== "string") throw new TypeError(`${label} must be an ISO timestamp string.`);
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.getTime())) throw new TypeError(`${label} must be an ISO timestamp string.`);
+  return timestamp.toISOString();
+}
+
+export type RelayPlayerDetail = {
+  playerEntityId: string;
+  username: string;
+  presenceRegionId: string;
+  signedIn: boolean;
+  lastActiveTimestamp?: string;
+  lastLoginTimestamp?: string;
+};
+
+export function normalizeRelayPlayerDetail(value: unknown): RelayPlayerDetail {
+  const payload = record(value, "Relay player detail payload");
+  const player = record(payload.player ?? payload, "Relay player detail");
+  const signedIn = player.signed_in ?? player.signedIn;
+  if (typeof signedIn !== "boolean") {
+    throw new TypeError("Relay player detail signed_in must be boolean");
+  }
+  const lastActiveTimestamp = optionalSecondsTimestamp(
+    player.last_active_timestamp ?? player.lastActiveTimestamp,
+    "Relay player last active",
+  );
+  const lastLoginTimestamp = optionalSecondsTimestamp(
+    player.last_login_timestamp ?? player.lastLoginTimestamp,
+    "Relay player last login",
+  );
+  return {
+    playerEntityId: decimalString(
+      player.entity_id ?? player.entityId,
+      "Relay player detail entity id",
+    ),
+    username: String(player.username ?? ""),
+    presenceRegionId: decimalString(
+      player.region ?? player.region_id ?? player.regionId,
+      "Relay player detail region",
+    ),
+    signedIn,
+    ...(lastActiveTimestamp == null ? {} : { lastActiveTimestamp }),
+    ...(lastLoginTimestamp == null ? {} : { lastLoginTimestamp }),
+  };
+}
+
+export type RelayCraftContributionRow = {
+  entityId: string;
+  progress: string;
+  ownerEntityId?: string;
+};
+
+export function normalizeRelayCraftContributionRow(value: unknown): RelayCraftContributionRow {
+  const row = record(value, "Relay craft contribution row");
+  const ownerEntityId = optionalDecimalString(
+    row.ownerEntityId ?? row.owner_entity_id,
+    "Relay craft contribution owner entity id",
+  );
+  return {
+    entityId: decimalString(
+      row.entityId ?? row.entity_id,
+      "Relay craft contribution entity id",
+    ),
+    progress: decimalString(row.progress, "Relay craft contribution progress"),
+    ...(ownerEntityId == null ? {} : { ownerEntityId }),
+  };
+}
+
 export function normalizeItemKind(value: unknown): ItemKind {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (normalized === "item") return "item";
@@ -455,13 +531,17 @@ export function normalizeRegionalClaims(options: {
       throw error;
     }
   }
-  if (missingOwnerUsernameCount > 0) {
-    warnings.push(`Regional claims missing owner usernames: ${missingOwnerUsernameCount}.`);
-  }
   claims.sort((left, right) => (
     BigInt(String(left.entityId)) < BigInt(String(right.entityId)) ? -1 : 1
   ));
-  return { data: { regionId, claims }, warnings };
+  return {
+    data: {
+      regionId,
+      coverage: { missingOwnerUsernameCount },
+      claims,
+    },
+    warnings,
+  };
 }
 
 function regionalEmpireSpatialRows(options: {
@@ -1376,12 +1456,14 @@ export function normalizeCitizensPayload(value: unknown) {
 }
 
 export function normalizeRegionalPlayers(options: {
+  regionId: string;
   members: unknown[];
   playerRows: unknown[];
   taskRows?: unknown[];
   taskDescriptionRows?: unknown[];
   observedAt: string;
 }) {
+  const regionId = decimalString(options.regionId, "regional player region id");
   const observedAtMs = Date.parse(options.observedAt);
   if (!Number.isFinite(observedAtMs)) throw new TypeError("regional player observedAt is invalid");
   const includeTasks = options.taskRows !== undefined || options.taskDescriptionRows !== undefined;
@@ -1439,12 +1521,13 @@ export function normalizeRegionalPlayers(options: {
       )),
     };
     if (!row) {
-      warnings.push(`Regional player_state omitted member ${playerEntityId}.`);
       return {
         entityId: playerEntityId,
         playerEntityId,
         username: String(member.userName ?? member.user_name ?? ""),
-        signedIn: false,
+        signedIn: null,
+        presenceRegionId: null,
+        presenceSource: "unavailable" as const,
         sessionSeconds: null,
         timePlayedSeconds: null,
         timeSignedInSeconds: null,
@@ -1470,6 +1553,8 @@ export function normalizeRegionalPlayers(options: {
       playerEntityId,
       username: String(member.userName ?? member.user_name ?? ""),
       signedIn,
+      presenceRegionId: regionId,
+      presenceSource: "regional" as const,
       sessionSeconds,
       timePlayedSeconds: Math.max(0, integer(row.timePlayed ?? row.time_played ?? 0, "regional player time played")),
       timeSignedInSeconds: Math.max(0, integer(row.timeSignedIn ?? row.time_signed_in ?? 0, "regional player time signed in")),
@@ -3107,6 +3192,10 @@ export function normalizeClaimCrafts(value: unknown) {
   return {
     craftResults: crafts.map((value, craftIndex) => {
       const row = record(value, `Relay craft ${craftIndex}`);
+      const updatedAt = optionalIsoTimestamp(
+        row.updated_at ?? row.updatedAt,
+        `crafts[${craftIndex}].updated_at`,
+      );
       return {
         entityId: decimalString(row.entity_id, `crafts[${craftIndex}].entity_id`),
         buildingEntityId: decimalString(row.building_entity_id, `crafts[${craftIndex}].building_entity_id`),
@@ -3119,6 +3208,7 @@ export function normalizeClaimCrafts(value: unknown) {
         progress: decimalString(row.progress ?? 0, `crafts[${craftIndex}].progress`),
         recipeId: decimalString(row.recipe_id, `crafts[${craftIndex}].recipe_id`),
         totalActionsRequired: decimalString(row.total_actions_required ?? 0, `crafts[${craftIndex}].total_actions_required`),
+        ...(updatedAt == null ? {} : { updatedAt }),
         craftedItem: (Array.isArray(row.crafted_item) ? row.crafted_item : []).map((value, stackIndex) => (
           normalizeStack(value, `crafts[${craftIndex}].crafted_item[${stackIndex}]`)
         )),

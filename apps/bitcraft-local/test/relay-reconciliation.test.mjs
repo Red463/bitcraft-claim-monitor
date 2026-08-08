@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createScheduledRelayReconciler,
   readRelayClaimForSupplyReport,
   runIndependentReconciliation,
 } from "../src/server/relayReconciliation.mjs";
@@ -9,6 +10,48 @@ import { reconcileCraftPlanBuildingProgress } from "../src/server/craftPlanning.
 
 const claimId = "1369094286777412590";
 const receivedAt = "2026-07-31T12:00:00.000Z";
+
+test("scheduled Relay reconciliation does not overlap an in-flight run", async () => {
+  let finishFirst;
+  let runs = 0;
+  const supervisor = createScheduledRelayReconciler({
+    reconcile: async () => {
+      runs += 1;
+      await new Promise((resolve) => { finishFirst = resolve; });
+    },
+    terminate: () => assert.fail("a healthy in-flight reconciliation must not terminate"),
+  });
+
+  const first = supervisor.request("scheduled");
+  const overlapping = supervisor.request("scheduled");
+
+  assert.equal(runs, 1);
+  assert.equal(overlapping, first);
+  finishFirst();
+  await first;
+});
+
+test("scheduled Relay reconciliation terminates a worker stalled for 180 seconds", () => {
+  let timeoutCallback;
+  let timeoutDelay;
+  let terminationError;
+  const supervisor = createScheduledRelayReconciler({
+    reconcile: () => new Promise(() => {}),
+    scheduleTimeout: (callback, delayMs) => {
+      timeoutCallback = callback;
+      timeoutDelay = delayMs;
+      return { unref() {} };
+    },
+    cancelTimeout: () => {},
+    terminate: (error) => { terminationError = error; },
+  });
+
+  supervisor.request("scheduled");
+  assert.equal(timeoutDelay, 180_000);
+  timeoutCallback();
+  assert.match(terminationError.message, /Relay reconciliation stalled for 180000ms/);
+  assert.match(terminationError.message, /terminating worker for systemd restart/);
+});
 
 function snapshot(data, overrides = {}) {
   return {

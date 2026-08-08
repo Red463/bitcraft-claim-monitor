@@ -29,6 +29,8 @@ test("primary-region runtime publishes players and restarts only when membership
   const stops = [];
   const writes = [];
   const handlers = [];
+  const presenceBaseUrls = [];
+  const presenceRequests = [];
   const runtime = new runtimeModule.RelayPrimaryRegionRuntime({
     manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
     discoverTopology: async () => topology(),
@@ -39,6 +41,17 @@ test("primary-region runtime publishes players and restarts only when membership
         start: async (config) => starts.push(config),
         stop: async () => stops.push(index),
         health: () => ({ connected: true, applied: true, lastAppliedAt: null, lastError: null }),
+      };
+    },
+    createPresenceService: (baseUrl) => {
+      presenceBaseUrls.push(baseUrl);
+      return {
+        enrich: async (players) => players.map((player) => {
+          presenceRequests.push(player.playerEntityId);
+          return player.presenceSource === "unavailable"
+            ? { ...player, signedIn: false, presenceRegionId: "14", presenceSource: "relay-player" }
+            : player;
+        }),
       };
     },
     currentStateRepository: {
@@ -55,6 +68,7 @@ test("primary-region runtime publishes players and restarts only when membership
     members,
   });
   assert.equal(starts.length, 1);
+  assert.deepEqual(presenceBaseUrls, ["https://relay.example"]);
   assert.deepEqual(starts[0], {
     uri: "wss://relay.example:4019",
     database: "relay-region-19",
@@ -67,7 +81,13 @@ test("primary-region runtime publishes players and restarts only when membership
   });
 
   await handlers[0]({
-    players: [{ playerEntityId: "101", username: "Ada", signedIn: true }],
+    players: [{
+      playerEntityId: "101",
+      username: "Ada",
+      signedIn: null,
+      presenceRegionId: null,
+      presenceSource: "unavailable",
+    }],
     warnings: [],
     equipment: { members: [{ playerEntityId: "101", username: "Ada" }] },
     equipmentWarnings: [],
@@ -132,7 +152,13 @@ test("primary-region runtime publishes players and restarts only when membership
     generation: 12,
     domains: {
       players: {
-        data: [{ playerEntityId: "101", username: "Ada", signedIn: true }],
+        data: [{
+          playerEntityId: "101",
+          username: "Ada",
+          signedIn: false,
+          presenceRegionId: "14",
+          presenceSource: "relay-player",
+        }],
         confidence: "authoritative",
         provenance: {
           provider: "relay",
@@ -273,6 +299,7 @@ test("primary-region runtime publishes players and restarts only when membership
     },
   });
 
+  assert.deepEqual(presenceRequests, ["101"]);
   await runtime.reconcile({ regionId: "19", members: [...members] });
   assert.equal(starts.length, 1);
   await runtime.reconcile({
@@ -588,4 +615,111 @@ test("primary-region runtime stops a session whose startup rejects", async () =>
     members: [{ playerEntityId: "101", userName: "Ada" }],
   }), /connection failed/);
   assert.equal(stopped, true);
+});
+
+test("primary-region reconnects only for disconnected or errored subscription health", async () => {
+  let now = 0;
+  const healthStates = [
+    { connected: false, applied: true, lastAppliedAt: "2026-08-08T10:00:00.000Z", lastError: null },
+    { connected: true, applied: true, lastAppliedAt: "2026-08-08T10:00:00.000Z", lastError: "socket failed" },
+    { connected: true, applied: true, lastAppliedAt: "2026-08-08T10:00:00.000Z", lastError: null },
+  ];
+  const sessions = [];
+  const runtime = new runtimeModule.RelayPrimaryRegionRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    now: () => now,
+    topologyRefreshMs: 60_000,
+    reconnectDelayMs: () => 1_000,
+    discoverTopology: async () => topology(),
+    createSession: () => {
+      const index = sessions.length;
+      const session = {
+        stopped: false,
+        async start() {},
+        updateContributionScope() {},
+        health: () => healthStates[index],
+        async stop() { session.stopped = true; },
+      };
+      sessions.push(session);
+      return session;
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+  });
+  const config = {
+    claimId: "100",
+    regionId: "19",
+    members: [{ playerEntityId: "101", userName: "Ada" }],
+  };
+
+  await runtime.start({ relayBaseUrl: "https://relay.example", ...config });
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 2, "disconnected health must restart");
+
+  now = 999;
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 2, "reconnect attempts must respect backoff");
+
+  now = 1_000;
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 3, "subscription errors must restart after backoff");
+
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 3, "healthy idle subscriptions must not restart");
+});
+
+test("primary-region applies escalating backoff after repeated rejected reconnect starts", async () => {
+  let now = 0;
+  const attempts = [];
+  const delays = [];
+  const runtime = new runtimeModule.RelayPrimaryRegionRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    now: () => now,
+    topologyRefreshMs: 60_000,
+    reconnectDelayMs: (failureCount) => {
+      delays.push(failureCount);
+      return failureCount * 1_000;
+    },
+    discoverTopology: async () => topology(),
+    createSession: () => {
+      const attempt = attempts.length;
+      return {
+        async start() {
+          attempts.push(attempt);
+          if (attempt > 0) throw new Error(`connection rejected ${attempt}`);
+        },
+        updateContributionScope() {},
+        health: () => ({ connected: false, applied: true, lastAppliedAt: null, lastError: null }),
+        async stop() {},
+      };
+    },
+    currentStateRepository: { nextGeneration: () => 1, commitGeneration: () => {} },
+  });
+  const config = {
+    claimId: "100",
+    regionId: "19",
+    members: [{ playerEntityId: "101", userName: "Ada" }],
+  };
+
+  await runtime.start({ relayBaseUrl: "https://relay.example", ...config });
+  await assert.rejects(runtime.reconcile(config), /connection rejected 1/);
+  assert.deepEqual(delays, [1]);
+
+  now = 999;
+  await runtime.reconcile(config);
+  assert.equal(attempts.length, 2, "rejected reconnect must remain inside its first delay");
+
+  now = 1_000;
+  await assert.rejects(runtime.reconcile(config), /connection rejected 2/);
+  assert.deepEqual(delays, [1, 2]);
+
+  now = 2_999;
+  await runtime.reconcile(config);
+  assert.equal(attempts.length, 3, "second rejection must receive an escalated delay");
+
+  now = 3_000;
+  await assert.rejects(runtime.reconcile(config), /connection rejected 3/);
+  assert.deepEqual(delays, [1, 2, 3]);
 });

@@ -9,6 +9,63 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.51.0-beta.5] - 2026-08-08
+
+### Added
+
+- Added a bounded same-origin icon fallback for verified BitJita item and cargo images when a Relay catalog asset is unavailable locally.
+
+### Changed
+
+- Consolidated Research into Completed Technology and Available Research while keeping locked technologies visible with prerequisite status.
+
+### Fixed
+
+- Fixed missing local game icons returning the frontend HTML shell instead of a 404 response.
+
+## [0.51.0-beta.4] - 2026-08-08
+
+### Changed
+
+- Unified Dashboard and Craft Monitor output names, recipe labels, and icons while preserving separate item and cargo identities.
+- Grouped passive crafts only when member, output, structure, and status all match.
+- Limited contribution rankings to exact player attribution and exposed retained historical unknown events only as an admin diagnostic count.
+
+### Fixed
+
+- Replaced unresolved craft recipe placeholders with the catalog output name.
+- Added exact craft-owner fallback when reducer or player-action attribution is unavailable or ambiguous.
+- Safely migrated contribution confidence values and rebuilt aggregates only from stored exact evidence.
+
+## [0.51.0-beta.3] - 2026-08-08
+
+### Changed
+
+- Added accurate cross-region presence details for monitored members while keeping unavailable presence explicit.
+- Kept missing regional owner usernames as local Region coverage diagnostics instead of global refresh warnings.
+- Clarified whether saved data is actively refreshing or live refresh is unavailable.
+
+### Fixed
+
+- Fixed member status timestamps preferring last login over newer Relay last-active data.
+- Prevented members outside the primary region from being reported as offline or as a global data-loss warning.
+
+## [0.51.0-beta.2] - 2026-08-08
+
+### Added
+
+- Added a guarded dry-run and hash-verified repair tool for removing market history proven to belong to another claim.
+
+### Changed
+
+- Made Relay worker reconciliation non-overlapping, time-bounded, and automatically recoverable after subscription disconnects.
+- Made the claim-market subscription the sole writer of settlement market history while regional market data continues powering tools and Deal Watch.
+
+### Fixed
+
+- Rejected mixed or foreign-claim market snapshots before they can write history, activity, trades, or notifications.
+- Preserved item and cargo identity in market history and aligned Dashboard income, Revenue by Day, and Best Sellers to the same selected-period trade semantics.
+
 ## [0.51.0-beta.1] - 2026-08-02
 
 ### Added

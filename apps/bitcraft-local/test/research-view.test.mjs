@@ -46,6 +46,24 @@ test("research view keeps legacy unresearched rows visible as available", () => 
   });
 });
 
+test("researchLanes exposes completed technology and all unresearched entries in Available Research", () => {
+  assert.ok(viewModule, "research view module must exist");
+  const rows = [
+    { id: "100", state: "researched" },
+    { id: "200", state: "researching" },
+    { id: "300", state: "available" },
+    { id: "400", state: "locked", missingRequirementIds: ["100"] },
+  ];
+  assert.deepEqual(viewModule.researchLanes(rows), {
+    completed: [{ item: rows[0], state: "researched" }],
+    available: [
+      { item: rows[1], state: "researching" },
+      { item: rows[2], state: "available" },
+      { item: rows[3], state: "locked" },
+    ],
+  });
+});
+
 test("research settlement caps use the greatest learned supply capacity", () => {
   assert.deepEqual(viewModule.researchSettlementCaps(
     { maxSupplies: "115000" },

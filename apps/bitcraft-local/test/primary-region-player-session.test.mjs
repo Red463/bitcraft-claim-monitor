@@ -289,6 +289,8 @@ test("primary-region session filters member, settlement, and Town Bank state bef
         playerEntityId: "101",
         username: "Ada",
         signedIn: true,
+        presenceRegionId: "19",
+        presenceSource: "regional",
         sessionSeconds: 5100,
         timePlayedSeconds: 7200,
         timeSignedInSeconds: 3600,
@@ -307,14 +309,16 @@ test("primary-region session filters member, settlement, and Town Bank state bef
         entityId: "202",
         playerEntityId: "202",
         username: "Grace",
-        signedIn: false,
+        signedIn: null,
+        presenceRegionId: null,
+        presenceSource: "unavailable",
         sessionSeconds: null,
         timePlayedSeconds: null,
         timeSignedInSeconds: null,
         tasks: { tasks: [] },
       },
     ],
-    warnings: ["Regional player_state omitted member 202."],
+    warnings: [],
     equipment: {
       members: [
         {
@@ -419,7 +423,7 @@ test("primary-region session filters member, settlement, and Town Bank state bef
   assert.equal(fake.state.callbacks.size, 0);
 });
 
-test("primary-region session attributes live craft progress without owner fallback and deduplicates evidence", async () => {
+test("primary-region session attributes authoritative and matched-action updates without owner rows and deduplicates evidence", async () => {
   assert.ok(sessionModule, "primary-region player session module must exist");
   const playerActionRows = [{
     autoId: 94295n,
@@ -449,10 +453,15 @@ test("primary-region session attributes live craft progress without owner fallba
     playerActionRows,
   });
   const contributions = [];
+  const resolvedPlayerIds = [];
   const session = new sessionModule.RelayPrimaryRegionPlayerSession({
     loadBindings: async () => fake.module,
     onSnapshot: () => {},
     onContribution: (event) => contributions.push(event),
+    resolvePlayerName: async (playerEntityId) => {
+      resolvedPlayerIds.push(playerEntityId);
+      return playerEntityId === "504403158356601680" ? "Relay Grace" : `Player ${playerEntityId}`;
+    },
     now: () => new Date("2026-08-02T12:54:09.000Z"),
   });
   const target = {
@@ -476,7 +485,7 @@ test("primary-region session attributes live craft progress without owner fallba
     claimId: "1369094286777412590",
     members: [
       { playerEntityId: "576460752388321942", userName: "Mosswick" },
-      { playerEntityId: "504403158356601680", userName: "Grace" },
+      { playerEntityId: "504403158356601680" },
     ],
     contributionTargets: [target],
   });
@@ -518,18 +527,18 @@ test("primary-region session attributes live craft progress without owner fallba
   };
   update(
     reducerContext,
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16056 },
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16080 },
+    { entityId: 1369094287428103662n, progress: 16056 },
+    { entityId: 1369094287428103662n, progress: 16080 },
   );
   update(
     reducerContext,
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16056 },
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16080 },
+    { entityId: 1369094287428103662n, progress: 16056 },
+    { entityId: 1369094287428103662n, progress: 16080 },
   );
   update(
     { event: { tag: "Transaction" } },
-    { entityId: 1369094287428103662n, ownerEntityId: 999n, progress: 16080 },
-    { entityId: 1369094287428103662n, ownerEntityId: 999n, progress: 16104 },
+    { entityId: 1369094287428103662n, progress: 16080 },
+    { entityId: 1369094287428103662n, progress: 16104 },
   );
   playerActionRows.push({
     ...playerActionRows[0],
@@ -544,8 +553,8 @@ test("primary-region session attributes live craft progress without owner fallba
   playerActionRows.splice(0);
   update(
     { event: { tag: "Transaction" } },
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16128 },
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16152 },
+    { entityId: 1369094287428103662n, ownerEntityId: 504403158356601680n, progress: 16128 },
+    { entityId: 1369094287428103662n, ownerEntityId: 504403158356601680n, progress: 16152 },
   );
   update(
     { event: { tag: "Transaction" } },
@@ -558,7 +567,10 @@ test("primary-region session attributes live craft progress without owner fallba
     { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 0 },
   );
 
+  await new Promise((resolve) => setImmediate(resolve));
+
   assert.equal(contributions.length, 4);
+  assert.deepEqual(resolvedPlayerIds, ["504403158356601680"]);
   assert.deepEqual(
     contributions.map(({ sourceKey, data }) => ({
       sourceKey,
@@ -580,28 +592,28 @@ test("primary-region session attributes live craft progress without owner fallba
         contributedXp: "42.24",
       },
       {
-        sourceKey: "relay-craft-contribution:19:joined:action:94295:1369094287428103662:16080:16104",
+        sourceKey: "relay-craft-contribution:19:matched_action:action:94295:1369094287428103662:16080:16104",
         contributorEntityId: "576460752388321942",
         contributorName: "Mosswick",
-        attributionConfidence: "joined",
+        attributionConfidence: "matched_action",
         observedSince: "2026-08-02T12:54:09.000Z",
         contributedProgress: "24",
         contributedXp: "42.24",
       },
       {
-        sourceKey: "relay-craft-contribution:19:unknown:unknown:ambiguous:1369094287428103662:16104:16128",
-        contributorEntityId: null,
-        contributorName: "Unknown contributor",
-        attributionConfidence: "unknown",
+        sourceKey: "relay-craft-contribution:19:owner_fallback:owner:576460752388321942:1369094287428103662:16104:16128",
+        contributorEntityId: "576460752388321942",
+        contributorName: "Mosswick",
+        attributionConfidence: "owner_fallback",
         observedSince: "2026-08-02T12:54:09.000Z",
         contributedProgress: "24",
         contributedXp: "42.24",
       },
       {
-        sourceKey: "relay-craft-contribution:19:unknown:unknown:no-match:1369094287428103662:16128:16152",
-        contributorEntityId: null,
-        contributorName: "Unknown contributor",
-        attributionConfidence: "unknown",
+        sourceKey: "relay-craft-contribution:19:owner_fallback:owner:504403158356601680:1369094287428103662:16128:16152",
+        contributorEntityId: "504403158356601680",
+        contributorName: "Relay Grace",
+        attributionConfidence: "owner_fallback",
         observedSince: "2026-08-02T12:54:09.000Z",
         contributedProgress: "24",
         contributedXp: "42.24",
@@ -610,14 +622,15 @@ test("primary-region session attributes live craft progress without owner fallba
   );
   assert.deepEqual(session.health(), {
     connected: true,
-    applied: false,
-    lastAppliedAt: null,
+    applied: true,
+    lastAppliedAt: "2026-08-02T12:54:09.000Z",
     lastError: null,
     lastContributionAt: "2026-08-02T12:54:09.000Z",
     authoritativeContributions: 1,
-    joinedContributions: 1,
-    unattributedContributions: 2,
-    ambiguousContributionMatches: 1,
+    matchedActionContributions: 1,
+    ownerFallbackContributions: 2,
+    unattributedContributions: 0,
+    ambiguousContributionMatches: 0,
     deduplicatedContributions: 1,
   });
 

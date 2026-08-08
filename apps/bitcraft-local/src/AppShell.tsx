@@ -26,7 +26,7 @@ import {
 import packageJson from "../package.json";
 import { useGameData } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
-import { pageGameDataWarnings } from "./api/pageGameDataWarnings";
+import { pageGameDataWarnings, staleDataWarning } from "./api/pageGameDataWarnings";
 import { ApiErrorState, ApiStatusBanner, AppSkeleton, RefreshStatus, type ApiStatusDiagnostics } from "./components/main/AppChrome";
 import { RouteLoadingState } from "./components/main/RouteLoadingState";
 import { CommandPalette } from "./components/main/CommandPalette";
@@ -831,15 +831,19 @@ function DashboardApp() {
   const apiWarnings = React.useMemo(() => {
     const partialErrors = Array.isArray(data.raw?.partialErrors) ? data.raw.partialErrors.map((error) => String(error)) : [];
     const relevantPartialErrors = pageGameDataWarnings(active, partialErrors);
-    const staleWarning = state.stale
-      ? `Showing cached data${lastUpdated ? ` from ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""} while refresh continues.`
-      : "";
+    const staleWarning = staleDataWarning({
+      stale: state.stale === true,
+      refreshActive: state.loading === true || manualRefreshIsRefreshing,
+      lastUpdatedLabel: lastUpdated
+        ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+        : null,
+    });
     return [
       ...(state.error ? [`Main data refresh failed: ${state.error}`] : []),
       ...(staleWarning ? [staleWarning] : []),
       ...relevantPartialErrors,
     ];
-  }, [active, data.raw?.partialErrors, lastUpdated, state.error, state.stale]);
+  }, [active, data.raw?.partialErrors, lastUpdated, manualRefreshIsRefreshing, state.error, state.loading, state.stale]);
   const apiDiagnostics = React.useMemo<ApiStatusDiagnostics>(() => ({
     appVersion: APP_VERSION,
     page: active,

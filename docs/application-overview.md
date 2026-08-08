@@ -145,9 +145,10 @@ showing old data as live.
 
 ## Assets
 
-Runtime icons are served from `/game-icons/` with a self-only image policy.
+Runtime icons prefer `/game-icons/`. Missing verified local assets may use the
+bounded same-origin `/api/local/game-icon/:itemType/:itemId` fallback.
 `apps/bitcraft-local/assets/game-icons-manifest.json` is immutable build-time
-provenance and is never fetched at runtime. Its original source URLs are retained
+provenance and is not used as a runtime URL source. Its original source URLs are retained
 only to prove identity, permission, retrieval time, and SHA-256 digest.
 
 ## Deployment isolation

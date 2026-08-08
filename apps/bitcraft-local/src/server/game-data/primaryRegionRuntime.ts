@@ -4,6 +4,8 @@ import {
   RelayPrimaryRegionPlayerSession,
   type RegionalPlayerSnapshot,
 } from "./primaryRegionPlayerSession.ts";
+import { RelayHttpClient } from "./http.ts";
+import { RelayPlayerPresenceService } from "./playerPresenceService.ts";
 import {
   discoverRelayTopology,
   type RelayTopology,
@@ -44,8 +46,10 @@ type RuntimeDependencies = {
     options?: RelayTopologyDiscoveryOptions,
   ) => Promise<RelayTopology>;
   createSession?: RegionalSessionFactory;
+  createPresenceService?: (baseUrl: string) => Pick<RelayPlayerPresenceService, "enrich" | "resolvePlayerName">;
   now?: () => number;
   topologyRefreshMs?: number;
+  reconnectDelayMs?: (failureCount: number) => number;
 };
 
 function memberId(member: Member): string {
@@ -117,9 +121,12 @@ export class RelayPrimaryRegionRuntime {
     options?: RelayTopologyDiscoveryOptions,
   ) => Promise<RelayTopology>;
   readonly #createSession: RegionalSessionFactory;
+  readonly #createPresenceService: (baseUrl: string) => Pick<RelayPlayerPresenceService, "enrich" | "resolvePlayerName">;
   readonly #now: () => number;
   readonly #topologyRefreshMs: number;
+  readonly #reconnectDelayMs: (failureCount: number) => number;
   #session: RegionalSession | null = null;
+  #presenceService: Pick<RelayPlayerPresenceService, "enrich" | "resolvePlayerName"> | null = null;
   #relayBaseUrl: string | null = null;
   #claimId: string | null = null;
   #membershipSignature: string | null = null;
@@ -137,6 +144,8 @@ export class RelayPrimaryRegionRuntime {
   #lastError: string | null = null;
   #lastTopologyCheckedAt = 0;
   #reconcileInFlight: Promise<void> | null = null;
+  #connectionFailures = 0;
+  #nextReconnectAt = 0;
 
   constructor(dependencies: RuntimeDependencies) {
     this.#manifest = dependencies.manifest;
@@ -145,8 +154,13 @@ export class RelayPrimaryRegionRuntime {
       ?? ((baseUrl, options) => discoverRelayTopology(baseUrl, fetch, options));
     this.#createSession = dependencies.createSession
       ?? ((options) => new RelayPrimaryRegionPlayerSession(options));
+    this.#createPresenceService = dependencies.createPresenceService
+      ?? ((baseUrl) => new RelayPlayerPresenceService({
+        http: new RelayHttpClient({ baseUrl }),
+      }));
     this.#now = dependencies.now ?? Date.now;
     this.#topologyRefreshMs = dependencies.topologyRefreshMs ?? 60_000;
+    this.#reconnectDelayMs = dependencies.reconnectDelayMs ?? (() => 1_000);
   }
 
   async start(config: {
@@ -159,7 +173,13 @@ export class RelayPrimaryRegionRuntime {
   }): Promise<void> {
     if (this.#session) throw new Error("Relay primary-region runtime is already started");
     this.#relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
+    this.#presenceService = this.#createPresenceService(this.#relayBaseUrl);
     this.#claimId = String(config.claimId).trim();
+    this.#membershipSignature = membershipSignature(config.regionId, config.members);
+    this.#contributionSignature = contributionSessionSignature(
+      config.contributionTargets ?? [],
+      config.contributionWarnings ?? [],
+    );
     await this.#startSession(
       config.regionId,
       config.members,
@@ -184,23 +204,43 @@ export class RelayPrimaryRegionRuntime {
       contributionWarnings,
     );
     const session = this.#session;
-    const sameScope = session
-      && claimId === this.#claimId
+    const configuredScope = claimId === this.#claimId
       && nextSignature === this.#membershipSignature;
-    if (sameScope && nextContributionSignature !== this.#contributionSignature) {
+    const sameScope = Boolean(session && configuredScope);
+    const health = session?.health();
+    const unhealthy = Boolean(configuredScope && (
+      session
+        ? health?.connected === false || health?.lastError || this.#lastError
+        : this.#lastError
+    ));
+    if (session && configuredScope && nextContributionSignature !== this.#contributionSignature) {
       session.updateContributionScope(
         contributionTargets,
         contributionWarnings,
       );
       this.#contributionSignature = nextContributionSignature;
     }
+    if (configuredScope && unhealthy && this.#now() < this.#nextReconnectAt) {
+      return Promise.resolve();
+    }
+    if (configuredScope && unhealthy) {
+      this.#connectionFailures += 1;
+      this.#nextReconnectAt = this.#now() + this.#reconnectDelayMs(this.#connectionFailures);
+    } else if (sameScope) {
+      this.#connectionFailures = 0;
+      this.#nextReconnectAt = 0;
+    } else if (!configuredScope) {
+      this.#connectionFailures = 0;
+      this.#nextReconnectAt = 0;
+    }
     if (
       sameScope
+      && !unhealthy
       && this.#now() - this.#lastTopologyCheckedAt < this.#topologyRefreshMs
     ) return Promise.resolve();
     if (this.#reconcileInFlight) return this.#reconcileInFlight;
     const reconcile = (async () => {
-      if (sameScope) {
+      if (sameScope && !unhealthy) {
         const relayBaseUrl = this.#relayBaseUrl;
         if (!relayBaseUrl) throw new Error("Relay primary-region runtime is not configured");
         const topology = await this.#discoverTopology(relayBaseUrl, {
@@ -219,9 +259,9 @@ export class RelayPrimaryRegionRuntime {
       await this.#commitTail;
       await this.#eventTail;
       this.#session = null;
-      this.#membershipSignature = null;
-      this.#contributionSignature = null;
       this.#claimId = claimId;
+      this.#membershipSignature = nextSignature;
+      this.#contributionSignature = nextContributionSignature;
       await this.#startSession(config.regionId, config.members, contributionTargets, contributionWarnings);
     })();
     this.#reconcileInFlight = reconcile;
@@ -253,6 +293,10 @@ export class RelayPrimaryRegionRuntime {
       openingSession = this.#createSession({
         onSnapshot: (snapshot) => this.#enqueueSnapshot(snapshot, sessionEpoch),
         onContribution: (event) => this.#enqueueEvent(event, sessionEpoch),
+        resolvePlayerName: async (playerEntityId) => (
+          this.#presenceService?.resolvePlayerName(playerEntityId)
+          ?? `Player ${playerEntityId}`
+        ),
       });
       await openingSession.start({
         uri: this.#source.uri,
@@ -308,12 +352,15 @@ export class RelayPrimaryRegionRuntime {
     if (!claimId) throw new Error("Relay primary-region runtime has no configured claim");
     const sourceKey = `region:${Number(snapshot.regionId)}` as const;
     try {
+      const players = this.#presenceService
+        ? await this.#presenceService.enrich(snapshot.players)
+        : snapshot.players;
       await this.#currentStateRepository.commitGeneration({
         claimId,
         generation: this.#currentStateRepository.nextGeneration(claimId),
         domains: {
           players: {
-            data: snapshot.players,
+            data: players,
             confidence: snapshot.warnings.length ? "partial" : "authoritative",
             provenance: {
               provider: "relay",
@@ -440,7 +487,10 @@ export class RelayPrimaryRegionRuntime {
     await this.#commitTail;
     await this.#eventTail;
     this.#session = null;
+    this.#presenceService = null;
     this.#membershipSignature = null;
     this.#contributionSignature = null;
+    this.#connectionFailures = 0;
+    this.#nextReconnectAt = 0;
   }
 }

@@ -535,7 +535,7 @@ export const schemaBootstrapSql = `
     contributor_entity_id TEXT,
     contributor_name TEXT NOT NULL,
     attribution_confidence TEXT NOT NULL DEFAULT 'unknown'
-      CHECK (attribution_confidence IN ('authoritative', 'joined', 'unknown')),
+      CHECK (attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback', 'unknown')),
     profession TEXT,
     craft_label TEXT,
     structure_name TEXT,
@@ -556,7 +556,7 @@ export const schemaBootstrapSql = `
     craft_entity_id TEXT NOT NULL,
     contributor_entity_id TEXT,
     attribution_confidence TEXT NOT NULL DEFAULT 'unknown'
-      CHECK (attribution_confidence IN ('authoritative', 'joined', 'unknown')),
+      CHECK (attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback', 'unknown')),
     contributed_progress TEXT NOT NULL,
     contributed_xp TEXT NOT NULL,
     occurred_at TEXT NOT NULL,
