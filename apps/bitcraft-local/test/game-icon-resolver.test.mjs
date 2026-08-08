@@ -24,3 +24,15 @@ test("game icon resolver returns only normalized same-origin asset paths", () =>
   assert.equal(gameAssets.gameIconUrl({ iconAssetName: "https://bitjita.com/icon.webp" }), null);
   assert.equal(gameAssets.gameIconUrl({ iconAssetName: "\uFFEE" }), null);
 });
+
+test("game icon sources prefer the Relay catalog asset, then the same-origin metadata fallback", () => {
+  assert.deepEqual(
+    gameAssets.gameIconSources({ id: "42", itemType: 0, iconAssetName: "Items/Basic Axe.webp" }),
+    ["/game-icons/GeneratedIcons/Items/Basic%20Axe.webp", "/api/local/game-icon/item/42"],
+  );
+  assert.deepEqual(
+    gameAssets.gameIconSources({ itemId: "42", item_type: 1, iconAssetName: "\uFFEE" }),
+    ["/api/local/game-icon/cargo/42"],
+  );
+  assert.deepEqual(gameAssets.gameIconSources({ id: "not-decimal", itemType: "item" }), []);
+});

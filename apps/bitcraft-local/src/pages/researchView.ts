@@ -23,6 +23,18 @@ export function groupResearchTechnologies(technologies: AnyRecord[]) {
   return { researched, researching, available, locked };
 }
 
+export function researchLanes(technologies: AnyRecord[]) {
+  const groups = groupResearchTechnologies(technologies);
+  return {
+    completed: groups.researched.map((item) => ({ item, state: "researched" as const })),
+    available: [
+      ...groups.researching.map((item) => ({ item, state: "researching" as const })),
+      ...groups.available.map((item) => ({ item, state: "available" as const })),
+      ...groups.locked.map((item) => ({ item, state: "locked" as const })),
+    ],
+  };
+}
+
 export function researchSettlementCaps(claim: AnyRecord, technologies: AnyRecord[]) {
   const researched = technologies.filter(
     (technology) => technology.isResearched || technology.state === "researched",

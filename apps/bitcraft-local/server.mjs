@@ -10,8 +10,9 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseMemberPermissions } from "./shared/member-permissions.mjs";
-import { mimeType, routeGroup, securityHeaders, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
+import { mimeType, routeGroup, securityHeaders, shouldFallbackToFrontend, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
+import { createGameIconFallbackService, serveGameIconRequest } from "./src/server/gameIconFallback.mjs";
 import { parseCookies, serializeHttpOnlyCookie } from "./src/server/httpCookies.mjs";
 import { originFromRequest as requestOriginFromRequest, requestLogPolicy, safeReturnPath, sameOriginRequest as requestSameOriginRequest } from "./src/server/httpRequests.mjs";
 import { appUserCsrfToken, csrfToken, validCsrfHeader } from "./src/server/httpCsrf.mjs";
@@ -367,6 +368,13 @@ const readCachedServerHealthFiles = createCachedServerHealthReader(() => readSer
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const appVersion = String(packageJson.version ?? "0.0.0-dev");
 const appIdentifier = process.env.BITCRAFT_APP_IDENTIFIER ?? "BitCraft Claim Monitor Relay (github.com/Red463/bitcraft-claim-monitor-relay)";
+const gameIconFallbackService = createGameIconFallbackService({
+  metadataOrigin: process.env.BITJITA_ICON_API_ORIGIN ?? "https://bitjita.com",
+  approvedHosts: String(process.env.BITJITA_ICON_APPROVED_HOSTS ?? "bitjita.com,cdn.bitjita.com").split(","),
+  timeoutMs: Number(process.env.BITJITA_ICON_TIMEOUT_MS ?? 5_000),
+  maxBytes: Number(process.env.BITJITA_ICON_MAX_BYTES ?? 512 * 1024),
+  appIdentifier,
+});
 const ipHash = createIpHasher(appIdentifier);
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor-relay/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
@@ -7109,7 +7117,9 @@ async function serveBuiltFrontend(url, method, res) {
   const requestedPath = pathname === "/" ? "index.html" : pathname.slice(1);
   const assetPath = path.resolve(distDir, requestedPath);
   const isDistPath = assetPath === distDir || assetPath.startsWith(`${distDir}${path.sep}`);
-  const candidate = isDistPath && existsSync(assetPath) && statSync(assetPath).isFile() ? assetPath : path.join(distDir, "index.html");
+  const hasStaticFile = isDistPath && existsSync(assetPath) && statSync(assetPath).isFile();
+  if (!hasStaticFile && !shouldFallbackToFrontend(pathname)) return false;
+  const candidate = hasStaticFile ? assetPath : path.join(distDir, "index.html");
   if (!existsSync(candidate)) {
     send(res, 503, { error: "Frontend build is missing. Run the production build before starting the server." });
     return true;
@@ -7175,6 +7185,7 @@ const server = createServer(async (req, res) => {
       });
     }
     if (req.method === "OPTIONS") return send(res, 204, {});
+    if (req.method === "GET" && await serveGameIconRequest(url.pathname, res, gameIconFallbackService)) return;
     if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, {
       ok: true,
       version: appVersion,

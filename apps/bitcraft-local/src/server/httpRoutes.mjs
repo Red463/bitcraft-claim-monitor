@@ -6,7 +6,7 @@ export function securityHeaders(headers = {}) {
       "default-src 'self'",
       "script-src 'self'",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "img-src 'self' data:",
+      "img-src 'self' data: https://cdn.discordapp.com",
       "font-src 'self' data: https://fonts.gstatic.com",
       "connect-src 'self'",
       "frame-src https://bitcraftsync.app https://bitcraftmap.com https://bccodex.com",
@@ -43,12 +43,15 @@ export function mimeType(filePath) {
 export function staticCacheControl(filePath) {
   return String(filePath).endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable";
 }
+export function shouldFallbackToFrontend(pathname) {
+  return !String(pathname).startsWith("/game-icons/");
+}
 export function routeGroup(pathname) {
   if (pathname.startsWith("/api/local/admin")) return "admin";
   if (pathname.startsWith("/api/local/auth") || pathname.startsWith("/api/local/user")) return "auth";
   if (pathname.startsWith("/api/discord")) return "discord";
   if (pathname.startsWith("/api/local")) return "local-api";
-  if (pathname.startsWith("/assets/") || pathname === "/favicon.svg" || pathname === "/favicon.ico") return "static";
+  if (pathname.startsWith("/assets/") || pathname.startsWith("/game-icons/") || pathname === "/favicon.svg" || pathname === "/favicon.ico") return "static";
   return "app";
 }
 

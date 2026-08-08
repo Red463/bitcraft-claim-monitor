@@ -36,3 +36,31 @@ export function gameIconUrl(item) {
 
   return `/game-icons/${segments.map((segment) => encodeURIComponent(segment)).join("/")}.webp`;
 }
+
+function gameIconIdentity(item) {
+  const itemId = String(
+    item?.itemId
+      ?? item?.item_id
+      ?? item?.id
+      ?? item?.contents?.itemId
+      ?? item?.contents?.item_id
+      ?? "",
+  ).trim();
+  if (!/^\d+$/.test(itemId)) return null;
+  const rawType = item?.itemType ?? item?.item_type ?? item?.kind ?? item?.contents?.itemType ?? item?.contents?.item_type;
+  const itemType = rawType === 0 || rawType === "0" || rawType === "item" || rawType === "items"
+    ? "item"
+    : rawType === 1 || rawType === "1" || rawType === "cargo"
+      ? "cargo"
+      : null;
+  return itemType ? { itemType, itemId } : null;
+}
+
+export function gameIconSources(item) {
+  const sources = [];
+  const localUrl = gameIconUrl(item);
+  if (localUrl) sources.push(localUrl);
+  const identity = gameIconIdentity(item);
+  if (identity) sources.push(`/api/local/game-icon/${identity.itemType}/${identity.itemId}`);
+  return [...new Set(sources)];
+}

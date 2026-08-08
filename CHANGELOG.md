@@ -9,6 +9,20 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.51.0-beta.5] - 2026-08-08
+
+### Added
+
+- Added a bounded same-origin icon fallback for verified BitJita item and cargo images when a Relay catalog asset is unavailable locally.
+
+### Changed
+
+- Consolidated Research into Completed Technology and Available Research while keeping locked technologies visible with prerequisite status.
+
+### Fixed
+
+- Fixed missing local game icons returning the frontend HTML shell instead of a 404 response.
+
 ## [0.51.0-beta.4] - 2026-08-08
 
 ### Changed

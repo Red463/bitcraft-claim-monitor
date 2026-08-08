@@ -19,5 +19,10 @@ test("migration fetch transport rejects BitJita hosts and permits provider-neutr
     /Forbidden BitJita test request/,
   );
   assert.equal((await guardedFetch("/api/local/game-data")).status, 200);
-  assert.deepEqual(requested, ["/api/local/game-data"]);
+  assert.equal((await guardedFetch("/api/local/game-icon/item/42")).status, 200);
+  await assert.rejects(
+    () => guardedFetch("/api/local/game-icon/items/42"),
+    /Forbidden non-standard game icon fallback/,
+  );
+  assert.deepEqual(requested, ["/api/local/game-data", "/api/local/game-icon/item/42"]);
 });

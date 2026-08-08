@@ -278,6 +278,23 @@
   color: #8e98a8;
 }
 
+.research-card-badges {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.research-prerequisite-badge {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid rgba(240,198,79,.24);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: #cdbf98;
+  background: rgba(240,198,79,.07);
+}
+
 .research-card b {
   color: var(--gold);
   font-size: 12px;

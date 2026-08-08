@@ -1,5 +1,5 @@
 import { toNumber, type AnyRecord } from "../main-app-data.ts";
-export { gameIconUrl } from "./gameAssets.mjs";
+export { gameIconSources, gameIconUrl } from "./gameAssets.mjs";
 
 export function catalogEntries(catalog: unknown): AnyRecord[] {
   if (Array.isArray(catalog)) return catalog;
