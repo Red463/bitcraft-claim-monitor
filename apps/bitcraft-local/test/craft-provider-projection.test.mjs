@@ -174,6 +174,39 @@ test("craft projection preserves unknown recipes without misclassifying them as 
   assert.equal(projected.passiveCraftResults.length, 0);
 });
 
+test("passive craft projection groups only identical member, output, structure, and status rows", () => {
+  const entities = new Map([
+    ["items:42", { id: "42", name: "Iron Ore", tier: 2 }],
+    ["cargo:42", { id: "42", name: "Crate of Iron Ore", tier: 3 }],
+  ]);
+  const projected = enrichCraftsWithCatalog({
+    craftResults: [
+      { entityId: "1", recipeId: "10", ownerEntityId: "101", ownerUsername: "Ada", buildingEntityId: "501", buildingName: "Mine", completed: false, craftCount: "2", timestamp: "2026-08-08T10:00:00.000Z", craftedItem: [{ itemId: "42", itemType: 0, quantity: "3" }] },
+      { entityId: "2", recipeId: "10", ownerEntityId: "101", ownerUsername: "Ada", buildingEntityId: "501", buildingName: "Mine", completed: false, craftCount: "4", timestamp: "2026-08-08T11:00:00.000Z", craftedItem: [{ itemId: "42", itemType: 0, quantity: "3" }] },
+      { entityId: "3", recipeId: "10", ownerEntityId: "102", ownerUsername: "Grace", buildingEntityId: "501", buildingName: "Mine", completed: false, craftCount: "1", timestamp: "2026-08-08T09:00:00.000Z", craftedItem: [{ itemId: "42", itemType: 0, quantity: "3" }] },
+      { entityId: "4", recipeId: "11", ownerEntityId: "101", ownerUsername: "Ada", buildingEntityId: "501", buildingName: "Mine", completed: false, craftCount: "5", timestamp: "2026-08-08T08:00:00.000Z", craftedItem: [{ itemId: "42", itemType: 1, quantity: "1" }] },
+      { entityId: "5", recipeId: "10", ownerEntityId: "101", ownerUsername: "Ada", buildingEntityId: "502", buildingName: "Deep Mine", completed: false, craftCount: "1", timestamp: "2026-08-08T07:00:00.000Z", craftedItem: [{ itemId: "42", itemType: 0, quantity: "3" }] },
+      { entityId: "6", recipeId: "10", ownerEntityId: "101", ownerUsername: "Ada", buildingEntityId: "501", buildingName: "Mine", completed: true, craftCount: "1", timestamp: "invalid", craftedItem: [{ itemId: "42", itemType: 0, quantity: "3" }] },
+    ],
+  }, (key) => entities.get(key) ?? null, (id) => ({ id, name: "Craft {0}", isPassive: true }));
+
+  assert.deepEqual(projected.passiveCraftResults.map((row) => ({
+    memberEntityId: row.memberEntityId,
+    outputIdentity: row.outputIdentity,
+    structureEntityId: row.structureEntityId,
+    status: row.status,
+    quantity: row.quantity,
+    craftCount: row.craftCount,
+    timestamp: row.timestamp,
+  })), [
+    { memberEntityId: "101", outputIdentity: "items:42", structureEntityId: "501", status: "processing", quantity: "18", craftCount: "6", timestamp: "2026-08-08T11:00:00.000Z" },
+    { memberEntityId: "102", outputIdentity: "items:42", structureEntityId: "501", status: "processing", quantity: "3", craftCount: "1", timestamp: "2026-08-08T09:00:00.000Z" },
+    { memberEntityId: "101", outputIdentity: "cargo:42", structureEntityId: "501", status: "processing", quantity: "5", craftCount: "5", timestamp: "2026-08-08T08:00:00.000Z" },
+    { memberEntityId: "101", outputIdentity: "items:42", structureEntityId: "502", status: "processing", quantity: "3", craftCount: "1", timestamp: "2026-08-08T07:00:00.000Z" },
+    { memberEntityId: "101", outputIdentity: "items:42", structureEntityId: "501", status: "complete", quantity: "3", craftCount: "1", timestamp: null },
+  ]);
+});
+
 test("planner craft projection retains complete rows and marks unknown recipe kinds safely", () => {
   const projected = enrichCraftsForPlanning({
     craftResults: [{
