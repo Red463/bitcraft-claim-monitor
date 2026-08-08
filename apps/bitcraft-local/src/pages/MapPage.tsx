@@ -9,6 +9,8 @@ import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
 import { formatCurrentSession, formatNumber } from "../utils/format";
 import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
 import { useGameDataGeneration } from "../hooks/useGameDataGeneration";
+import { usePageRefresh } from "../refresh/ManualRefreshContext";
+import { pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { gameIconUrl } from "../utils/items";
 import { memberDisplayName, memberTrackingId } from "../utils/memberIdentity";
@@ -114,6 +116,7 @@ function MapPlayerTrackingControls({
   );
 }
 export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void; activeRegionScopeKey?: string }) {
+  const { cycle, trackPromise } = usePageRefresh();
   const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
   const [selectedResources, setSelectedResources] = usePersistedState<string[]>("map.resources", []);
   const [resourceSearch, setResourceSearch] = usePersistedState("map.resource-search", "");
@@ -166,8 +169,9 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
   const catalogGeneration = useGameDataGeneration(String(data.claim.entityId ?? ""), ["catalogs"]);
   React.useEffect(() => {
     const controller = new AbortController();
-    fetch(`${LOCAL_API}/map/catalog`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`map catalog HTTP ${response.status}`)))
+    const refresh = fetch(`${LOCAL_API}/map/catalog`, { headers: cycle ? pageRefreshHeaders(cycle, "map") : {}, signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`map catalog HTTP ${response.status}`)));
+    void trackPromise("map-catalog", refresh)
       .then((catalogPayload) => {
         const resourceRows: AnyRecord[] = unwrap<AnyRecord[]>(catalogPayload, "resources", [])
           .filter((resource) => resource?.id != null && resource?.name)
@@ -186,7 +190,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
         if (!controller.signal.aborted) setResourceError(error instanceof Error ? error.message : String(error));
       });
     return () => controller.abort();
-  }, [catalogGeneration]);
+  }, [catalogGeneration, trackPromise]);
   const current = React.useMemo(() => currentMapPlayerSelection(selectedIds, roster), [selectedIds, roster]);
   const defaultFocus = data.claim.locationX != null && data.claim.locationZ != null ? {
     name: data.claim.name ?? "Monitored settlement",

@@ -10,6 +10,7 @@ import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { unique } from "../../utils/array";
 import type { LoadState } from "../../types/app";
+import { createDelayedRefreshTask } from "../../refresh/pageRefresh.mjs";
 import { marketDealWatchSearchUrl, marketRegionScopeUrl, type MarketRefreshProps } from "./globalMarket";
 
 const LOCAL_API = "/api/local";
@@ -117,27 +118,28 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
       return;
     }
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
+    const refresh = createDelayedRefreshTask(() => {
       setSearchState("loading");
-      trackRefresh("global-market-watch-search", fetch(marketDealWatchSearchUrl({
+      return fetch(marketDealWatchSearchUrl({
         claimId,
         regionId: activeRegion,
         query,
-      }), { headers: refreshHeaders, signal: controller.signal }))
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
-        .then((payload) => {
-          setSuggestions((Array.isArray(payload.items) ? payload.items : []).slice(0, 8));
-          setSearchState("idle");
-        })
-        .catch(() => {
-          if (!controller.signal.aborted) {
-            setSuggestions([]);
-            setSearchState("error");
-          }
-        });
+      }), { headers: refreshHeaders, signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)));
     }, 250);
+    trackRefresh("global-market-watch-search", refresh.promise)
+      .then((payload) => {
+        setSuggestions((Array.isArray(payload.items) ? payload.items : []).slice(0, 8));
+        setSearchState("idle");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setSuggestions([]);
+          setSearchState("error");
+        }
+      });
     return () => {
-      window.clearTimeout(timer);
+      refresh.cancel();
       controller.abort();
     };
   }, [activeRegion, claimId, generationSequence, query, refreshSequence, selectedItem?.name]);

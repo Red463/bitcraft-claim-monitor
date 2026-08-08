@@ -151,7 +151,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
         if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
         if (stale) return;
         setPlan(body);
-        if (request && selectedNeedRef.current) await openNeedDetail(selectedNeedRef.current);
+        if (request && selectedNeedRef.current) await openNeedDetail(selectedNeedRef.current, true);
       });
     void trackPromise("craft-plan", refresh)
       .catch((err) => {
@@ -166,7 +166,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     };
   }, [claimId, managerRefreshToken, refreshToken, request?.sequence, trackPromise]);
 
-  async function openNeedDetail(cell: NeedCell) {
+  async function openNeedDetail(cell: NeedCell, propagateError = false) {
     const requestId = ++detailRequestRef.current;
     const nextItemKey = cell.items?.[0]?.key ?? itemKey(cell.item);
     setItemDetailFeedback((current) => current?.itemKey === nextItemKey ? current : null);
@@ -190,6 +190,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       setDetailSteps(Array.isArray(body.steps) ? body.steps : []);
     } catch (detailFetchError) {
       if (requestId === detailRequestRef.current) setDetailError(detailFetchError instanceof Error ? detailFetchError.message : String(detailFetchError));
+      if (propagateError) throw detailFetchError;
     } finally {
       if (requestId === detailRequestRef.current) setDetailLoading(false);
     }

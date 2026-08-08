@@ -103,7 +103,7 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
     let stale = false;
     const controller = new AbortController();
     const refresh = fetch(`/api/local/craft-plan?claimId=${encodeURIComponent(monitoredClaimId)}`, { headers: manualRefreshHeaders(request, "dashboard"), signal: controller.signal })
-      .then((response) => response.ok ? response.json() : null)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`craft plan HTTP ${response.status}`)))
       .then((body) => { if (!stale) setCraftPlan(body); });
     void trackPromise("dashboard-craft-plan", refresh).catch(() => {});
     return () => { stale = true; controller.abort(); };

@@ -15,16 +15,16 @@ test("floating action rail can be collapsed with persisted state and accessible 
   assert.match(appShell, /Show tools/);
 });
 
-test("global refresh uses a manual request lifecycle with consistent accessible feedback", () => {
+test("global refresh uses the page-cycle lifecycle with consistent manual feedback", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
 
-  assert.match(appShell, /createManualRefreshRequest/);
-  assert.match(appShell, /createManualRefreshTaskCoordinator/);
+  assert.match(appShell, /createPageRefreshController/);
+  assert.match(appShell, /createPageRefreshTaskCoordinator/);
   assert.match(appShell, /cooldownRemainingMs/);
-  assert.match(appShell, /ManualRefreshProvider/);
+  assert.match(appShell, /PageRefreshProvider/);
   assert.match(appShell, /requestManualRefresh/);
-  assert.match(appShell, /manualRefreshRequest/);
-  assert.match(appShell, /manualRefreshCoordinator/);
+  assert.match(appShell, /pageRefreshCycle/);
+  assert.match(appShell, /pageRefreshCoordinator/);
   assert.match(appShell, /aria-busy=\{manualRefreshIsRefreshing\}/);
   assert.match(appShell, /aria-disabled=\{manualRefreshButtonDisabled\}/);
   assert.match(appShell, /manualRefreshButtonLabel/);
@@ -40,16 +40,17 @@ test("global refresh uses a manual request lifecycle with consistent accessible 
   assert.match(appShell, /manualRefreshIssueCount/);
   assert.match(appShell, /state\.stale \? 1 : 0/);
   assert.match(appShell, /pageGameDataWarnings\(active, partialErrors\)/);
-  assert.match(appShell, /<ManualRefreshProvider[\s\S]*\{activePanel\}[\s\S]*<\/ManualRefreshProvider>/);
+  assert.match(appShell, /<PageRefreshProvider[\s\S]*\{activePanel\}[\s\S]*<\/PageRefreshProvider>/);
 });
 
-test("automatic interval remains separate from the manual refresh request", () => {
+test("page cadence is centralized while notification and deal timers stay independent", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
-  const automaticRefresh = appShell.match(/const intervalMs = appSettings\.refreshSeconds \* 1000;([\s\S]*?)\}, \[appSettings\.refreshSeconds\]\);/);
-
-  assert.ok(automaticRefresh, "expected the automatic refresh interval");
-  assert.match(automaticRefresh[1], /setRefreshToken/);
-  assert.doesNotMatch(automaticRefresh[1], /createManualRefreshRequest|setManualRefreshRequest/);
+  assert.match(appShell, /pageRefreshController\.setIntervalMs\(appSettings\.refreshSeconds \* 1000\)/);
+  assert.match(appShell, /active !== "craft-monitor"/);
+  assert.match(appShell, /createGameDataGenerationWatcher/);
+  assert.match(appShell, /schedule\(setNotificationRefreshToken/);
+  assert.match(appShell, /schedule\(setDealRefreshToken/);
+  assert.doesNotMatch(appShell, /schedule\(setRefreshToken|schedule\(setHistoryAutoRefreshToken/);
 });
 
 test("floating action rail CSS slides collapsed rail offscreen with reduced motion support", () => {

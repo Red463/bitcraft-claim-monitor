@@ -4,12 +4,13 @@ import test from "node:test";
 
 const source = (relativePath) => readFileSync(new URL(relativePath, import.meta.url), "utf8");
 
-test("generic page data reloads when its provider-neutral generation commits and retains last good data on failure", () => {
+test("generic page data reloads with its page cycle and retains last good data on failure", () => {
   const loader = source("../src/api/gameDataLoader.ts");
 
-  assert.match(loader, /import \{ useGameDataGeneration \} from "\.\.\/hooks\/useGameDataGeneration";/);
-  assert.match(loader, /const domains = pageDomains\(activePanel\);\s*const generation = useGameDataGeneration\(claimId, domains\);/s);
-  assert.match(loader, /\}, \[\s*activePanel,\s*claimId,\s*generation,/s);
+  assert.match(loader, /pageRefreshCycle: PageRefreshCycle \| null/);
+  assert.match(loader, /const domains = pageDomains\(activePanel\)/);
+  assert.match(loader, /\}, \[\s*activePanel,\s*claimId,\s*pageRefreshCycle\?\.sequence,/s);
+  assert.doesNotMatch(loader, /useGameDataGeneration/);
   assert.match(loader, /setState\(\(previous\) => \(\{[\s\S]*data: previous\.data,[\s\S]*stale: Boolean\(previous\.data\) \|\| previous\.stale,/);
 });
 

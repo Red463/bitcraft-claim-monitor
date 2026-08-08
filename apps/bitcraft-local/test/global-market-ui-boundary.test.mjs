@@ -121,20 +121,21 @@ test("Overview and Deals use generation-invalidated local Relay projections", ()
   assert.doesNotMatch(deals, /Route distance and map coordinates will appear/);
 });
 
-test("Browse invalidates on regional-market generation events and keeps history non-blocking", () => {
+test("Browse follows the central page cycle and keeps history non-blocking", () => {
   const browse = source("../src/pages/market/MarketBrowse.tsx");
   const generationHook = source("../src/hooks/useGameDataGeneration.ts");
+  const watcher = source("../src/refresh/generationWatcher.mjs");
 
   assert.match(browse, /useGameDataGeneration\([^)]*"catalogs"[^)]*"regional-market"/s);
   assert.match(browse, /generationSequence/);
   assert.doesNotMatch(browse, /Promise\.all\(\[\s*fetch\(urls\.orderBook/);
-  assert.match(generationHook, /new EventSource/);
-  assert.match(generationHook, /setInterval/);
-  assert.match(generationHook, /\/api\/local\/game-data\/generation/);
-  assert.match(generationHook, /separate worker process[\s\S]*startPolling\(\);/);
-  assert.match(generationHook, /let pollInFlight = false/);
-  assert.match(generationHook, /if \(closed \|\| pollInFlight\) return/);
-  assert.match(generationHook, /finally \{\s*pollInFlight = false/);
+  assert.match(generationHook, /usePageRefresh\(\)\.cycle\?\.sequence/);
+  assert.doesNotMatch(generationHook, /EventSource|setInterval|fetch\(/);
+  assert.match(watcher, /new EventSourceClass/);
+  assert.match(watcher, /setIntervalFn/);
+  assert.match(watcher, /\/api\/local\/game-data\/generation/);
+  assert.match(watcher, /let pollInFlight = false/);
+  assert.match(watcher, /finally \{\s*pollInFlight = false/);
 });
 
 test("Browse labels progressive locally observed history without blocking live orders", () => {
@@ -162,4 +163,12 @@ test("Deal Watch renders operational facts as labelled units", () => {
   assert.match(watch, />Region<\/span><strong>R\{watch\.regionId\}<\/strong>/);
   assert.match(watch, />Last checked<\/span><strong>/);
   assert.match(watch, />Last alert<\/span><strong>/);
+});
+
+test("favorite order-book failures fail the active page cycle without clearing last-good rows", () => {
+  const overview = source("../src/pages/market/MarketOverview.tsx");
+
+  assert.match(overview, /if \(!response\.ok\) throw new Error\(`favorite order book HTTP \$\{response\.status\}`\)/);
+  assert.doesNotMatch(overview, /catch \{\s*return null;\s*\}/);
+  assert.match(overview, /trackRefresh\("global-market-favorites",[\s\S]*\.catch\(\(\) => \{\}\)/);
 });

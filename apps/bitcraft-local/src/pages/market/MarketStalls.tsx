@@ -4,6 +4,7 @@ import { MapPin, Search, Store, X } from "lucide-react";
 import { ItemLabel } from "../../components/main/ItemDisplay";
 import { MiniStat } from "../../components/main/Stats";
 import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
+import { createDelayedRefreshTask } from "../../refresh/pageRefresh.mjs";
 import type { AnyRecord } from "../../main-app-data";
 import { formatNumber } from "../../utils/format";
 import type { MapFocus } from "../map/mapUtils";
@@ -24,7 +25,7 @@ export function MarketStalls({ claimId, regionId, onShowMap, refreshSequence, re
 
   React.useEffect(() => {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
+    const refresh = createDelayedRefreshTask(() => {
       const search = new URLSearchParams({
         claimId,
         regionId: regionId || "all",
@@ -33,21 +34,22 @@ export function MarketStalls({ claimId, regionId, onShowMap, refreshSequence, re
       });
       if (query.trim()) search.set("q", query.trim());
       setState((current) => ({ ...current, loading: true, error: "" }));
-      trackRefresh("global-market-stalls", fetch(`/api/local/market/stalls?${search}`, { headers: refreshHeaders, signal: controller.signal }))
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`stalls HTTP ${response.status}`)))
-        .then((payload) => {
-          setState({ loading: false, error: "", data: payload });
-          const returnedPage = Number(payload?.page);
-          if (Number.isSafeInteger(returnedPage) && returnedPage > 0) {
-            setPage((current) => current === returnedPage ? current : returnedPage);
-          }
-        })
-        .catch((error) => {
-          if (!controller.signal.aborted) setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
-        });
+      return fetch(`/api/local/market/stalls?${search}`, { headers: refreshHeaders, signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`stalls HTTP ${response.status}`)));
     }, 200);
+    trackRefresh("global-market-stalls", refresh.promise)
+      .then((payload) => {
+        setState({ loading: false, error: "", data: payload });
+        const returnedPage = Number(payload?.page);
+        if (Number.isSafeInteger(returnedPage) && returnedPage > 0) {
+          setPage((current) => current === returnedPage ? current : returnedPage);
+        }
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
+      });
     return () => {
-      window.clearTimeout(timer);
+      refresh.cancel();
       controller.abort();
     };
   }, [activeOnly, claimId, generationSequence, page, query, refreshSequence, regionId]);

@@ -1,8 +1,8 @@
 import React from "react";
 
 import { toNumber, type AnyRecord } from "../main-app-data";
-import type { ManualRefreshRequest } from "../refresh/ManualRefreshContext";
-import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
+import type { PageRefreshCycle } from "../refresh/pageRefresh.mjs";
+import { pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
 import type { ActivePanel, LocalHistoryState, NotificationActivityState } from "../types/app";
 import { localHistoryIncludeForPanel } from "./localHistoryInclude";
 
@@ -16,11 +16,10 @@ const LOCAL_API = "/api/local";
  * captured by the local server.
  */
 export function useLocalHistory(
-  refreshToken: number,
   claimId: string,
   activePanel: ActivePanel,
-  manualRefreshRequest: ManualRefreshRequest | null = null,
-  trackManualRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (_taskKey, promise) => promise,
+  pageRefreshCycle: PageRefreshCycle | null,
+  trackPageRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (_taskKey, promise) => promise,
 ): LocalHistoryState {
   const [state, setState] = React.useState<LocalHistoryState>({
     market: null,
@@ -32,12 +31,13 @@ export function useLocalHistory(
   });
 
   React.useEffect(() => {
+    if (!pageRefreshCycle || pageRefreshCycle.page !== activePanel) return;
     const controller = new AbortController();
     async function load() {
       try {
         const include = localHistoryIncludeForPanel(activePanel);
         const activityLimit = activePanel === "activity" ? 2000 : activePanel === "dashboard" ? 40 : 60;
-        const response = await fetch(`${LOCAL_API}/history?claimId=${encodeURIComponent(claimId)}&include=${encodeURIComponent(include)}&activityLimit=${activityLimit}`, { headers: manualRefreshHeaders(manualRefreshRequest, activePanel), signal: controller.signal });
+        const response = await fetch(`${LOCAL_API}/history?claimId=${encodeURIComponent(claimId)}&include=${encodeURIComponent(include)}&activityLimit=${activityLimit}`, { headers: pageRefreshHeaders(pageRefreshCycle, activePanel), signal: controller.signal });
         if (!response.ok) throw new Error(`local history HTTP ${response.status}`);
         const history = await response.json();
         const activity = history.activity ?? {};
@@ -55,11 +55,11 @@ export function useLocalHistory(
         throw err;
       }
     }
-    void trackManualRefreshPromise("local-history", load()).catch(() => {});
+    void trackPageRefreshPromise("local-history", load()).catch(() => {});
     return () => {
       controller.abort();
     };
-  }, [activePanel, claimId, manualRefreshRequest?.sequence, refreshToken, trackManualRefreshPromise]);
+  }, [activePanel, claimId, pageRefreshCycle?.sequence, trackPageRefreshPromise]);
 
   return state;
 }

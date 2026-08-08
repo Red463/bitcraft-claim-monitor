@@ -26,6 +26,7 @@ import {
 import packageJson from "../package.json";
 import { useGameData } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
+import { pageDomains } from "./api/pageDomains";
 import { pageGameDataWarnings, staleDataWarning } from "./api/pageGameDataWarnings";
 import { ApiErrorState, ApiStatusBanner, AppSkeleton, RefreshStatus, type ApiStatusDiagnostics } from "./components/main/AppChrome";
 import { RouteLoadingState } from "./components/main/RouteLoadingState";
@@ -65,8 +66,17 @@ import type { MapFocus } from "./pages/map/mapUtils";
 import { applyTheme, DEFAULT_THEME, normalizeThemeCandidate, type ThemeSettings } from "./theme";
 import { ACCESS_CONTROL_TARGETS, effectiveTargetAllowed, targetIdForPage, type EffectiveAccess } from "./access/accessControl.mjs";
 import { restrictedAccessGuidance } from "./access/restrictedAccess";
-import { ManualRefreshProvider, type ManualRefreshRequest } from "./refresh/ManualRefreshContext";
-import { cooldownRemainingMs, createManualRefreshRequest, createManualRefreshTaskCoordinator, manualRefreshApplies } from "./refresh/manualRefresh.mjs";
+import { PageRefreshProvider } from "./refresh/ManualRefreshContext";
+import { cooldownRemainingMs } from "./refresh/manualRefresh.mjs";
+import { createGameDataGenerationWatcher } from "./refresh/generationWatcher.mjs";
+import {
+  createPageRefreshController,
+  createPageRefreshTaskCoordinator,
+  type PageRefreshController,
+  type PageRefreshCycle,
+  type PageRefreshTaskCoordinator,
+  type PageRefreshTaskState,
+} from "./refresh/pageRefresh.mjs";
 
 /*
  * Top-level browser application shell.
@@ -88,13 +98,6 @@ const DEFAULT_FAVICON_URL = "/favicon.ico";
 const RELEASE_UPDATED_NOTICE_MS = 8_000;
 const VISUALLY_HIDDEN_STYLE: React.CSSProperties = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clipPath: "inset(50%)", whiteSpace: "nowrap", border: 0 };
 
-type ManualRefreshState = {
-  requestId: string;
-  status: "idle" | "refreshing" | "complete";
-  pendingTasks: string[];
-  errors: string[];
-};
-
 const Dashboard = React.lazy(() => import("./pages/DashboardPage").then(({ Dashboard }) => ({ default: Dashboard })));
 const Leaderboard = React.lazy(() => import("./pages/LeaderboardPage").then(({ Leaderboard }) => ({ default: Leaderboard })));
 const Members = React.lazy(() => import("./pages/MembersPage").then(({ Members }) => ({ default: Members })));
@@ -114,6 +117,15 @@ const CraftCalculatorPage = React.lazy(() => import("./pages/CraftCalculatorPage
 const MapPanel = React.lazy(() => import("./pages/MapPage").then(({ MapPanel }) => ({ default: MapPanel })));
 const SyncPanel = React.lazy(() => import("./pages/SyncPage").then(({ SyncPanel }) => ({ default: SyncPanel })));
 const AdminPanel = React.lazy(() => import("./components/admin/AdminPanel").then(({ AdminPanel }) => ({ default: AdminPanel })));
+
+function PageRefreshCycleSeal({ cycle, coordinator }: { cycle: PageRefreshCycle | null; coordinator: PageRefreshTaskCoordinator }) {
+  React.useEffect(() => {
+    if (!cycle) return;
+    const timer = window.setTimeout(() => coordinator.seal(cycle.id), 0);
+    return () => window.clearTimeout(timer);
+  }, [coordinator, cycle]);
+  return null;
+}
 
 class RouteErrorBoundary extends React.Component<{ routeKey: string; children: React.ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -232,20 +244,40 @@ function DashboardApp() {
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
   const [browserTheme, setBrowserTheme] = usePersistedState<ThemeSettings>("theme.local", DEFAULT_THEME);
-  const [refreshToken, setRefreshToken] = React.useState(0);
-  const [historyAutoRefreshToken, setHistoryAutoRefreshToken] = React.useState(0);
   const [notificationRefreshToken, setNotificationRefreshToken] = React.useState(0);
   const [dealRefreshToken, setDealRefreshToken] = React.useState(0);
-  const [historyRefreshToken, setHistoryRefreshToken] = React.useState(0);
-  const [manualRefreshRequest, setManualRefreshRequest] = React.useState<ManualRefreshRequest | null>(null);
-  const [manualRefreshState, setManualRefreshState] = React.useState<ManualRefreshState>({ requestId: "", status: "idle", pendingTasks: [], errors: [] });
+  const [pageRefreshCycle, setPageRefreshCycle] = React.useState<PageRefreshCycle | null>(null);
+  const [pageRefreshState, setPageRefreshState] = React.useState<PageRefreshTaskState>({
+    cycleId: "",
+    status: "idle",
+    pendingTasks: [],
+    errors: [],
+    lastSuccessfulAt: null,
+    visibleProgress: false,
+  });
   const [manualRefreshClock, setManualRefreshClock] = React.useState(() => Date.now());
-  const manualRefreshSequenceRef = React.useRef(0);
+  const [lastManualRefreshAt, setLastManualRefreshAt] = React.useState<number | null>(null);
   const manualRefreshCompletionRef = React.useRef("");
-  const manualRefreshCoordinator = React.useMemo(() => createManualRefreshTaskCoordinator({
-    onStateChange: (nextState: ManualRefreshState) => setManualRefreshState(nextState),
+  const pageRefreshControllerRef = React.useRef<PageRefreshController | null>(null);
+  const pageRefreshCoordinator = React.useMemo(() => createPageRefreshTaskCoordinator({
+    onStateChange: setPageRefreshState,
+    onComplete: (cycle, succeeded) => pageRefreshControllerRef.current?.complete(cycle.id, succeeded),
   }), []);
-  const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
+  const pageRefreshController = React.useMemo(() => {
+    const controller = createPageRefreshController({
+      page: active,
+      intervalMs: DEFAULT_SETTINGS.refreshSeconds * 1000,
+      visible: document.visibilityState !== "hidden",
+      onCycle: (cycle) => {
+        pageRefreshCoordinator.beginCycle(cycle);
+        setPageRefreshCycle(cycle);
+      },
+    });
+    pageRefreshControllerRef.current = controller;
+    return controller;
+  }, [pageRefreshCoordinator]);
+  const pageRefreshScopeRef = React.useRef(`${active}|${claimId}`);
+  const lastUpdated = pageRefreshState.lastSuccessfulAt == null ? null : new Date(pageRefreshState.lastSuccessfulAt);
   const [mapFocus, setMapFocus] = usePersistedState<MapFocus>("map.focus", urlMapFocus());
   const [selectedMemberId, setSelectedMemberId] = usePersistedState("production.member", "All");
   const [userToastSettings, setUserToastSettings] = usePersistedState<UserToastSettings>("user.notifications", DEFAULT_USER_TOAST_SETTINGS);
@@ -308,21 +340,12 @@ function DashboardApp() {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [mobileNavigationOpen]);
-  const trackManualRefreshPromise = React.useCallback(<T,>(taskKey: string, promise: Promise<T>): Promise<T> => {
-    const activeRequest = manualRefreshApplies(manualRefreshRequest, active) ? manualRefreshRequest : null;
-    if (!activeRequest) return promise;
-    const finish = manualRefreshCoordinator.beginTask(activeRequest.id, taskKey);
-    return promise
-      .then((result) => {
-        finish();
-        return result;
-      })
-      .catch((error) => {
-        finish(error);
-        throw error;
-      });
-  }, [active, manualRefreshCoordinator, manualRefreshRequest]);
-  const state = useGameData(refreshToken, claimId, active, manualRefreshRequest, trackManualRefreshPromise);
+  const trackPageRefreshPromise = React.useCallback(<T,>(taskKey: string, promise: Promise<T>): Promise<T> => {
+    const activeCycle = pageRefreshCycle?.page === active ? pageRefreshCycle : null;
+    if (!activeCycle) return promise;
+    return pageRefreshCoordinator.trackPromise(activeCycle.id, taskKey, promise);
+  }, [active, pageRefreshCoordinator, pageRefreshCycle]);
+  const state = useGameData(claimId, active, pageRefreshCycle, trackPageRefreshPromise);
   const excludedMemberIds = appSettings.excludedMemberIds;
   const data = React.useMemo(() => {
     // Provider payloads vary by domain during migration. Normalize them once, then apply
@@ -331,7 +354,7 @@ function DashboardApp() {
     const normalized = normalizeData(state.data);
     return applyMemberTrackingFilter({ ...normalized, raw: state.data }, excludedMemberIds);
   }, [state.data, excludedMemberIds]);
-  const localHistory = useLocalHistory(historyAutoRefreshToken + historyRefreshToken, claimId, active, manualRefreshRequest, trackManualRefreshPromise);
+  const localHistory = useLocalHistory(claimId, active, pageRefreshCycle, trackPageRefreshPromise);
   const notificationActivity = useNotificationActivity(notificationRefreshToken, claimId);
   const dealAlerts = useDealAlerts(dealRefreshToken);
   const dealAlertSource = React.useMemo(
@@ -711,6 +734,36 @@ function DashboardApp() {
     document.title = `${label} — BitCraft Claim Monitor`;
   }, [active]);
   React.useEffect(() => {
+    pageRefreshController.start();
+    return () => pageRefreshController.stop();
+  }, [pageRefreshController]);
+  React.useEffect(() => {
+    const nextScope = `${active}|${claimId}`;
+    if (pageRefreshScopeRef.current === nextScope) return;
+    const [previousPage] = pageRefreshScopeRef.current.split("|");
+    pageRefreshScopeRef.current = nextScope;
+    if (previousPage !== active) pageRefreshController.setPage(active);
+    else pageRefreshController.restart();
+  }, [active, claimId, pageRefreshController]);
+  React.useEffect(() => {
+    pageRefreshController.setIntervalMs(appSettings.refreshSeconds * 1000);
+  }, [appSettings.refreshSeconds, pageRefreshController]);
+  React.useEffect(() => {
+    const onVisibilityChange = () => pageRefreshController.setVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [pageRefreshController]);
+  React.useEffect(() => {
+    if (active !== "craft-monitor" || !claimId) return;
+    const watcher = createGameDataGenerationWatcher({
+      claimId,
+      domains: pageDomains(active),
+      isVisible: () => document.visibilityState !== "hidden",
+      onGeneration: () => pageRefreshController.invalidateNearLive(),
+    });
+    return () => watcher.stop();
+  }, [active, claimId, pageRefreshController]);
+  React.useEffect(() => {
     const intervalMs = appSettings.refreshSeconds * 1000;
     const visibleBump = (setter: React.Dispatch<React.SetStateAction<number>>) => {
       if (document.visibilityState !== "hidden") setter((x) => x + 1);
@@ -723,8 +776,6 @@ function DashboardApp() {
       }, delayMs);
       timers.push(start);
     };
-    schedule(setRefreshToken, 0);
-    schedule(setHistoryAutoRefreshToken, Math.min(5000, Math.floor(intervalMs * 0.25)));
     schedule(setNotificationRefreshToken, Math.min(10000, Math.floor(intervalMs * 0.5)));
     schedule(setDealRefreshToken, Math.min(15000, Math.floor(intervalMs * 0.75)));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
@@ -736,11 +787,6 @@ function DashboardApp() {
     link.href = favicon ? `${favicon.url}?v=${encodeURIComponent(favicon.updatedAt)}` : DEFAULT_FAVICON_URL;
     link.type = favicon?.contentType ?? "image/x-icon";
   }, [appSettings.branding.favicon]);
-  React.useEffect(() => {
-    if (!state.data) return;
-    const serverTime = state.updatedAt ?? state.data.serverFreshness?.lastSuccessAt ?? state.data.serverFreshness?.collectedAt ?? state.data.serverFreshness?.cachedAt;
-    setLastUpdated(serverTime ? new Date(serverTime) : new Date());
-  }, [state.data, state.updatedAt]);
   React.useEffect(() => {
     if (selectedMemberId !== "All" && state.data && !selectedProductionMember) setSelectedMemberId("All");
   }, [selectedMemberId, selectedProductionMember, state.data]);
@@ -758,11 +804,11 @@ function DashboardApp() {
   const activeRegionScopeKey = `${appSettings.defaultRegion}|${appSettings.additionalActiveRegions}`;
   const panels: Record<string, React.ReactNode> = {
     dashboard: <Dashboard data={data} activity={localHistory.activity} marketHistory={localHistory.market} dashboardSummary={localHistory.dashboard} lastUpdated={lastUpdated} onNavigate={navigate} />,
-    leaderboard: <Leaderboard claimId={claimId} refreshToken={refreshToken} excludedMemberIds={appSettings.excludedMemberIds} data={data} access={effectiveAccess} />,
+    leaderboard: <Leaderboard claimId={claimId} refreshToken={pageRefreshCycle?.sequence ?? 0} excludedMemberIds={appSettings.excludedMemberIds} data={data} access={effectiveAccess} />,
     members: <Members data={data} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} onMemberDetailsOpened={() => trackAnalyticsEvent("member_details_opened")} />,
     skills: <Skills data={data} />,
-    "craft-monitor": <Production data={data} refreshToken={refreshToken} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
-    planning: <CraftPlanningPage claimId={claimId} refreshToken={refreshToken} />,
+    "craft-monitor": <Production data={data} refreshToken={pageRefreshCycle?.sequence ?? 0} selectedMemberId={selectedMemberId} onSelectMember={setSelectedMemberId} />,
+    planning: <CraftPlanningPage claimId={claimId} refreshToken={pageRefreshCycle?.sequence ?? 0} />,
     publiccrafts: <div className="panel public-craft-page"><PublicCraftFinder providerData={data.raw?.["public-crafts"]} providerLoading={state.loading} providerError={state.error} monitoredClaimId={claimId} monitoredRegionId={String(data.claim.regionId ?? "")} monitoredOwnerName={getTrackedOwnerName(data.claim)} defaultRegionId={appSettings.defaultRegion} activeRegionScopeKey={activeRegionScopeKey} onShowMap={(focus) => { setMapFocus(focus); navigate("map", undefined, focus); }} /></div>,
     craftcalc: <CraftCalculatorPage />,
     inventory: <Inventory data={data} />,
@@ -775,7 +821,7 @@ function DashboardApp() {
     map: <MapPanel data={data} focus={mapFocus} activeRegionScopeKey={activeRegionScopeKey} onClearFocus={() => { setMapFocus(null); updateQueryState({ label: null, x: null, z: null, regionId: null, mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} members={data.members} access={effectiveAccess} />,
-    admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); setRefreshToken((x) => x + 1); setHistoryRefreshToken((x) => x + 1); }} />,
+    admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); }} />,
   };
   const activePageTargetId = targetIdForPage(active);
   const activePageDecision = accessDecisionFor(activePageTargetId);
@@ -783,13 +829,15 @@ function DashboardApp() {
   const activePanel = isPageAllowed(active)
     ? panels[active] ?? panels.dashboard
     : <RestrictedAccessState title={activePageLabel} decision={activePageDecision} user={userAuth.user} discordLoginEnabled={userAuth.discordLoginEnabled} onDiscordLogin={discordLogin} onOpenUserSettings={() => setUserSettingsOpen(true)} />;
-  const manualRefreshIsRefreshing = manualRefreshState.status === "refreshing";
-  const manualRefreshCooldownMs = cooldownRemainingMs(manualRefreshRequest?.requestedAt, manualRefreshClock);
+  const pageRefreshInFlight = pageRefreshState.status === "refreshing";
+  const manualRefreshIsRefreshing = pageRefreshInFlight && pageRefreshCycle?.reason === "manual";
+  const visibleRefreshProgress = pageRefreshState.visibleProgress;
+  const manualRefreshCooldownMs = cooldownRemainingMs(lastManualRefreshAt, manualRefreshClock);
   const manualRefreshCooldownSeconds = Math.ceil(manualRefreshCooldownMs / 1000);
   const manualRefreshIsCoolingDown = !manualRefreshIsRefreshing && manualRefreshCooldownMs > 0;
-  const manualRefreshIssueCount = manualRefreshState.errors.length + (state.stale ? 1 : 0);
-  const manualRefreshHasErrors = manualRefreshState.status === "complete" && manualRefreshIssueCount > 0;
-  const manualRefreshButtonDisabled = manualRefreshIsRefreshing || manualRefreshCooldownMs > 0;
+  const manualRefreshIssueCount = pageRefreshState.errors.length + (state.stale ? 1 : 0);
+  const manualRefreshHasErrors = pageRefreshState.status === "complete" && pageRefreshCycle?.reason === "manual" && manualRefreshIssueCount > 0;
+  const manualRefreshButtonDisabled = pageRefreshInFlight || manualRefreshCooldownMs > 0;
   const manualRefreshButtonLabel = manualRefreshIsRefreshing
     ? `Refreshing ${activePageLabel} data`
     : manualRefreshCooldownMs > 0
@@ -797,37 +845,31 @@ function DashboardApp() {
       : "Refresh data now";
   const manualRefreshStatusText = manualRefreshIsRefreshing
     ? `${manualRefreshButtonLabel}. Current data remains visible.`
-    : manualRefreshState.status === "complete"
+    : pageRefreshState.status === "complete" && pageRefreshCycle?.reason === "manual"
       ? manualRefreshHasErrors
         ? `Refresh finished with ${manualRefreshIssueCount} ${manualRefreshIssueCount === 1 ? "issue" : "issues"}. Current data remains visible.`
         : "Data refreshed."
       : "";
   const requestManualRefresh = React.useCallback(() => {
     const now = Date.now();
-    if (manualRefreshState.status === "refreshing" || cooldownRemainingMs(manualRefreshRequest?.requestedAt, now) > 0) return;
-    manualRefreshSequenceRef.current += 1;
-    const request = createManualRefreshRequest(active, manualRefreshSequenceRef.current, { now: () => now });
-    manualRefreshCoordinator.beginRequest(request.id);
+    if (pageRefreshInFlight || cooldownRemainingMs(lastManualRefreshAt, now) > 0) return;
+    const cycle = pageRefreshController.requestManual();
+    if (!cycle) return;
     setManualRefreshClock(now);
-    setManualRefreshRequest(request);
+    setLastManualRefreshAt(now);
     setNotificationRefreshToken((current) => current + 1);
     setDealRefreshToken((current) => current + 1);
-  }, [active, manualRefreshCoordinator, manualRefreshRequest?.requestedAt, manualRefreshState.status]);
+  }, [lastManualRefreshAt, pageRefreshController, pageRefreshInFlight]);
   React.useEffect(() => {
-    if (!manualRefreshRequest) return undefined;
-    const timer = window.setTimeout(() => manualRefreshCoordinator.seal(manualRefreshRequest.id), 0);
-    return () => window.clearTimeout(timer);
-  }, [manualRefreshCoordinator, manualRefreshRequest]);
-  React.useEffect(() => {
-    if (!manualRefreshRequest || manualRefreshCooldownMs <= 0) return undefined;
+    if (lastManualRefreshAt == null || manualRefreshCooldownMs <= 0) return undefined;
     const timer = window.setInterval(() => setManualRefreshClock(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [manualRefreshCooldownMs > 0, manualRefreshRequest?.id]);
+  }, [lastManualRefreshAt, manualRefreshCooldownMs > 0]);
   React.useEffect(() => {
-    if (manualRefreshState.status !== "complete" || !manualRefreshState.requestId || manualRefreshCompletionRef.current === manualRefreshState.requestId) return;
-    manualRefreshCompletionRef.current = manualRefreshState.requestId;
+    if (pageRefreshState.status !== "complete" || pageRefreshCycle?.reason !== "manual" || !pageRefreshState.cycleId || manualRefreshCompletionRef.current === pageRefreshState.cycleId) return;
+    manualRefreshCompletionRef.current = pageRefreshState.cycleId;
     setRouteStatus(manualRefreshHasErrors ? "Refresh finished with issues. Current data remains visible." : "Data refreshed.");
-  }, [manualRefreshHasErrors, manualRefreshState.requestId, manualRefreshState.status]);
+  }, [manualRefreshHasErrors, pageRefreshCycle?.reason, pageRefreshState.cycleId, pageRefreshState.status]);
   const apiWarnings = React.useMemo(() => {
     const partialErrors = Array.isArray(data.raw?.partialErrors) ? data.raw.partialErrors.map((error) => String(error)) : [];
     const relevantPartialErrors = pageGameDataWarnings(active, partialErrors);
@@ -962,7 +1004,7 @@ function DashboardApp() {
           })}
         </nav>
         <RefreshStatus
-          loading={state.loading && Boolean(state.data)}
+          loading={visibleRefreshProgress && state.loading && Boolean(state.data)}
           lastUpdated={lastUpdated}
           collectorStatus={data.raw?.collectorStatus}
           intervalSeconds={appSettings.refreshSeconds}
@@ -972,7 +1014,7 @@ function DashboardApp() {
       <main ref={mainRef} tabIndex={-1}>
         <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{routeStatus}</p>
         <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{manualRefreshStatusText}</p>
-        <div className={`page-refresh-line ${state.loading || manualRefreshIsRefreshing ? "is-visible" : ""}`} aria-hidden="true" />
+        <div className={`page-refresh-line ${visibleRefreshProgress ? "is-visible" : ""}`} aria-hidden="true" />
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
           <>
             <ApiStatusBanner
@@ -984,9 +1026,10 @@ function DashboardApp() {
             <div className="page-view" key={active}>
               <RouteErrorBoundary routeKey={active}>
                 <React.Suspense fallback={<RouteLoadingState label={activePageLabel} />}>
-                  <ManualRefreshProvider page={active} request={manualRefreshRequest} coordinator={manualRefreshCoordinator}>
+                  <PageRefreshProvider page={active} cycle={pageRefreshCycle} coordinator={pageRefreshCoordinator}>
                     {activePanel}
-                  </ManualRefreshProvider>
+                    <PageRefreshCycleSeal cycle={pageRefreshCycle} coordinator={pageRefreshCoordinator} />
+                  </PageRefreshProvider>
                 </React.Suspense>
               </RouteErrorBoundary>
             </div>

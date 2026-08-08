@@ -9,6 +9,8 @@ import { MiniStat } from "../components/main/Stats";
 import { AsyncState } from "../components/main/AsyncState";
 import { AppSkeleton } from "../components/main/AppChrome";
 import { formatNumber } from "../utils/format";
+import { usePageRefresh } from "../refresh/ManualRefreshContext";
+import { createDelayedRefreshTask, pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
 import { isUnpackRecipe, recipeId, recipeKey, recipeKindFromType, buildRecipePlan, detailTarget, recipesForTarget, selectedRecipeForTarget, type RecipeDetail, type RecipeMaterial, type RecipeSelections, type RecipeTarget } from "../utils/recipeTree";
 
 /*
@@ -44,10 +46,10 @@ function catalogItemToTarget(item: AnyRecord): RecipeTarget {
   };
 }
 
-async function fetchRecipeDetail(target: RecipeTarget, signal: AbortSignal): Promise<RecipeDetail> {
+async function fetchRecipeDetail(target: RecipeTarget, signal: AbortSignal, headers: Record<string, string>, force: boolean): Promise<RecipeDetail> {
   const cacheKey = recipeKey(target.kind, target.id);
   const cached = recipeDetailCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.detail;
+  if (!force && cached && cached.expiresAt > Date.now()) return cached.detail;
   const params = new URLSearchParams({
     kind: target.kind,
     id: String(target.id),
@@ -58,7 +60,7 @@ async function fetchRecipeDetail(target: RecipeTarget, signal: AbortSignal): Pro
   if (target.rarityStr) params.set("rarity", target.rarityStr);
   if (target.tag) params.set("tag", target.tag);
   if (target.iconAssetName) params.set("iconAssetName", target.iconAssetName);
-  const response = await fetch(`${LOCAL_API}/recipe-detail?${params.toString()}`, { signal });
+  const response = await fetch(`${LOCAL_API}/recipe-detail?${params.toString()}`, { headers, signal });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`${target.name}: ${body.error ?? `HTTP ${response.status}`}`);
   const detail = body.detail ?? body;
@@ -66,7 +68,7 @@ async function fetchRecipeDetail(target: RecipeTarget, signal: AbortSignal): Pro
   return detail;
 }
 
-async function collectRecipeDetails(target: RecipeTarget, signal: AbortSignal, selections: RecipeSelections, maxDepth = 14) {
+async function collectRecipeDetails(target: RecipeTarget, signal: AbortSignal, selections: RecipeSelections, headers: Record<string, string>, force: boolean, maxDepth = 14) {
   const details = new Map<string, RecipeDetail>();
   const pending = new Set<string>();
 
@@ -76,7 +78,7 @@ async function collectRecipeDetails(target: RecipeTarget, signal: AbortSignal, s
     pending.add(key);
     let fetchedDetail: RecipeDetail;
     try {
-      fetchedDetail = await fetchRecipeDetail(nextTarget, signal);
+      fetchedDetail = await fetchRecipeDetail(nextTarget, signal, headers, force);
     } catch (error) {
       pending.delete(key);
       if (signal.aborted) throw error;
@@ -150,6 +152,7 @@ function recipeRouteMeta(recipe: AnyRecord) {
 }
 
 export function CraftCalculatorPage() {
+  const { cycle, trackPromise } = usePageRefresh();
   const [query, setQuery] = React.useState("");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = React.useState(-1);
@@ -167,29 +170,30 @@ export function CraftCalculatorPage() {
       return;
     }
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
+    const refresh = createDelayedRefreshTask(() => {
       setSearchState("loading");
-      fetch(`${LOCAL_API}/catalog/search?q=${encodeURIComponent(query.trim())}&limit=10`, { signal: controller.signal })
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`catalog search HTTP ${response.status}`)))
-        .then((payload) => {
-          const items: AnyRecord[] = payload.items ?? [];
-          const cargos: AnyRecord[] = payload.cargos ?? [];
-          setSuggestions([...items, ...cargos].slice(0, 10));
-          setActiveSuggestionIndex(-1);
-          setSearchState("idle");
-        })
-        .catch(() => {
-          if (!controller.signal.aborted) {
-            setSuggestions([]);
-            setSearchState("error");
-          }
-        });
+      return fetch(`${LOCAL_API}/catalog/search?q=${encodeURIComponent(query.trim())}&limit=10`, { headers: cycle ? pageRefreshHeaders(cycle, "craftcalc") : {}, signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`catalog search HTTP ${response.status}`)));
     }, 220);
+    void trackPromise("craft-calculator-search", refresh.promise)
+      .then((payload) => {
+        const items: AnyRecord[] = payload.items ?? [];
+        const cargos: AnyRecord[] = payload.cargos ?? [];
+        setSuggestions([...items, ...cargos].slice(0, 10));
+        setActiveSuggestionIndex(-1);
+        setSearchState("idle");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setSuggestions([]);
+          setSearchState("error");
+        }
+      });
     return () => {
-      window.clearTimeout(timer);
+      refresh.cancel();
       controller.abort();
     };
-  }, [query, selectedTarget?.name]);
+  }, [cycle?.sequence, query, selectedTarget?.name, trackPromise]);
 
   React.useEffect(() => {
     if (!selectedTarget) {
@@ -198,13 +202,20 @@ export function CraftCalculatorPage() {
     }
     const controller = new AbortController();
     setState((current) => ({ ...current, loading: true, error: null }));
-    collectRecipeDetails(selectedTarget, controller.signal, recipeSelections)
+    const refresh = collectRecipeDetails(
+      selectedTarget,
+      controller.signal,
+      recipeSelections,
+      cycle ? pageRefreshHeaders(cycle, "craftcalc") : {},
+      cycle?.reason === "manual",
+    );
+    void trackPromise("craft-calculator-plan", refresh)
       .then((details) => setState({ loading: false, error: null, plan: buildRecipePlan(selectedTarget, amount, details, 14, recipeSelections), details }))
       .catch((error) => {
         if (!controller.signal.aborted) setState({ loading: false, error: error instanceof Error ? error.message : String(error), plan: null, details: new Map() });
       });
     return () => controller.abort();
-  }, [amount, selectedTarget, recipeSelectionKey]);
+  }, [amount, cycle?.sequence, recipeSelectionKey, selectedTarget, trackPromise]);
 
   function chooseItem(item: AnyRecord) {
     const target = catalogItemToTarget(item);

@@ -5,6 +5,8 @@ import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
 import { Dialog } from "../components/main/Dialog";
 import type { AnyRecord } from "../main-app-data";
 import { dateLabel, formatNumber, timeAgo } from "../utils/format";
+import { usePageRefresh } from "../refresh/ManualRefreshContext";
+import { createDelayedRefreshTask, pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
 
 const LOCAL_API = "/api/local";
 const TABS = ["targets", "sources", "players", "routes", "buffers", "audit"] as const;
@@ -175,6 +177,7 @@ function formatStoredBytes(value: unknown) {
 }
 
 export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { open: boolean; onClose: () => void; csrfToken: string; onSaved: () => void }) {
+  const { cycle, trackPromise } = usePageRefresh();
   const [state, setState] = React.useState<AnyRecord | null>(null);
   const [config, setConfig] = React.useState<CraftPlanConfig>(emptyConfig());
   const [activeTab, setActiveTab] = React.useState<ManagerTab>("targets");
@@ -196,6 +199,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   async function adminApi(path: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers);
     headers.set("content-type", "application/json");
+    for (const [key, value] of Object.entries(cycle ? pageRefreshHeaders(cycle, "planning") : {})) headers.set(key, value);
     if (options.method && options.method !== "GET") headers.set("x-csrf-token", csrfToken);
     const response = await fetch(`${LOCAL_API}${path}`, { ...options, headers });
     const body = await response.json().catch(() => ({}));
@@ -208,7 +212,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setOperation(mode);
     setError(null);
     try {
-      const result = await adminApi("/admin/craft-plan");
+      const result = await trackPromise("craft-plan-manager", adminApi("/admin/craft-plan"));
       setState(result);
       setConfig({ ...emptyConfig(), ...(result.config ?? {}), sourceRules: { ...emptyConfig().sourceRules, ...(result.config?.sourceRules ?? {}) } });
     } catch (err) {
@@ -217,15 +221,15 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
       setBusy(false);
       setOperation(null);
     }
-  }, [csrfToken]);
+  }, [csrfToken, cycle?.sequence, trackPromise]);
 
   const loadAudit = React.useCallback(async () => {
     setAuditLoading(true);
     setAuditError(null);
     setProgressAuditError(null);
     const [settingsResult, progressResult] = await Promise.allSettled([
-      adminApi("/admin/craft-plan/audit?limit=100"),
-      adminApi("/admin/craft-plan/progress-audit"),
+      trackPromise("craft-plan-manager-audit", adminApi("/admin/craft-plan/audit?limit=100")),
+      trackPromise("craft-plan-progress-audit", adminApi("/admin/craft-plan/progress-audit")),
     ]);
     if (settingsResult.status === "fulfilled") {
       setAuditRows(Array.isArray(settingsResult.value.auditLog) ? settingsResult.value.auditLog : []);
@@ -239,7 +243,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     }
     setAuditLoading(false);
     setAuditLoaded(true);
-  }, [csrfToken]);
+  }, [csrfToken, cycle?.sequence, trackPromise]);
 
   async function downloadProgressAudit(range: string) {
     setAuditDownloadRange(range);
@@ -293,17 +297,16 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     const trimmed = query.trim();
     if (trimmed.length < 2) { setSearchResults([]); return; }
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      fetch(`${LOCAL_API}/catalog/search?q=${encodeURIComponent(trimmed)}&limit=16`, { signal: controller.signal })
-        .then((response) => response.ok ? response.json() : { items: [], cargos: [] })
-        .then((body) => {
-          setSearchResults([...(body.items ?? []), ...(body.cargos ?? [])].slice(0, 16));
-          setActiveSearchResultIndex(-1);
-        })
-        .catch(() => setSearchResults([]));
-    }, 200);
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [query]);
+    const refresh = createDelayedRefreshTask(() => fetch(`${LOCAL_API}/catalog/search?q=${encodeURIComponent(trimmed)}&limit=16`, { headers: cycle ? pageRefreshHeaders(cycle, "planning") : {}, signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`catalog search HTTP ${response.status}`))), 200);
+    void trackPromise("craft-plan-manager-search", refresh.promise)
+      .then((body) => {
+        setSearchResults([...(body.items ?? []), ...(body.cargos ?? [])].slice(0, 16));
+        setActiveSearchResultIndex(-1);
+      })
+      .catch(() => setSearchResults([]));
+    return () => { refresh.cancel(); controller.abort(); };
+  }, [cycle?.sequence, query, trackPromise]);
 
   function selectSearchResult(item: AnyRecord) {
     addTargets([withQuantity(item, 1)], `Added ${item.name ?? item.id}.`);

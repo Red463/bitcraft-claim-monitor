@@ -16,7 +16,8 @@ test("active region helpers live outside the legacy MainPages bundle", () => {
   assert.doesNotMatch(mainPages, /type\s+ActiveRegion\s*=/);
   assert.doesNotMatch(mainPages, /function\s+activeRegionLabel\s*\(/);
   assert.doesNotMatch(mainPages, /function\s+useActiveRegions\s*\(/);
-  assert.match(activeRegions, /useGameDataGeneration\(String\(claimId \?\? ""\), \["region"\]\)/);
+  assert.match(activeRegions, /usePageRefresh\(\)/);
+  assert.match(activeRegions, /trackPromise\("active-regions"/);
   assert.match(activeRegions, /scopeIdentity.*claimId.*includeRegionId.*scopeKey/);
   assert.match(activeRegions, /current\.scopeIdentity === scopeIdentity/);
   assert.match(activeRegions, /state\.scopeIdentity === scopeIdentity \? state\.regions : \[\]/);

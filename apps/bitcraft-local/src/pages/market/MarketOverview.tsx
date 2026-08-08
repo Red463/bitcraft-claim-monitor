@@ -89,38 +89,35 @@ export function MarketOverview({
   React.useEffect(() => {
     const controller = new AbortController();
     trackRefresh("global-market-favorites", Promise.all(favorites.slice(0, 20).map(async (favorite) => {
-      try {
-        const search = new URLSearchParams({
-          claimId,
-          regionId: regionId || "all",
-          itemType: favorite.itemType,
-          itemId: favorite.itemId,
-        });
-        const response = await fetch(`/api/local/market/order-book?${search}`, {
-          headers: refreshHeaders,
-          signal: controller.signal,
-        });
-        if (!response.ok) return null;
-        const detail = await response.json();
-        const sells = Array.isArray(detail.sellOrders) ? detail.sellOrders : [];
-        const buys = Array.isArray(detail.buyOrders) ? detail.buyOrders : [];
-        return {
-          ...favorite,
-          ...(detail.item ?? {}),
-          itemName: detail.item?.name ?? `Item ${favorite.itemId}`,
-          bestSell: bestPrice(sells, "low"),
-          bestBuy: bestPrice(buys, "high"),
-          currentQuantity: [...sells, ...buys]
-            .reduce((total, order) => total + decimalBigInt(order.quantity), 0n)
-            .toString(),
-        };
-      } catch {
-        return null;
-      }
+      const search = new URLSearchParams({
+        claimId,
+        regionId: regionId || "all",
+        itemType: favorite.itemType,
+        itemId: favorite.itemId,
+      });
+      const response = await fetch(`/api/local/market/order-book?${search}`, {
+        headers: refreshHeaders,
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`favorite order book HTTP ${response.status}`);
+      const detail = await response.json();
+      const sells = Array.isArray(detail.sellOrders) ? detail.sellOrders : [];
+      const buys = Array.isArray(detail.buyOrders) ? detail.buyOrders : [];
+      return {
+        ...favorite,
+        ...(detail.item ?? {}),
+        itemName: detail.item?.name ?? `Item ${favorite.itemId}`,
+        bestSell: bestPrice(sells, "low"),
+        bestBuy: bestPrice(buys, "high"),
+        currentQuantity: [...sells, ...buys]
+          .reduce((total, order) => total + decimalBigInt(order.quantity), 0n)
+          .toString(),
+      };
     })))
       .then((rows) => {
-        if (!controller.signal.aborted) setFavoriteRows(rows.filter(Boolean) as AnyRecord[]);
-      });
+        if (!controller.signal.aborted) setFavoriteRows(rows);
+      })
+      .catch(() => {});
     return () => controller.abort();
   }, [claimId, favorites, generationSequence, refreshSequence, regionId]);
 

@@ -12,6 +12,8 @@ import { activityActorName, activityContainerName, activitySummary, compactActiv
 import { activityStyle } from "./activity/activityDisplay";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { resolveAllowedView } from "../navigation/routeState.ts";
+import { usePageRefresh } from "../refresh/ManualRefreshContext";
+import { createDelayedRefreshTask, pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
 
 const LOCAL_API = "/api/local";
 
@@ -26,6 +28,7 @@ const ACTIVITY_FILTERS = [
 ] as const;
 
 export function ActivityPanel({ activity, activityTotal, claimId, error, members, access }: { activity: AnyRecord[]; activityTotal: number; claimId: string; error: string | null; members: AnyRecord[]; access?: EffectiveAccess | null }) {
+  const { cycle, trackPromise } = usePageRefresh();
   const [filter, setFilter] = usePersistedState<(typeof ACTIVITY_FILTERS)[number][0]>("activity.filter", "all");
   const [memberFilter, setMemberFilter] = usePersistedState("activity.member", "All");
   const [searchQuery, setSearchQuery] = usePersistedState("activity.search", "");
@@ -43,20 +46,26 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, members
       return;
     }
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
+    const refresh = createDelayedRefreshTask(() => {
       setSearchState((current) => ({ ...current, loading: true, error: null, query: trimmedSearch }));
-      fetch(`${LOCAL_API}/activity?claimId=${encodeURIComponent(claimId)}&q=${encodeURIComponent(trimmedSearch)}&limit=500`, { signal: controller.signal })
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`activity search HTTP ${response.status}`)))
-        .then((payload) => setSearchState({ loading: false, error: null, events: payload.events ?? [], total: toNumber(payload.total ?? payload.events?.length), query: trimmedSearch }))
-        .catch((searchError) => {
-          if (!controller.signal.aborted) setSearchState({ loading: false, error: searchError instanceof Error ? searchError.message : String(searchError), events: [], total: 0, query: trimmedSearch });
-        });
+      return fetch(`${LOCAL_API}/activity?claimId=${encodeURIComponent(claimId)}&q=${encodeURIComponent(trimmedSearch)}&limit=500`, { headers: cycle ? pageRefreshHeaders(cycle, "activity") : {}, signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`activity search HTTP ${response.status}`)));
     }, 250);
+    void trackPromise("activity-search", refresh.promise)
+      .then((payload) => setSearchState({ loading: false, error: null, events: payload.events ?? [], total: toNumber(payload.total ?? payload.events?.length), query: trimmedSearch }))
+      .catch((searchError) => {
+        if (!controller.signal.aborted) setSearchState((current) => ({
+          ...current,
+          loading: false,
+          error: searchError instanceof Error ? searchError.message : String(searchError),
+          query: trimmedSearch,
+        }));
+      });
     return () => {
-      window.clearTimeout(timer);
+      refresh.cancel();
       controller.abort();
     };
-  }, [claimId, trimmedSearch]);
+  }, [claimId, cycle?.sequence, trackPromise, trimmedSearch]);
   const searching = Boolean(trimmedSearch);
   const sourceActivity = searching ? searchState.events : activity;
   const sourceTotal = searching ? searchState.total : activityTotal;
