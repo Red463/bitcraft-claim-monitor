@@ -9,6 +9,19 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.51.0-beta.7] - 2026-08-08
+
+### Changed
+
+- Made Craft Monitor the only near-live page while ordinary pages refresh on their configured interval without flickering progress indicators.
+- Sorted online members first by longest current session, followed by recently seen offline members and unavailable presence.
+- Simplified Craft Monitor contributor and visibility copy for settlement users.
+
+### Fixed
+
+- Resolved the monitored settlement's player-facing region name on Dashboard instead of showing `Unknown`.
+- Coordinated each page's main and auxiliary data under one refresh cycle with hidden-tab catch-up and last-good-data preservation.
+
 ## [0.51.0-beta.6] - 2026-08-08
 
 ### Fixed
