@@ -34,6 +34,17 @@ test("craft presentation replaces recipe output placeholders with the compound i
   });
 });
 
+test("craft presentation replaces any numbered Relay output placeholder", () => {
+  assert.ok(presentationModule, "expected the shared craft presentation projection");
+  const projected = presentationModule.projectCraftPresentation({
+    recipeName: "Tan {1}",
+    craftedItem: [{ itemId: "42", itemType: 0, quantity: "1" }],
+  }, payload);
+
+  assert.equal(projected.recipeName, "Tan Iron Ore");
+  assert.doesNotMatch(projected.recipeName, /\{\d+\}/);
+});
+
 test("craft presentation never collides cargo and item rows with the same numeric id", () => {
   assert.ok(presentationModule, "expected the shared craft presentation projection");
   const item = presentationModule.projectCraftPresentation({

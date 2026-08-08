@@ -95,7 +95,7 @@ function latestValidTimestamp(value: unknown): string | null {
 function recipeDisplayName(recipe: CraftRecipe | undefined, output: CatalogEntity | null): string {
   const outputName = String(output?.name ?? "crafted item");
   return String(recipe?.name ?? outputName)
-    .replaceAll("{0}", outputName)
+    .replace(/\{\d+\}/g, outputName)
     .replace(/\s+/g, " ")
     .trim();
 }
