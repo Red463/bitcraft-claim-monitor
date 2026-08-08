@@ -126,7 +126,7 @@ export class RelayPrimaryRegionRuntime {
   readonly #topologyRefreshMs: number;
   readonly #reconnectDelayMs: (failureCount: number) => number;
   #session: RegionalSession | null = null;
-  #presenceService: Pick<RelayPlayerPresenceService, "enrich"> | null = null;
+  #presenceService: Pick<RelayPlayerPresenceService, "enrich" | "resolvePlayerName"> | null = null;
   #relayBaseUrl: string | null = null;
   #claimId: string | null = null;
   #membershipSignature: string | null = null;

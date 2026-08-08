@@ -9,6 +9,20 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.51.0-beta.4] - 2026-08-08
+
+### Changed
+
+- Unified Dashboard and Craft Monitor output names, recipe labels, and icons while preserving separate item and cargo identities.
+- Grouped passive crafts only when member, output, structure, and status all match.
+- Limited contribution rankings to exact player attribution and exposed retained historical unknown events only as an admin diagnostic count.
+
+### Fixed
+
+- Replaced unresolved craft recipe placeholders with the catalog output name.
+- Added exact craft-owner fallback when reducer or player-action attribution is unavailable or ambiguous.
+- Safely migrated contribution confidence values and rebuilt aggregates only from stored exact evidence.
+
 ## [0.51.0-beta.3] - 2026-08-08
 
 ### Changed
