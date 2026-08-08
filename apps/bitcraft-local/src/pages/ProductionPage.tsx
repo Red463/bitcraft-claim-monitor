@@ -23,13 +23,6 @@ import { projectCraftPresentation } from "./production/craftPresentation";
 import { passiveCraftQuantityLabel } from "./production/passiveCraftPresentation";
 import { evaluateCraftEligibility } from "./production/toolEligibility";
 
-function formatObservedSince(value: unknown): string {
-  const observedAt = new Date(String(value));
-  return Number.isFinite(observedAt.getTime())
-    ? observedAt.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
-    : "tracking became available";
-}
-
 function passiveCraftItem(row: AnyRecord): AnyRecord | null {
   const itemId = String(row.outputItemId ?? "").trim();
   const itemType = row.outputItemType === "item" || row.outputItemType === "cargo"
@@ -46,7 +39,7 @@ export function MemberPassiveCrafts({ rows }: { rows: AnyRecord[] }) {
       <div className="split-header">
         <div className="dashboard-section-heading">
           <h3><Factory size={15} /> Member Passive Crafts</h3>
-          <p>Current settlement passive output joined to its member and structure by the Relay.</p>
+          <p>Current settlement passive output for settlement members and structures.</p>
         </div>
       </div>
       {rows.length === 0 ? <div className="empty-state"><Factory />No current passive crafts reported for this settlement.</div> : null}
@@ -60,7 +53,7 @@ export function MemberPassiveCrafts({ rows }: { rows: AnyRecord[] }) {
         ["Structure", (row) => row.structure],
         ["Status", (row) => <span className={`status-pill ${row.status === "complete" ? "complete" : ""}`}>{formatEquipmentSlot(row.status)}</span>],
         ["Quantity", (row) => passiveCraftQuantityLabel(row.quantity)],
-        ["Latest", (row) => row.timestamp ? timeAgo(row.timestamp) : "Current Relay snapshot"],
+        ["Latest", (row) => row.timestamp ? timeAgo(row.timestamp) : "Current snapshot"],
       ]} /> : null}
     </section>
   );
@@ -138,7 +131,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
       .then((response) => (
         response.ok
           ? response.json()
-          : Promise.reject(new Error(`Relay player inventory HTTP ${response.status}`))
+          : Promise.reject(new Error(`Player inventory HTTP ${response.status}`))
       ))
       .then((payload) => {
         const inventory = payload?.domains?.inventory?.data ?? null;
@@ -255,7 +248,6 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
         <MiniStat icon={<TrendingUp />} label="Total XP" value={formatNumber(totalProductionXp)} />
         <MiniStat icon={<Star />} label="XP Remaining" value={formatNumber(remainingProductionXp)} />
       </div>
-      <small className="production-observation-note">Contributor activity is observed from {data.contributionObservedSince ? formatObservedSince(data.contributionObservedSince) : "when tracking became available"}. Inferred names were joined from related Relay data.</small>
       <div className="command-filter-panel" data-tour="production-controls">
         <div className="command-filter-main">
           <span className="command-filter-title"><Wrench size={15} /> Production controls</span>
@@ -303,7 +295,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
       </div>
       {selectedMember ? <div className="production-member-banner"><User size={15} /><span>Checking jobs for</span><strong><TrackedOwnerName name={selectedMember.userName ?? selectedMember.username} claim={data.claim} members={data.members} /></strong><small>Requires skill level and a suitable Toolbelt tool. A tool can craft one tier above its own tier; power controls effort per action.</small></div> : null}
       {data.crafts.length === 0 ? <div className="empty-state"><Factory />No crafting jobs are currently active.</div> : null}
-      {unknownVisibilityCrafts > 0 ? <div className="empty-state"><AlertTriangle />Craft visibility is unavailable for {unknownVisibilityCrafts} job{unknownVisibilityCrafts === 1 ? "" : "s"}; unknown jobs stay hidden until the public-crafts marker is ready.</div> : null}
+      {unknownVisibilityCrafts > 0 ? <div className="empty-state"><AlertTriangle />Craft details are unavailable for {unknownVisibilityCrafts} job{unknownVisibilityCrafts === 1 ? "" : "s"}; those jobs stay hidden until their visibility is confirmed.</div> : null}
       {data.crafts.length > 0 && visibleCrafts.length === 0 && unknownVisibilityCrafts === 0 ? <div className="empty-state"><Lock />Private crafts are hidden by your Production controls.</div> : null}
       <div className="production-grid">
         {jobs.map((job, index) => {
@@ -323,7 +315,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
           return (
             <article className={`production-card ${isWorking ? "active-work" : ""} ${eligibilityStatus?.ok ? "can-craft" : ""}`} key={job.entityId ?? index}>
               <header>
-                <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}{job.isPublic === false ? <span className="private-craft-pill" title="Private craft returned by the provider's member-scoped craft data."><Lock size={11} /> Private</span> : null}</strong><span><TrackedOwnerName name={job.ownerUsername ?? "Unknown"} claim={data.claim} members={data.members} /></span></div>
+                <div><Factory size={15} /><strong>{job.buildingName ?? "Unknown Structure"}{job.isPublic === false ? <span className="private-craft-pill" title="Private craft available to settlement members."><Lock size={11} /> Private</span> : null}</strong><span><TrackedOwnerName name={job.ownerUsername ?? "Unknown"} claim={data.claim} members={data.members} /></span></div>
                 <p><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
@@ -350,7 +342,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
                       return <span key={person.contributorEntityId ?? `unknown:${job.entityId}`}><strong><TrackedOwnerName name={contributorName} claim={data.claim} members={data.members} /></strong> {formatDecimalQuantity(person.totalProgressContributed)} progress - {formatDecimalQuantity(person.totalXpContributed)} XP {person.attributionConfidence === "matched_action" ? <small>Matched action</small> : person.attributionConfidence === "owner_fallback" ? <small>Craft owner</small> : null}</span>;
                     })}
                   </div>
-                ) : data.contributionObservedSince ? <small>No contributor activity has been observed since {formatObservedSince(data.contributionObservedSince)}.</small> : <small>No contributor activity has been observed since tracking became available.</small>}
+                ) : <small>No contribution activity recorded.</small>}
               </section>
             </article>
           );
