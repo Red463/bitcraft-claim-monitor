@@ -589,3 +589,56 @@ test("primary-region runtime stops a session whose startup rejects", async () =>
   }), /connection failed/);
   assert.equal(stopped, true);
 });
+
+test("primary-region reconnects only for disconnected or errored subscription health", async () => {
+  let now = 0;
+  const healthStates = [
+    { connected: false, applied: true, lastAppliedAt: "2026-08-08T10:00:00.000Z", lastError: null },
+    { connected: true, applied: true, lastAppliedAt: "2026-08-08T10:00:00.000Z", lastError: "socket failed" },
+    { connected: true, applied: true, lastAppliedAt: "2026-08-08T10:00:00.000Z", lastError: null },
+  ];
+  const sessions = [];
+  const runtime = new runtimeModule.RelayPrimaryRegionRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    now: () => now,
+    topologyRefreshMs: 60_000,
+    reconnectDelayMs: () => 1_000,
+    discoverTopology: async () => topology(),
+    createSession: () => {
+      const index = sessions.length;
+      const session = {
+        stopped: false,
+        async start() {},
+        updateContributionScope() {},
+        health: () => healthStates[index],
+        async stop() { session.stopped = true; },
+      };
+      sessions.push(session);
+      return session;
+    },
+    currentStateRepository: {
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+  });
+  const config = {
+    claimId: "100",
+    regionId: "19",
+    members: [{ playerEntityId: "101", userName: "Ada" }],
+  };
+
+  await runtime.start({ relayBaseUrl: "https://relay.example", ...config });
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 2, "disconnected health must restart");
+
+  now = 999;
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 2, "reconnect attempts must respect backoff");
+
+  now = 1_000;
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 3, "subscription errors must restart after backoff");
+
+  await runtime.reconcile(config);
+  assert.equal(sessions.length, 3, "healthy idle subscriptions must not restart");
+});

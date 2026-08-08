@@ -66,6 +66,7 @@ import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/s
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import {
+  createScheduledRelayReconciler,
   readRelayClaimBuildingsForPlanning,
   readRelayClaimForSupplyReport,
   readRelayCraftsForDiscord,
@@ -516,6 +517,7 @@ const relayGlobalCatalogRuntime = new RelayGlobalCatalogRuntime({
 const relayPrimaryRegionRuntime = new RelayPrimaryRegionRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
+  reconnectDelayMs: relayReconnectDelayMs,
 });
 const relayRegionClaimsRuntime = new RelayRegionClaimsRuntime({
   manifest: relayBindingManifest,
@@ -529,6 +531,7 @@ const relayMarketTransitionWriter = createRelayMarketTransitionWriter(db, {
 const relayClaimMarketRuntime = new RelayClaimMarketRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
+  reconnectDelayMs: relayReconnectDelayMs,
   onSnapshotCommitted: ({ claimId, previousData, currentData, observedAt }) => (
     relayMarketTransitionWriter.apply({
       claimId,
@@ -552,19 +555,6 @@ const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
 const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
-  onSnapshotCommitted: ({
-    claimId,
-    previousData,
-    currentData,
-    observedAt,
-  }) => relayMarketTransitionWriter.apply({
-    claimId,
-    previous: previousData == null
-      ? null
-      : regionalMarketTransitionSnapshot(claimId, previousData),
-    current: regionalMarketTransitionSnapshot(claimId, currentData),
-    observedAt,
-  }),
   onCurrentPublished: ({
     claimId,
     currentData,
@@ -1561,36 +1551,6 @@ function enrichMarketSnapshot(claimId, data) {
     getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
     claim,
   }).data;
-}
-
-function regionalMarketTransitionSnapshot(claimId, data) {
-  const source = data && typeof data === "object" && !Array.isArray(data) ? data : {};
-  const listings = (Array.isArray(source.orders) ? source.orders : []).map((order) => {
-    const itemType = String(order?.itemType ?? "").toLowerCase() === "cargo"
-      ? "cargo"
-      : "item";
-    const itemId = String(order?.itemId ?? "").trim();
-    const entity = providerCatalogRepository.getEntity(
-      `${itemType === "cargo" ? "cargo" : "items"}:${itemId}`,
-    );
-    return {
-      ...order,
-      itemType,
-      itemId,
-      itemName: String(entity?.name ?? `${itemType === "cargo" ? "Cargo" : "Item"} #${itemId}`),
-      itemTier: entity?.tier ?? null,
-      itemRarityStr: entity?.rarity ?? entity?.rarityStr ?? null,
-    };
-  });
-  const activeRegionIds = Array.isArray(source.activeRegionIds)
-    ? source.activeRegionIds.map(String).filter((regionId) => /^\d+$/.test(regionId))
-    : [];
-  return {
-    claimId: String(claimId),
-    regionId: activeRegionIds[0] ?? String(getSettings().defaultRegion ?? "0"),
-    listings,
-    closedListings: Array.isArray(source.closedListings) ? source.closedListings : [],
-  };
 }
 
 function currentMarketProjection(claimId) {
@@ -9624,12 +9584,18 @@ function startBackgroundTasks() {
         if (!isTestRuntime) console.warn(`Relay provider refresh failed: ${errorMessage(error)}`);
       }
     };
+    const relayRuntimeReconciler = createScheduledRelayReconciler({
+      reconcile: refreshRelay,
+    });
     requestRelayRuntimeRefresh = (reason = "manual") => {
-      void refreshRelay(reason);
+      void relayRuntimeReconciler.request(reason);
     };
-    void refreshRelay("scheduled");
+    void relayRuntimeReconciler.request("scheduled");
     if (!relayProviderRefreshTimer) {
-      relayProviderRefreshTimer = setInterval(() => void refreshRelay(), relayHttpRefreshMs);
+      relayProviderRefreshTimer = setInterval(
+        () => void relayRuntimeReconciler.request("scheduled"),
+        relayHttpRefreshMs,
+      );
       relayProviderRefreshTimer.unref?.();
     }
     if (process.env.ENABLE_RELAY_GLOBAL_CATALOG !== "false") {

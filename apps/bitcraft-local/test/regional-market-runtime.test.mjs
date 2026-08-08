@@ -563,7 +563,7 @@ test("regional market runtime preserves exact decimal region provenance", async 
   await runtime.stop();
 });
 
-test("regional market runtime retains and retries a failed transition edge", async () => {
+test("regional market runtime never retries settlement transition writers", async () => {
   let handler;
   let retryTransition;
   let attempts = 0;
@@ -623,20 +623,12 @@ test("regional market runtime retains and retries a failed transition edge", asy
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(attempts, 1);
-  assert.equal(runtime.health().transition.pending, 1);
-  assert.equal(runtime.health().transition.lastError, "history disk temporarily unavailable");
-  assert.equal(typeof retryTransition, "function");
-
-  retryTransition();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(attempts, 2);
-  assert.equal(runtime.health().transition.pending, 0);
-  assert.equal(runtime.health().transition.lastError, null);
+  assert.equal(attempts, 0);
+  assert.equal(retryTransition, undefined);
   await runtime.stop();
 });
 
-test("regional market runtime recovers a durable transition edge after restart", async () => {
+test("regional market runtime never persists or recovers settlement transition edges", async () => {
   let handler;
   let generation = 0;
   let pending = [];
@@ -711,16 +703,8 @@ test("regional market runtime recovers a durable transition edge after restart",
     receivedAt: "2026-07-30T12:01:00.000Z",
   });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(firstAttempts, 1);
-  assert.equal(pending.length, 1);
-  assert.deepEqual(
-    pending[0].payload.previousData.orders.map((entry) => entry.entityId),
-    ["190"],
-  );
-  assert.deepEqual(
-    pending[0].payload.currentData.orders.map((entry) => entry.entityId),
-    ["191"],
-  );
+  assert.equal(firstAttempts, 0);
+  assert.equal(pending.length, 0);
   await firstRuntime.stop();
 
   const restartedRuntime = new runtimeModule.RelayRegionalMarketRuntime({
@@ -731,13 +715,12 @@ test("regional market runtime recovers a durable transition edge after restart",
   });
   await restartedRuntime.start(config);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(recoveredAttempts, 1);
+  assert.equal(recoveredAttempts, 0);
   assert.deepEqual(pending, []);
-  assert.equal(restartedRuntime.health().transition.pending, 0);
   await restartedRuntime.stop();
 });
 
-test("regional market runtime reports malformed durable transition rows", async () => {
+test("regional market runtime ignores legacy durable settlement transition rows", async () => {
   let recordedError = null;
   const runtime = new runtimeModule.RelayRegionalMarketRuntime({
     manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
@@ -774,13 +757,11 @@ test("regional market runtime reports malformed durable transition rows", async 
     activeRegionIds: ["19"],
   });
   await Promise.resolve();
-  assert.match(recordedError, /Invalid persisted regional-market transition/);
-  assert.equal(runtime.health().transition.pending, 1);
-  assert.equal(runtime.health().transition.poisoned, 1);
+  assert.equal(recordedError, null);
   await runtime.stop();
 });
 
-test("regional market Deal Watch failures do not block durable transition history", async () => {
+test("regional market publishes Deal Watch data without writing settlement history", async () => {
   let handler;
   let historyWrites = 0;
   const runtime = new runtimeModule.RelayRegionalMarketRuntime({
@@ -834,9 +815,7 @@ test("regional market Deal Watch failures do not block durable transition histor
     receivedAt: "2026-07-30T12:01:00.000Z",
   });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(historyWrites, 1);
-  assert.equal(runtime.health().transition.pending, 0);
-  assert.equal(runtime.health().transition.lastError, null);
+  assert.equal(historyWrites, 0);
   assert.equal(runtime.health().currentPublished.lastError, "Deal Watch unavailable");
   await runtime.stop();
 });

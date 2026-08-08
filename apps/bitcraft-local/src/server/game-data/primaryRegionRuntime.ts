@@ -46,6 +46,7 @@ type RuntimeDependencies = {
   createSession?: RegionalSessionFactory;
   now?: () => number;
   topologyRefreshMs?: number;
+  reconnectDelayMs?: (failureCount: number) => number;
 };
 
 function memberId(member: Member): string {
@@ -119,6 +120,7 @@ export class RelayPrimaryRegionRuntime {
   readonly #createSession: RegionalSessionFactory;
   readonly #now: () => number;
   readonly #topologyRefreshMs: number;
+  readonly #reconnectDelayMs: (failureCount: number) => number;
   #session: RegionalSession | null = null;
   #relayBaseUrl: string | null = null;
   #claimId: string | null = null;
@@ -137,6 +139,8 @@ export class RelayPrimaryRegionRuntime {
   #lastError: string | null = null;
   #lastTopologyCheckedAt = 0;
   #reconcileInFlight: Promise<void> | null = null;
+  #connectionFailures = 0;
+  #nextReconnectAt = 0;
 
   constructor(dependencies: RuntimeDependencies) {
     this.#manifest = dependencies.manifest;
@@ -147,6 +151,7 @@ export class RelayPrimaryRegionRuntime {
       ?? ((options) => new RelayPrimaryRegionPlayerSession(options));
     this.#now = dependencies.now ?? Date.now;
     this.#topologyRefreshMs = dependencies.topologyRefreshMs ?? 60_000;
+    this.#reconnectDelayMs = dependencies.reconnectDelayMs ?? (() => 1_000);
   }
 
   async start(config: {
@@ -187,6 +192,12 @@ export class RelayPrimaryRegionRuntime {
     const sameScope = session
       && claimId === this.#claimId
       && nextSignature === this.#membershipSignature;
+    const health = session?.health();
+    const unhealthy = Boolean(sameScope && (
+      health?.connected === false
+      || health?.lastError
+      || this.#lastError
+    ));
     if (sameScope && nextContributionSignature !== this.#contributionSignature) {
       session.updateContributionScope(
         contributionTargets,
@@ -194,13 +205,24 @@ export class RelayPrimaryRegionRuntime {
       );
       this.#contributionSignature = nextContributionSignature;
     }
+    if (sameScope && unhealthy && this.#now() < this.#nextReconnectAt) {
+      return Promise.resolve();
+    }
+    if (sameScope && unhealthy) {
+      this.#connectionFailures += 1;
+      this.#nextReconnectAt = this.#now() + this.#reconnectDelayMs(this.#connectionFailures);
+    } else if (sameScope) {
+      this.#connectionFailures = 0;
+      this.#nextReconnectAt = 0;
+    }
     if (
       sameScope
+      && !unhealthy
       && this.#now() - this.#lastTopologyCheckedAt < this.#topologyRefreshMs
     ) return Promise.resolve();
     if (this.#reconcileInFlight) return this.#reconcileInFlight;
     const reconcile = (async () => {
-      if (sameScope) {
+      if (sameScope && !unhealthy) {
         const relayBaseUrl = this.#relayBaseUrl;
         if (!relayBaseUrl) throw new Error("Relay primary-region runtime is not configured");
         const topology = await this.#discoverTopology(relayBaseUrl, {
@@ -442,5 +464,7 @@ export class RelayPrimaryRegionRuntime {
     this.#session = null;
     this.#membershipSignature = null;
     this.#contributionSignature = null;
+    this.#connectionFailures = 0;
+    this.#nextReconnectAt = 0;
   }
 }

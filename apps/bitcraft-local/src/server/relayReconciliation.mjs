@@ -188,3 +188,38 @@ export async function runIndependentReconciliation({ runMaintenance, runSupplyRe
     supplyError: supply.error,
   };
 }
+
+export function createScheduledRelayReconciler({
+  reconcile,
+  timeoutMs = 180_000,
+  terminate = (error) => {
+    console.error(error.message);
+    process.exit(1);
+  },
+  scheduleTimeout = (callback, delayMs) => setTimeout(callback, delayMs),
+  cancelTimeout = (timer) => clearTimeout(timer),
+}) {
+  if (typeof reconcile !== "function") {
+    throw new TypeError("Scheduled Relay reconciler requires a reconcile function");
+  }
+  let inFlight = null;
+  return {
+    request(reason = "scheduled") {
+      if (inFlight) return inFlight;
+      const startedAt = new Date().toISOString();
+      const timeout = scheduleTimeout(() => {
+        terminate(new Error(
+          `Relay reconciliation stalled for ${timeoutMs}ms (reason=${reason}, startedAt=${startedAt}); terminating worker for systemd restart`,
+        ));
+      }, timeoutMs);
+      timeout?.unref?.();
+      const operation = Promise.resolve(reconcile(reason));
+      const tracked = operation.finally(() => {
+        cancelTimeout(timeout);
+        if (inFlight === tracked) inFlight = null;
+      });
+      inFlight = tracked;
+      return inFlight;
+    },
+  };
+}
