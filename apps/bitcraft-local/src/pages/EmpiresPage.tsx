@@ -20,6 +20,7 @@ import { DepositsPanel } from "./empires/DepositsPanel";
 import { SiegeDetailsDialog } from "./empires/SiegeDetailsDialog";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
+import { pageRefreshShowsRetainedDataProgress } from "../refresh/pageRefresh.mjs";
 
 const LOCAL_API = "/api/local";
 
@@ -97,6 +98,7 @@ function distanceLabel(distance: number | null): string {
 
 function ClaimMembersDialog({ claim, generation, onBack }: { claim: AnyRecord; generation: number; onBack: () => void }) {
   const { request, trackPromise } = useManualRefresh();
+  const showRefreshProgress = pageRefreshShowsRetainedDataProgress(request);
   const [state, setState] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: true, error: null });
   const [rankFilters, setRankFilters] = React.useState<string[]>([]);
   React.useEffect(() => {
@@ -130,7 +132,7 @@ function ClaimMembersDialog({ claim, generation, onBack }: { claim: AnyRecord; g
         </div>
       ) : null}
       {state.loading && !state.data ? <AppSkeleton /> : null}
-      {state.loading && state.data ? <AsyncState kind="loading" title="Refreshing claim members" detail="Current members remain visible." compact /> : null}
+      {state.loading && state.data && showRefreshProgress ? <AsyncState kind="loading" title="Refreshing claim members" detail="Current members remain visible." compact /> : null}
       {state.error ? <AsyncState kind="error" title="Unable to refresh claim members" detail={state.error} compact /> : null}
       {state.data?.stale ? <AsyncState kind="stale" title="Showing last-good claim members" detail={staleRelayDetail(state.data)} compact /> : null}
       {state.data ? (
@@ -250,6 +252,7 @@ export function Empires({
   access?: EffectiveAccess | null;
 }) {
   const { request, trackPromise } = useManualRefresh();
+  const showRefreshProgress = pageRefreshShowsRetainedDataProgress(request);
   const empireGeneration = useGameDataGeneration(monitoredClaimId, ["empires"]);
   const initialRegion = monitoredRegionId && /^\d+$/.test(String(monitoredRegionId)) ? String(monitoredRegionId) : "19";
   const [tab, setTab] = usePersistedState<EmpireTab>("empires.tab", "overview");
@@ -459,11 +462,11 @@ export function Empires({
             <MiniStat icon={<Users />} label="Total members" value={formatNumber(overviewSummary.totalMembers)} />
             <MiniStat icon={<Crown />} label="Largest empire" value={largestEmpire} />
           </div>
-          {overview.loading && overview.data ? <AsyncState kind="loading" title="Refreshing regional empires" detail="Current empire rows remain visible." compact /> : null}
+          {overview.loading && overview.data && showRefreshProgress ? <AsyncState kind="loading" title="Refreshing regional empires" detail="Current empire rows remain visible." compact /> : null}
           {overview.error ? <AsyncState kind="error" title="Unable to refresh regional empires" detail={overview.error} compact /> : null}
           {overview.data?.stale ? <AsyncState kind="stale" title="Showing last-good Empire data" detail={staleRelayDetail(overview.data)} compact /> : null}
           <section className="dashboard-card table-panel">
-            <div className="panel-head"><strong><Landmark size={15} /> Regional empires</strong><span>{overview.loading ? "Refreshing..." : `${formatNumber(overviewRows.length)} shown`}</span></div>
+            <div className="panel-head"><strong><Landmark size={15} /> Regional empires</strong><span>{overview.loading && showRefreshProgress ? "Refreshing..." : `${formatNumber(overviewRows.length)} shown`}</span></div>
             <p className="hexite-reserve-note"><Zap size={14} /> Live known minimum includes the Empire treasury, completed Foundry Capsules, and bounded configured-region player and claim inventories; incomplete regional coverage remains explicit.</p>
             <DataTable rows={overviewRows} columns={overviewColumns} scrollLabel="Regional empires table" emptyState={<AsyncState kind="empty" title="No regional empires returned" detail="Try another active region." compact />} />
           </section>
@@ -489,7 +492,7 @@ export function Empires({
             </div>
             <label className="field compact-field"><span>Days offline</span><input value={inactiveDays} onChange={(event) => setInactiveDays(event.target.value.replace(/\D/g, "").slice(0, 3) || "1")} /></label>
           </section>
-          {watchtowers.loading && watchtowers.data ? <AsyncState kind="loading" title="Refreshing claimed watchtowers" detail="Current tower rows remain visible." compact /> : null}
+          {watchtowers.loading && watchtowers.data && showRefreshProgress ? <AsyncState kind="loading" title="Refreshing claimed watchtowers" detail="Current tower rows remain visible." compact /> : null}
           {watchtowers.error ? <AsyncState kind="error" title="Unable to refresh claimed watchtowers" detail={watchtowers.error} compact /> : null}
           {watchtowers.data?.stale ? <AsyncState kind="stale" title="Showing last-good watchtower data" detail={staleRelayDetail(watchtowers.data)} compact /> : null}
           {Array.isArray(watchtowers.data?.errors) && watchtowers.data.errors.length ? <div className="warning-card">Some empire tower scans failed: {watchtowers.data.errors.slice(0, 3).join("; ")}</div> : null}
@@ -522,7 +525,7 @@ export function Empires({
             )}
           </section>
           <section className="dashboard-card table-panel" data-tour="watchtower-card">
-            <div className="panel-head watchtower-panel-head"><strong><RadioTower size={15} /> Claimed watchtowers</strong><span>{watchtowers.loading ? "Refreshing..." : visibleTowerRows.length === towerRows.length ? `${formatNumber(towerRows.length)} shown` : `${formatNumber(visibleTowerRows.length)} of ${formatNumber(towerRows.length)} shown`}</span></div>
+            <div className="panel-head watchtower-panel-head"><strong><RadioTower size={15} /> Claimed watchtowers</strong><span>{watchtowers.loading && showRefreshProgress ? "Refreshing..." : visibleTowerRows.length === towerRows.length ? `${formatNumber(towerRows.length)} shown` : `${formatNumber(visibleTowerRows.length)} of ${formatNumber(towerRows.length)} shown`}</span></div>
             <div className="watchtower-filter-bar">
               <div className="watchtower-empire-filter" aria-label="Filter watchtowers by empire">
                 {watchtowerEmpireFilters.map((filter) => (

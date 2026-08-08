@@ -45,3 +45,10 @@ test("Leaderboard describes Relay current data without legacy provider coupling"
   assert.match(leaderboardPage, /current Relay member and player data/);
   assert.doesNotMatch(leaderboardPage, /bitjita/i);
 });
+
+test("Leaderboard shows retained-data refresh progress only for manual cycles", () => {
+  assert.match(leaderboardPage, /pageRefreshShowsRetainedDataProgress/);
+  assert.match(leaderboardPage, /const showRefreshProgress = pageRefreshShowsRetainedDataProgress\(request\)/);
+  assert.match(leaderboardPage, /state\.loading && state\.data && showRefreshProgress \? <AsyncState kind="loading" title="Refreshing contribution history"/);
+  assert.doesNotMatch(leaderboardPage, /\{state\.loading \? <AsyncState kind="loading" title="Refreshing contribution history"/);
+});

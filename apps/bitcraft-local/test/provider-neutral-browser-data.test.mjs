@@ -15,6 +15,7 @@ test("claim overview, Members, Professions, and Leaderboard request provider-neu
     "market",
     "research",
     "crafts",
+    "region",
     "region-claims",
   ]);
   assert.deepEqual(pageDomains("members"), [

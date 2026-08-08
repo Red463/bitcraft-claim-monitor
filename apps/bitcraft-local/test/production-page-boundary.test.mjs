@@ -69,7 +69,7 @@ test("Production crafter filters wrap within phone-width control panels", () => 
   );
 });
 
-test("production page defaults private crafts to hidden while explaining unknown visibility", () => {
+test("production page defaults private crafts to hidden with operational empty states", () => {
   const source = readFileSync(new URL("../src/pages/ProductionPage.tsx", import.meta.url), "utf8");
 
   assert.match(source, /usePersistedState\("production\.showPrivateCrafts", false\)/);
@@ -83,8 +83,9 @@ test("production page defaults private crafts to hidden while explaining unknown
   assert.match(source, /formatDecimalQuantity\(person\.totalXpContributed\)/);
   assert.match(source, /person\.attributionConfidence === "matched_action" \? <small>Matched action<\/small>/);
   assert.match(source, /key=\{person\.contributorEntityId \?\? `unknown:\$\{job\.entityId\}`\}/);
-  assert.match(source, /No contributor activity has been observed since \{formatObservedSince\(data\.contributionObservedSince\)\}\./);
-  assert.match(source, /No contributor activity has been observed since tracking became available\./);
+  assert.match(source, /No contribution activity recorded\./);
+  assert.doesNotMatch(source, /production-observation-note/);
+  assert.doesNotMatch(source, /formatObservedSince/);
 });
 
 test("Craft Monitor mounts item icons for known compound identities without catalog icon metadata", () => {
@@ -97,7 +98,7 @@ test("Craft Monitor mounts item icons for known compound identities without cata
   assert.doesNotMatch(source, /presentation\.iconAssetName \? <ItemIcon item=\{item\} \/> : null/);
 });
 
-test("normalizeData preserves contribution map consumers while exposing the observation window", async () => {
+test("normalizeData retains contribution observation metadata for diagnostics", async () => {
   const { normalizeData } = await import(new URL("../src/utils/normalize.ts", import.meta.url).href);
   const normalized = normalizeData({
     contributions: {

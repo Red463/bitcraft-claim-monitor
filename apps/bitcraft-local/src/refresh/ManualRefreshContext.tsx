@@ -1,60 +1,52 @@
 import React from "react";
 
-import { manualRefreshApplies } from "./manualRefresh.mjs";
+import type { PageRefreshCycle, PageRefreshTaskCoordinator } from "./pageRefresh.mjs";
 
-export type ManualRefreshRequest = {
-  id: string;
-  page: string;
-  sequence: number;
-  requestedAt: number;
-};
+export type ManualRefreshRequest = PageRefreshCycle;
 
-type ManualRefreshCoordinator = {
-  beginTask: (requestId: string, taskKey: string) => (error?: unknown) => void;
-};
-
-type ManualRefreshContextValue = {
-  request: ManualRefreshRequest | null;
+type PageRefreshContextValue = {
+  cycle: PageRefreshCycle | null;
+  /** Compatibility alias for page modules that still name the cycle request. */
+  request: PageRefreshCycle | null;
   trackPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T>;
 };
 
-const ManualRefreshContext = React.createContext<ManualRefreshContextValue>({
+const PageRefreshContext = React.createContext<PageRefreshContextValue>({
+  cycle: null,
   request: null,
   trackPromise: (_taskKey, promise) => promise,
 });
 
-export function ManualRefreshProvider({
+export function PageRefreshProvider({
   page,
-  request,
+  cycle,
   coordinator,
   children,
 }: {
   page: string;
-  request: ManualRefreshRequest | null;
-  coordinator: ManualRefreshCoordinator;
+  cycle: PageRefreshCycle | null;
+  coordinator: PageRefreshTaskCoordinator;
   children: React.ReactNode;
 }) {
-  const activeRequest = manualRefreshApplies(request, page) ? request : null;
-  const value = React.useMemo<ManualRefreshContextValue>(() => ({
-    request: activeRequest,
+  const activeCycle = cycle?.id && cycle.page === page ? cycle : null;
+  const value = React.useMemo<PageRefreshContextValue>(() => ({
+    cycle: activeCycle,
+    request: activeCycle,
     trackPromise: <T,>(taskKey: string, promise: Promise<T>) => {
-      if (!activeRequest) return promise;
-      const finish = coordinator.beginTask(activeRequest.id, taskKey);
-      return promise
-        .then((result) => {
-          finish();
-          return result;
-        })
-        .catch((error) => {
-          finish(error);
-          throw error;
-        });
+      if (!activeCycle) return promise;
+      return coordinator.trackPromise(activeCycle.id, taskKey, promise);
     },
-  }), [activeRequest, coordinator]);
+  }), [activeCycle, coordinator]);
 
-  return <ManualRefreshContext.Provider value={value}>{children}</ManualRefreshContext.Provider>;
+  return <PageRefreshContext.Provider value={value}>{children}</PageRefreshContext.Provider>;
 }
 
-export function useManualRefresh() {
-  return React.useContext(ManualRefreshContext);
+export function usePageRefresh() {
+  return React.useContext(PageRefreshContext);
 }
+
+export const ManualRefreshProvider = ({ request, ...props }: Omit<React.ComponentProps<typeof PageRefreshProvider>, "cycle"> & { request: PageRefreshCycle | null }) => (
+  <PageRefreshProvider {...props} cycle={request} />
+);
+
+export const useManualRefresh = usePageRefresh;

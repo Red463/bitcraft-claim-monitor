@@ -1,7 +1,8 @@
 import React from "react";
 
 import type { AnyRecord } from "../main-app-data";
-import { useGameDataGeneration } from "./useGameDataGeneration";
+import { usePageRefresh } from "../refresh/ManualRefreshContext";
+import { pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
 
 const LOCAL_API = "/api/local";
 
@@ -33,13 +34,17 @@ export function useActiveRegions(includeRegionId?: string, claimId?: string, sco
     scopeIdentity,
     regions: [],
   });
-  const generation = useGameDataGeneration(String(claimId ?? ""), ["region"]);
+  const { cycle, trackPromise } = usePageRefresh();
   React.useEffect(() => {
     const controller = new AbortController();
     let disposed = false;
     const include = includeRegionId && /^\d+$/.test(String(includeRegionId)) ? `?include=${encodeURIComponent(String(includeRegionId))}` : "";
-    fetch(`${LOCAL_API}/regions/active${include}`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`active regions HTTP ${response.status}`)))
+    const refresh = fetch(`${LOCAL_API}/regions/active${include}`, {
+      headers: cycle ? pageRefreshHeaders(cycle, cycle.page) : {},
+      signal: controller.signal,
+    })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`active regions HTTP ${response.status}`)));
+    void trackPromise("active-regions", refresh)
       .then((payload) => {
         if (disposed) return;
         const rows = Array.isArray(payload.regions) ? payload.regions : [];
@@ -67,6 +72,6 @@ export function useActiveRegions(includeRegionId?: string, claimId?: string, sco
       disposed = true;
       controller.abort();
     };
-  }, [generation, scopeIdentity]);
+  }, [cycle?.sequence, scopeIdentity, trackPromise]);
   return state.scopeIdentity === scopeIdentity ? state.regions : [];
 }

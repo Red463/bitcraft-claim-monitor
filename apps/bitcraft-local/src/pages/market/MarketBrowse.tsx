@@ -8,6 +8,7 @@ import { RarityBadge, TierBadge } from "../../components/main/Badges";
 import { MiniStat } from "../../components/main/Stats";
 import { toNumber, type AnyRecord } from "../../main-app-data";
 import { updateQueryState } from "../../navigation";
+import { createDelayedRefreshTask } from "../../refresh/pageRefresh.mjs";
 import { formatCompactNumber, formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
 import type { MapFocus } from "../map/mapUtils";
 import type { MarketItemKey, MarketRefreshProps } from "./globalMarket";
@@ -89,7 +90,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       return;
     }
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
+    const refresh = createDelayedRefreshTask(() => {
       const catalogUrl = marketBrowseSearchUrl({
         query,
         regionId: regionId || "all",
@@ -100,20 +101,21 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
         sort: catalogSort,
       });
       setCatalogState((current) => ({ ...current, loading: true, error: "" }));
-      trackRefresh("global-market-catalog", fetch(catalogUrl, { headers: refreshHeaders, signal: controller.signal }))
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
-        .then((payload) => {
-          const items = Array.isArray(payload.items) ? payload.items : [];
-          const categories = Array.isArray(payload.categories) ? payload.categories.map(String) : [];
-          setSuggestions(items.slice(0, 12));
-          setCatalogState({ loading: false, error: "", categories });
-        })
-        .catch((error) => {
-          if (!controller.signal.aborted) setCatalogState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
-        });
+      return fetch(catalogUrl, { headers: refreshHeaders, signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)));
     }, 220);
+    trackRefresh("global-market-catalog", refresh.promise)
+      .then((payload) => {
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        const categories = Array.isArray(payload.categories) ? payload.categories.map(String) : [];
+        setSuggestions(items.slice(0, 12));
+        setCatalogState({ loading: false, error: "", categories });
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setCatalogState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
+      });
     return () => {
-      window.clearTimeout(timer);
+      refresh.cancel();
       controller.abort();
     };
   }, [availableOnly, catalogSort, category, generationSequence, hasBuy, hasSell, query, refreshSequence, regionId, selectedItem?.name]);

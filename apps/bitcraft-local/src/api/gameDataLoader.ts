@@ -1,10 +1,9 @@
 import React from "react";
 
 import type { AnyRecord } from "../main-app-data";
-import type { ManualRefreshRequest } from "../refresh/ManualRefreshContext";
-import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
+import type { PageRefreshCycle } from "../refresh/pageRefresh.mjs";
+import { pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
 import type { ActivePanel, LoadState } from "../types/app";
-import { useGameDataGeneration } from "../hooks/useGameDataGeneration";
 import { loadGameData } from "./gameData.ts";
 import { pageDomains } from "./pageDomains.ts";
 
@@ -40,17 +39,15 @@ function loadedState(data: AnyRecord): LoadState<AnyRecord> {
 }
 
 export function useGameData(
-  refreshToken: number,
   claimId: string,
   activePanel: ActivePanel,
-  manualRefreshRequest: ManualRefreshRequest | null = null,
-  trackManualRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (
+  pageRefreshCycle: PageRefreshCycle | null,
+  trackPageRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (
     _taskKey,
     promise,
   ) => promise,
 ): LoadState<AnyRecord> {
   const domains = pageDomains(activePanel);
-  const generation = useGameDataGeneration(claimId, domains);
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
     error: null,
@@ -58,9 +55,10 @@ export function useGameData(
   });
 
   React.useEffect(() => {
+    if (!pageRefreshCycle || pageRefreshCycle.page !== activePanel) return;
     const cacheKey = `${claimId}:${activePanel}`;
     const cached = pageNavigationCache.get(cacheKey);
-    const manualHeaders = manualRefreshHeaders(manualRefreshRequest, activePanel);
+    const refreshHeaders = pageRefreshHeaders(pageRefreshCycle, activePanel);
     if (domains.length === 0) {
       setState({ data: null, loading: false, error: null });
       return;
@@ -84,7 +82,7 @@ export function useGameData(
           claimId,
           domains,
           fetch,
-          { headers: { ...manualHeaders }, signal: controller.signal },
+          { headers: { ...refreshHeaders }, signal: controller.signal },
         );
         const freshness = freshnessFromPayload(raw);
         pageNavigationCache.set(cacheKey, { data: raw, ...freshness });
@@ -101,7 +99,7 @@ export function useGameData(
         throw error;
       }
     }
-    void trackManualRefreshPromise("main-data", load()).catch(() => {});
+    void trackPageRefreshPromise("main-data", load()).catch(() => {});
     return () => {
       cancelled = true;
       controller.abort();
@@ -109,10 +107,8 @@ export function useGameData(
   }, [
     activePanel,
     claimId,
-    generation,
-    manualRefreshRequest?.sequence,
-    refreshToken,
-    trackManualRefreshPromise,
+    pageRefreshCycle?.sequence,
+    trackPageRefreshPromise,
   ]);
 
   return state;

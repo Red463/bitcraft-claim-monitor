@@ -17,7 +17,7 @@ export function manualRefreshApplies(request, page) {
 }
 
 export function manualRefreshHeaders(request, page) {
-  return manualRefreshApplies(request, page)
+  return manualRefreshApplies(request, page) && (request.reason == null || request.reason === "manual")
     ? { [CLIENT_MANUAL_REFRESH_HEADER]: request.id }
     : {};
 }

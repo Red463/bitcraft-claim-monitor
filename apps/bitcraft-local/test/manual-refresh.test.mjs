@@ -88,8 +88,5 @@ test("React context tracks page promises without swallowing rejections", () => {
   assert.match(context, /ManualRefreshProvider/);
   assert.match(context, /useManualRefresh/);
   assert.match(context, /trackPromise/);
-  assert.match(context, /coordinator\.beginTask/);
-  assert.match(context, /\.then[\s\S]*finish\(\)/);
-  assert.match(context, /\.catch[\s\S]*finish\(error\)/);
-  assert.match(context, /throw error/);
+  assert.match(context, /coordinator\.trackPromise/);
 });

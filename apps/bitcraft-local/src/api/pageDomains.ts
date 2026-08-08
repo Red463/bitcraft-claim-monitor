@@ -34,6 +34,7 @@ export function pageDomains(activePanel: ActivePanel): DomainKey[] {
         "market",
         "research",
         "crafts",
+        "region",
         "region-claims",
       ];
     case "members":
