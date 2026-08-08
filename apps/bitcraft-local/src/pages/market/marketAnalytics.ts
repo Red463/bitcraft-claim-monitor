@@ -35,20 +35,60 @@ export function bestSellerSortValue(row: AnyRecord, sort: BestSellerSortKey): nu
 }
 
 export function buildMarketTopItems(events: AnyRecord[]) {
-  const grouped = new Map<string, { itemName: string; salesCount: number; unitsSold: number; totalValue: number; lastSoldAt: string }>();
+  const grouped = new Map<string, { itemId: string | null; itemType: "item" | "cargo" | null; itemName: string; salesCount: number; unitsSold: number; totalValue: number; lastSoldAt: string }>();
   for (const event of events) {
     const itemName = String(event.item_name ?? event.itemName ?? "Unknown Item");
-    const current = grouped.get(itemName) ?? { itemName, salesCount: 0, unitsSold: 0, totalValue: 0, lastSoldAt: "" };
+    const itemId = String(event.item_id ?? event.itemId ?? "").trim() || null;
+    const rawItemType = String(event.item_type ?? event.itemType ?? "").trim().toLowerCase();
+    const itemType = rawItemType === "cargo" || rawItemType === "1"
+      ? "cargo"
+      : rawItemType === "item" || rawItemType === "0" ? "item" : null;
+    const key = itemId && itemType ? `${itemType}:${itemId}` : `name:${itemName}`;
+    const current = grouped.get(key) ?? { itemId, itemType, itemName, salesCount: 0, unitsSold: 0, totalValue: 0, lastSoldAt: "" };
     current.salesCount += 1;
     current.unitsSold += toNumber(event.quantity);
     current.totalValue += toNumber(event.total_value ?? event.totalValue);
     current.lastSoldAt = String(current.lastSoldAt && current.lastSoldAt > String(event.occurred_at) ? current.lastSoldAt : event.occurred_at ?? "");
-    grouped.set(itemName, current);
+    grouped.set(key, current);
   }
   return [...grouped.values()]
     .map((item) => ({ ...item, avgUnitPrice: item.unitsSold ? item.totalValue / item.unitsSold : 0 }))
     .sort((a, b) => b.unitsSold - a.unitsSold || b.totalValue - a.totalValue)
     .slice(0, 20);
+}
+
+export function buildMarketRangeAnalytics(
+  trades: AnyRecord[],
+  endAt: string | Date | null | undefined,
+  rangeDays: MarketIncomeRangeDays,
+) {
+  const selectedRangeDays = MARKET_INCOME_RANGES.some((range) => range.days === rangeDays)
+    ? rangeDays
+    : 7;
+  const end = parseDateValue(endAt) ?? new Date();
+  const endDay = end.toISOString().slice(0, 10);
+  const start = new Date(`${endDay}T00:00:00.000Z`);
+  start.setUTCDate(start.getUTCDate() - (selectedRangeDays - 1));
+  const startDay = start.toISOString().slice(0, 10);
+  const selectedTrades = trades.filter((trade) => {
+    const occurredAt = parseDateValue(trade.occurred_at ?? trade.occurredAt ?? trade.timestamp);
+    if (!occurredAt) return false;
+    const day = occurredAt.toISOString().slice(0, 10);
+    return day >= startDay && day <= endDay;
+  });
+  return {
+    trades: selectedTrades,
+    topItems: buildMarketTopItems(selectedTrades),
+    daily: buildMarketDaily(selectedTrades),
+    totals: {
+      confirmedSales: selectedTrades.length,
+      confirmedUnits: selectedTrades.reduce((total, trade) => total + toNumber(trade.quantity), 0),
+      trackedValue: selectedTrades.reduce(
+        (total, trade) => total + toNumber(trade.total_value ?? trade.totalValue ?? trade.total_price ?? trade.totalPrice),
+        0,
+      ),
+    },
+  };
 }
 
 export function buildMarketDaily(events: AnyRecord[]) {
@@ -63,14 +103,14 @@ export function buildMarketDaily(events: AnyRecord[]) {
     current.totalValue += toNumber(event.total_value ?? event.totalValue);
     grouped.set(day, current);
   }
-  return [...grouped.values()].sort((a, b) => a.day.localeCompare(b.day)).slice(-30);
+  return [...grouped.values()].sort((a, b) => a.day.localeCompare(b.day));
 }
 
 export function buildMarketIncomeSummary(
   dailyRows: AnyRecord[],
   endAt?: string | Date | null,
   rangeDays: MarketIncomeRangeDays = 7,
-  lifetimeTotal?: number,
+  _lifetimeTotal?: number,
 ) {
   const rows = [...dailyRows]
     .map((row) => ({
@@ -91,13 +131,12 @@ export function buildMarketIncomeSummary(
   requestedStart?.setUTCDate(requestedStart.getUTCDate() - (selectedRangeDays - 1));
   const requestedStartDay = requestedStart?.toISOString().slice(0, 10) ?? null;
   const plottedStartDay = firstDay && requestedStartDay && firstDay > requestedStartDay ? firstDay : requestedStartDay;
+  const selectedRows = requestedStartDay
+    ? rows.filter((row) => row.day >= requestedStartDay && (!lastDay || row.day <= lastDay))
+    : [];
   const cumulativeTrend: Array<{ at: string; value: number }> = [];
-  const totalValue = rows.reduce((total, row) => total + row.totalValue, 0);
-  const resolvedLifetimeTotal = typeof lifetimeTotal === "number" && Number.isFinite(lifetimeTotal) ? lifetimeTotal : totalValue;
-  const plottedIncome = plottedStartDay
-    ? rows.filter((row) => row.day >= plottedStartDay && (!lastDay || row.day <= lastDay)).reduce((total, row) => total + row.totalValue, 0)
-    : 0;
-  let runningTotal = Math.max(0, resolvedLifetimeTotal - plottedIncome);
+  const totalValue = selectedRows.reduce((total, row) => total + row.totalValue, 0);
+  let runningTotal = 0;
 
   if (plottedStartDay && lastDay) {
     const cursor = new Date(`${plottedStartDay}T00:00:00.000Z`);
@@ -112,8 +151,8 @@ export function buildMarketIncomeSummary(
 
   return {
     totalValue,
-    salesCount: rows.reduce((total, row) => total + row.salesCount, 0),
-    unitsSold: rows.reduce((total, row) => total + row.unitsSold, 0),
+    salesCount: selectedRows.reduce((total, row) => total + row.salesCount, 0),
+    unitsSold: selectedRows.reduce((total, row) => total + row.unitsSold, 0),
     trend: cumulativeTrend,
     requestedStartDay,
     availableStartDay: firstDay ?? null,

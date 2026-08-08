@@ -263,7 +263,11 @@ test("server background ingestion keeps citizens, primary-region state, and publ
 test("Relay HTTP current domains refresh on their own live loop instead of the legacy collector schedule", async () => {
   const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(server, /RELAY_HTTP_REFRESH_MS \?\? 15000/);
-  assert.match(server, /setInterval\(\(\) => void refreshRelay\(\), relayHttpRefreshMs\)/);
+  assert.match(server, /createScheduledRelayReconciler\(\{[\s\S]*reconcile: refreshRelay/);
+  assert.match(
+    server,
+    /setInterval\([\s\S]*relayRuntimeReconciler\.request\("scheduled"\)[\s\S]*relayHttpRefreshMs/,
+  );
   assert.doesNotMatch(server, /setInterval\(\(\) => void refreshRelay\(\), serverRefreshIntervalMs\(\)\)/);
 });
 

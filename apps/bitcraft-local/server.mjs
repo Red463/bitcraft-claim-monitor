@@ -5657,6 +5657,13 @@ function marketHistory(claimId, limit, owner = "") {
   const args = selectedOwner ? [claimId, selectedOwner] : [claimId];
   const tradeOwnerClause = selectedOwner ? " AND lower(COALESCE(seller_username, '')) = lower(?)" : "";
   const tradeArgs = selectedOwner ? [claimId, selectedOwner] : [claimId];
+  const marketRangeEndDate = new Date();
+  marketRangeEndDate.setUTCHours(0, 0, 0, 0);
+  marketRangeEndDate.setUTCDate(marketRangeEndDate.getUTCDate() + 1);
+  const marketRangeStartDate = new Date(marketRangeEndDate);
+  marketRangeStartDate.setUTCDate(marketRangeStartDate.getUTCDate() - MARKET_DAILY_HISTORY_LIMIT);
+  const marketRangeStart = marketRangeStartDate.toISOString();
+  const marketRangeEnd = marketRangeEndDate.toISOString();
   const eventLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
   const currentMarket = currentMarketProjection(claimId);
   const liveListings = currentMarketListings(currentMarket.data, {
@@ -5666,19 +5673,21 @@ function marketHistory(claimId, limit, owner = "") {
   const events = db.prepare(`SELECT * FROM market_events WHERE claim_id = ?${ownerClause} ORDER BY occurred_at DESC, id DESC LIMIT ?`).all(...args, eventLimit)
     .map((event) => event.event_type === "sold_or_removed" ? { ...event, event_type: "removed_or_cancelled" } : event);
   const sales = db.prepare(`
-    SELECT trade_id AS id, 'sale' AS event_type, order_entity_id AS listing_key, item_name, seller_username AS owner,
+    SELECT trade_id AS id, 'sale' AS event_type, order_entity_id AS listing_key,
+      item_id AS itemId, item_type AS itemType, item_name, seller_username AS owner,
       quantity, unit_price AS price, total_price AS total_value, tier, rarity, occurred_at, raw_json
     FROM market_trades
     WHERE claim_id = ?${tradeOwnerClause}
+      AND occurred_at >= ? AND occurred_at < ?
     ORDER BY occurred_at DESC, trade_id DESC
-    LIMIT ?
-  `).all(...tradeArgs, eventLimit);
+  `).all(...tradeArgs, marketRangeStart, marketRangeEnd);
   const topItems = db.prepare(`
-    SELECT item_name AS itemName, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue,
+    SELECT item_id AS itemId, item_type AS itemType, item_name AS itemName,
+      COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue,
       SUM(total_price) / NULLIF(SUM(quantity), 0) AS avgUnitPrice, MAX(occurred_at) AS lastSoldAt
     FROM market_trades
     WHERE claim_id = ?${tradeOwnerClause}
-    GROUP BY item_name
+    GROUP BY item_type, item_id, item_name
     ORDER BY unitsSold DESC, totalValue DESC
     LIMIT 20
   `).all(...tradeArgs);

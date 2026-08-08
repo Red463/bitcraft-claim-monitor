@@ -25,7 +25,7 @@ import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import type { ActivePanel } from "../types/app";
 import { activityMetadata, signedDelta } from "./activity/activityUtils";
-import { MARKET_INCOME_RANGES, buildMarketIncomeSummary, type MarketIncomeRangeDays } from "./market/marketAnalytics";
+import { MARKET_INCOME_RANGES, buildMarketIncomeSummary, buildMarketRangeAnalytics, type MarketIncomeRangeDays } from "./market/marketAnalytics";
 import { hasRecentCraftContribution } from "./production/productionUtils";
 import { dashboardRegionWealth, formatExactCompactInteger } from "./dashboardView";
 import { researchSettlementCaps } from "./researchView";
@@ -78,21 +78,19 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
   const treasuryDeltasToday = treasuryEventsToday.map(({ metadata }) => toNumber(metadata.after) - toNumber(metadata.before));
   const fallbackTreasuryNetToday = treasuryDeltasToday.reduce((total, delta) => total + delta, 0);
   const treasuryNetToday = dashboardSummary?.treasuryNetToday == null ? fallbackTreasuryNetToday : toNumber(dashboardSummary.treasuryNetToday);
-  const marketTotals = marketHistory?.totals ?? {};
-  const storedMarketIncome = marketTotals.trackedValue ?? marketTotals.totalValue;
-  const marketIncome = buildMarketIncomeSummary(
-    Array.isArray(marketHistory?.daily) ? marketHistory.daily : [],
+  const marketRange = buildMarketRangeAnalytics(
+    Array.isArray(marketHistory?.sales) ? marketHistory.sales : [],
     lastUpdated ?? new Date(),
     marketIncomeRange,
-    storedMarketIncome == null ? undefined : toNumber(storedMarketIncome),
   );
-  const confirmedMarketSales = marketTotals.confirmedSales == null && marketTotals.salesCount == null
-    ? marketIncome.salesCount
-    : toNumber(marketTotals.confirmedSales ?? marketTotals.salesCount);
-  const confirmedMarketUnits = marketTotals.confirmedUnits == null && marketTotals.unitsSold == null
-    ? marketIncome.unitsSold
-    : toNumber(marketTotals.confirmedUnits ?? marketTotals.unitsSold);
-  const confirmedMarketIncome = storedMarketIncome == null ? marketIncome.totalValue : toNumber(storedMarketIncome);
+  const marketIncome = buildMarketIncomeSummary(
+    marketRange.daily,
+    lastUpdated ?? new Date(),
+    marketIncomeRange,
+  );
+  const confirmedMarketSales = marketIncome.salesCount;
+  const confirmedMarketUnits = marketIncome.unitsSold;
+  const confirmedMarketIncome = marketIncome.totalValue;
   const marketIncomeDetail = confirmedMarketSales
     ? `${formatNumber(confirmedMarketSales, 0)} sale${confirmedMarketSales === 1 ? "" : "s"} - ${formatNumber(confirmedMarketUnits, 0)} units sold`
     : "No confirmed sales tracked yet";

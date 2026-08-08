@@ -9,6 +9,22 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.51.0-beta.2] - 2026-08-08
+
+### Added
+
+- Added a guarded dry-run and hash-verified repair tool for removing market history proven to belong to another claim.
+
+### Changed
+
+- Made Relay worker reconciliation non-overlapping, time-bounded, and automatically recoverable after subscription disconnects.
+- Made the claim-market subscription the sole writer of settlement market history while regional market data continues powering tools and Deal Watch.
+
+### Fixed
+
+- Rejected mixed or foreign-claim market snapshots before they can write history, activity, trades, or notifications.
+- Preserved item and cargo identity in market history and aligned Dashboard income, Revenue by Day, and Best Sellers to the same selected-period trade semantics.
+
 ## [0.51.0-beta.1] - 2026-08-02
 
 ### Added
