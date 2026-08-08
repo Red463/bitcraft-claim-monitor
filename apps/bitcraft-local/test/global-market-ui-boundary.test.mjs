@@ -138,6 +138,13 @@ test("Browse follows the central page cycle and keeps history non-blocking", () 
   assert.match(watcher, /finally \{\s*pollInFlight = false/);
 });
 
+test("Market Overview tracks response parsing as part of page completion", () => {
+  const overview = source("../src/pages/market/MarketOverview.tsx");
+
+  assert.match(overview, /const refresh = fetch\(`\/api\/local\/market\/overview[\s\S]*response\.json\(\)[\s\S]*trackRefresh\(\s*"global-market-overview",\s*refresh\s*\)/);
+  assert.doesNotMatch(overview, /trackRefresh\(\s*"global-market-overview",\s*fetch\(/);
+});
+
 test("Browse labels progressive locally observed history without blocking live orders", () => {
   const browse = source("../src/pages/market/MarketBrowse.tsx");
 

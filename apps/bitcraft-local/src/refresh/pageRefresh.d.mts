@@ -27,6 +27,7 @@ export function createDelayedRefreshTask<T>(
   },
 ): { promise: Promise<T>; cancel: () => void };
 export function pageRefreshPolicy(page: ActivePanel): PageRefreshPolicy;
+export function pageRefreshShowsRetainedDataProgress(cycle: PageRefreshCycle | null | undefined): boolean;
 export function createPageRefreshCycle(
   page: ActivePanel,
   sequence: number,

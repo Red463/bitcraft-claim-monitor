@@ -1015,7 +1015,12 @@ function DashboardApp() {
         <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{routeStatus}</p>
         <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{manualRefreshStatusText}</p>
         <div className={`page-refresh-line ${visibleRefreshProgress ? "is-visible" : ""}`} aria-hidden="true" />
-        {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? <ApiErrorState message={state.error} /> : (
+        {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? (
+          <>
+            <ApiErrorState message={state.error} />
+            <PageRefreshCycleSeal cycle={pageRefreshCycle} coordinator={pageRefreshCoordinator} />
+          </>
+        ) : (
           <>
             <ApiStatusBanner
               warnings={apiWarnings}

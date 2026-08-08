@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -8,6 +9,7 @@ import {
   createPageRefreshTaskCoordinator,
   pageRefreshHeaders,
   pageRefreshPolicy,
+  pageRefreshShowsRetainedDataProgress,
 } from "../src/refresh/pageRefresh.mjs";
 import { createGameDataGenerationWatcher } from "../src/refresh/generationWatcher.mjs";
 
@@ -49,7 +51,8 @@ function createFakeClock(start = 0) {
     }
     now = target;
   };
-  return { now: () => now, setTimeout, clearTimeout, setInterval, clearInterval: clearTimeout, advance };
+  const elapse = (elapsed) => { now += elapsed; };
+  return { now: () => now, setTimeout, clearTimeout, setInterval, clearInterval: clearTimeout, advance, elapse };
 }
 
 test("route policy keeps only Craft Monitor near-live and demand pages manual", () => {
@@ -150,6 +153,43 @@ test("Craft Monitor failures retry with bounded 5-30 second exponential backoff"
   assert.equal(cycles.length, id, "success clears the failure retry");
 });
 
+test("cold-start failures are sealed outside the data branch and enter Craft Monitor backoff", async () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  assert.match(appShell, /state\.error && !state\.data \? \([\s\S]*<ApiErrorState[\s\S]*<PageRefreshCycleSeal[\s\S]*\) : \(/);
+  assert.match(appShell, /<PageRefreshProvider[\s\S]*\{activePanel\}[\s\S]*<PageRefreshCycleSeal[\s\S]*<\/PageRefreshProvider>/);
+
+  const clock = createFakeClock();
+  const cycles = [];
+  let controller;
+  const coordinator = createPageRefreshTaskCoordinator({
+    onComplete: (cycle, succeeded) => controller.complete(cycle.id, succeeded),
+  });
+  controller = createPageRefreshController({
+    page: "craft-monitor",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `cold-start-${cycles.length + 1}`,
+    onCycle: (cycle) => {
+      cycles.push(cycle);
+      coordinator.beginCycle(cycle);
+      void coordinator.trackPromise(cycle.id, "main-data", Promise.reject(new Error("cold start failed"))).catch(() => {});
+      coordinator.seal(cycle.id);
+    },
+  });
+
+  controller.start();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(coordinator.snapshot().status, "complete");
+  clock.advance(4_999);
+  assert.equal(cycles.length, 1);
+  clock.advance(1);
+  assert.equal(cycles.length, 2);
+  assert.equal(cycles[1].reason, "near-live");
+});
+
 test("interval pages ignore generations, pause while hidden, and catch up once visible", () => {
   const clock = createFakeClock();
   const cycles = [];
@@ -176,6 +216,28 @@ test("interval pages ignore generations, pause while hidden, and catch up once v
   assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "visibility-catch-up"]);
   controller.setVisible(true);
   assert.equal(cycles.length, 2, "visibility catch-up is emitted once");
+});
+
+test("visibility restoration catches up from elapsed time even when the hidden timer was throttled", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `throttled-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.setVisible(false);
+  clock.elapse(30_000);
+  controller.setVisible(true);
+
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "visibility-catch-up"]);
 });
 
 test("manual pages run initially and on demand without an interval", () => {
@@ -240,6 +302,17 @@ test("only manual cycles attach the compatibility refresh header", () => {
   assert.deepEqual(pageRefreshHeaders(manual, "planning"), { "x-manual-refresh-id": "manual-id" });
   assert.deepEqual(pageRefreshHeaders(interval, "planning"), {});
   assert.deepEqual(pageRefreshHeaders(manual, "dashboard"), {});
+});
+
+test("retained-data progress is visible for manual cycles and silent for automatic cycles", () => {
+  const cycle = (reason) => createPageRefreshCycle("leaderboard", 1, reason, { createId: () => reason });
+
+  assert.equal(pageRefreshShowsRetainedDataProgress(cycle("manual")), true);
+  assert.equal(pageRefreshShowsRetainedDataProgress(cycle("initial")), false);
+  assert.equal(pageRefreshShowsRetainedDataProgress(cycle("interval")), false);
+  assert.equal(pageRefreshShowsRetainedDataProgress(cycle("near-live")), false);
+  assert.equal(pageRefreshShowsRetainedDataProgress(cycle("visibility-catch-up")), false);
+  assert.equal(pageRefreshShowsRetainedDataProgress(null), false);
 });
 
 test("route changes start a page-scoped initial cycle and cleanup cancels stale timers", () => {

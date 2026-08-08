@@ -28,6 +28,10 @@ export function pageRefreshPolicy(page) {
   return { mode: INTERVAL_PAGES.has(page) ? "interval" : "manual" };
 }
 
+export function pageRefreshShowsRetainedDataProgress(cycle) {
+  return cycle?.reason === "manual";
+}
+
 export function createDelayedRefreshTask(start, delayMs, options = {}) {
   const setTimer = options.setTimeout ?? globalThis.setTimeout;
   const clearTimer = options.clearTimeout ?? globalThis.clearTimeout;
@@ -304,7 +308,11 @@ export function createPageRefreshController(options) {
     setVisible(nextVisible) {
       const becameVisible = !visible && Boolean(nextVisible);
       visible = Boolean(nextVisible);
-      if (becameVisible && overdue) {
+      const intervalExpired = pageRefreshPolicy(page).mode === "interval"
+        && !activeCycle
+        && now() >= lastStartedAt + intervalMs;
+      if (becameVisible && (overdue || intervalExpired)) {
+        clearScheduled();
         overdue = false;
         dirty = false;
         startCycle("visibility-catch-up");

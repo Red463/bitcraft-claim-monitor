@@ -18,6 +18,7 @@ import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "..
 import { resolveAllowedView } from "../navigation/routeState.ts";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
+import { pageRefreshShowsRetainedDataProgress } from "../refresh/pageRefresh.mjs";
 import { addDecimal, compareDecimal, formatExactDecimal } from "../server/game-data/exactDecimal.ts";
 
 const LOCAL_API = "/api/local";
@@ -46,6 +47,7 @@ export function Leaderboard({
   access?: EffectiveAccess | null;
 }) {
   const { request, trackPromise } = useManualRefresh();
+  const showRefreshProgress = pageRefreshShowsRetainedDataProgress(request);
   const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
   const [activeTab, setActiveTab] = usePersistedState<LeaderboardTab>("leaderboard.tab", "contribution");
   const [professionFilter, setProfessionFilter] = React.useState("All");
@@ -258,7 +260,7 @@ export function Leaderboard({
             </select>
           </label>
         </header>
-        {state.loading ? <AsyncState kind="loading" title="Refreshing contribution history" detail="Current standings remain visible while the latest records load." compact /> : null}
+        {state.loading && state.data && showRefreshProgress ? <AsyncState kind="loading" title="Refreshing contribution history" detail="Current standings remain visible while the latest records load." compact /> : null}
         {state.error ? <AsyncState kind="error" title="Leaderboard refresh failed" detail={`Current standings are retained. ${state.error}`} compact /> : null}
         {!state.loading && !contributors.length ? (
           <AsyncState kind="empty" title="No craft contributions recorded yet" detail="The leaderboard fills as settlement craft contribution data is observed during refreshes." />

@@ -24,6 +24,16 @@ test("Empires renders a restricted state when every view is denied", () => {
   assert.match(empiresPage, /No empire views are available for your account\./);
 });
 
+test("Empires shows retained-data refresh progress only for manual cycles", () => {
+  assert.match(empiresPage, /pageRefreshShowsRetainedDataProgress/);
+  assert.match(empiresPage, /const showRefreshProgress = pageRefreshShowsRetainedDataProgress\(request\)/);
+  assert.match(empiresPage, /overview\.loading && overview\.data && showRefreshProgress/);
+  assert.match(empiresPage, /watchtowers\.loading && watchtowers\.data && showRefreshProgress/);
+  assert.match(empiresPage, /overview\.loading && showRefreshProgress \? "Refreshing\.\.\."/);
+  assert.match(empiresPage, /watchtowers\.loading && showRefreshProgress \? "Refreshing\.\.\."/);
+  assert.match(empiresPage, /state\.loading && state\.data && showRefreshProgress/);
+});
+
 test("Empires exposes live provider-neutral Hexite deposits without treating unknown rows as active", () => {
   const depositsPanel = readFileSync(new URL("../src/pages/empires/DepositsPanel.tsx", import.meta.url), "utf8");
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");

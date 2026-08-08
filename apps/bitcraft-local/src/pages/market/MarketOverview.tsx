@@ -63,16 +63,14 @@ export function MarketOverview({
       regionId: regionId || "all",
     });
     setState((current) => ({ ...current, loading: true, error: "" }));
-    trackRefresh(
-      "global-market-overview",
-      fetch(`/api/local/market/overview?${search}`, {
-        headers: refreshHeaders,
-        signal: controller.signal,
-      }),
-    )
+    const refresh = fetch(`/api/local/market/overview?${search}`, {
+      headers: refreshHeaders,
+      signal: controller.signal,
+    })
       .then((response) => response.ok
         ? response.json()
-        : Promise.reject(new Error(`overview HTTP ${response.status}`)))
+        : Promise.reject(new Error(`overview HTTP ${response.status}`)));
+    trackRefresh("global-market-overview", refresh)
       .then((payload) => setState({ loading: false, error: "", data: payload }))
       .catch((error) => {
         if (!controller.signal.aborted) {
