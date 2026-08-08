@@ -104,3 +104,31 @@ The first sandboxed full-suite attempt had one intentionally stale session fixtu
 
 - Live Relay verification of Allusion was intentionally not performed because the controller reserved production/live rollout and verification.
 - Player-detail failures intentionally remain per-member `unavailable` metadata and are not promoted to global warnings, matching the brief; operators must inspect the affected member rather than a global banner.
+
+## Fix round 1 — Competing last-active sources
+
+Corrected member activity selection so Relay enrichment cannot replace a newer claim-member `lastActiveTimestamp` with an older Relay-player value. The Members presentation now selects the maximum valid last-active timestamp across member and player projections before considering last login. Invalid and null candidates are ignored.
+
+### Red evidence
+
+```powershell
+node --experimental-strip-types --test test/player-presence-service.test.mjs test/member-presence-presentation.test.mjs
+```
+
+Observed: exit 1, 6 passed / 2 failed. Enrichment returned Relay `2026-07-30T11:00:00.000Z` instead of the newer member `2026-07-30T12:00:00.000Z`, and presentation selected the first older candidate instead of the maximum valid candidate.
+
+### Green evidence
+
+```powershell
+node --experimental-strip-types --test test/player-presence-service.test.mjs test/member-presence-presentation.test.mjs
+```
+
+Observed: exit 0, 8 passed / 0 failed.
+
+```powershell
+corepack pnpm --filter @workspace/bitcraft-local run build
+```
+
+Observed: exit 0; provider/server TypeScript, bindings, asset verification, frontend TypeScript, Vite client build, and Relay runtime boundaries passed.
+
+Commit: `92980a7` — Prefer newest member activity timestamp.
