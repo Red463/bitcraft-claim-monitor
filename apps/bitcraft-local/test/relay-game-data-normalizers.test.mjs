@@ -475,6 +475,9 @@ test("regional claims join live claim state, local metrics, tier, owner, and coo
   }), {
     data: {
       regionId: "19",
+      coverage: {
+        missingOwnerUsernameCount: 1,
+      },
       claims: [{
         entityId: "1369094286777412590",
         ownerPlayerEntityId: "1224979098736429551",
@@ -507,7 +510,6 @@ test("regional claims join live claim state, local metrics, tier, owner, and coo
     },
     warnings: [
       "Regional claim 1369094286777412591 has no claim_local_state row.",
-      "Regional claims missing owner usernames: 1.",
     ],
   });
 });
@@ -942,6 +944,7 @@ test("Relay member skills become citizen levels with exact player identity", () 
 
 test("regional player rows preserve exact IDs and derive bounded session activity", () => {
   assert.deepEqual(normalizeRegionalPlayers({
+    regionId: "19",
     members: [{
       playerEntityId: "1369094286756659093",
       userName: "Modular",
@@ -967,6 +970,8 @@ test("regional player rows preserve exact IDs and derive bounded session activit
       playerEntityId: "1369094286756659093",
       username: "Modular",
       signedIn: true,
+      presenceRegionId: "19",
+      presenceSource: "regional",
       sessionSeconds: 300,
       timePlayedSeconds: 100000,
       timeSignedInSeconds: 80000,
@@ -976,13 +981,15 @@ test("regional player rows preserve exact IDs and derive bounded session activit
       entityId: "1224979098736429551",
       playerEntityId: "1224979098736429551",
       username: "Texian1836",
-      signedIn: false,
+      signedIn: null,
+      presenceRegionId: null,
+      presenceSource: "unavailable",
       sessionSeconds: null,
       timePlayedSeconds: null,
       timeSignedInSeconds: null,
       lastLoginTimestamp: "2026-07-29T18:50:00.000Z",
     }],
-    warnings: ["Regional player_state omitted member 1224979098736429551."],
+    warnings: [],
   });
 });
 

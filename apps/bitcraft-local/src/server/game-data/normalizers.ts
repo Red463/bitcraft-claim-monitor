@@ -455,13 +455,17 @@ export function normalizeRegionalClaims(options: {
       throw error;
     }
   }
-  if (missingOwnerUsernameCount > 0) {
-    warnings.push(`Regional claims missing owner usernames: ${missingOwnerUsernameCount}.`);
-  }
   claims.sort((left, right) => (
     BigInt(String(left.entityId)) < BigInt(String(right.entityId)) ? -1 : 1
   ));
-  return { data: { regionId, claims }, warnings };
+  return {
+    data: {
+      regionId,
+      coverage: { missingOwnerUsernameCount },
+      claims,
+    },
+    warnings,
+  };
 }
 
 function regionalEmpireSpatialRows(options: {
@@ -1376,12 +1380,14 @@ export function normalizeCitizensPayload(value: unknown) {
 }
 
 export function normalizeRegionalPlayers(options: {
+  regionId: string;
   members: unknown[];
   playerRows: unknown[];
   taskRows?: unknown[];
   taskDescriptionRows?: unknown[];
   observedAt: string;
 }) {
+  const regionId = decimalString(options.regionId, "regional player region id");
   const observedAtMs = Date.parse(options.observedAt);
   if (!Number.isFinite(observedAtMs)) throw new TypeError("regional player observedAt is invalid");
   const includeTasks = options.taskRows !== undefined || options.taskDescriptionRows !== undefined;
@@ -1439,12 +1445,13 @@ export function normalizeRegionalPlayers(options: {
       )),
     };
     if (!row) {
-      warnings.push(`Regional player_state omitted member ${playerEntityId}.`);
       return {
         entityId: playerEntityId,
         playerEntityId,
         username: String(member.userName ?? member.user_name ?? ""),
-        signedIn: false,
+        signedIn: null,
+        presenceRegionId: null,
+        presenceSource: "unavailable" as const,
         sessionSeconds: null,
         timePlayedSeconds: null,
         timeSignedInSeconds: null,
@@ -1470,6 +1477,8 @@ export function normalizeRegionalPlayers(options: {
       playerEntityId,
       username: String(member.userName ?? member.user_name ?? ""),
       signedIn,
+      presenceRegionId: regionId,
+      presenceSource: "regional" as const,
       sessionSeconds,
       timePlayedSeconds: Math.max(0, integer(row.timePlayed ?? row.time_played ?? 0, "regional player time played")),
       timeSignedInSeconds: Math.max(0, integer(row.timeSignedIn ?? row.time_signed_in ?? 0, "regional player time signed in")),

@@ -29,6 +29,8 @@ test("primary-region runtime publishes players and restarts only when membership
   const stops = [];
   const writes = [];
   const handlers = [];
+  const presenceBaseUrls = [];
+  const presenceRequests = [];
   const runtime = new runtimeModule.RelayPrimaryRegionRuntime({
     manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
     discoverTopology: async () => topology(),
@@ -39,6 +41,17 @@ test("primary-region runtime publishes players and restarts only when membership
         start: async (config) => starts.push(config),
         stop: async () => stops.push(index),
         health: () => ({ connected: true, applied: true, lastAppliedAt: null, lastError: null }),
+      };
+    },
+    createPresenceService: (baseUrl) => {
+      presenceBaseUrls.push(baseUrl);
+      return {
+        enrich: async (players) => players.map((player) => {
+          presenceRequests.push(player.playerEntityId);
+          return player.presenceSource === "unavailable"
+            ? { ...player, signedIn: false, presenceRegionId: "14", presenceSource: "relay-player" }
+            : player;
+        }),
       };
     },
     currentStateRepository: {
@@ -55,6 +68,7 @@ test("primary-region runtime publishes players and restarts only when membership
     members,
   });
   assert.equal(starts.length, 1);
+  assert.deepEqual(presenceBaseUrls, ["https://relay.example"]);
   assert.deepEqual(starts[0], {
     uri: "wss://relay.example:4019",
     database: "relay-region-19",
@@ -67,7 +81,13 @@ test("primary-region runtime publishes players and restarts only when membership
   });
 
   await handlers[0]({
-    players: [{ playerEntityId: "101", username: "Ada", signedIn: true }],
+    players: [{
+      playerEntityId: "101",
+      username: "Ada",
+      signedIn: null,
+      presenceRegionId: null,
+      presenceSource: "unavailable",
+    }],
     warnings: [],
     equipment: { members: [{ playerEntityId: "101", username: "Ada" }] },
     equipmentWarnings: [],
@@ -132,7 +152,13 @@ test("primary-region runtime publishes players and restarts only when membership
     generation: 12,
     domains: {
       players: {
-        data: [{ playerEntityId: "101", username: "Ada", signedIn: true }],
+        data: [{
+          playerEntityId: "101",
+          username: "Ada",
+          signedIn: false,
+          presenceRegionId: "14",
+          presenceSource: "relay-player",
+        }],
         confidence: "authoritative",
         provenance: {
           provider: "relay",
@@ -273,6 +299,7 @@ test("primary-region runtime publishes players and restarts only when membership
     },
   });
 
+  assert.deepEqual(presenceRequests, ["101"]);
   await runtime.reconcile({ regionId: "19", members: [...members] });
   assert.equal(starts.length, 1);
   await runtime.reconcile({

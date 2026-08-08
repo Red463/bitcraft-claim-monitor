@@ -790,30 +790,34 @@ test("game-data route does not trust a stale or disconnected subscription heartb
   }
 });
 
-test("game-data route surfaces partial-domain warnings to browser status", () => {
+test("game-data route does not emit a global warning for unavailable member presence", () => {
   const result = gameDataResponse({
     configuredClaimId: "1369094286777412590",
     claimId: "1369094286777412590",
     domains: ["players"],
     repository: {
       read: () => ({
-        data: [{ playerEntityId: "1", signedIn: false }],
-        confidence: "partial",
+        data: [{
+          playerEntityId: "1",
+          signedIn: null,
+          presenceRegionId: null,
+          presenceSource: "unavailable",
+        }],
+        confidence: "authoritative",
         generation: 5,
         lastError: null,
         provenance: {
           ...relayProvenance("2026-07-29T20:45:00.000Z"),
           sourceKey: "region:19",
         },
-        warnings: ["Regional player_state omitted member 1."],
+        warnings: [],
       }),
     },
     now: new Date("2026-07-29T20:45:10.000Z"),
   });
   assert.equal(result.status, 200);
-  assert.deepEqual(result.body.partialErrors, [
-    "players: Regional player_state omitted member 1.",
-  ]);
+  assert.deepEqual(result.body.partialErrors, []);
+  assert.equal(result.body.domains.players.data[0].presenceSource, "unavailable");
 });
 
 test("game-data route composes requested domains through a provider-neutral local projection", () => {

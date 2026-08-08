@@ -12,3 +12,15 @@ export function pageGameDataWarnings(
     (warning) => !DASHBOARD_OWNER_ENRICHMENT_WARNING.test(warning),
   );
 }
+
+export function staleDataWarning(options: {
+  stale: boolean;
+  refreshActive: boolean;
+  lastUpdatedLabel: string | null;
+}): string {
+  if (!options.stale) return "";
+  const savedAt = options.lastUpdatedLabel ? ` from ${options.lastUpdatedLabel}` : "";
+  return options.refreshActive
+    ? `Showing saved data${savedAt} while refresh continues.`
+    : `Showing saved data${savedAt}; live refresh is unavailable.`;
+}

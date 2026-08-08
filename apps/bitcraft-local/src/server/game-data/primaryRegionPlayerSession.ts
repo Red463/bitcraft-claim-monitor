@@ -452,6 +452,7 @@ export class RelayPrimaryRegionPlayerSession {
     try {
       const receivedAt = this.#now().toISOString();
       const normalized = normalizeRegionalPlayers({
+        regionId: config.regionId,
         members: config.members,
         playerRows: [...connection.db.playerState.iter()],
         taskRows: [...connection.db.travelerTaskState.iter()],

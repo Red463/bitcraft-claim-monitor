@@ -26,7 +26,15 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
       ? Math.floor(Date.parse(signInValue) / 1000)
       : 0;
   const now = Math.floor(Date.now() / 1000);
-  const signedIn = Boolean(player.signedIn ?? player.online ?? player.isOnline ?? (signInTs > 0));
+  const presenceSource = String(player.presenceSource ?? "").trim() || null;
+  const signedInValue = player.signedIn ?? player.online ?? player.isOnline;
+  const signedIn = typeof signedInValue === "boolean"
+    ? signedInValue
+    : signInTs > 0
+      ? true
+      : presenceSource === "unavailable"
+        ? null
+        : false;
   const existingSessionSeconds = toNumber(player.sessionSeconds ?? player.session_seconds ?? player.currentSessionSeconds);
   const timePlayedSeconds = toNumber(
     player.timePlayed ??
@@ -67,6 +75,8 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
     username: player.username ?? player.userName,
     regionId: regionId || null,
     regionName: regionName || null,
+    presenceRegionId: player.presenceRegionId == null ? null : String(player.presenceRegionId),
+    presenceSource,
     signedIn,
     sessionSeconds: signInTs > 0 ? Math.max(0, now - signInTs) : existingSessionSeconds > 0 ? existingSessionSeconds : null,
     timePlayedSeconds: timePlayedSeconds > 0 ? timePlayedSeconds : null,
@@ -90,12 +100,13 @@ export function normalizeData(raw: AnyRecord | null) {
   const crafts = unwrap<AnyRecord[]>(raw?.crafts, "craftResults", []);
   const players = unwrap<AnyRecord[]>(raw?.players, "players", []).map(normalizePlayer);
   const region = unwrap<AnyRecord[]>(raw?.["region-claims"], "claims", unwrap<AnyRecord[]>(raw?.region, "claims", []));
+  const regionCoverage = raw?.["region-claims"]?.coverage ?? {};
   const skills = raw?.skills ?? {};
   const contributionPayload = raw?.contributions ?? {};
   const contributions = contributionPayload.byCraft ?? contributionPayload;
   const contributionObservedSince = contributionPayload.observedSince ?? null;
   const marketApi = raw?.marketApi ?? { histories: [], trades: [] };
   const regionStatus = unwrap<AnyRecord[]>(raw?.region, "regions", unwrap<AnyRecord[]>(raw?.regionStatus, "regions", []));
-  return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, skills, contributions, contributionObservedSince, marketApi, regionStatus };
+  return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, regionCoverage, skills, contributions, contributionObservedSince, marketApi, regionStatus };
 }
 

@@ -128,6 +128,11 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
         <div><strong>Average Tiles</strong><span>{formatNumber(avgTiles)} claimed tiles</span></div>
         <div><strong>Live Claims</strong><span>{formatNumber(allRows.length)} in the current Relay generation</span></div>
       </div>
+      {toNumber(data.regionCoverage?.missingOwnerUsernameCount) > 0 ? (
+        <div className="info">
+          Owner usernames are unavailable for {formatNumber(data.regionCoverage.missingOwnerUsernameCount)} regional settlements.
+        </div>
+      ) : null}
       <div className="region-context">
         <section className="bar-panel region-leaders-panel">
           <h3><Box size={16} /> Supply Leaders</h3>

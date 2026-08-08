@@ -9,6 +9,19 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.51.0-beta.3] - 2026-08-08
+
+### Changed
+
+- Added accurate cross-region presence details for monitored members while keeping unavailable presence explicit.
+- Kept missing regional owner usernames as local Region coverage diagnostics instead of global refresh warnings.
+- Clarified whether saved data is actively refreshing or live refresh is unavailable.
+
+### Fixed
+
+- Fixed member status timestamps preferring last login over newer Relay last-active data.
+- Prevented members outside the primary region from being reported as offline or as a global data-loss warning.
+
 ## [0.51.0-beta.2] - 2026-08-08
 
 ### Added
