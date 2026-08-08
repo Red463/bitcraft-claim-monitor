@@ -51,3 +51,20 @@ test("craft presentation never collides cargo and item rows with the same numeri
   assert.equal(cargo.recipeName, "Pack Crate of Iron Ore");
   assert.equal(cargo.iconAssetName, "iron-cargo.png");
 });
+
+test("craft presentation keeps partial output data explicit without throwing during render", () => {
+  assert.ok(presentationModule, "expected the shared craft presentation projection");
+  assert.deepEqual(presentationModule.projectCraftPresentation({
+    recipeName: "Craft {0}",
+    craftedItem: [],
+  }, payload), {
+    outputIdentity: null,
+    outputItemType: null,
+    outputItemId: null,
+    outputName: "crafted item",
+    recipeName: "Craft crafted item",
+    displayName: "crafted item",
+    iconAssetName: null,
+    item: { name: "crafted item", tier: null, iconAssetName: null },
+  });
+});

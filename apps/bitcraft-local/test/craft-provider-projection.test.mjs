@@ -207,6 +207,23 @@ test("passive craft projection groups only identical member, output, structure, 
   ]);
 });
 
+test("partial passive crafts do not invent typed ids or merge unrelated rows", () => {
+  const projected = enrichCraftsWithCatalog({ craftResults: [
+    { entityId: "91", recipeId: "10", ownerUsername: "Unknown", buildingName: "Unknown", completed: false, craftCount: "1", craftedItem: [] },
+    { entityId: "92", recipeId: "10", ownerUsername: "Unknown", buildingName: "Unknown", completed: false, craftCount: "1", craftedItem: [] },
+  ] }, () => null, (id) => ({ id, name: "Craft {0}", isPassive: true }));
+
+  assert.equal(projected.passiveCraftResults.length, 2);
+  assert.deepEqual(projected.passiveCraftResults.map((row) => ({
+    memberEntityId: row.memberEntityId,
+    outputIdentity: row.outputIdentity,
+    structureEntityId: row.structureEntityId,
+  })), [
+    { memberEntityId: null, outputIdentity: null, structureEntityId: null },
+    { memberEntityId: null, outputIdentity: null, structureEntityId: null },
+  ]);
+});
+
 test("planner craft projection retains complete rows and marks unknown recipe kinds safely", () => {
   const projected = enrichCraftsForPlanning({
     craftResults: [{

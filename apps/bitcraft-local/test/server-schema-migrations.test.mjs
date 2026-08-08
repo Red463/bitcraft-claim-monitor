@@ -754,6 +754,10 @@ test("production contribution migration maps joined evidence and rebuilds only e
     "unknown:1", "102", null, "unknown", "8", "9",
     "2026-08-08T12:00:00.000Z", "2026-08-08T12:00:01.000Z", "{}",
   );
+  insertEvent.run(
+    "unknown:malformed", "103", null, "unknown", "1", "1",
+    "2026-08-08T12:01:00.000Z", "2026-08-08T12:01:01.000Z", "{malformed",
+  );
   db.prepare(`
     INSERT INTO production_contributions (
       contribution_key, claim_id, craft_entity_id, contributor_entity_id,
@@ -776,6 +780,7 @@ test("production contribution migration maps joined evidence and rebuilds only e
       { source_key: "action:1", attribution_confidence: "matched_action" },
       { source_key: "owner:1", attribution_confidence: "owner_fallback" },
       { source_key: "unknown:1", attribution_confidence: "unknown" },
+      { source_key: "unknown:malformed", attribution_confidence: "unknown" },
     ],
   );
   assert.deepEqual(

@@ -2325,11 +2325,11 @@ test("server collection paginates listings and protects production mutations", a
   const contributionLeaderboard = await fetch(`${origin}/api/local/leaderboard?claimId=${claimId}`).then((response) => response.json());
   assert.equal(contributionLeaderboard.summary.contributorCount, 1);
   assert.equal(contributionLeaderboard.summary.recordedCrafts, 3);
-  assert.equal(contributionLeaderboard.summary.totalProgress, 78);
+  assert.equal(contributionLeaderboard.summary.totalProgress, "78");
   assert.equal(contributionLeaderboard.contributors[0].name, "Tester");
-  assert.equal(contributionLeaderboard.contributors[0].totalProgress, 78);
+  assert.equal(contributionLeaderboard.contributors[0].totalProgress, "78");
   assert.equal(contributionLeaderboard.contribution.summary.contributorCount, 1);
-  assert.equal(contributionLeaderboard.contribution.contributors[0].totalProgress, 78);
+  assert.equal(contributionLeaderboard.contribution.contributors[0].totalProgress, "78");
   assert.equal(contributionLeaderboard.market.summary.activeListings, 2);
   assert.equal(contributionLeaderboard.market.summary.confirmedSales, 1);
   assert.equal(contributionLeaderboard.market.summary.confirmedSaleValue, 50);

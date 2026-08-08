@@ -1,7 +1,8 @@
 import type { AnyRecord } from "../../main-app-data.ts";
 import { inventoryStackKey } from "../../server/game-data/inventoryProjection.ts";
 
-function catalogEntity(outputIdentity: string, payload: AnyRecord): AnyRecord | null {
+function catalogEntity(outputIdentity: string | null, payload: AnyRecord): AnyRecord | null {
+  if (!outputIdentity) return null;
   const projected = payload.catalog?.[outputIdentity];
   if (projected && typeof projected === "object") return projected as AnyRecord;
   const [kind, itemId] = outputIdentity.split(":");
@@ -18,16 +19,23 @@ function resolvedRecipeName(value: unknown, outputName: string): string {
 }
 
 export function projectCraftPresentation(job: AnyRecord, payload: AnyRecord = {}) {
-  const output = Array.isArray(job.craftedItem) ? job.craftedItem[0] ?? {} : {};
-  const outputIdentity = inventoryStackKey(output);
-  const [kind, outputItemId] = outputIdentity.split(":");
+  const output = Array.isArray(job.craftedItem) ? job.craftedItem[0] : null;
+  let outputIdentity: string | null = null;
+  if (output && typeof output === "object") {
+    try {
+      outputIdentity = inventoryStackKey(output);
+    } catch {
+      // Partial Relay craft rows must remain renderable while their output is unavailable.
+    }
+  }
+  const [kind, outputItemId = null] = outputIdentity?.split(":") ?? [];
   const item = catalogEntity(outputIdentity, payload);
-  const outputItemType = kind === "cargo" ? "cargo" : "item";
+  const outputItemType = kind === "cargo" ? "cargo" : kind === "items" ? "item" : null;
   const outputName = String(
     item?.name
       ?? job.outputName
       ?? job.itemName
-      ?? `${outputItemType === "cargo" ? "Cargo" : "Item"} #${outputItemId}`,
+      ?? (outputItemId ? `${outputItemType === "cargo" ? "Cargo" : "Item"} #${outputItemId}` : "crafted item"),
   );
   return {
     outputIdentity,
@@ -38,9 +46,7 @@ export function projectCraftPresentation(job: AnyRecord, payload: AnyRecord = {}
     displayName: outputName,
     iconAssetName: item?.iconAssetName ?? job.iconAssetName ?? null,
     item: item ?? {
-      id: outputItemId,
-      itemId: outputItemId,
-      itemType: outputItemType,
+      ...(outputItemId ? { id: outputItemId, itemId: outputItemId, itemType: outputItemType } : {}),
       name: outputName,
       tier: job.tier ?? job.itemTier ?? null,
       iconAssetName: job.iconAssetName ?? null,

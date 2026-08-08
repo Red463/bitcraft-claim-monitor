@@ -63,6 +63,22 @@ export function addDecimal(left: string, right: string): string {
   });
 }
 
+export function compareDecimal(left: string, right: string): number {
+  const leftParts = parseDecimal(left);
+  const rightParts = parseDecimal(right);
+  const scale = Math.max(leftParts.scale, rightParts.scale);
+  const leftCoefficient = leftParts.coefficient * 10n ** BigInt(scale - leftParts.scale);
+  const rightCoefficient = rightParts.coefficient * 10n ** BigInt(scale - rightParts.scale);
+  return leftCoefficient < rightCoefficient ? -1 : leftCoefficient > rightCoefficient ? 1 : 0;
+}
+
+export function formatExactDecimal(value: unknown, locale?: string): string {
+  const canonical = canonicalNonNegativeDecimal(String(value ?? "0"), "Decimal");
+  const [whole, fraction] = canonical.split(".");
+  const grouped = BigInt(whole).toLocaleString(locale);
+  return fraction ? `${grouped}.${fraction}` : grouped;
+}
+
 export function multiplyDecimalByInteger(decimal: string, integer: string): string {
   const parts = parseDecimal(decimal);
   if (!/^\d+$/.test(integer)) throw new Error("Integer multiplier must be a non-negative integer");

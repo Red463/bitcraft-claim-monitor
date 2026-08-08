@@ -200,7 +200,7 @@ function contributionMembers(
   }
   return members.map((member, index) => {
     const entityId = memberEntityId(member, index);
-    const name = String(member.userName ?? member.user_name ?? entityId).trim() || entityId;
+    const name = String(member.userName ?? member.user_name ?? "").trim() || `Player ${entityId}`;
     return {
       entityId,
       name,

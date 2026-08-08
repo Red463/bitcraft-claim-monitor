@@ -21,6 +21,7 @@ import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/se
 import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySettings.mjs";
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
 import { projectCraftContributionEnvelope } from "./src/server/craftContributionProjection.mjs";
+import { projectCraftContributionLeaderboard } from "./src/server/craftContributionLeaderboard.mjs";
 import { partitionCraftContributionRows } from "./src/server/craftContributionVisibility.mjs";
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
@@ -6148,103 +6149,7 @@ function contributionLeaderboard(claimId) {
     ORDER BY last_contributed_at DESC, updated_at DESC
     LIMIT 5000
   `).all(claimId);
-  const { playerRows: rows } = partitionCraftContributionRows(storedRows);
-  const contributors = new Map();
-  const professions = new Map();
-  let totalProgress = 0;
-  let totalXp = 0;
-  for (const row of rows) {
-    totalProgress += toNumber(row.contributed_progress);
-    totalXp += toNumber(row.contributed_xp);
-    const namedContributor = row.contributor_entity_id != null
-      && row.attribution_confidence !== "unknown";
-    if (!namedContributor) continue;
-    const contributorKey = String(row.contributor_entity_id || row.contributor_name);
-    const profession = String(row.profession || "Unknown");
-    const contributor = contributors.get(contributorKey) ?? {
-      contributorId: row.contributor_entity_id,
-      name: row.contributor_name,
-      totalProgress: 0,
-      totalXp: 0,
-      contributionCount: 0,
-      craftCount: 0,
-      lastContributedAt: null,
-      professions: {},
-    };
-    contributor.totalProgress += toNumber(row.contributed_progress);
-    contributor.totalXp += toNumber(row.contributed_xp);
-    contributor.contributionCount += toNumber(row.contribution_count);
-    contributor.craftCount += 1;
-    if (!contributor.lastContributedAt || String(row.last_contributed_at ?? row.updated_at) > contributor.lastContributedAt) contributor.lastContributedAt = row.last_contributed_at ?? row.updated_at;
-    contributor.professions[profession] = {
-      progress: toNumber(contributor.professions[profession]?.progress) + toNumber(row.contributed_progress),
-      xp: toNumber(contributor.professions[profession]?.xp) + toNumber(row.contributed_xp),
-      crafts: toNumber(contributor.professions[profession]?.crafts) + 1,
-    };
-    contributors.set(contributorKey, contributor);
-
-    const professionRow = professions.get(profession) ?? {
-      profession,
-      totalProgress: 0,
-      totalXp: 0,
-      craftCount: 0,
-      contributorCount: new Set(),
-      topContributor: "",
-      topContributorProgress: 0,
-      contributors: new Map(),
-    };
-    professionRow.totalProgress += toNumber(row.contributed_progress);
-    professionRow.totalXp += toNumber(row.contributed_xp);
-    professionRow.craftCount += 1;
-    professionRow.contributorCount.add(contributorKey);
-    const professionContributor = toNumber(professionRow.contributors.get(contributorKey)?.progress) + toNumber(row.contributed_progress);
-    professionRow.contributors.set(contributorKey, { name: row.contributor_name, progress: professionContributor });
-    if (professionContributor > professionRow.topContributorProgress) {
-      professionRow.topContributor = row.contributor_name;
-      professionRow.topContributorProgress = professionContributor;
-    }
-    professions.set(profession, professionRow);
-  }
-  const contributorList = Array.from(contributors.values())
-    .map((entry) => ({ ...entry, professions: Object.entries(entry.professions).map(([profession, values]) => ({ profession, ...values })).sort((a, b) => b.progress - a.progress) }))
-    .sort((a, b) => b.totalProgress - a.totalProgress);
-  const professionList = Array.from(professions.values())
-    .map((entry) => ({
-      profession: entry.profession,
-      totalProgress: entry.totalProgress,
-      totalXp: entry.totalXp,
-      craftCount: entry.craftCount,
-      contributorCount: entry.contributorCount.size,
-      topContributor: entry.topContributor,
-      topContributorProgress: entry.topContributorProgress,
-    }))
-    .sort((a, b) => b.totalProgress - a.totalProgress);
-  const contribution = {
-    summary: {
-      contributorCount: contributorList.length,
-      professionCount: professionList.length,
-      totalProgress,
-      totalXp,
-      recordedCrafts: new Set(rows.map((row) => row.craft_entity_id)).size,
-      lastContributedAt: rows[0]?.last_contributed_at ?? null,
-    },
-    contributors: contributorList.slice(0, 100),
-    professions: professionList,
-    recent: rows.slice(0, 50).map((row) => ({
-      contributorId: row.contributor_entity_id,
-      contributorName: row.contributor_name,
-      profession: row.profession,
-      craftLabel: row.craft_label,
-      structureName: row.structure_name,
-      itemTier: row.item_tier,
-      totalProgress: toNumber(row.contributed_progress),
-      totalXp: toNumber(row.contributed_xp),
-      contributionCount: toNumber(row.contribution_count),
-      attributionConfidence: row.attribution_confidence,
-      firstContributedAt: row.first_contributed_at,
-      lastContributedAt: row.last_contributed_at,
-    })),
-  };
+  const contribution = projectCraftContributionLeaderboard(storedRows);
   return {
     ...contribution,
     contribution,

@@ -453,10 +453,15 @@ test("primary-region session attributes every exact live craft progress owner an
     playerActionRows,
   });
   const contributions = [];
+  const resolvedPlayerIds = [];
   const session = new sessionModule.RelayPrimaryRegionPlayerSession({
     loadBindings: async () => fake.module,
     onSnapshot: () => {},
     onContribution: (event) => contributions.push(event),
+    resolvePlayerName: async (playerEntityId) => {
+      resolvedPlayerIds.push(playerEntityId);
+      return playerEntityId === "504403158356601680" ? "Relay Grace" : `Player ${playerEntityId}`;
+    },
     now: () => new Date("2026-08-02T12:54:09.000Z"),
   });
   const target = {
@@ -480,7 +485,7 @@ test("primary-region session attributes every exact live craft progress owner an
     claimId: "1369094286777412590",
     members: [
       { playerEntityId: "576460752388321942", userName: "Mosswick" },
-      { playerEntityId: "504403158356601680", userName: "Grace" },
+      { playerEntityId: "504403158356601680" },
     ],
     contributionTargets: [target],
   });
@@ -548,8 +553,8 @@ test("primary-region session attributes every exact live craft progress owner an
   playerActionRows.splice(0);
   update(
     { event: { tag: "Transaction" } },
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16128 },
-    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16152 },
+    { entityId: 1369094287428103662n, ownerEntityId: 504403158356601680n, progress: 16128 },
+    { entityId: 1369094287428103662n, ownerEntityId: 504403158356601680n, progress: 16152 },
   );
   update(
     { event: { tag: "Transaction" } },
@@ -562,7 +567,10 @@ test("primary-region session attributes every exact live craft progress owner an
     { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 0 },
   );
 
+  await new Promise((resolve) => setImmediate(resolve));
+
   assert.equal(contributions.length, 4);
+  assert.deepEqual(resolvedPlayerIds, ["504403158356601680"]);
   assert.deepEqual(
     contributions.map(({ sourceKey, data }) => ({
       sourceKey,
@@ -602,9 +610,9 @@ test("primary-region session attributes every exact live craft progress owner an
         contributedXp: "42.24",
       },
       {
-        sourceKey: "relay-craft-contribution:19:owner_fallback:owner:576460752388321942:1369094287428103662:16128:16152",
-        contributorEntityId: "576460752388321942",
-        contributorName: "Mosswick",
+        sourceKey: "relay-craft-contribution:19:owner_fallback:owner:504403158356601680:1369094287428103662:16128:16152",
+        contributorEntityId: "504403158356601680",
+        contributorName: "Relay Grace",
         attributionConfidence: "owner_fallback",
         observedSince: "2026-08-02T12:54:09.000Z",
         contributedProgress: "24",
@@ -614,8 +622,8 @@ test("primary-region session attributes every exact live craft progress owner an
   );
   assert.deepEqual(session.health(), {
     connected: true,
-    applied: false,
-    lastAppliedAt: null,
+    applied: true,
+    lastAppliedAt: "2026-08-02T12:54:09.000Z",
     lastError: null,
     lastContributionAt: "2026-08-02T12:54:09.000Z",
     authoritativeContributions: 1,

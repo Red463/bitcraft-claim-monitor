@@ -18,6 +18,7 @@ import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "..
 import { resolveAllowedView } from "../navigation/routeState.ts";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
+import { addDecimal, compareDecimal, formatExactDecimal } from "../server/game-data/exactDecimal.ts";
 
 const LOCAL_API = "/api/local";
 
@@ -87,28 +88,28 @@ export function Leaderboard({
     for (const contributor of contributors) {
       for (const row of contributor.professions ?? []) {
         const profession = String(row.profession ?? "Unknown");
-        const current = byProfession.get(profession) ?? { profession, totalProgress: 0, totalXp: 0, craftCount: 0, contributorCount: 0, topContributor: "", topContributorProgress: 0 };
-        const progress = toNumber(row.progress);
-        current.totalProgress += progress;
-        current.totalXp += toNumber(row.xp);
-        current.craftCount += toNumber(row.crafts);
+        const current = byProfession.get(profession) ?? { profession, totalProgress: "0", totalXp: "0", craftCount: "0", contributorCount: 0, topContributor: "", topContributorProgress: "0" };
+        const progress = String(row.progress ?? "0");
+        current.totalProgress = addDecimal(String(current.totalProgress), progress);
+        current.totalXp = addDecimal(String(current.totalXp), String(row.xp ?? "0"));
+        current.craftCount = addDecimal(String(current.craftCount), String(row.crafts ?? "0"));
         current.contributorCount += 1;
-        if (progress > current.topContributorProgress) {
+        if (compareDecimal(progress, String(current.topContributorProgress)) > 0) {
           current.topContributor = contributor.name;
           current.topContributorProgress = progress;
         }
         byProfession.set(profession, current);
       }
     }
-    return Array.from(byProfession.values()).sort((a, b) => b.totalProgress - a.totalProgress);
+    return Array.from(byProfession.values()).sort((a, b) => compareDecimal(String(b.totalProgress), String(a.totalProgress)));
   }, [contributors]);
   const summary = React.useMemo(() => ({
     ...(contributionBoard.summary ?? {}),
     contributorCount: contributors.length,
     professionCount: professions.length,
-    totalProgress: contributors.reduce((sum, row) => sum + toNumber(row.totalProgress), 0),
-    totalXp: contributors.reduce((sum, row) => sum + toNumber(row.totalXp), 0),
-    recordedCrafts: contributors.reduce((sum, row) => sum + toNumber(row.craftCount), 0),
+    totalProgress: contributors.reduce((sum, row) => addDecimal(sum, String(row.totalProgress ?? "0")), "0"),
+    totalXp: contributors.reduce((sum, row) => addDecimal(sum, String(row.totalXp ?? "0")), "0"),
+    recordedCrafts: contributors.reduce((sum, row) => addDecimal(sum, String(row.craftCount ?? "0")), "0"),
     lastContributedAt: recent[0]?.lastContributedAt ?? null,
   }), [contributors, contributionBoard.summary, professions.length, recent]);
   const filteredContributors = professionFilter === "All"
@@ -204,8 +205,8 @@ export function Leaderboard({
     <MiniStat key="played" icon={<Trophy />} label="Most Played" value={mostPlayedRow?.timePlayedSeconds ? `${mostPlayedRow.name} - ${formatPlaytime(mostPlayedRow.timePlayedSeconds)}` : "Unavailable"} />,
     <MiniStat key="longest" icon={<Clock />} label="Longest Current Session" value={formatCurrentSession(longestSessionRow?.sessionSeconds) ?? "Unavailable"} />,
   ] : [
-    <MiniStat key="progress" icon={<Trophy />} label="Recorded Contribution" value={formatNumber(summary.totalProgress)} />,
-    <MiniStat key="xp" icon={<TrendingUp />} label="Estimated XP" value={formatNumber(summary.totalXp)} />,
+    <MiniStat key="progress" icon={<Trophy />} label="Recorded Contribution" value={formatExactDecimal(summary.totalProgress)} />,
+    <MiniStat key="xp" icon={<TrendingUp />} label="Estimated XP" value={formatExactDecimal(summary.totalXp)} />,
     <MiniStat key="top" icon={<Users />} label="Top Contributor" value={topContributor?.name ?? "None yet"} />,
     <MiniStat key="profession" icon={<GraduationCap />} label="Top Profession" value={topProfession?.profession ?? "None yet"} />,
   ];
@@ -226,7 +227,7 @@ export function Leaderboard({
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><Trophy size={14} /> {formatNumber(summary.contributorCount)} contributors</span>
-            <span><Factory size={14} /> {formatNumber(summary.recordedCrafts)} crafts</span>
+            <span><Factory size={14} /> {formatExactDecimal(summary.recordedCrafts)} crafts</span>
             <span>{summary.lastContributedAt ? `Updated ${timeAgo(summary.lastContributedAt)}` : "No history yet"}</span>
           </div>
         </div>
@@ -269,12 +270,12 @@ export function Leaderboard({
             rows={filteredContributors}
             columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
-              ["Progress", (entry) => formatNumber(entry.totalProgress)],
-              ["Estimated XP", (entry) => formatNumber(entry.totalXp)],
-              ["Crafts", (entry) => formatNumber(entry.craftCount)],
+              ["Progress", (entry) => formatExactDecimal(entry.totalProgress)],
+              ["Estimated XP", (entry) => formatExactDecimal(entry.totalXp)],
+              ["Crafts", (entry) => formatExactDecimal(entry.craftCount)],
               ["Top professions", (entry) => (
                 <div className="leaderboard-profession-tags">
-                {(entry.professions ?? []).slice(0, 3).map((profession: AnyRecord) => <span key={profession.profession}>{profession.profession} <b>{formatNumber(profession.progress)}</b></span>)}
+                {(entry.professions ?? []).slice(0, 3).map((profession: AnyRecord) => <span key={profession.profession}>{profession.profession} <b>{formatExactDecimal(profession.progress)}</b></span>)}
                 </div>
               )],
               ["Last contribution", (entry) => entry.lastContributedAt ? timeAgo(entry.lastContributedAt) : "Unknown", (entry) => timestampMs(entry.lastContributedAt)],
@@ -397,9 +398,9 @@ export function Leaderboard({
               <article key={profession.profession}>
                 <div>
                   <strong>{profession.profession}</strong>
-                  <small>{formatNumber(profession.contributorCount)} contributor{toNumber(profession.contributorCount) === 1 ? "" : "s"} - {formatNumber(profession.craftCount)} craft records</small>
+                  <small>{formatNumber(profession.contributorCount)} contributor{toNumber(profession.contributorCount) === 1 ? "" : "s"} - {formatExactDecimal(profession.craftCount)} craft records</small>
                 </div>
-                <span>{formatNumber(profession.totalProgress)}</span>
+                <span>{formatExactDecimal(profession.totalProgress)}</span>
                 <em>Top: {profession.topContributor || "Unknown"}</em>
               </article>
             ))}
@@ -416,7 +417,7 @@ export function Leaderboard({
                   <strong>{entry.contributorName}</strong>
                   <small>{entry.profession || "Unknown profession"} - {entry.craftLabel} at {entry.structureName}</small>
                 </div>
-                <span>{formatNumber(entry.totalProgress)}</span>
+                <span>{formatExactDecimal(entry.totalProgress)}</span>
                 <time>{entry.lastContributedAt ? timeAgo(entry.lastContributedAt) : "Unknown"}</time>
               </article>
             ))}

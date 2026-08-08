@@ -66,6 +66,22 @@ function outputQuantity(stack: CraftStack | undefined, craftCount: unknown): str
   ).toString();
 }
 
+function optionalDecimalIdentifier(value: unknown): string | null {
+  if (typeof value === "bigint" && value >= 0n) return value.toString();
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) return BigInt(value.trim()).toString();
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return String(value);
+  return null;
+}
+
+function optionalOutputIdentity(output: CraftStack | undefined): string | null {
+  if (!output) return null;
+  try {
+    return inventoryStackKey(output);
+  } catch {
+    return null;
+  }
+}
+
 function latestValidTimestamp(value: unknown): string | null {
   if (value == null) return null;
   const timestamp = String(value);
@@ -170,7 +186,7 @@ export function enrichCraftsWithCatalog(
   const activeCrafts: ReturnType<typeof enrichedCraft>[] = [];
   const passiveCrafts = new Map<string, Record<string, unknown>>();
 
-  for (const craft of rows) {
+  for (const [rowIndex, craft] of rows.entries()) {
     const id = String(craft.recipeId ?? "");
     if (!recipeById.has(id)) recipeById.set(id, getRecipe(id));
     const recipe = recipeById.get(id) ?? undefined;
@@ -188,18 +204,21 @@ export function enrichCraftsWithCatalog(
     };
     const output = Array.isArray(craft.craftedItem) ? craft.craftedItem[0] : undefined;
     let outputEntity: CatalogEntity | null = null;
-    if (output) {
-      const key = inventoryStackKey(output);
+    const resolvedOutputIdentity = optionalOutputIdentity(output);
+    if (resolvedOutputIdentity) {
+      const key = resolvedOutputIdentity;
       outputEntity = catalog[key] ?? getEntity(key);
       if (outputEntity) catalog[key] = outputEntity;
     }
 
     if (recipe?.isPassive === true) {
-      const outputIdentity = output ? inventoryStackKey(output) : "items:0";
-      const memberEntityId = String(craft.ownerEntityId ?? craft.owner_entity_id ?? craft.ownerUsername ?? "Unknown");
-      const structureEntityId = String(craft.buildingEntityId ?? craft.building_entity_id ?? craft.buildingName ?? "Unknown Structure");
+      const outputIdentity = resolvedOutputIdentity;
+      const memberEntityId = optionalDecimalIdentifier(craft.ownerEntityId ?? craft.owner_entity_id);
+      const structureEntityId = optionalDecimalIdentifier(craft.buildingEntityId ?? craft.building_entity_id);
       const status = craft.completed === true ? "complete" : "processing";
-      const key = [memberEntityId, outputIdentity, structureEntityId, status].join("|");
+      const key = memberEntityId && outputIdentity && structureEntityId
+        ? [memberEntityId, outputIdentity, structureEntityId, status].join("|")
+        : `partial:${exactEntityId ?? rowIndex}`;
       const quantity = outputQuantity(output, craft.craftCount);
       const craftCount = decimalInteger(craft.craftCount ?? 0, "craft count");
       const timestamp = latestValidTimestamp(craft.timestamp ?? craft.updatedAt ?? craft.updated_at);
@@ -220,8 +239,8 @@ export function enrichCraftsWithCatalog(
         memberEntityId,
         memberName: String(craft.ownerUsername ?? "Unknown"),
         outputIdentity,
-        outputItemId: outputIdentity.split(":")[1],
-        outputItemType: outputIdentity.startsWith("cargo:") ? "cargo" : "item",
+        outputItemId: outputIdentity?.split(":")[1] ?? null,
+        outputItemType: outputIdentity ? outputIdentity.startsWith("cargo:") ? "cargo" : "item" : null,
         outputName: String(outputEntity?.name ?? "crafted item"),
         iconAssetName: outputEntity?.iconAssetName ?? null,
         structureEntityId,

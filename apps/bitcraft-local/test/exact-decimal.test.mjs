@@ -5,6 +5,8 @@ const {
   addDecimal,
   canonicalF32Decimal,
   canonicalNonNegativeDecimal,
+  compareDecimal,
+  formatExactDecimal,
   multiplyDecimalByInteger,
   roundDecimalToWhole,
 } = await import(
@@ -19,6 +21,12 @@ test("Relay F32 XP rates normalize without binary noise", () => {
 test("exact decimal XP multiplies and accumulates without Number", () => {
   assert.equal(multiplyDecimalByInteger("1.76", "24"), "42.24");
   assert.equal(addDecimal("42.24", "9007199254740993.76"), "9007199254741036");
+});
+
+test("exact decimal comparison and display preserve values above Number.MAX_SAFE_INTEGER", () => {
+  assert.equal(compareDecimal("9007199254740993", "9007199254740992.99"), 1);
+  assert.equal(compareDecimal("1.5", "1.50"), 0);
+  assert.equal(formatExactDecimal("9007199254740993.25", "en-GB"), "9,007,199,254,740,993.25");
 });
 
 test("exact decimal XP rounds half-up to a whole-number string", () => {

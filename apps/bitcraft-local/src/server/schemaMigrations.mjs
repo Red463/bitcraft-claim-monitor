@@ -447,6 +447,7 @@ export function applyProductionContributionExactAmountMigration(db) {
             WHEN attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback')
               THEN attribution_confidence
             WHEN attribution_confidence = 'unknown'
+              AND json_valid(raw_json)
               AND json_extract(raw_json, '$.attributionConfidence') = 'owner_fallback'
               AND CAST(json_extract(raw_json, '$.craftEntityId') AS TEXT) = craft_entity_id
               AND CAST(json_extract(raw_json, '$.craftOwnerEntityId') AS TEXT) = contributor_entity_id
