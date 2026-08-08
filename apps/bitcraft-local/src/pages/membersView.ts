@@ -16,7 +16,11 @@ function presenceDetails(member: AnyRecord) {
     lastActiveTimestamps: [player.lastActiveTimestamp, member.lastActiveTimestamp],
     lastLoginTimestamp: player.lastLoginTimestamp ?? member.lastLoginTimestamp,
   });
-  return { player, lastSeenMs: status.timestamp ? Date.parse(status.timestamp) : 0 };
+  return {
+    player,
+    signedIn: member.player?.signedIn,
+    lastSeenMs: status.timestamp ? Date.parse(status.timestamp) : 0,
+  };
 }
 
 /** Default operational roster order before an operator chooses a table sort. */
@@ -24,7 +28,7 @@ export function compareMembersByDefault(left: AnyRecord, right: AnyRecord): numb
   const leftPresence = presenceDetails(left);
   const rightPresence = presenceDetails(right);
   const group = (presence: ReturnType<typeof presenceDetails>) => (
-    presence.player.signedIn === true ? 0 : presence.player.presenceSource === "unavailable" ? 2 : 1
+    presence.signedIn === true ? 0 : presence.signedIn === false ? 1 : 2
   );
   const groupDifference = group(leftPresence) - group(rightPresence);
   if (groupDifference) return groupDifference;

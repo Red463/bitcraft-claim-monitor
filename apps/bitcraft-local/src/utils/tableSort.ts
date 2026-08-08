@@ -83,6 +83,14 @@ export function sortIndexedRows<Row>(
   });
 }
 
+export function resolveDataTableRows<Row>(
+  rows: ReadonlyArray<IndexedRow<Row>>,
+  sort: { direction: SortDirection; sortValue: (row: Row, index: number) => unknown } | null,
+): Array<IndexedRow<Row>> {
+  if (!sort) return [...rows];
+  return sortIndexedRows(rows, sort.sortValue, sort.direction);
+}
+
 export function windowIndexedRows<Row>(
   rows: ReadonlyArray<IndexedRow<Row>>,
   offset = 0,

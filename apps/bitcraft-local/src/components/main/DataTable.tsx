@@ -1,6 +1,6 @@
 import React from "react";
 import type { AnyRecord } from "../../main-app-data";
-import { sortIndexedRows, windowIndexedRows, type SortDirection } from "../../utils/tableSort";
+import { resolveDataTableRows, windowIndexedRows, type SortDirection } from "../../utils/tableSort";
 import { AsyncState, type AsyncStateKind } from "./AsyncState";
 
 export type DataTableColumn = [
@@ -50,13 +50,15 @@ export function DataTable({
   const [sort, setSort] = React.useState<{ column: number; direction: SortDirection } | null>(null);
   const indexedRows = React.useMemo(() => rows.map((row, index) => ({ row, index })), [rows]);
   const sortedRows = React.useMemo(() => {
-    if (!sort) return indexedRows;
+    if (!sort) return resolveDataTableRows(indexedRows, null);
     const [, render, sortValue] = columns[sort.column] ?? [];
-    if (!render) return indexedRows;
-    return sortIndexedRows(
+    if (!render) return resolveDataTableRows(indexedRows, null);
+    return resolveDataTableRows(
       indexedRows,
-      sortValue ?? ((row, index) => cellSortText(render(row, index))),
-      sort.direction,
+      {
+        sortValue: sortValue ?? ((row, index) => cellSortText(render(row, index))),
+        direction: sort.direction,
+      },
     );
   }, [columns, indexedRows, sort]);
   const visibleRows = React.useMemo(

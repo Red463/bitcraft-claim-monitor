@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { dashboardClaimRegionLabel } from "../src/pages/dashboardView.ts";
 import { orderMembersByDefault } from "../src/pages/membersView.ts";
-import { sortIndexedRows } from "../src/utils/tableSort.ts";
 
 test("Dashboard resolves the monitored claim region name from the global region catalog", () => {
   assert.equal(
@@ -43,16 +42,14 @@ test("Members default ordering breaks equal presence values by username then ent
   assert.deepEqual(orderMembersByDefault(members).map((member) => member.playerEntityId), ["1", "3", "2"]);
 });
 
-test("Explicit DataTable sorting overrides the Members default row order", () => {
-  const defaultRows = orderMembersByDefault([
-    { playerEntityId: "1", username: "Zed", player: { signedIn: true, sessionSeconds: 540 } },
-    { playerEntityId: "2", username: "Ada", player: { signedIn: false, lastActiveTimestamp: "2026-08-08T10:00:00.000Z" } },
-  ]);
+test("Members with missing or indeterminate player presence sort after confirmed offline members", () => {
+  const members = [
+    { playerEntityId: "1", username: "Ada" },
+    { playerEntityId: "2", username: "Bea", player: { presenceSource: "regional" } },
+    { playerEntityId: "3", username: "Zed", player: { signedIn: false } },
+  ];
 
-  assert.deepEqual(defaultRows.map((member) => member.username), ["Zed", "Ada"]);
-  assert.deepEqual(
-    sortIndexedRows(defaultRows.map((row, index) => ({ row, index })), (row) => row.username, "asc")
-      .map(({ row }) => row.username),
-    ["Ada", "Zed"],
-  );
+  assert.deepEqual(orderMembersByDefault(members).map((member) => member.username), [
+    "Zed", "Ada", "Bea",
+  ]);
 });
