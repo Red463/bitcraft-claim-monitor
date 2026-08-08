@@ -207,6 +207,29 @@ test("passive craft projection groups only identical member, output, structure, 
   ]);
 });
 
+test("passive craft projection replaces nonzero numbered output placeholders", () => {
+  const projected = enrichCraftsWithCatalog({
+    craftResults: [{
+      entityId: "701",
+      recipeId: "70",
+      ownerEntityId: "101",
+      ownerUsername: "Ada",
+      buildingEntityId: "501",
+      buildingName: "Tanning Tub",
+      completed: true,
+      craftCount: "1",
+      craftedItem: [{ itemId: "42", itemType: "item", quantity: "3" }],
+    }],
+  }, () => ({ id: "42", name: "Rough Leather", tier: 1 }), (id) => ({
+    id,
+    name: "Tan {1}",
+    isPassive: true,
+  }));
+
+  assert.equal(projected.passiveCraftResults[0].recipeName, "Tan Rough Leather");
+  assert.doesNotMatch(projected.passiveCraftResults[0].recipeName, /\{\d+\}/);
+});
+
 test("partial passive crafts do not invent typed ids or merge unrelated rows", () => {
   const requestedCatalogKeys = [];
   const projected = enrichCraftsWithCatalog({ craftResults: [

@@ -15,7 +15,7 @@ function catalogEntity(outputIdentity: string | null, payload: AnyRecord): AnyRe
 function resolvedRecipeName(value: unknown, outputName: string): string {
   const recipeName = String(value ?? "").trim();
   if (!recipeName) return outputName;
-  return recipeName.replaceAll("{0}", outputName).replace(/\s+/g, " ").trim();
+  return recipeName.replace(/\{\d+\}/g, outputName).replace(/\s+/g, " ").trim();
 }
 
 export function projectCraftPresentation(job: AnyRecord, payload: AnyRecord = {}) {

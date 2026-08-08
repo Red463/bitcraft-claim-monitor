@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.51.0-beta.6] - 2026-08-08
+
+### Fixed
+
+- Fixed nonzero numbered Relay recipe placeholders such as `Tan {1}` appearing in Craft Monitor.
+
 ## [0.51.0-beta.5] - 2026-08-08
 
 ### Added
