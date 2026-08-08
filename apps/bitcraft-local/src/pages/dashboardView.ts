@@ -19,6 +19,19 @@ export function dashboardRegionWealth(rows: AnyRecord[]) {
   };
 }
 
+/**
+ * The settlement payload identifies the monitored region, while the global
+ * region catalog owns the human-readable name. Keep that lookup at the view
+ * boundary so no transport-only claim field is required.
+ */
+export function dashboardClaimRegionLabel(claim: AnyRecord, regions: AnyRecord[]): string {
+  const regionId = String(claim.regionId ?? "").trim();
+  const region = regions.find((candidate) => String(candidate.regionId ?? "").trim() === regionId);
+  const regionName = String(region?.regionName ?? region?.name ?? "").trim();
+  const displayId = regionId || "?";
+  return `R${displayId} · ${regionName || `Region ${displayId}`}`;
+}
+
 export function formatExactCompactInteger(value: unknown): string {
   const integer = exactInteger(value);
   const scales = [

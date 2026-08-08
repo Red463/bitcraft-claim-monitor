@@ -28,7 +28,7 @@ import { activityMetadata, signedDelta } from "./activity/activityUtils";
 import { MARKET_INCOME_RANGES, buildMarketIncomeSummary, buildMarketRangeAnalytics, type MarketIncomeRangeDays } from "./market/marketAnalytics";
 import { hasRecentCraftContribution } from "./production/productionUtils";
 import { projectCraftPresentation } from "./production/craftPresentation";
-import { dashboardRegionWealth, formatExactCompactInteger } from "./dashboardView";
+import { dashboardClaimRegionLabel, dashboardRegionWealth, formatExactCompactInteger } from "./dashboardView";
 import { researchSettlementCaps } from "./researchView";
 
 export function Dashboard({ data, activity, marketHistory, dashboardSummary, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; marketHistory: AnyRecord | null; dashboardSummary: AnyRecord | null; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
@@ -69,6 +69,7 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
   const regionWealthDetail = regionSettlementCount
     ? `${formatNumber(regionSettlementCount)} player settlement${regionSettlementCount === 1 ? "" : "s"} in region`
     : "Region data loading";
+  const claimRegionLabel = dashboardClaimRegionLabel(claim, data.regionStatus);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const treasuryEventsToday = activity.filter((event) => {
@@ -165,7 +166,7 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
         description={`Real-time summary of ${claim.name ?? "the monitored settlement"}`}
         meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
-            <span className="dashboard-region-line"><Globe2 size={15} /> {claim.regionName ?? "Unknown"} <span className="dashboard-region-badge">R{claim.regionId ?? "?"}</span></span>
+            <span className="dashboard-region-line"><Globe2 size={15} /> {claimRegionLabel}</span>
             <span className="dashboard-refresh-line"><span className="online-dot is-online" /> Last updated {lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "waiting"}</span>
           </div>
           <span className="dashboard-claim-link"><TierBadge tier={claim.tier} /> {claim.name ?? "Monitored Settlement"}</span>

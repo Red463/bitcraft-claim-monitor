@@ -30,6 +30,7 @@ import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import { recruitmentSummary } from "./recruitmentView.ts";
 import { memberPresenceStatus, memberSessionStatus } from "./memberPresence.ts";
+import { orderMembersByDefault } from "./membersView.ts";
 import { memberPassiveCraftQuantityLabel } from "./production/passiveCraftPresentation.ts";
 
 /**
@@ -67,7 +68,8 @@ export function Members({
       player: playerMap.get(String(username)) ?? null,
     };
   });
-  const filtered = merged.filter((member) => String(member.username).toLowerCase().includes(searchTerm.toLowerCase()));
+  const orderedMembers = orderMembersByDefault(merged);
+  const filtered = orderedMembers.filter((member) => String(member.username).toLowerCase().includes(searchTerm.toLowerCase()));
   const onlineCount = merged.filter((member) => member.player?.signedIn).length;
   const totalMemberLevels = merged.reduce((total, member) => total + toNumber(member.citizen?.totalLevel ?? member.citizen?.totalSkillLevel), 0);
   const recruitment = recruitmentSummary(data.raw?.recruitment);
