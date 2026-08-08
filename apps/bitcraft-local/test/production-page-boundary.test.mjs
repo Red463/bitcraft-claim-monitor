@@ -77,11 +77,11 @@ test("production page defaults private crafts to hidden while explaining unknown
   assert.match(source, /Show private crafts/);
   assert.match(source, /Hide private crafts/);
   assert.match(source, /Unknown contributor/);
-  assert.match(source, /Inferred/);
+  assert.match(source, /Matched action/);
   assert.match(source, /const unknownContributor = person\.contributorEntityId == null\s*\|\| person\.attributionConfidence === "unknown"/);
   assert.match(source, /formatDecimalQuantity\(person\.totalProgressContributed\)/);
   assert.match(source, /formatDecimalQuantity\(person\.totalXpContributed\)/);
-  assert.match(source, /person\.attributionConfidence === "joined" \? <small>Inferred<\/small> : null/);
+  assert.match(source, /person\.attributionConfidence === "matched_action" \? <small>Matched action<\/small>/);
   assert.match(source, /key=\{person\.contributorEntityId \?\? `unknown:\$\{job\.entityId\}`\}/);
   assert.match(source, /No contributor activity has been observed since \{formatObservedSince\(data\.contributionObservedSince\)\}\./);
   assert.match(source, /No contributor activity has been observed since tracking became available\./);

@@ -15,8 +15,8 @@ function contributorId(value) {
 
 function attributionConfidence(value) {
   const confidence = String(value ?? "unknown");
-  if (!new Set(["authoritative", "joined", "unknown"]).has(confidence)) {
-    throw new TypeError("Attribution confidence must be authoritative, joined, or unknown");
+  if (!new Set(["authoritative", "matched_action", "owner_fallback", "unknown"]).has(confidence)) {
+    throw new TypeError("Attribution confidence must be authoritative, matched_action, owner_fallback, or unknown");
   }
   return confidence;
 }

@@ -122,6 +122,16 @@ export class RelayPlayerPresenceService {
     }));
   }
 
+  async resolvePlayerName(playerEntityIdValue: unknown): Promise<string> {
+    const playerEntityId = decimalId(playerEntityIdValue, "contribution player entity id");
+    try {
+      const detail = await this.#detail(playerEntityId);
+      return detail.username.trim() || `Player ${playerEntityId}`;
+    } catch {
+      return `Player ${playerEntityId}`;
+    }
+  }
+
   async #detail(playerEntityId: string): Promise<PlayerDetail> {
     const now = this.#now();
     const cached = this.#cache.get(playerEntityId);

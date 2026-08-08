@@ -21,6 +21,7 @@ import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/se
 import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySettings.mjs";
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
 import { projectCraftContributionEnvelope } from "./src/server/craftContributionProjection.mjs";
+import { partitionCraftContributionRows } from "./src/server/craftContributionVisibility.mjs";
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
 import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { gameTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
@@ -261,7 +262,12 @@ async function serverHealthResponse(url, { includeDiagnosticBundle = false } = {
   const overall = serverHealthState(files.snapshot, application);
   const logs = filterServerHealthLogs(files.snapshot?.logs ?? [], { service: url.searchParams.get("service") ?? "", severity: url.searchParams.get("severity") ?? "", search: url.searchParams.get("search") ?? "", cursor: url.searchParams.get("cursor") ?? 0, limit: url.searchParams.get("limit") ?? 50 });
   const incidents = db.prepare("SELECT * FROM server_health_incidents ORDER BY last_observed_at DESC LIMIT 100").all();
-  const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: false }, version: appVersion, buildId: currentAppBuildId() };
+  const contributionRows = db.prepare(`
+    SELECT contributor_entity_id, attribution_confidence
+    FROM production_contribution_events
+  `).all();
+  const craftContributionDiagnostics = partitionCraftContributionRows(contributionRows).adminDiagnostics;
+  const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), craftContributionDiagnostics, incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: false }, version: appVersion, buildId: currentAppBuildId() };
   return buildServerHealthResponse(response, { includeDiagnosticBundle });
 }
 
@@ -6135,13 +6141,14 @@ function marketLeaderboard(claimId) {
 }
 
 function contributionLeaderboard(claimId) {
-  const rows = db.prepare(`
+  const storedRows = db.prepare(`
     SELECT *
     FROM production_contributions
     WHERE claim_id = ?
     ORDER BY last_contributed_at DESC, updated_at DESC
     LIMIT 5000
   `).all(claimId);
+  const { playerRows: rows } = partitionCraftContributionRows(storedRows);
   const contributors = new Map();
   const professions = new Map();
   let totalProgress = 0;
@@ -6247,7 +6254,7 @@ function contributionLeaderboard(claimId) {
 }
 
 function currentCraftContributions(claimId) {
-  return projectCraftContributionEnvelope(db.prepare(`
+  const storedRows = db.prepare(`
     SELECT
       craft_entity_id,
       contributor_entity_id,
@@ -6261,7 +6268,10 @@ function currentCraftContributions(claimId) {
     FROM production_contributions
     WHERE claim_id = ?
     ORDER BY last_contributed_at DESC, contributor_name
-  `).all(claimId));
+  `).all(claimId);
+  return projectCraftContributionEnvelope(
+    partitionCraftContributionRows(storedRows).playerRows,
+  );
 }
 
 function dashboardHistory(claimId) {

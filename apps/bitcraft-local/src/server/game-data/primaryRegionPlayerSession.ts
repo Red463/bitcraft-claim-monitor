@@ -113,6 +113,7 @@ type SessionDependencies = {
   loadBindings?: () => Promise<RegionalBindingModule>;
   onSnapshot: (snapshot: RegionalPlayerSnapshot) => void | Promise<void>;
   onContribution?: (event: DomainEvent) => void | Promise<void>;
+  resolvePlayerName?: (playerEntityId: string) => Promise<string>;
   now?: () => Date;
 };
 
@@ -280,6 +281,7 @@ export class RelayPrimaryRegionPlayerSession {
   readonly #loadBindings: () => Promise<RegionalBindingModule>;
   readonly #onSnapshot: SessionDependencies["onSnapshot"];
   readonly #onContribution: SessionDependencies["onContribution"];
+  readonly #resolvePlayerName: SessionDependencies["resolvePlayerName"];
   readonly #now: () => Date;
   #connection: BindingConnection | null = null;
   #baseSubscription: SubscriptionHandle | null = null;
@@ -301,7 +303,7 @@ export class RelayPrimaryRegionPlayerSession {
   readonly #contributionSourceKeys = new Set<string>();
   readonly #tableChanged = () => this.#queueSnapshot();
   readonly #bankChanged = () => this.#queueBankInventoryRefresh();
-  readonly #contributionChanged = (...args: unknown[]) => this.#handleContributionUpdate(args);
+  readonly #contributionChanged = (...args: unknown[]) => { void this.#handleContributionUpdate(args); };
   #health = {
     connected: false,
     applied: false,
@@ -309,7 +311,8 @@ export class RelayPrimaryRegionPlayerSession {
     lastError: null as string | null,
     lastContributionAt: null as string | null,
     authoritativeContributions: 0,
-    joinedContributions: 0,
+    matchedActionContributions: 0,
+    ownerFallbackContributions: 0,
     unattributedContributions: 0,
     ambiguousContributionMatches: 0,
     deduplicatedContributions: 0,
@@ -319,6 +322,7 @@ export class RelayPrimaryRegionPlayerSession {
     this.#loadBindings = dependencies.loadBindings ?? loadBundledRegionalBindings;
     this.#onSnapshot = dependencies.onSnapshot;
     this.#onContribution = dependencies.onContribution;
+    this.#resolvePlayerName = dependencies.resolvePlayerName;
     this.#now = dependencies.now ?? (() => new Date());
   }
 
@@ -563,7 +567,7 @@ export class RelayPrimaryRegionPlayerSession {
     this.#listenersAttached = false;
   }
 
-  #handleContributionUpdate(args: unknown[]): void {
+  async #handleContributionUpdate(args: unknown[]): Promise<void> {
     if (!this.#onContribution || !this.#config) return;
     try {
       const [contextValue, previousValue, currentValue] = args;
@@ -609,6 +613,10 @@ export class RelayPrimaryRegionPlayerSession {
       if (progressDelta <= 0n) return;
       const observedAt = this.#now();
       const occurredAt = observedAt.toISOString();
+      const craftOwnerEntityId = decimalInteger(
+        current.ownerEntityId ?? current.owner_entity_id,
+        "Relay craft contribution owner entity id",
+      );
       const attribution = resolveCraftContributionAttribution({
         event,
         target,
@@ -617,10 +625,15 @@ export class RelayPrimaryRegionPlayerSession {
           [...this.#connection!.db.userState.iter()],
         ),
         actionRows: [...this.#connection!.db.playerActionState.iter()],
+        craftOwnerEntityId,
         observedAtMs: observedAt.getTime(),
       });
-      if (attribution.evidenceKey === "unknown:ambiguous") {
-        this.#health.ambiguousContributionMatches += 1;
+      if (attribution.confidence === "unknown") {
+        this.#health.unattributedContributions += 1;
+        if (attribution.evidenceKey === "unknown:ambiguous") {
+          this.#health.ambiguousContributionMatches += 1;
+        }
+        return;
       }
       const sourceKey = [
         "relay-craft-contribution",
@@ -642,13 +655,21 @@ export class RelayPrimaryRegionPlayerSession {
         const oldest = this.#contributionSourceKeys.values().next().value;
         if (oldest !== undefined) this.#contributionSourceKeys.delete(oldest);
       }
+      let contributorName = attribution.contributorName;
+      if (
+        attribution.confidence === "owner_fallback"
+        && contributorName === `Player ${attribution.contributorEntityId}`
+        && this.#resolvePlayerName
+      ) {
+        contributorName = await this.#resolvePlayerName(attribution.contributorEntityId);
+      }
       this.#health.lastContributionAt = occurredAt;
       if (attribution.confidence === "authoritative") {
         this.#health.authoritativeContributions += 1;
-      } else if (attribution.confidence === "joined") {
-        this.#health.joinedContributions += 1;
-      } else {
-        this.#health.unattributedContributions += 1;
+      } else if (attribution.confidence === "matched_action") {
+        this.#health.matchedActionContributions += 1;
+      } else if (attribution.confidence === "owner_fallback") {
+        this.#health.ownerFallbackContributions += 1;
       }
       const result = this.#onContribution({
         claimId: this.#config.claimId,
@@ -662,8 +683,10 @@ export class RelayPrimaryRegionPlayerSession {
           schemaFingerprint: this.#config.schemaFingerprint,
           craftEntityId: craftId,
           contributorEntityId: attribution.contributorEntityId,
-          contributorName: attribution.contributorName,
+          contributorName,
           attributionConfidence: attribution.confidence,
+          evidenceKey: attribution.evidenceKey,
+          craftOwnerEntityId,
           observedSince: occurredAt,
           profession: target.profession,
           craftLabel: target.craftLabel,

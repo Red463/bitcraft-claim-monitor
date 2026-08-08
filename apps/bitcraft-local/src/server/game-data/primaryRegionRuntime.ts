@@ -46,7 +46,7 @@ type RuntimeDependencies = {
     options?: RelayTopologyDiscoveryOptions,
   ) => Promise<RelayTopology>;
   createSession?: RegionalSessionFactory;
-  createPresenceService?: (baseUrl: string) => Pick<RelayPlayerPresenceService, "enrich">;
+  createPresenceService?: (baseUrl: string) => Pick<RelayPlayerPresenceService, "enrich" | "resolvePlayerName">;
   now?: () => number;
   topologyRefreshMs?: number;
   reconnectDelayMs?: (failureCount: number) => number;
@@ -121,7 +121,7 @@ export class RelayPrimaryRegionRuntime {
     options?: RelayTopologyDiscoveryOptions,
   ) => Promise<RelayTopology>;
   readonly #createSession: RegionalSessionFactory;
-  readonly #createPresenceService: (baseUrl: string) => Pick<RelayPlayerPresenceService, "enrich">;
+  readonly #createPresenceService: (baseUrl: string) => Pick<RelayPlayerPresenceService, "enrich" | "resolvePlayerName">;
   readonly #now: () => number;
   readonly #topologyRefreshMs: number;
   readonly #reconnectDelayMs: (failureCount: number) => number;
@@ -293,6 +293,10 @@ export class RelayPrimaryRegionRuntime {
       openingSession = this.#createSession({
         onSnapshot: (snapshot) => this.#enqueueSnapshot(snapshot, sessionEpoch),
         onContribution: (event) => this.#enqueueEvent(event, sessionEpoch),
+        resolvePlayerName: async (playerEntityId) => (
+          this.#presenceService?.resolvePlayerName(playerEntityId)
+          ?? `Player ${playerEntityId}`
+        ),
       });
       await openingSession.start({
         uri: this.#source.uri,

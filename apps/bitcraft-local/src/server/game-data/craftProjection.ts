@@ -66,6 +66,20 @@ function outputQuantity(stack: CraftStack | undefined, craftCount: unknown): str
   ).toString();
 }
 
+function latestValidTimestamp(value: unknown): string | null {
+  if (value == null) return null;
+  const timestamp = String(value);
+  return Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
+}
+
+function recipeDisplayName(recipe: CraftRecipe | undefined, output: CatalogEntity | null): string {
+  const outputName = String(output?.name ?? "crafted item");
+  return String(recipe?.name ?? outputName)
+    .replaceAll("{0}", outputName)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function enrichedCraft(craft: CraftRow, recipe: CraftRecipe | undefined) {
   return {
     ...craft,
@@ -154,7 +168,7 @@ export function enrichCraftsWithCatalog(
   const recipeById = new Map<string, CraftRecipe | null>();
   const catalog: Record<string, CatalogEntity> = {};
   const activeCrafts: ReturnType<typeof enrichedCraft>[] = [];
-  const passiveCrafts: Array<Record<string, unknown>> = [];
+  const passiveCrafts = new Map<string, Record<string, unknown>>();
 
   for (const craft of rows) {
     const id = String(craft.recipeId ?? "");
@@ -181,15 +195,41 @@ export function enrichCraftsWithCatalog(
     }
 
     if (recipe?.isPassive === true) {
-      passiveCrafts.push({
+      const outputIdentity = output ? inventoryStackKey(output) : "items:0";
+      const memberEntityId = String(craft.ownerEntityId ?? craft.owner_entity_id ?? craft.ownerUsername ?? "Unknown");
+      const structureEntityId = String(craft.buildingEntityId ?? craft.building_entity_id ?? craft.buildingName ?? "Unknown Structure");
+      const status = craft.completed === true ? "complete" : "processing";
+      const key = [memberEntityId, outputIdentity, structureEntityId, status].join("|");
+      const quantity = outputQuantity(output, craft.craftCount);
+      const craftCount = decimalInteger(craft.craftCount ?? 0, "craft count");
+      const timestamp = latestValidTimestamp(craft.timestamp ?? craft.updatedAt ?? craft.updated_at);
+      const current = passiveCrafts.get(key);
+      if (current) {
+        current.quantity = (BigInt(String(current.quantity)) + BigInt(quantity)).toString();
+        current.craftCount = (BigInt(String(current.craftCount)) + BigInt(craftCount)).toString();
+        if (timestamp && (!current.timestamp || Date.parse(timestamp) > Date.parse(String(current.timestamp)))) {
+          current.timestamp = timestamp;
+        }
+        continue;
+      }
+      passiveCrafts.set(key, {
         entityId: String(craft.entityId ?? ""),
-        recipe: String(recipe.name ?? outputEntity?.name ?? "Passive craft"),
+        recipe: recipeDisplayName(recipe, outputEntity),
+        recipeName: recipeDisplayName(recipe, outputEntity),
         tier: outputEntity?.tier ?? null,
+        memberEntityId,
         memberName: String(craft.ownerUsername ?? "Unknown"),
+        outputIdentity,
+        outputItemId: outputIdentity.split(":")[1],
+        outputItemType: outputIdentity.startsWith("cargo:") ? "cargo" : "item",
+        outputName: String(outputEntity?.name ?? "crafted item"),
+        iconAssetName: outputEntity?.iconAssetName ?? null,
+        structureEntityId,
         structure: String(craft.buildingName ?? "Unknown Structure"),
-        status: craft.completed === true ? "complete" : "processing",
-        quantity: outputQuantity(output, craft.craftCount),
-        timestamp: null,
+        status,
+        quantity,
+        craftCount,
+        timestamp,
         item: outputEntity,
       });
     } else if (craft.completed !== true) {
@@ -200,11 +240,11 @@ export function enrichCraftsWithCatalog(
   return {
     ...source,
     craftResults: activeCrafts,
-    passiveCraftResults: passiveCrafts,
+    passiveCraftResults: [...passiveCrafts.values()],
     catalog,
-    count: activeCrafts.length + passiveCrafts.length,
+    count: activeCrafts.length + passiveCrafts.size,
     activeCount: activeCrafts.length,
-    passiveCount: passiveCrafts.length,
+    passiveCount: passiveCrafts.size,
   };
 }
 

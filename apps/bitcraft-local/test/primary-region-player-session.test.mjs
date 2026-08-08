@@ -423,7 +423,7 @@ test("primary-region session filters member, settlement, and Town Bank state bef
   assert.equal(fake.state.callbacks.size, 0);
 });
 
-test("primary-region session attributes live craft progress without owner fallback and deduplicates evidence", async () => {
+test("primary-region session attributes every exact live craft progress owner and deduplicates evidence", async () => {
   assert.ok(sessionModule, "primary-region player session module must exist");
   const playerActionRows = [{
     autoId: 94295n,
@@ -584,28 +584,28 @@ test("primary-region session attributes live craft progress without owner fallba
         contributedXp: "42.24",
       },
       {
-        sourceKey: "relay-craft-contribution:19:joined:action:94295:1369094287428103662:16080:16104",
+        sourceKey: "relay-craft-contribution:19:matched_action:action:94295:1369094287428103662:16080:16104",
         contributorEntityId: "576460752388321942",
         contributorName: "Mosswick",
-        attributionConfidence: "joined",
+        attributionConfidence: "matched_action",
         observedSince: "2026-08-02T12:54:09.000Z",
         contributedProgress: "24",
         contributedXp: "42.24",
       },
       {
-        sourceKey: "relay-craft-contribution:19:unknown:unknown:ambiguous:1369094287428103662:16104:16128",
-        contributorEntityId: null,
-        contributorName: "Unknown contributor",
-        attributionConfidence: "unknown",
+        sourceKey: "relay-craft-contribution:19:owner_fallback:owner:576460752388321942:1369094287428103662:16104:16128",
+        contributorEntityId: "576460752388321942",
+        contributorName: "Mosswick",
+        attributionConfidence: "owner_fallback",
         observedSince: "2026-08-02T12:54:09.000Z",
         contributedProgress: "24",
         contributedXp: "42.24",
       },
       {
-        sourceKey: "relay-craft-contribution:19:unknown:unknown:no-match:1369094287428103662:16128:16152",
-        contributorEntityId: null,
-        contributorName: "Unknown contributor",
-        attributionConfidence: "unknown",
+        sourceKey: "relay-craft-contribution:19:owner_fallback:owner:576460752388321942:1369094287428103662:16128:16152",
+        contributorEntityId: "576460752388321942",
+        contributorName: "Mosswick",
+        attributionConfidence: "owner_fallback",
         observedSince: "2026-08-02T12:54:09.000Z",
         contributedProgress: "24",
         contributedXp: "42.24",
@@ -619,9 +619,10 @@ test("primary-region session attributes live craft progress without owner fallba
     lastError: null,
     lastContributionAt: "2026-08-02T12:54:09.000Z",
     authoritativeContributions: 1,
-    joinedContributions: 1,
-    unattributedContributions: 2,
-    ambiguousContributionMatches: 1,
+    matchedActionContributions: 1,
+    ownerFallbackContributions: 2,
+    unattributedContributions: 0,
+    ambiguousContributionMatches: 0,
     deduplicatedContributions: 1,
   });
 

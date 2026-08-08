@@ -549,7 +549,7 @@ test("server collection paginates listings and protects production mutations", a
           contributed_progress, contributed_xp, contribution_count,
           first_contributed_at, last_contributed_at, first_seen, updated_at,
           raw_json
-        ) VALUES (?, ?, ?, ?, 'Tester', 'joined', 'Carpentry', 'Simple Plank', ?, '2',
+        ) VALUES (?, ?, ?, ?, 'Tester', 'matched_action', 'Carpentry', 'Simple Plank', ?, '2',
           ?, ?, ?, '2026-05-20T12:00:00.000Z', ?, ?, ?, '{}')
       `).run(
         `${claimId}:${craftId}:1369094286777412591`,

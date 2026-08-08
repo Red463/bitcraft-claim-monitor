@@ -27,6 +27,7 @@ import type { ActivePanel } from "../types/app";
 import { activityMetadata, signedDelta } from "./activity/activityUtils";
 import { MARKET_INCOME_RANGES, buildMarketIncomeSummary, buildMarketRangeAnalytics, type MarketIncomeRangeDays } from "./market/marketAnalytics";
 import { hasRecentCraftContribution } from "./production/productionUtils";
+import { projectCraftPresentation } from "./production/craftPresentation";
 import { dashboardRegionWealth, formatExactCompactInteger } from "./dashboardView";
 import { researchSettlementCaps } from "./researchView";
 
@@ -130,20 +131,21 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
     };
   }).slice(0, 4);
   const rawData = (data as ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }).raw;
-  const craftItemLookup = new Map([...(rawData?.crafts?.items ?? []), ...(rawData?.crafts?.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]));
   const currentCrafts = crafts.map((job) => {
-    const item = craftItemLookup.get(String(job.craftedItem?.[0]?.item_id)) ?? {};
+    const presentation = projectCraftPresentation(job, rawData?.crafts ?? {});
+    const item = presentation.item;
     const progress = toNumber(job.progress);
     const total = toNumber(job.totalActionsRequired);
     const pct = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
     const skillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
     const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity ?? job.experiencePerEffort);
     const totalXp = toNumber(job.totalXp ?? job.totalXP) || total * experiencePerEffort;
-    const name = String(item.name ?? job.recipeName ?? job.craftName ?? job.buildingName ?? "Craft");
+    const name = presentation.displayName;
     return {
       id: String(job.entityId ?? `${job.recipeName}-${job.buildingName}`),
-      item: Object.keys(item).length ? item : { name },
+      item,
       name,
+      recipeName: presentation.recipeName,
       detail: job.buildingName ?? "Production",
       pct,
       totalXp,

@@ -25,7 +25,7 @@ test("durable contribution history projects whole XP and contributor attribution
     contributed_progress: "4",
     contributed_xp: "3.52",
     contribution_count: "1",
-    attribution_confidence: "joined",
+    attribution_confidence: "matched_action",
     first_contributed_at: "2026-08-01T07:00:00.000Z",
     last_contributed_at: "2026-08-01T10:00:00.000Z",
   }, {
@@ -55,7 +55,7 @@ test("durable contribution history projects whole XP and contributor attribution
       totalProgressContributed: "4",
       totalXpContributed: "4",
       contributionCount: "1",
-      attributionConfidence: "joined",
+      attributionConfidence: "matched_action",
       firstContributedAt: "2026-08-01T07:00:00.000Z",
       lastContributedAt: "2026-08-01T10:00:00.000Z",
     }, {
@@ -147,7 +147,7 @@ test("envelope returns structured craft contributions with the earliest observed
     contributed_progress: "1",
     contributed_xp: "invalid",
     contribution_count: "1",
-    attribution_confidence: "joined",
+    attribution_confidence: "matched_action",
     first_contributed_at: "2026-08-01T05:00:00.000Z",
   }, {
     craft_entity_id: "4",

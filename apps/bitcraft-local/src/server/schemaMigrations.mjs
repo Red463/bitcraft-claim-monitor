@@ -1,3 +1,5 @@
+import { addDecimal } from "../../dist-server/game-data/exactDecimal.js";
+
 export const additiveColumnMigrations = [
   { table: "market_events", column: "owner_entity_id", definition: "TEXT" },
   { table: "market_events", column: "item_id", definition: "TEXT" },
@@ -356,18 +358,30 @@ export function applyProductionContributionExactAmountMigration(db) {
   ]));
   const contributions = columnMap(contributionColumns);
   const events = columnMap(eventColumns);
+  const tableSql = (name) => String(db.prepare(`
+    SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?
+  `).get(name)?.sql ?? "");
+  const contributionSql = tableSql("production_contributions");
+  const eventSql = tableSql("production_contribution_events");
+  const hasCurrentConfidenceConstraint = (sql) => (
+    sql.includes("'matched_action'")
+    && sql.includes("'owner_fallback'")
+    && !sql.includes("'joined'")
+  );
   const migrateContributions = contributionColumns.length > 0 && (
     String(contributions.get("contributed_progress")?.type ?? "").toUpperCase() !== "TEXT"
     || String(contributions.get("contributed_xp")?.type ?? "").toUpperCase() !== "TEXT"
     || String(contributions.get("contribution_count")?.type ?? "").toUpperCase() !== "TEXT"
     || Number(contributions.get("contributor_entity_id")?.notnull ?? 0) !== 0
     || !contributions.has("attribution_confidence")
+    || !hasCurrentConfidenceConstraint(contributionSql)
   );
   const migrateEvents = eventColumns.length > 0 && (
     String(events.get("contributed_progress")?.type ?? "").toUpperCase() !== "TEXT"
     || String(events.get("contributed_xp")?.type ?? "").toUpperCase() !== "TEXT"
     || Number(events.get("contributor_entity_id")?.notnull ?? 0) !== 0
     || !events.has("attribution_confidence")
+    || !hasCurrentConfidenceConstraint(eventSql)
   );
   if (!migrateContributions && !migrateEvents && contributionColumns.length === 0) {
     return;
@@ -378,7 +392,8 @@ export function applyProductionContributionExactAmountMigration(db) {
     if (migrateContributions) {
       const confidence = contributions.has("attribution_confidence")
         ? `CASE
-            WHEN attribution_confidence IN ('authoritative', 'joined', 'unknown')
+            WHEN attribution_confidence = 'joined' THEN 'matched_action'
+            WHEN attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback', 'unknown')
               THEN attribution_confidence
             ELSE 'unknown'
           END`
@@ -393,7 +408,7 @@ export function applyProductionContributionExactAmountMigration(db) {
           contributor_entity_id TEXT,
           contributor_name TEXT NOT NULL,
           attribution_confidence TEXT NOT NULL DEFAULT 'unknown'
-            CHECK (attribution_confidence IN ('authoritative', 'joined', 'unknown')),
+            CHECK (attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback', 'unknown')),
           profession TEXT,
           craft_label TEXT,
           structure_name TEXT,
@@ -428,8 +443,14 @@ export function applyProductionContributionExactAmountMigration(db) {
     if (migrateEvents) {
       const confidence = events.has("attribution_confidence")
         ? `CASE
-            WHEN attribution_confidence IN ('authoritative', 'joined', 'unknown')
+            WHEN attribution_confidence = 'joined' THEN 'matched_action'
+            WHEN attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback')
               THEN attribution_confidence
+            WHEN attribution_confidence = 'unknown'
+              AND json_extract(raw_json, '$.attributionConfidence') = 'owner_fallback'
+              AND CAST(json_extract(raw_json, '$.craftEntityId') AS TEXT) = craft_entity_id
+              AND CAST(json_extract(raw_json, '$.craftOwnerEntityId') AS TEXT) = contributor_entity_id
+              THEN 'owner_fallback'
             ELSE 'unknown'
           END`
         : "'unknown'";
@@ -443,7 +464,7 @@ export function applyProductionContributionExactAmountMigration(db) {
           craft_entity_id TEXT NOT NULL,
           contributor_entity_id TEXT,
           attribution_confidence TEXT NOT NULL DEFAULT 'unknown'
-            CHECK (attribution_confidence IN ('authoritative', 'joined', 'unknown')),
+            CHECK (attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback', 'unknown')),
           contributed_progress TEXT NOT NULL,
           contributed_xp TEXT NOT NULL,
           occurred_at TEXT NOT NULL,
@@ -504,6 +525,110 @@ export function applyProductionContributionExactAmountMigration(db) {
         if (update.contributionCount !== null) {
           updateCount.run(update.contributionCount, update.contributionKey);
         }
+      }
+    }
+    if (migrateContributions || migrateEvents) {
+      const exactId = (value) => {
+        const id = String(value ?? "").trim();
+        return /^\d+$/.test(id) ? BigInt(id).toString() : null;
+      };
+      const safeJson = (value) => {
+        try {
+          const parsed = JSON.parse(String(value ?? "{}"));
+          return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+          return {};
+        }
+      };
+      const evidenceMatches = (row, raw) => {
+        const confidence = String(row.attribution_confidence ?? "unknown");
+        const evidenceKey = String(raw.evidenceKey ?? row.source_key ?? "");
+        if (confidence === "authoritative") return evidenceKey.includes("reducer:");
+        if (confidence === "matched_action") return evidenceKey.includes("action:");
+        if (confidence !== "owner_fallback") return false;
+        return evidenceKey.includes("owner:")
+          && exactId(raw.craftEntityId) === exactId(row.craft_entity_id)
+          && exactId(raw.craftOwnerEntityId) === exactId(row.contributor_entity_id);
+      };
+      const confidenceRank = { owner_fallback: 1, matched_action: 2, authoritative: 3 };
+      const aggregates = new Map();
+      const eventRows = db.prepare(`
+        SELECT * FROM production_contribution_events
+        ORDER BY occurred_at, source_key
+      `).all();
+      for (const row of eventRows) {
+        const craftEntityId = exactId(row.craft_entity_id);
+        const contributorEntityId = exactId(row.contributor_entity_id);
+        const progress = canonicalLegacyCounter(row.contributed_progress);
+        const raw = safeJson(row.raw_json);
+        if (!craftEntityId || !contributorEntityId || !progress || !evidenceMatches(row, raw)) continue;
+        let xp;
+        try {
+          xp = addDecimal("0", String(row.contributed_xp ?? ""));
+        } catch {
+          continue;
+        }
+        const key = `${String(row.claim_id)}:${craftEntityId}:${contributorEntityId}`;
+        const current = aggregates.get(key) ?? {
+          contributionKey: key,
+          claimId: String(row.claim_id),
+          craftEntityId,
+          contributorEntityId,
+          contributorName: `Player ${contributorEntityId}`,
+          attributionConfidence: "owner_fallback",
+          profession: null,
+          craftLabel: "Craft contribution",
+          structureName: "Unknown structure",
+          itemTier: null,
+          contributedProgress: "0",
+          contributedXp: "0",
+          contributionCount: "0",
+          firstContributedAt: String(row.occurred_at),
+          lastContributedAt: String(row.occurred_at),
+          firstSeen: String(row.received_at),
+          updatedAt: String(row.received_at),
+          rawJson: String(row.raw_json),
+        };
+        const confidence = String(row.attribution_confidence);
+        if ((confidenceRank[confidence] ?? 0) > (confidenceRank[current.attributionConfidence] ?? 0)) {
+          current.attributionConfidence = confidence;
+        }
+        current.contributorName = String(raw.contributorName ?? current.contributorName).trim() || current.contributorName;
+        current.profession = String(raw.profession ?? "").trim() || current.profession;
+        current.craftLabel = String(raw.craftLabel ?? "").trim() || current.craftLabel;
+        current.structureName = String(raw.structureName ?? "").trim() || current.structureName;
+        current.itemTier = String(raw.itemTier ?? "").trim() || current.itemTier;
+        current.contributedProgress = (BigInt(current.contributedProgress) + BigInt(progress)).toString();
+        current.contributedXp = addDecimal(current.contributedXp, xp);
+        current.contributionCount = (BigInt(current.contributionCount) + 1n).toString();
+        if (String(row.occurred_at) < current.firstContributedAt) current.firstContributedAt = String(row.occurred_at);
+        if (String(row.occurred_at) >= current.lastContributedAt) {
+          current.lastContributedAt = String(row.occurred_at);
+          current.updatedAt = String(row.received_at);
+          current.rawJson = String(row.raw_json);
+        }
+        if (String(row.received_at) < current.firstSeen) current.firstSeen = String(row.received_at);
+        aggregates.set(key, current);
+      }
+      db.exec("DELETE FROM production_contributions");
+      const insertAggregate = db.prepare(`
+        INSERT INTO production_contributions (
+          contribution_key, claim_id, craft_entity_id, contributor_entity_id,
+          contributor_name, attribution_confidence, profession, craft_label,
+          structure_name, item_tier, contributed_progress, contributed_xp,
+          contribution_count, first_contributed_at, last_contributed_at,
+          first_seen, updated_at, raw_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const row of aggregates.values()) {
+        insertAggregate.run(
+          row.contributionKey, row.claimId, row.craftEntityId,
+          row.contributorEntityId, row.contributorName,
+          row.attributionConfidence, row.profession, row.craftLabel,
+          row.structureName, row.itemTier, row.contributedProgress,
+          row.contributedXp, row.contributionCount, row.firstContributedAt,
+          row.lastContributedAt, row.firstSeen, row.updatedAt, row.rawJson,
+        );
       }
     }
     db.exec("COMMIT");

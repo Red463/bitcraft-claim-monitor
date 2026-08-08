@@ -101,6 +101,18 @@ test("production contribution migration canonicalizes legacy counters before app
 
   applySchemaBootstrap(db);
   applyAdditiveColumnMigrations(db);
+  db.prepare(`
+    INSERT INTO production_contribution_events (
+      source_key, claim_id, region_id, craft_entity_id, contributor_entity_id,
+      attribution_confidence, contributed_progress, contributed_xp, occurred_at,
+      received_at, raw_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    "relay-craft-contribution:19:authoritative:reducer:0xabc:2:0:24",
+    "1", "19", "2", "3", "authoritative", "24", "48",
+    "2026-08-01T09:00:00.000Z", "2026-08-01T09:00:00.000Z",
+    JSON.stringify({ contributorName: "Ada", profession: "Forestry", craftLabel: "Timber", structureName: "Forester", itemTier: "3", evidenceKey: "reducer:0xabc" }),
+  );
   applyProductionContributionExactAmountMigration(db);
   applyProductionContributionExactAmountMigration(db);
   applySchemaIndexStatements(db);
@@ -118,7 +130,7 @@ test("production contribution migration canonicalizes legacy counters before app
     `).get() },
     {
       contributed_progress: "24",
-      contributed_xp: "48.0",
+      contributed_xp: "48",
       contribution_count: "1",
     },
   );
@@ -126,7 +138,7 @@ test("production contribution migration canonicalizes legacy counters before app
   await repository.appendEvents([{
     claimId: "1",
     domain: "contributions",
-    sourceKey: "relay-craft-contribution:19:joined:action:100:2:24:25",
+    sourceKey: "relay-craft-contribution:19:matched_action:action:100:2:24:25",
     occurredAt: "2026-08-01T09:00:01.000Z",
     data: {
       eventType: "craft_contribution",
@@ -134,7 +146,9 @@ test("production contribution migration canonicalizes legacy counters before app
       craftEntityId: "2",
       contributorEntityId: "3",
       contributorName: "Ada",
-      attributionConfidence: "joined",
+      attributionConfidence: "matched_action",
+      evidenceKey: "action:100",
+      craftOwnerEntityId: "3",
       profession: "Forestry",
       craftLabel: "Timber",
       structureName: "Forester",
@@ -682,7 +696,43 @@ test("production contribution migration retains unknown events without rebuildin
 
 test("production contribution migration maps joined evidence and rebuilds only exact durable attribution", () => {
   const db = new DatabaseSync(":memory:");
-  applySchemaBootstrap(db);
+  db.exec(`
+    CREATE TABLE production_contributions (
+      contribution_key TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL,
+      craft_entity_id TEXT NOT NULL,
+      contributor_entity_id TEXT,
+      contributor_name TEXT NOT NULL,
+      attribution_confidence TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (attribution_confidence IN ('authoritative', 'joined', 'unknown')),
+      profession TEXT,
+      craft_label TEXT,
+      structure_name TEXT,
+      item_tier TEXT,
+      contributed_progress TEXT NOT NULL DEFAULT '0',
+      contributed_xp TEXT NOT NULL DEFAULT '0',
+      contribution_count TEXT NOT NULL DEFAULT '0',
+      first_contributed_at TEXT,
+      last_contributed_at TEXT,
+      first_seen TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      raw_json TEXT NOT NULL
+    );
+    CREATE TABLE production_contribution_events (
+      source_key TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL,
+      region_id TEXT NOT NULL,
+      craft_entity_id TEXT NOT NULL,
+      contributor_entity_id TEXT,
+      attribution_confidence TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (attribution_confidence IN ('authoritative', 'joined', 'unknown')),
+      contributed_progress TEXT NOT NULL,
+      contributed_xp TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      received_at TEXT NOT NULL,
+      raw_json TEXT NOT NULL
+    );
+  `);
   const insertEvent = db.prepare(`
     INSERT INTO production_contribution_events (
       source_key, claim_id, region_id, craft_entity_id, contributor_entity_id,
