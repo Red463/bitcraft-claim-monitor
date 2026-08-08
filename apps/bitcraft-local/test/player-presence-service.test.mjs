@@ -114,6 +114,29 @@ test("player presence cache is reused before 60 seconds and expires at 60 second
   assert.equal(calls, 2);
 });
 
+test("failed player presence lookups are negative-cached for 60 seconds", async () => {
+  assert.ok(presenceModule, "expected the player-presence service module");
+  let now = 1_000;
+  let calls = 0;
+  const service = new presenceModule.RelayPlayerPresenceService({
+    http: { player: async () => { calls += 1; throw new Error("Relay HTTP 503"); } },
+    now: () => now,
+  });
+  const unavailable = [{
+    playerEntityId: "1224979098660030450",
+    presenceSource: "unavailable",
+    signedIn: null,
+  }];
+
+  await service.enrich(unavailable);
+  now += 59_999;
+  await service.enrich(unavailable);
+  assert.equal(calls, 1);
+  now += 1;
+  await service.enrich(unavailable);
+  assert.equal(calls, 2);
+});
+
 test("player presence enrichment caps Relay HTTP concurrency at four", async () => {
   assert.ok(presenceModule, "expected the player-presence service module");
   let active = 0;

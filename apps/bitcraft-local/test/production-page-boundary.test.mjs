@@ -87,6 +87,16 @@ test("production page defaults private crafts to hidden while explaining unknown
   assert.match(source, /No contributor activity has been observed since tracking became available\./);
 });
 
+test("Craft Monitor mounts item icons for known compound identities without catalog icon metadata", () => {
+  const source = readFileSync(new URL("../src/pages/ProductionPage.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /const hasKnownItemIdentity = Boolean\(presentation\.outputItemType && presentation\.outputItemId\)/);
+  assert.match(source, /const shouldRenderItemIcon = hasKnownItemIdentity \|\| Boolean\(presentation\.iconAssetName\)/);
+  assert.match(source, /shouldRenderItemIcon \? <ItemIcon item=\{item\} \/> : null/);
+  assert.match(source, /passiveCraftItem\(row\)/);
+  assert.doesNotMatch(source, /presentation\.iconAssetName \? <ItemIcon item=\{item\} \/> : null/);
+});
+
 test("normalizeData preserves contribution map consumers while exposing the observation window", async () => {
   const { normalizeData } = await import(new URL("../src/utils/normalize.ts", import.meta.url).href);
   const normalized = normalizeData({

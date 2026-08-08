@@ -26,11 +26,45 @@ const {
   normalizeRegionalPlayers,
   normalizeRegionalRecruitment,
   normalizeRegionalResearch,
+  normalizeRelayCraftContributionRow,
+  normalizeRelayPlayerDetail,
   normalizeGlobalEmpireFoundries,
   normalizeGlobalRegions,
   normalizeStorageLogs,
   normalizeTimestamp,
 } = await import(new URL("../src/server/game-data/normalizers.ts", import.meta.url).href);
+
+test("Relay player detail wire fields normalize once into provider-neutral presence", () => {
+  assert.deepEqual(normalizeRelayPlayerDetail({
+    player: {
+      entity_id: "1224979098660030450",
+      username: "Allusion",
+      region: 14,
+      signed_in: false,
+      last_active_timestamp: 1785409200,
+      last_login_timestamp: 1785405600,
+    },
+  }), {
+    playerEntityId: "1224979098660030450",
+    username: "Allusion",
+    presenceRegionId: "14",
+    signedIn: false,
+    lastActiveTimestamp: "2026-07-30T11:00:00.000Z",
+    lastLoginTimestamp: "2026-07-30T10:00:00.000Z",
+  });
+});
+
+test("Relay craft contribution wire fields normalize once into provider-neutral state", () => {
+  assert.deepEqual(normalizeRelayCraftContributionRow({
+    entity_id: 9007199254740993n,
+    owner_entity_id: 1224979098660030450n,
+    progress: 16056n,
+  }), {
+    entityId: "9007199254740993",
+    ownerEntityId: "1224979098660030450",
+    progress: "16056",
+  });
+});
 
 test("regional Town Bank inventories join through the bank building and preserve personal item identities", () => {
   assert.deepEqual(normalizeRegionalBankInventories({
@@ -1627,10 +1661,12 @@ test("claim craft and deposit payloads normalize into provider domain shapes", (
       progress: 2580,
       recipe_id: 209007,
       total_actions_required: 8125,
+      updated_at: "2026-08-08T11:00:00.000Z",
       crafted_item: [{ item_id: 2090008, item_type: "Item", quantity: 1 }],
     }],
   });
   assert.equal(crafts.craftResults[0].entityId, "1369094286813753789");
+  assert.equal(crafts.craftResults[0].updatedAt, "2026-08-08T11:00:00.000Z");
   assert.deepEqual(crafts.craftResults[0].craftedItem[0], {
     itemId: "2090008",
     itemType: "item",

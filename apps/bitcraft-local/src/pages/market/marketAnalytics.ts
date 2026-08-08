@@ -135,7 +135,6 @@ export function buildMarketIncomeSummary(
   dailyRows: AnyRecord[],
   endAt?: string | Date | null,
   rangeDays: MarketIncomeRangeDays = 7,
-  _lifetimeTotal?: number,
 ) {
   const rows = [...dailyRows]
     .map((row) => ({

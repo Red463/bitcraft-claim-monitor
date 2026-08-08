@@ -10,10 +10,8 @@ type CatalogEntity = {
 
 type CraftStack = {
   itemId?: unknown;
-  item_id?: unknown;
   id?: unknown;
   itemType?: unknown;
-  item_type?: unknown;
   kind?: unknown;
   quantity?: unknown;
   [key: string]: unknown;
@@ -220,15 +218,15 @@ export function enrichCraftsWithCatalog(
 
     if (recipe?.isPassive === true) {
       const outputIdentity = resolvedOutputIdentity;
-      const memberEntityId = optionalDecimalIdentifier(craft.ownerEntityId ?? craft.owner_entity_id);
-      const structureEntityId = optionalDecimalIdentifier(craft.buildingEntityId ?? craft.building_entity_id);
+      const memberEntityId = optionalDecimalIdentifier(craft.ownerEntityId);
+      const structureEntityId = optionalDecimalIdentifier(craft.buildingEntityId);
       const status = craft.completed === true ? "complete" : "processing";
       const quantity = outputQuantity(output, craft.craftCount);
       const craftCount = optionalDecimalCounter(craft.craftCount, "craft count");
       const key = memberEntityId && outputIdentity && structureEntityId && quantity !== null && craftCount !== null
         ? [memberEntityId, outputIdentity, structureEntityId, status].join("|")
         : `partial:${exactEntityId ?? "row"}:${rowIndex}`;
-      const timestamp = latestValidTimestamp(craft.timestamp ?? craft.updatedAt ?? craft.updated_at);
+      const timestamp = latestValidTimestamp(craft.timestamp ?? craft.updatedAt);
       const current = passiveCrafts.get(key);
       if (current) {
         current.quantity = (BigInt(String(current.quantity)) + BigInt(quantity!)).toString();

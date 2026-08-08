@@ -30,6 +30,16 @@ function formatObservedSince(value: unknown): string {
     : "tracking became available";
 }
 
+function passiveCraftItem(row: AnyRecord): AnyRecord | null {
+  const itemId = String(row.outputItemId ?? "").trim();
+  const itemType = row.outputItemType === "item" || row.outputItemType === "cargo"
+    ? row.outputItemType
+    : null;
+  return itemType && /^\d+$/.test(itemId)
+    ? { ...(row.item ?? {}), id: itemId, itemId, itemType, name: row.outputName ?? row.recipe }
+    : null;
+}
+
 export function MemberPassiveCrafts({ rows }: { rows: AnyRecord[] }) {
   return (
     <section className="settlement-passive-crafts">
@@ -41,7 +51,10 @@ export function MemberPassiveCrafts({ rows }: { rows: AnyRecord[] }) {
       </div>
       {rows.length === 0 ? <div className="empty-state"><Factory />No current passive crafts reported for this settlement.</div> : null}
       {rows.length ? <DataTable rows={rows} scrollLabel="Production jobs table" emptyState="No production jobs match the current filters." columns={[
-        ["Output", (row) => <strong>{row.recipe}</strong>],
+        ["Output", (row) => {
+          const item = passiveCraftItem(row);
+          return <span className="item-label">{item ? <ItemIcon item={item} /> : null}<strong>{row.recipe}</strong></span>;
+        }],
         ["Tier", (row) => row.tier ? <TierBadge tier={row.tier} /> : "-"],
         ["Member", (row) => row.memberName],
         ["Structure", (row) => row.structure],
@@ -295,6 +308,8 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
       <div className="production-grid">
         {jobs.map((job, index) => {
           const presentation = projectCraftPresentation(job, data.raw?.crafts ?? {});
+          const hasKnownItemIdentity = Boolean(presentation.outputItemType && presentation.outputItemId);
+          const shouldRenderItemIcon = hasKnownItemIdentity || Boolean(presentation.iconAssetName);
           const { skillId, experiencePerEffort, total, progress, remaining, totalXp, remainingXp, tier: metricsTier } = productionMetrics(job, itemLookup);
           const item = presentation.item;
           const tier = toNumber(item.tier ?? metricsTier);
@@ -312,7 +327,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
                 <p><span className={`status-pill ${isWorking ? "working" : ""}`}>{status}</span>{skillName ? <small>{skillName} Lv {job.levelRequirements?.[0]?.level ?? 1}+</small> : null}</p>
               </header>
               <section>
-                <div className={`craft-title ${presentation.iconAssetName ? "has-icon" : ""}`}>{presentation.iconAssetName ? <ItemIcon item={item} /> : null}<h3>{presentation.displayName}</h3>{tier ? <TierBadge tier={tier} /> : null}</div>
+                <div className={`craft-title ${shouldRenderItemIcon ? "has-icon" : ""}`}>{shouldRenderItemIcon ? <ItemIcon item={item} /> : null}<h3>{presentation.displayName}</h3>{tier ? <TierBadge tier={tier} /> : null}</div>
                 {!item.name && job.recipeId ? <small>recipe #{job.recipeId}</small> : null}
                 <div className="work-chips">
                   <span>{formatDecimalQuantity(job.craftCount)} craft{String(job.craftCount) === "1" ? "" : "s"}</span>

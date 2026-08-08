@@ -1,41 +1,23 @@
 import type { RelayHttpClient } from "./http.ts";
-import { normalizeTimestamp } from "./normalizers.ts";
+import {
+  normalizeRelayPlayerDetail,
+  type RelayPlayerDetail as PlayerDetail,
+} from "./normalizers.ts";
 
 type PlayerPresenceHttp = Pick<RelayHttpClient, "player">;
 type PlayerProjection = Record<string, unknown> & {
   playerEntityId?: unknown;
   presenceSource?: unknown;
 };
-type PlayerDetail = {
-  playerEntityId: string;
-  username: string;
-  presenceRegionId: string;
-  signedIn: boolean;
-  lastActiveTimestamp?: string;
-  lastLoginTimestamp?: string;
-};
-type CacheEntry = { loadedAt: number; detail: PlayerDetail };
+type CacheEntry = { loadedAt: number; detail: PlayerDetail | null };
 
 const PLAYER_PRESENCE_TTL_MS = 60_000;
 const PLAYER_PRESENCE_CONCURRENCY = 4;
-
-function record(value: unknown, label: string): Record<string, unknown> {
-  if (value == null || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
-}
 
 function decimalId(value: unknown, label: string): string {
   const id = typeof value === "bigint" ? value.toString() : String(value ?? "").trim();
   if (!/^\d+$/.test(id)) throw new TypeError(`${label} must be a decimal integer`);
   return id;
-}
-
-function optionalTimestamp(value: unknown, label: string): string | undefined {
-  return value == null
-    ? undefined
-    : normalizeTimestamp(decimalId(value, label), "seconds");
 }
 
 function newestValidTimestamp(...values: unknown[]): string | undefined {
@@ -47,40 +29,6 @@ function newestValidTimestamp(...values: unknown[]): string | undefined {
     newest = { value, time };
   }
   return newest?.value;
-}
-
-function normalizePlayerDetail(value: unknown, expectedPlayerEntityId: string): PlayerDetail {
-  const payload = record(value, "Relay player detail payload");
-  const player = record(payload.player ?? payload, "Relay player detail");
-  const playerEntityId = decimalId(
-    player.entity_id ?? player.entityId,
-    "Relay player detail entity id",
-  );
-  if (playerEntityId !== expectedPlayerEntityId) {
-    throw new TypeError(
-      `Relay returned player ${playerEntityId} for requested player ${expectedPlayerEntityId}`,
-    );
-  }
-  const signedIn = player.signed_in ?? player.signedIn;
-  if (typeof signedIn !== "boolean") {
-    throw new TypeError("Relay player detail signed_in must be boolean");
-  }
-  const lastActiveTimestamp = optionalTimestamp(
-    player.last_active_timestamp ?? player.lastActiveTimestamp,
-    "Relay player last active",
-  );
-  const lastLoginTimestamp = optionalTimestamp(
-    player.last_login_timestamp ?? player.lastLoginTimestamp,
-    "Relay player last login",
-  );
-  return {
-    playerEntityId,
-    username: String(player.username ?? ""),
-    presenceRegionId: decimalId(player.region ?? player.region_id ?? player.regionId, "Relay player detail region"),
-    signedIn,
-    ...(lastActiveTimestamp == null ? {} : { lastActiveTimestamp }),
-    ...(lastLoginTimestamp == null ? {} : { lastLoginTimestamp }),
-  };
 }
 
 export class RelayPlayerPresenceService {
@@ -135,7 +83,10 @@ export class RelayPlayerPresenceService {
   async #detail(playerEntityId: string): Promise<PlayerDetail> {
     const now = this.#now();
     const cached = this.#cache.get(playerEntityId);
-    if (cached && now - cached.loadedAt < PLAYER_PRESENCE_TTL_MS) return cached.detail;
+    if (cached && now - cached.loadedAt < PLAYER_PRESENCE_TTL_MS) {
+      if (cached.detail) return cached.detail;
+      throw new Error(`Relay player ${playerEntityId} is unavailable`);
+    }
     const existing = this.#inflight.get(playerEntityId);
     if (existing) return existing;
     const request = this.#load(playerEntityId);
@@ -144,6 +95,9 @@ export class RelayPlayerPresenceService {
       const detail = await request;
       this.#cache.set(playerEntityId, { loadedAt: this.#now(), detail });
       return detail;
+    } catch (error) {
+      this.#cache.set(playerEntityId, { loadedAt: this.#now(), detail: null });
+      throw error;
     } finally {
       this.#inflight.delete(playerEntityId);
     }
@@ -152,7 +106,13 @@ export class RelayPlayerPresenceService {
   async #load(playerEntityId: string): Promise<PlayerDetail> {
     await this.#acquire();
     try {
-      return normalizePlayerDetail(await this.#http.player(playerEntityId), playerEntityId);
+      const detail = normalizeRelayPlayerDetail(await this.#http.player(playerEntityId));
+      if (detail.playerEntityId !== playerEntityId) {
+        throw new TypeError(
+          `Relay returned player ${detail.playerEntityId} for requested player ${playerEntityId}`,
+        );
+      }
+      return detail;
     } finally {
       this.#release();
     }

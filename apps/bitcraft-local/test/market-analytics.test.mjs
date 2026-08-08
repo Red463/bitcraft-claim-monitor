@@ -121,7 +121,7 @@ test("buildMarketIncomeSummary totals only the selected seven-day period", () =>
     { day: "2026-06-01", salesCount: 1, unitsSold: 1, totalValue: 100 },
     { day: "2026-06-24", salesCount: 1, unitsSold: 2, totalValue: 10 },
     { day: "2026-06-25", salesCount: 1, unitsSold: 3, totalValue: 20 },
-  ], "2026-06-25", 7, 130);
+  ], "2026-06-25", 7);
 
   assert.equal(summary.partialRange, false);
   assert.equal(summary.requestedStartDay, "2026-06-19");
@@ -137,7 +137,7 @@ test("buildMarketIncomeSummary does not invent observations before stored histor
   const summary = buildMarketIncomeSummary([
     { day: "2026-06-24", salesCount: 1, unitsSold: 2, totalValue: 10 },
     { day: "2026-06-25", salesCount: 1, unitsSold: 3, totalValue: 20 },
-  ], "2026-06-25", 30, 30);
+  ], "2026-06-25", 30);
 
   assert.equal(summary.partialRange, true);
   assert.equal(summary.requestedStartDay, "2026-05-27");

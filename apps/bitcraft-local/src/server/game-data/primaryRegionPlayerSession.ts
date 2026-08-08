@@ -5,6 +5,7 @@ import {
   normalizeRegionalPlayers,
   normalizeRegionalRecruitment,
   normalizeRegionalResearch,
+  normalizeRelayCraftContributionRow,
 } from "./normalizers.ts";
 import {
   assertSchemaFingerprint,
@@ -578,20 +579,10 @@ export class RelayPrimaryRegionPlayerSession {
         ? context.event as Record<string, unknown>
         : {};
       if (event.tag !== "Transaction" && event.tag !== "Reducer") return;
-      const previous = previousValue && typeof previousValue === "object"
-        ? previousValue as Record<string, unknown>
-        : {};
-      const current = currentValue && typeof currentValue === "object"
-        ? currentValue as Record<string, unknown>
-        : {};
-      const previousCraftId = decimalInteger(
-        previous.entityId ?? previous.entity_id,
-        "Relay craft contribution previous entity id",
-      );
-      const currentCraftId = decimalInteger(
-        current.entityId ?? current.entity_id,
-        "Relay craft contribution current entity id",
-      );
+      const previous = normalizeRelayCraftContributionRow(previousValue);
+      const current = normalizeRelayCraftContributionRow(currentValue);
+      const previousCraftId = previous.entityId;
+      const currentCraftId = current.entityId;
       if (previousCraftId !== currentCraftId) return;
       const craftId = currentCraftId;
       const target = [
@@ -601,22 +592,13 @@ export class RelayPrimaryRegionPlayerSession {
         (candidate) => candidate.craftEntityId === craftId,
       );
       if (!target) return;
-      const previousProgress = decimalInteger(
-        previous.progress,
-        "Relay craft contribution previous progress",
-      );
-      const currentProgress = decimalInteger(
-        current.progress,
-        "Relay craft contribution current progress",
-      );
+      const previousProgress = previous.progress;
+      const currentProgress = current.progress;
       const progressDelta = BigInt(currentProgress) - BigInt(previousProgress);
       if (progressDelta <= 0n) return;
       const observedAt = this.#now();
       const occurredAt = observedAt.toISOString();
-      const rawCraftOwnerEntityId = current.ownerEntityId ?? current.owner_entity_id;
-      const craftOwnerEntityId = rawCraftOwnerEntityId == null
-        ? undefined
-        : decimalInteger(rawCraftOwnerEntityId, "Relay craft contribution owner entity id");
+      const craftOwnerEntityId = current.ownerEntityId;
       const attribution = resolveCraftContributionAttribution({
         event,
         target,
