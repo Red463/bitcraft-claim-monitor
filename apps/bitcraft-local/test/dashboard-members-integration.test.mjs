@@ -8,7 +8,24 @@ import { createServer as createViteServer } from "vite";
 
 import { pageDomains } from "../src/api/pageDomains.ts";
 import { orderMembersByDefault } from "../src/pages/membersView.ts";
-import * as tableSort from "../src/utils/tableSort.ts";
+
+function findElements(node, predicate, matches = []) {
+  if (Array.isArray(node)) {
+    for (const child of node) findElements(child, predicate, matches);
+    return matches;
+  }
+  if (!React.isValidElement(node)) return matches;
+  if (predicate(node)) matches.push(node);
+  findElements(node.props.children, predicate, matches);
+  return matches;
+}
+
+function elementText(node) {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(elementText).join("");
+  return React.isValidElement(node) ? elementText(node.props.children) : "";
+}
 
 test("Dashboard requests the global region catalog with its page data", () => {
   assert.equal(pageDomains("dashboard").includes("region"), true);
@@ -46,22 +63,59 @@ test("Dashboard renders the monitored region name resolved from the global catal
   }
 });
 
-test("DataTable row resolution preserves Members defaults until an explicit sort overrides them", () => {
-  assert.equal(typeof tableSort.resolveDataTableRows, "function");
-  const defaultRows = orderMembersByDefault([
-    { playerEntityId: "1", username: "Zed", player: { signedIn: true, sessionSeconds: 540 } },
-    { playerEntityId: "2", username: "Ada", player: { signedIn: false } },
-  ]).map((row, index) => ({ row, index }));
+test("clicking a DataTable header overrides the Members default row order", async () => {
+  const appRoot = fileURLToPath(new URL("..", import.meta.url));
+  const vite = await createViteServer({
+    root: appRoot,
+    appType: "custom",
+    logLevel: "silent",
+    server: { middlewareMode: true },
+  });
+  const originalUseMemo = React.useMemo;
+  const originalUseState = React.useState;
+  let sortState;
+  let initialized = false;
+  React.useMemo = (calculate) => calculate();
+  React.useState = (initial) => {
+    if (!initialized) {
+      sortState = typeof initial === "function" ? initial() : initial;
+      initialized = true;
+    }
+    return [sortState, (update) => {
+      sortState = typeof update === "function" ? update(sortState) : update;
+    }];
+  };
+  try {
+    const { DataTable } = await vite.ssrLoadModule("/src/components/main/DataTable.tsx");
+    const rows = orderMembersByDefault([
+      { playerEntityId: "1", username: "Zed", player: { signedIn: true, sessionSeconds: 540 } },
+      { playerEntityId: "2", username: "Ada", player: { signedIn: false } },
+    ]);
+    const props = {
+      rows,
+      columns: [["Username", (row) => row.username, (row) => row.username]],
+      emptyState: "No members",
+      scrollLabel: "Settlement roster table",
+    };
+    const renderedUsernames = (tree) => findElements(tree, (element) => element.type === "tbody")
+      .flatMap((tbody) => findElements(tbody.props.children, (element) => element.type === "tr"))
+      .map((row) => elementText(row));
 
-  assert.deepEqual(
-    tableSort.resolveDataTableRows(defaultRows, null).map(({ row }) => row.username),
-    ["Zed", "Ada"],
-  );
-  assert.deepEqual(
-    tableSort.resolveDataTableRows(defaultRows, {
-      direction: "asc",
-      sortValue: (row) => row.username,
-    }).map(({ row }) => row.username),
-    ["Ada", "Zed"],
-  );
+    let tree = DataTable(props);
+    assert.deepEqual(renderedUsernames(tree), ["Zed", "Ada"]);
+
+    const usernameSort = findElements(
+      tree,
+      (element) => element.type === "button" && element.props["aria-label"] === "Sort by Username",
+    )[0];
+    assert.ok(usernameSort, "sortable Username header should render");
+    usernameSort.props.onClick();
+
+    tree = DataTable(props);
+    assert.deepEqual(renderedUsernames(tree), ["Ada", "Zed"]);
+  } finally {
+    React.useMemo = originalUseMemo;
+    React.useState = originalUseState;
+    await vite.close();
+  }
 });
