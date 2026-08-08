@@ -432,6 +432,68 @@ test("hidden Craft Monitor defers generation invalidation to one visible catch-u
   assert.equal(cycles.length, 2);
 });
 
+test("Craft Monitor visibility catch-up preserves the two-second coalescing deadline", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "craft-monitor",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `hidden-coalesce-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  clock.advance(500);
+  controller.setVisible(false);
+  controller.invalidateNearLive();
+  clock.advance(500);
+  controller.setVisible(true);
+
+  assert.equal(cycles.length, 1, "visibility restoration must not bypass coalescing");
+  clock.advance(999);
+  assert.equal(cycles.length, 1);
+  clock.advance(1);
+  assert.equal(cycles.length, 2);
+  assert.equal(cycles[1].reason, "visibility-catch-up");
+  clock.advance(5_000);
+  assert.equal(cycles.length, 2, "one hidden invalidation produces one catch-up");
+});
+
+test("Craft Monitor visibility catch-up preserves an active failure-backoff deadline", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "craft-monitor",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `hidden-backoff-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, false);
+  clock.advance(1_000);
+  controller.setVisible(false);
+  controller.invalidateNearLive();
+  clock.advance(1_000);
+  controller.setVisible(true);
+
+  assert.equal(cycles.length, 1, "visibility restoration must not bypass failure backoff");
+  clock.advance(2_999);
+  assert.equal(cycles.length, 1);
+  clock.advance(1);
+  assert.equal(cycles.length, 2);
+  assert.equal(cycles[1].reason, "visibility-catch-up");
+  clock.advance(5_000);
+  assert.equal(cycles.length, 2, "one hidden invalidation produces one retry catch-up");
+});
+
 test("tracked non-OK HTTP responses fail the whole-page cycle", async () => {
   const coordinator = createPageRefreshTaskCoordinator();
   const cycle = createPageRefreshCycle("market", 1, "manual", { createId: () => "http-failure" });

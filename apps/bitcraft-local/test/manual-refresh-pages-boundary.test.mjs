@@ -98,3 +98,20 @@ test("automatic auxiliary refreshes retain data and propagate visible detail fai
   assert.match(planning, /openNeedDetail\(selectedNeedRef\.current,\s*true\)/);
   assert.match(planning, /if \(propagateError\) throw detailFetchError/);
 });
+
+test("Craft Planning aborts obsolete item-detail requests across replacement and scope cleanup", () => {
+  const planning = source("../src/pages/CraftPlanningPage.tsx");
+  const openDetail = planning.slice(planning.indexOf("async function openNeedDetail"), planning.indexOf("function closeNeedDetail"));
+  const closeDetail = planning.slice(planning.indexOf("function closeNeedDetail"), planning.indexOf("const config ="));
+
+  assert.match(planning, /const detailAbortControllerRef = React\.useRef<AbortController \| null>\(null\)/);
+  assert.match(openDetail, /detailAbortControllerRef\.current\?\.abort\(\)/);
+  assert.match(openDetail, /const controller = new AbortController\(\)/);
+  assert.match(openDetail, /detailAbortControllerRef\.current = controller/);
+  assert.match(openDetail, /signal: controller\.signal/);
+  assert.match(openDetail, /trackPromise\("craft-plan-detail", detail\)/);
+  assert.match(openDetail, /detailFetchError instanceof Error && detailFetchError\.name === "AbortError"/);
+  assert.match(openDetail, /detailAbortControllerRef\.current === controller/);
+  assert.match(closeDetail, /detailAbortControllerRef\.current\?\.abort\(\)/);
+  assert.match(planning, /React\.useEffect\(\(\) => \{[\s\S]*detailAbortControllerRef\.current\?\.abort\(\)[\s\S]*return \(\) => \{[\s\S]*detailAbortControllerRef\.current\?\.abort\(\)[\s\S]*\}, \[claimId, request\?\.sequence\]\)/);
+});

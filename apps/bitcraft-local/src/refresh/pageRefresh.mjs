@@ -180,6 +180,7 @@ export function createPageRefreshController(options) {
   let timer = null;
   let stopped = false;
   let failureCount = 0;
+  let failureRetryAt = Number.NEGATIVE_INFINITY;
   let visible = options.visible !== false;
   let overdue = false;
   let queuedReason = null;
@@ -209,16 +210,16 @@ export function createPageRefreshController(options) {
     return activeCycle;
   }
 
-  function scheduleNearLive() {
+  function scheduleNearLive(reason = "near-live") {
     if (stopped || timer != null) return;
     if (!visible) {
       overdue = true;
       return;
     }
-    const wait = Math.max(0, lastStartedAt + PAGE_REFRESH_COALESCE_MS - now());
+    const wait = Math.max(0, Math.max(lastStartedAt + PAGE_REFRESH_COALESCE_MS, failureRetryAt) - now());
     if (wait === 0 && !activeCycle) {
       dirty = false;
-      startCycle("near-live");
+      startCycle(reason);
       return;
     }
     timer = setTimer(() => {
@@ -232,13 +233,14 @@ export function createPageRefreshController(options) {
         return;
       }
       dirty = false;
-      startCycle("near-live");
+      startCycle(reason);
     }, wait);
   }
 
   function scheduleFailureRetry() {
     clearScheduled();
     const delay = PAGE_REFRESH_BACKOFF_MS[Math.min(failureCount - 1, PAGE_REFRESH_BACKOFF_MS.length - 1)];
+    failureRetryAt = now() + delay;
     timer = setTimer(() => {
       timer = null;
       if (!visible) {
@@ -287,6 +289,7 @@ export function createPageRefreshController(options) {
       overdue = false;
       queuedReason = null;
       failureCount = 0;
+      failureRetryAt = Number.NEGATIVE_INFINITY;
       return startCycle("initial");
     },
     restart() {
@@ -296,6 +299,7 @@ export function createPageRefreshController(options) {
       overdue = false;
       queuedReason = null;
       failureCount = 0;
+      failureRetryAt = Number.NEGATIVE_INFINITY;
       return startCycle("initial");
     },
     setIntervalMs(nextIntervalMs) {
@@ -315,7 +319,8 @@ export function createPageRefreshController(options) {
         clearScheduled();
         overdue = false;
         dirty = false;
-        startCycle("visibility-catch-up");
+        if (pageRefreshPolicy(page).mode === "near-live") scheduleNearLive("visibility-catch-up");
+        else startCycle("visibility-catch-up");
       }
     },
     requestManual() {
@@ -338,7 +343,10 @@ export function createPageRefreshController(options) {
         scheduleFailureRetry();
         return;
       }
-      if (succeeded) failureCount = 0;
+      if (succeeded) {
+        failureCount = 0;
+        failureRetryAt = Number.NEGATIVE_INFINITY;
+      }
       if (queuedReason) {
         const reason = queuedReason;
         queuedReason = null;
