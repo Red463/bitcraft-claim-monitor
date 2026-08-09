@@ -66,6 +66,7 @@ test("provider catalog snapshot atomically preserves item/cargo identity and rem
     repository.findEntities("timber").map((row) => row.catalogKey).sort(),
     ["cargo:42", "items:42"],
   );
+  assert.deepEqual(repository.listEntities().map((row) => row.name), ["Timber Crate", "Timber Plank"]);
 });
 
 test("provider catalog findEntities does not truncate candidates before live-order filters", () => {

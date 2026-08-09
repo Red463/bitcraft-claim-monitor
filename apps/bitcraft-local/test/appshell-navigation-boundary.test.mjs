@@ -68,8 +68,8 @@ test("Market tab locations canonicalize aliases and clean invalid values", () =>
   assert.deepEqual(routeStateModule.marketViewLocation("buyOrders"), { page: "market", view: "buy-orders", canonicalTab: "buy-orders", shouldReplace: true });
   assert.deepEqual(routeStateModule.marketViewLocation("dealWatchlist"), { page: "market", view: "deal-watch", canonicalTab: "deal-watch", shouldReplace: true });
   assert.deepEqual(routeStateModule.marketViewLocation("live"), { page: "settlement-market", view: "live", canonicalTab: "live", shouldReplace: true });
-  assert.deepEqual(routeStateModule.marketViewLocation("unknown"), { page: "market", view: "overview", canonicalTab: "overview", shouldReplace: true });
-  assert.deepEqual(routeStateModule.marketViewLocation(null), { page: "market", view: "overview", canonicalTab: "overview", shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation("unknown"), { page: "market", view: "browse", canonicalTab: "browse", shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation(null), { page: "market", view: "browse", canonicalTab: "browse", shouldReplace: true });
 });
 
 test("route shell restores history and announces explicit route changes", () => {

@@ -72,11 +72,16 @@ export class RelayPlayerPresenceService {
 
   async resolvePlayerName(playerEntityIdValue: unknown): Promise<string> {
     const playerEntityId = decimalId(playerEntityIdValue, "contribution player entity id");
+    return await this.resolveExactPlayerName(playerEntityId) ?? `Player ${playerEntityId}`;
+  }
+
+  async resolveExactPlayerName(playerEntityIdValue: unknown): Promise<string | null> {
+    const playerEntityId = decimalId(playerEntityIdValue, "player entity id");
     try {
       const detail = await this.#detail(playerEntityId);
-      return detail.username.trim() || `Player ${playerEntityId}`;
+      return detail.username.trim() || null;
     } catch {
-      return `Player ${playerEntityId}`;
+      return null;
     }
   }
 

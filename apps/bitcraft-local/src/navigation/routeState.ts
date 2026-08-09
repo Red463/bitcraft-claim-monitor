@@ -65,7 +65,7 @@ export function marketViewLocation(tab: string | null): MarketViewLocation {
   if (tab === "overview" || tab === "browse" || tab === "deals" || tab === "buy-orders" || tab === "deal-watch" || tab === "stalls") {
     return { page: "market", view: tab, canonicalTab: tab, shouldReplace: false };
   }
-  return { page: "market", view: "overview", canonicalTab: "overview", shouldReplace: true };
+  return { page: "market", view: "browse", canonicalTab: "browse", shouldReplace: true };
 }
 
 export function settlementMarketViewLocation(tab: string | null): MarketViewLocation {

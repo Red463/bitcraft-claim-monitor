@@ -38,7 +38,8 @@ export function projectCraftContributionLeaderboard(storedRows) {
     totalProgress = addDecimal(totalProgress, progress);
     totalXp = addDecimal(totalXp, xp);
     const contributorKey = String(row.contributor_entity_id);
-    const profession = String(row.profession || "Unknown");
+    const storedProfession = String(row.profession ?? "").trim();
+    const profession = storedProfession.toLowerCase() === "unknown" ? "" : storedProfession;
     const contributor = contributors.get(contributorKey) ?? {
       contributorId: row.contributor_entity_id,
       name: row.contributor_name,
@@ -57,13 +58,16 @@ export function projectCraftContributionLeaderboard(storedRows) {
       contributor.lastContributedAt,
       row.last_contributed_at ?? row.updated_at,
     );
-    const contributorProfession = contributor.professions[profession] ?? { progress: "0", xp: "0", crafts: "0" };
-    contributorProfession.progress = addDecimal(contributorProfession.progress, progress);
-    contributorProfession.xp = addDecimal(contributorProfession.xp, xp);
-    contributorProfession.crafts = addInteger(contributorProfession.crafts, "1");
-    contributor.professions[profession] = contributorProfession;
+    if (profession) {
+      const contributorProfession = contributor.professions[profession] ?? { progress: "0", xp: "0", crafts: "0" };
+      contributorProfession.progress = addDecimal(contributorProfession.progress, progress);
+      contributorProfession.xp = addDecimal(contributorProfession.xp, xp);
+      contributorProfession.crafts = addInteger(contributorProfession.crafts, "1");
+      contributor.professions[profession] = contributorProfession;
+    }
     contributors.set(contributorKey, contributor);
 
+    if (!profession) continue;
     const professionRow = professions.get(profession) ?? {
       profession,
       totalProgress: "0",

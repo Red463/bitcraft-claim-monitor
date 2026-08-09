@@ -89,7 +89,8 @@ export function Leaderboard({
     const byProfession = new Map<string, AnyRecord>();
     for (const contributor of contributors) {
       for (const row of contributor.professions ?? []) {
-        const profession = String(row.profession ?? "Unknown");
+        const profession = String(row.profession ?? "").trim();
+        if (!profession) continue;
         const current = byProfession.get(profession) ?? { profession, totalProgress: "0", totalXp: "0", craftCount: "0", contributorCount: 0, topContributor: "", topContributorProgress: "0" };
         const progress = String(row.progress ?? "0");
         current.totalProgress = addDecimal(String(current.totalProgress), progress);
@@ -210,7 +211,7 @@ export function Leaderboard({
     <MiniStat key="progress" icon={<Trophy />} label="Recorded Contribution" value={formatExactDecimal(summary.totalProgress)} />,
     <MiniStat key="xp" icon={<TrendingUp />} label="Estimated XP" value={formatExactDecimal(summary.totalXp)} />,
     <MiniStat key="top" icon={<Users />} label="Top Contributor" value={topContributor?.name ?? "None yet"} />,
-    <MiniStat key="profession" icon={<GraduationCap />} label="Top Profession" value={topProfession?.profession ?? "None yet"} />,
+    <MiniStat key="profession" icon={<GraduationCap />} label="Top Profession" value={topProfession?.profession ?? "—"} />,
   ];
   if (!resolvedTab) return (
     <div className="panel restricted-access-panel">
@@ -403,7 +404,7 @@ export function Leaderboard({
                   <small>{formatNumber(profession.contributorCount)} contributor{toNumber(profession.contributorCount) === 1 ? "" : "s"} - {formatExactDecimal(profession.craftCount)} craft records</small>
                 </div>
                 <span>{formatExactDecimal(profession.totalProgress)}</span>
-                <em>Top: {profession.topContributor || "Unknown"}</em>
+                <em>Top: {profession.topContributor || "—"}</em>
               </article>
             ))}
             {!professions.length ? <div className="empty-state compact"><GraduationCap />No profession totals yet.</div> : null}
@@ -417,7 +418,7 @@ export function Leaderboard({
                 <span className="activity-dot" />
                 <div>
                   <strong>{entry.contributorName}</strong>
-                  <small>{entry.profession || "Unknown profession"} - {entry.craftLabel} at {entry.structureName}</small>
+                  <small>{entry.profession ? `${entry.profession} - ` : ""}{entry.craftLabel} at {entry.structureName}</small>
                 </div>
                 <span>{formatExactDecimal(entry.totalProgress)}</span>
                 <time>{entry.lastContributedAt ? timeAgo(entry.lastContributedAt) : "Unknown"}</time>

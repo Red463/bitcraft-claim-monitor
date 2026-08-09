@@ -6,7 +6,7 @@ const page = readFileSync(new URL("../src/pages/SkillsPage.tsx", import.meta.url
 const css = readFileSync(new URL("../src/styles/skills.css", import.meta.url), "utf8");
 
 test("Settlement capability uses live tier readiness without fixed thresholds", () => {
-  assert.match(page, /useState\(false\)/);
+  assert.match(page, /skills\.capability-open", false/);
   assert.match(page, /Settlement Capability/);
   assert.match(page, /data\.claim\.tier/);
   assert.match(page, /buildProfessionCapability/);
@@ -21,10 +21,11 @@ test("Settlement capability uses live tier readiness without fixed thresholds", 
 });
 
 test("Capability dashboard keeps controls and expandable member detail", () => {
+  assert.match(page, /usePersistedState<boolean>\("skills\.capability-open", false\)/);
   assert.match(page, /capability-grid/);
   assert.match(page, /aria-expanded=\{insightsOpen\}/);
   assert.match(page, /className="profession-insights-select"[\s\S]*select-control/);
-  assert.match(page, /insightsOpen\s*\?\s*<div className="skills-dashboard profession-insights-content"/);
+  assert.match(page, /insightsOpen\s*\?\s*<>[\s\S]*className="capability-grid"/);
   assert.match(page, /focus-metrics/);
   assert.match(page, /focus-tier-strip/);
   assert.match(page, /focusRows\.map/);
@@ -32,6 +33,10 @@ test("Capability dashboard keeps controls and expandable member detail", () => {
   assert.match(page, /Why this profession is/);
   assert.match(page, /Adventure Skills|Skills/);
   assert.match(page, /className="skill-table"/);
+});
+
+test("profession and adventure skill identifiers use display-name alphabetical order", () => {
+  assert.match(page, /sort\(\(left, right\) => skillLabel\(left\)\.localeCompare\(skillLabel\(right\)\)\)/);
 });
 
 test("Profession and skill columns expose named sort buttons on sortable headers", () => {

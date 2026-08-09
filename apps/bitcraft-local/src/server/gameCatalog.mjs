@@ -730,6 +730,11 @@ export function createGameCatalogRepository(db) {
         kind ASC,
         target_id ASC
     `),
+    listEntities: db.prepare(`
+      SELECT *
+      FROM game_catalog_entities
+      ORDER BY name COLLATE NOCASE ASC, kind ASC, target_id ASC
+    `),
     listRawItemListRows: db.prepare(`
       SELECT
         lists.item_list_id,
@@ -1103,6 +1108,9 @@ export function createGameCatalogRepository(db) {
         normalizedQuery,
         `${escaped}%`,
       ).map(mapEntityRow);
+    },
+    listEntities() {
+      return statements.listEntities.all().map(mapEntityRow);
     },
     listProducerRecipesForOutput(outputKey) {
       return statements.listProducerRecipesForOutput.all(outputKey).map((row) => recipeWithLinks(row));

@@ -85,6 +85,6 @@ export function updateQueryState(values: Record<string, string | null>, mode: Na
 }
 
 export function panelHref(panel: ActivePanel): string {
-  const defaultTab = panel === "market" ? "&tab=overview" : panel === "settlement-market" ? "&tab=live" : "";
+  const defaultTab = panel === "market" ? "&tab=browse" : panel === "settlement-market" ? "&tab=live" : "";
   return `/?page=${encodeURIComponent(panel)}${defaultTab}`;
 }

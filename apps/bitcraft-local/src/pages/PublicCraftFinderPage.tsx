@@ -22,6 +22,12 @@ import {
   remainingCraftEffort,
 } from "./publicCraftMath";
 
+function publicCraftOwnerName(job: AnyRecord): string {
+  const username = String(job.ownerUsername ?? "").trim();
+  const ownerEntityId = String(job.ownerEntityId ?? "").trim();
+  return username || (/^\d+$/.test(ownerEntityId) ? `Player ${ownerEntityId}` : "-");
+}
+
 export function PublicCraftFinder({ providerData, providerLoading, providerError, monitoredClaimId, monitoredRegionId, monitoredOwnerName, defaultRegionId, activeRegionScopeKey, onShowMap }: { providerData?: AnyRecord | null; providerLoading: boolean; providerError: string | null; monitoredClaimId: string; monitoredRegionId: string; monitoredOwnerName?: string; defaultRegionId?: string; activeRegionScopeKey?: string; onShowMap: (focus: NonNullable<MapFocus>) => void }) {
   type PublicCraftSortKey = "output" | "tier" | "settlement" | "required" | "remaining" | "availableXp" | "owner";
   const [skillId, setSkillId] = usePersistedState("public-crafts.skill", "All");
@@ -73,7 +79,7 @@ export function PublicCraftFinder({ providerData, providerLoading, providerError
         required: (job) => toNumber(job.minimumLevel),
         remaining: (job) => job.remaining == null ? "" : String(job.remaining),
         availableXp: (job) => job.availableXp == null ? -1 : toNumber(job.availableXp),
-        owner: (job) => String(job.ownerUsername ?? ""),
+        owner: publicCraftOwnerName,
       };
       const left = values[sortKey](a);
       const right = values[sortKey](b);
@@ -106,7 +112,7 @@ export function PublicCraftFinder({ providerData, providerLoading, providerError
     ["Required", "required", (job) => `${job.requiredSkillName} Lv ${job.minimumLevel}+`],
     ["Effort to Craft", "remaining", (job) => formatCraftEffort(job.remaining)],
     ["XP Available", "availableXp", (job) => job.availableXp == null ? "-" : formatNumber(job.availableXp)],
-    ["Owner", "owner", (job) => <TrackedOwnerName name={job.ownerUsername ?? "-"} claim={{ ownerPlayerUsername: monitoredOwnerName }} />],
+    ["Owner", "owner", (job) => <TrackedOwnerName name={publicCraftOwnerName(job)} claim={{ ownerPlayerUsername: monitoredOwnerName }} />],
   ];
   if (providerLoading && !providerData) return <AppSkeleton />;
   if (providerError && !providerData) return <AsyncState kind="error" title="Unable to load public craft jobs" detail={providerError} />;
@@ -158,7 +164,6 @@ export function PublicCraftFinder({ providerData, providerLoading, providerError
         </div>
       </div>
       {providerLoading ? <AsyncState kind="loading" title="Refreshing public craft jobs" detail="Current results remain visible while the next Relay generation is applied." compact /> : null}
-      {providerError ? <AsyncState kind="error" title="Public crafts refresh failed" detail={`Current results are retained. ${providerError}`} compact /> : null}
       {!providerLoading && visibleJobs.length === 0 ? <AsyncState kind={publicJobs.length ? "no-match" : "empty"} title={publicJobs.length ? "No public crafts match these filters" : "No public craft jobs are open"} detail={publicJobs.length ? "Choose another skill or region to broaden the results." : "Public jobs will appear here when settlements expose incomplete crafts."} /> : null}
       {visibleJobs.length ? <div className="table-wrap" tabIndex={0} aria-label="Public craft jobs table"><table><thead><tr>{columns.map(([label, key]) => <th key={key}><button className="sort-button" onClick={() => changeSort(key)}>{label}{sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />}</button></th>)}</tr></thead><tbody>{visibleJobs.map((job, index) => <tr className="data-row" key={job.entityId ?? index}>{columns.map(([label, , render]) => <td key={label}>{render(job)}</td>)}</tr>)}</tbody></table></div> : null}
     </section>

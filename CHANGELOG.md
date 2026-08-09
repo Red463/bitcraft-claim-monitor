@@ -9,6 +9,25 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.51.0-beta.9] - 2026-08-09
+
+### Added
+
+- Added a guarded dry-run and manifest workflow for repairing contribution professions only when exact stored craft evidence is available.
+- Added compact, accessible refresh warning details beside the Last Refresh indicator.
+
+### Changed
+
+- Made global Market open on an alphabetical item search with live best buy and sell summaries.
+- Made Profession Capability collapsible and alphabetized profession and skill columns.
+- Displayed Current Gear and every saved member equipment preset without truncation.
+
+### Fixed
+
+- Fixed contribution professions being classified as unknown when Relay supplies camel-case skill IDs.
+- Resolved Public Craft Finder names across regions and kept unchanged connected subscriptions fresh without snapshot rewrites.
+- Kept Public Craft Finder disconnects stale until a replacement authoritative snapshot is applied.
+
 ## [0.51.0-beta.8] - 2026-08-09
 
 ### Fixed

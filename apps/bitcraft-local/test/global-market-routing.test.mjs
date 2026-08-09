@@ -6,6 +6,7 @@ import {
   marketViewLocation,
   settlementMarketViewLocation,
 } from "../src/navigation/routeState.ts";
+import { panelHref } from "../src/navigation.ts";
 import { localHistoryIncludeForPanel } from "../src/api/localHistoryInclude.ts";
 import {
   ACCESS_TAB_GROUPS,
@@ -14,10 +15,11 @@ import {
 } from "../src/access/accessControl.mjs";
 
 test("global Market canonicalizes current and legacy tool tabs", () => {
+  assert.equal(panelHref("market"), "/?page=market&tab=browse");
   assert.deepEqual(marketViewLocation(null), {
     page: "market",
-    view: "overview",
-    canonicalTab: "overview",
+    view: "browse",
+    canonicalTab: "browse",
     shouldReplace: true,
   });
   assert.deepEqual(marketViewLocation("pricing"), {

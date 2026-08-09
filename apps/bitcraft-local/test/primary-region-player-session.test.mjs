@@ -336,6 +336,7 @@ test("primary-region session filters member, settlement, and Town Bank state bef
           buffs: { buffs: [] },
         },
       ],
+      coverage: { unexpectedPresetRowCount: 0 },
     },
     equipmentWarnings: [],
     construction: {

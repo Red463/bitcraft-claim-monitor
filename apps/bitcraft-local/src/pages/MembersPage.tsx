@@ -266,7 +266,7 @@ export function Members({
               <section className="equipment-panel">
                 <div className="profile-section-heading">
                   <h3><Shield size={17} /> Gear Presets</h3>
-                  <span>2 preset slots</span>
+                  <span>{gearPresets.length} loadouts</span>
                 </div>
                 <div className="gear-preset-list">
                   {gearPresets.map((preset) => {

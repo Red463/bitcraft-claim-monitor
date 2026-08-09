@@ -66,34 +66,29 @@ export function visibleEquipmentSlots(slots: AnyRecord[]): AnyRecord[] {
   return [...visible, ...unexpectedEquipped];
 }
 
-function equipmentSignature(slots: AnyRecord[]): string {
-  return slots
-    .map((slot: AnyRecord) => `${slot.primary}:${slot.item?.id ?? "empty"}`)
-    .sort()
-    .join("|");
-}
-
 export function equipmentPresets(payload: AnyRecord | null | undefined, fallbackSlots: AnyRecord[]): AnyRecord[] {
-  const presets = Array.isArray(payload?.presets) ? payload.presets : [];
-  const activePreset = presets.find((preset: AnyRecord) => preset.active);
-  const currentSlots = fallbackSlots.length ? fallbackSlots : activePreset ? equipmentSlots(activePreset) : [];
-  const currentSignature = equipmentSignature(currentSlots);
-  const alternatePreset = presets.find((preset: AnyRecord) => {
-    const slots = equipmentSlots(preset);
-    return slots.some((slot: AnyRecord) => slot.item) && equipmentSignature(slots) !== currentSignature;
-  });
-  return [1, 2].map((index) => {
-    const preset = index === 2 ? alternatePreset : activePreset;
-    const slots = index === 1 ? currentSlots : preset ? equipmentSlots(preset) : [];
-    const presetTwoActive = Boolean(alternatePreset?.active);
-    return {
-      id: String(index === 1 ? "current-equipment" : preset?.entityId ?? preset?.id ?? `preset-${index}`),
-      label: `Preset ${index}`,
-      active: index === 2 ? presetTwoActive : !presetTwoActive,
-      reported: index === 1 ? currentSlots.length > 0 : Boolean(preset),
-      slots,
-    };
-  });
+  const presets = (Array.isArray(payload?.presets) ? payload.presets : [])
+    .slice()
+    .sort((left: AnyRecord, right: AnyRecord) => toNumber(left.index) - toNumber(right.index));
+  const currentSlots = fallbackSlots.length
+    ? fallbackSlots
+    : equipmentSlots(presets.find((preset: AnyRecord) => preset.active) ?? {});
+  return [
+    {
+      id: "current-equipment",
+      label: "Current Gear",
+      active: true,
+      reported: currentSlots.length > 0,
+      slots: currentSlots,
+    },
+    ...presets.map((preset: AnyRecord, index: number) => ({
+      id: String(preset.entityId ?? preset.id ?? `preset-${index + 1}`),
+      label: `Preset ${index + 1}`,
+      active: false,
+      reported: true,
+      slots: equipmentSlots(preset),
+    })),
+  ];
 }
 
 export function equippedCount(slots: AnyRecord[]): number {
