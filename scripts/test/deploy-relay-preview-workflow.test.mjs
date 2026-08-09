@@ -29,7 +29,7 @@ test("Relay deployment credentials are gated behind verification and preview app
   assert.match(workflow, /verify:/);
   assert.match(workflow, /pnpm --filter @workspace\/bitcraft-local test/);
   assert.match(workflow, /pnpm --filter @workspace\/bitcraft-local run build/);
-  assert.match(workflow, /node --test scripts\/test\/deploy-\*\.test\.mjs/);
+  assert.match(workflow, /sudo "\$\(command -v node\)" --test scripts\/test\/deploy-\*\.test\.mjs/);
   assert.match(workflow, /deploy:[\s\S]*needs: verify/);
   assert.match(workflow, /environment: relay-preview/);
 });

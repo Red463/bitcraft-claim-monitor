@@ -42,7 +42,8 @@ jobs:
       - name: Build application
         run: corepack pnpm --filter @workspace/bitcraft-local run build
       - name: Test deployment contracts
-        run: node --test scripts/test/deploy-*.test.mjs
+        # These contracts exercise root-owned production metadata and chown semantics.
+        run: sudo "$(command -v node)" --test scripts/test/deploy-*.test.mjs
       - name: Validate Relay systemd units
         run: |
           test -x /usr/bin/node || sudo ln -s "$(command -v node)" /usr/bin/node
