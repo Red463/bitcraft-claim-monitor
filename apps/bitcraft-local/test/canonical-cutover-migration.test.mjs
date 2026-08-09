@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,6 +89,7 @@ function addMigratedColumns(db) {
       db.exec(`ALTER TABLE admin_users ADD COLUMN ${column} ${definition}`);
     }
   }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> ''");
 }
 
 function finishDatabase(db) {
@@ -372,6 +373,22 @@ function mutateDatabase(databasePath, callback) {
   finishDatabase(db);
 }
 
+function rewriteMarketWatchAverageAffinity(databasePath, affinity) {
+  mutateDatabase(databasePath, (db) => {
+    const createSql = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'market_deal_watches'").get().sql
+      .replace("last_baseline_average TEXT", `last_baseline_average ${affinity}`);
+    const columns = db.prepare("PRAGMA table_info(market_deal_watches)").all().map((column) => `"${column.name}"`).join(", ");
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.exec(`CREATE TEMP TABLE saved_market_deal_watches AS SELECT * FROM market_deal_watches;
+      DROP TABLE market_deal_watches;`);
+    db.exec(createSql);
+    db.exec(`INSERT INTO market_deal_watches (${columns}) SELECT ${columns} FROM saved_market_deal_watches;
+      DROP TABLE saved_market_deal_watches;
+      CREATE INDEX IF NOT EXISTS idx_market_deal_watches_user ON market_deal_watches (user_id, enabled, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_market_deal_watches_scan ON market_deal_watches (claim_id, region_id, enabled, item_id, item_type);`);
+  });
+}
+
 function createManifest(fixture, name = "manifest.json") {
   const manifestPath = path.join(fixture.directory, name);
   const result = runScript(dryRunArguments(fixture, manifestPath));
@@ -581,17 +598,12 @@ test("apply refuses a changed database, tampered manifest, and an already-applie
   assert.match(secondApply.stderr, /already applied/i);
 });
 
-test("dry-run rejects unsupported schemas, duplicate or invalid Discord IDs, and malformed selected JSON", () => {
+test("dry-run rejects unsupported schemas, invalid Discord IDs, and malformed selected JSON", () => {
   const cases = [
     {
       expected: /unsupported.*discord_mod_notes/i,
       mutate(db) { db.exec("DROP TABLE discord_mod_notes"); },
       name: "unsupported-source-schema",
-    },
-    {
-      expected: /duplicate Discord IDs/i,
-      mutate(db) { db.prepare("UPDATE admin_users SET discord_id = '111' WHERE id = 20").run(); },
-      name: "duplicate-admin-discord-id",
     },
     {
       expected: /exact decimal ID/i,
@@ -616,6 +628,41 @@ test("dry-run rejects unsupported schemas, duplicate or invalid Discord IDs, and
     assert.notEqual(result.status, 0, entry.name);
     assert.match(result.stderr, entry.expected, entry.name);
   }
+});
+
+test("the supported selected schema makes duplicate administrator Discord IDs unrepresentable", () => {
+  const fixture = createFixture();
+  const db = new DatabaseSync(fixture.sourceDatabasePath);
+  assert.throws(
+    () => db.prepare("UPDATE admin_users SET discord_id = '111' WHERE id = 20").run(),
+    /UNIQUE constraint failed: admin_users\.discord_id/i,
+  );
+  db.close();
+});
+
+test("dry-run rejects an extra column in a selected source table", () => {
+  const fixture = createFixture();
+  mutateDatabase(fixture.sourceDatabasePath, (db) => {
+    db.exec("ALTER TABLE user_accounts ADD COLUMN shadow_profile TEXT");
+  });
+
+  const result = runScript(dryRunArguments(fixture, path.join(fixture.directory, "extra-selected-column.json")));
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unsupported.*user_accounts.*schema|schema.*fingerprint/i);
+});
+
+test("schema compatibility permits only the documented legacy source market-watch affinity", () => {
+  const legacySource = createFixture();
+  rewriteMarketWatchAverageAffinity(legacySource.sourceDatabasePath, "REAL");
+  const accepted = runScript(dryRunArguments(legacySource, path.join(legacySource.directory, "legacy-real-source.json")));
+  assert.equal(accepted.status, 0, accepted.stderr);
+
+  const legacyTarget = createFixture();
+  rewriteMarketWatchAverageAffinity(legacyTarget.targetDatabasePath, "REAL");
+  const rejected = runScript(dryRunArguments(legacyTarget, path.join(legacyTarget.directory, "legacy-real-target.json")));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /unsupported.*market_deal_watches.*schema fingerprint/i);
 });
 
 test("dry-run and apply enforce the exact claim and guarded filesystem roots", () => {
@@ -645,7 +692,12 @@ test("dry-run and apply enforce the exact claim and guarded filesystem roots", (
   const escapedBranding = createFixture();
   mutateDatabase(escapedBranding.sourceDatabasePath, (db) => {
     db.prepare("UPDATE app_settings SET value = ? WHERE key = 'branding_json'").run(JSON.stringify({
-      logo: { fileName: "../logo.png", contentType: "image/png" },
+      logo: {
+        fileName: "../logo.png",
+        contentType: "image/png",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+        url: "/api/local/branding/logo",
+      },
     }));
   });
   const escaped = runScript(dryRunArguments(escapedBranding, path.join(escapedBranding.directory, "escaped-branding.json")));
@@ -659,6 +711,40 @@ test("dry-run and apply enforce the exact claim and guarded filesystem roots", (
   const linked = runScript(linkedArgs);
   assert.notEqual(linked.status, 0);
   assert.match(linked.stderr, /symlink/i);
+});
+
+test("dry-run rejects cutover files nested inside branding roots before creating a manifest", () => {
+  const fixture = createFixture();
+  const nestedTargetDatabasePath = path.join(fixture.targetBrandingDirectory, "relay.sqlite");
+  renameSync(fixture.targetDatabasePath, nestedTargetDatabasePath);
+  const unsafeFixture = { ...fixture, targetDatabasePath: nestedTargetDatabasePath };
+  const manifestPath = path.join(fixture.directory, "unsafe-overlap.json");
+
+  const result = runScript(dryRunArguments(unsafeFixture, manifestPath));
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /disjoint|overlap|branding root/i);
+  assert.equal(existsSync(manifestPath), false);
+  assert.equal(existsSync(nestedTargetDatabasePath), true);
+});
+
+test("dry-run requires branding roots, databases, manifest, and markers to be mutually disjoint", () => {
+  const manifestFixture = createFixture();
+  const nestedManifestPath = path.join(manifestFixture.targetBrandingDirectory, "manifest.json");
+  const nestedManifest = runScript(dryRunArguments(manifestFixture, nestedManifestPath));
+  assert.notEqual(nestedManifest.status, 0);
+  assert.match(nestedManifest.stderr, /disjoint|overlap|branding root/i);
+  assert.equal(existsSync(nestedManifestPath), false);
+
+  const nestedRootsFixture = createFixture();
+  const nestedTargetRoot = path.join(nestedRootsFixture.sourceBrandingDirectory, "relay-branding");
+  renameSync(nestedRootsFixture.targetBrandingDirectory, nestedTargetRoot);
+  const nestedRoots = runScript(dryRunArguments(
+    { ...nestedRootsFixture, targetBrandingDirectory: nestedTargetRoot },
+    path.join(nestedRootsFixture.directory, "nested-roots.json"),
+  ));
+  assert.notEqual(nestedRoots.status, 0);
+  assert.match(nestedRoots.stderr, /disjoint|overlap|branding root/i);
 });
 
 test("dry-run refuses a database with uncheckpointed WAL content", () => {
@@ -679,6 +765,31 @@ test("dry-run rejects malformed Discord IDs inside durable Discord state", () =>
   const result = runScript(dryRunArguments(fixture, path.join(fixture.directory, "invalid-discord-state.json")));
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /exact decimal ID/i);
+});
+
+test("dry-run rejects noncanonical decimal IDs instead of normalizing mapping keys", () => {
+  const fixture = createFixture();
+  mutateDatabase(fixture.sourceDatabasePath, (db) => {
+    db.prepare("UPDATE user_accounts SET discord_id = ' 111 ' WHERE id = 10").run();
+  });
+
+  const result = runScript(dryRunArguments(fixture, path.join(fixture.directory, "whitespace-id.json")));
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /exact decimal ID in canonical string form/i);
+});
+
+test("dry-run rejects numeric JSON snowflakes before JavaScript can round them", () => {
+  const fixture = createFixture();
+  mutateDatabase(fixture.sourceDatabasePath, (db) => {
+    db.prepare("UPDATE app_settings SET value = ? WHERE key = 'discord_json'")
+      .run('{"guildId":1369094286777412590}');
+  });
+
+  const result = runScript(dryRunArguments(fixture, path.join(fixture.directory, "numeric-json-snowflake.json")));
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /exact decimal ID in canonical string form/i);
 });
 
 test("manifest records a missing source bot token without exposing or importing another secret", () => {
@@ -732,6 +843,51 @@ test("apply refuses branding hash drift before database mutation", () => {
   assert.equal(target.prepare("SELECT COUNT(*) AS count FROM user_sessions").get().count, 1);
   target.close();
   assert.deepEqual(readFileSync(path.join(fixture.targetBrandingDirectory, "favicon.webp")), WEBP_BYTES);
+});
+
+test("apply resumes post-commit branding and marker recovery without replaying database merges", () => {
+  const fixture = createFixture();
+  const manifestPath = createManifest(fixture);
+  const firstApply = runScript(["--apply", "--manifest", manifestPath]);
+  assert.equal(firstApply.status, 0, firstApply.stderr);
+  const appliedMarkerPath = `${manifestPath}.applied`;
+  const pendingMarkerPath = `${manifestPath}.applying`;
+  renameSync(appliedMarkerPath, pendingMarkerPath);
+  const pendingMarker = JSON.parse(readFileSync(pendingMarkerPath, "utf8"));
+  writeFileSync(pendingMarkerPath, `${JSON.stringify({ ...pendingMarker, applied: false, state: "pending" }, null, 2)}\n`);
+  rmSync(fixture.targetBrandingDirectory, { recursive: true });
+  mkdirSync(fixture.targetBrandingDirectory);
+  writeFileSync(path.join(fixture.targetBrandingDirectory, "favicon.webp"), WEBP_BYTES);
+
+  const recovery = runScript(["--apply", "--manifest", manifestPath]);
+
+  assert.equal(recovery.status, 0, recovery.stderr);
+  assert.equal(existsSync(appliedMarkerPath), true);
+  assert.equal(existsSync(pendingMarkerPath), false);
+  assert.deepEqual(readFileSync(path.join(fixture.targetBrandingDirectory, "logo.png")), PNG_BYTES);
+  const target = new DatabaseSync(fixture.targetDatabasePath, { readOnly: true });
+  assert.equal(target.prepare("SELECT COUNT(*) AS count FROM admin_audit_log").get().count, 3);
+  assert.equal(target.prepare("SELECT COUNT(*) AS count FROM user_sessions").get().count, 0);
+  target.close();
+});
+
+test("dry-run rejects an external branding URL instead of copying raw metadata", () => {
+  const fixture = createFixture();
+  mutateDatabase(fixture.sourceDatabasePath, (db) => {
+    db.prepare("UPDATE app_settings SET value = ? WHERE key = 'branding_json'").run(JSON.stringify({
+      logo: {
+        fileName: "logo.png",
+        contentType: "image/png",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+        url: "https://attacker.invalid/tracker.png",
+      },
+    }));
+  });
+
+  const result = runScript(dryRunArguments(fixture, path.join(fixture.directory, "external-branding-url.json")));
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /branding URL must be same-origin|branding metadata is noncanonical/i);
 });
 
 test("foreign-key integrity failure rolls back the entire target transaction", () => {

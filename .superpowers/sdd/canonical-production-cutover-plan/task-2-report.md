@@ -76,3 +76,53 @@ Focused coverage includes all twelve merge rules, every excluded-table class, de
 ## Operational concern
 
 No VPS or live command was run. Task 4 must stop writers, checkpoint/freeze both databases, and supply the final files/branding roots before invoking dry-run or apply. The clean-WAL guard intentionally refuses an online/unfrozen database.
+
+## Review remediation (2026-08-09)
+
+The rejected Task 2 review was addressed with focused RED/GREEN regressions and a second complete verification pass.
+This section supersedes the earlier selected-schema and replay descriptions: complete `.applied` markers still refuse replay, while an incomplete `.applying` phase is deliberately recoverable.
+
+### Filesystem disjointness and recoverable finalization
+
+- Dry-run now canonicalizes existing files/directories with `realpath`, canonicalizes planned manifest/marker/backup paths through guarded real parents, and proves mutual disjointness between the source database, target database, manifest, `.applied` marker, `.applying` recovery marker, source branding root, target branding root, and deterministic target-branding backup root.
+- A database or marker nested under either branding root, nested branding roots, symlink traversal, path equality, or an unexpected pre-existing backup fails before either database is opened for selection. The reproduced case where the target database lived under the target branding root now fails before manifest creation, so the later directory swap cannot remove the database.
+- Apply writes a non-secret phase-bearing `.applying` marker before `COMMIT`. It records deterministic pre/post database-state fingerprints covering the full schema and every mutated table's row count/content hash; protected tables remain verified against their manifest hashes.
+- A retry with a pending marker distinguishes an uncommitted pre-state from a committed post-state. Pre-state can restart normally; post-state resumes or verifies branding installation and writes the final `.applied` marker without replaying account, audit, or other database merges. Branding backup cleanup happens only after final-marker creation and only for a branding migration.
+- The recovery regression recreates a committed database with an incomplete branding/final-marker phase, reruns the same manifest, verifies the canonical logo is installed, verifies the final marker is written, and proves the audit log was not appended twice.
+
+### Explicit selected-schema compatibility
+
+- Every selected table is compared with an explicitly supported per-table fingerprint corresponding to live source build `15950d6f7f34` and target schema `0.52.0-beta.1`.
+- Each fingerprint includes ordered columns, declared types, computed SQLite affinities, nullability, defaults, primary-key positions, foreign keys, unique and ordinary indexes (including indexed columns/order/collation/partial predicates), normalized CHECK-bearing table SQL, and triggers.
+- Missing or extra selected columns, changed constraints/indexes/triggers, and all other selected-shape drift fail closed. The regression adding `user_accounts.shadow_profile` to the source is rejected.
+- The only compatibility exception is documented and tested: source `market_deal_watches.last_baseline_average` may have the live build's `REAL` affinity or the current `TEXT` affinity. The target must have `TEXT`; a target with `REAL` is rejected.
+- The real supported `idx_admin_users_discord_id` unique index is included in the fixture and fingerprint, making duplicate non-empty administrator Discord IDs unrepresentable at the SQLite boundary.
+
+### Canonical IDs and branding metadata
+
+- Decimal identifiers must now already be strings matching `0|[1-9][0-9]*`. No trimming, signs, leading-zero aliases, whitespace, or JavaScript numeric coercion is accepted. Mapping keys therefore use only previously validated canonical strings.
+- Regressions reject a source account Discord ID of `' 111 '` against target `'111'` and reject an unsafe numeric Discord snowflake in JSON before JavaScript rounding can become migration input.
+- `branding_json` accepts only `logo`/`favicon` entries with the server-supported exact keys, supported filename/content-type pairing, canonical ISO timestamp, and fixed same-origin `/api/local/branding/{type}` URL. External URLs and unsupported metadata fail closed.
+- Apply does not copy raw branding JSON. It reconstructs the setting from the validated manifest description with the fixed same-origin URL, while filesystem staging still verifies content magic, size, and SHA-256.
+
+### Follow-up verification
+
+Passed on the final review-remediation code:
+
+```text
+node --test test/canonical-cutover-migration.test.mjs
+22 tests, 22 passed, 0 failed
+
+corepack pnpm --filter @workspace/bitcraft-local test
+1771 tests, 1771 passed, 0 failed
+
+corepack pnpm --filter @workspace/bitcraft-local run build
+exit 0; server/provider bindings, 1191 asset checks, TypeScript, Vite production build,
+and Relay runtime-boundary verification passed
+
+node --check apps/bitcraft-local/src/server/canonicalCutoverMigration.mjs
+node --check scripts/repair-relay-canonical-cutover.mjs
+all exited 0
+```
+
+No production/live path was read or written, no VPS command was run, and `BITCRAFTSYNC_EXPLORER_AUDIT.md` remains untouched.

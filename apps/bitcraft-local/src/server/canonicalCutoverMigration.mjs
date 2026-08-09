@@ -99,6 +99,38 @@ const REQUIRED_COLUMNS = Object.freeze({
   discord_craft_plan_report_occurrences: ["rule_id", "occurrence_key", "scheduled_at", "status", "discord_message_id", "last_error", "created_at", "updated_at"],
 });
 
+// Generated from the selected-table shapes at live source build 15950d6f7f34 and
+// target schema 0.52.0-beta.1. Each description covers ordered columns (declared
+// type, computed affinity, nullability, default, PK position), FKs, every index/unique constraint,
+// normalized CHECK-bearing table SQL, and triggers. The sole source compatibility
+// exception normalizes market_deal_watches.last_baseline_average REAL or TEXT.
+const SUPPORTED_SELECTED_SCHEMA_FINGERPRINTS = Object.freeze({
+  user_accounts: "676576d72a2ff1cc2f5c185a937f2599c53bd04f4716de222affb69bef40ea83",
+  user_sessions: "438708f8b49aaff2505ba8dc9a07bcfc995ac3f261731d2cc902e2e23d337ea3",
+  user_legal_acceptances: "3a2d201dbe0dd069c05a3f3bcfd339d394ed51b47784d8b4a0fb724794e08937",
+  admin_users: "3368a5b9f2cf26c8bcb0db3be2baa383e65373c6d6053434f2f210c102fbeb6a",
+  admin_sessions: "0381add5807bd19fe1b01992c929559eeb0a16afb5972c7bcd85564e8a088ffb",
+  app_settings: "b3ede99ee79980ee201b9ad17b669dc9b83d9db963f77c96cd2db5a49f6af8f3",
+  app_secrets: "9479bc0d0ba5d21d937fa0b792727f091f13d961036382a692d84e05912851c3",
+  craft_plan_settings: "3d5a95b6163825213852a13a8d1f403b2abc66c80bc870a363d99969f288233e",
+  market_deal_watches: "2f4e04a537e3cfbc5fc320e653e22e72a3afbfb2c98f1e05d8c1e2e05b86c46e",
+  scheduled_jobs: "517f110b56b3a78e23f02db5ad389151e273003b9c62a41f5694d1544fa6bcfd",
+  admin_audit_log: "bfc50b62c6a6bd4cb5c258667b025d0ac2fee57510c0678627bf466e77ff5c93",
+  discord_youtube_channels: "8cd3036bbfe2e06006f9be365a21e264e379896f0872b845c1d91205bb020b8a",
+  discord_youtube_videos: "32e2d64adf66308ccbfcaf871e6036abb8b298b26337e82c730fac99f0adb474",
+  discord_craft_watches: "0d227d1ce8fcfedf42daf07437de2c3f03e39421dbfa7c167e54fdc4789f664d",
+  discord_mod_cases: "a2cbee4a9cde658836dfb5d64d91f13cda956d337ec6470b640633ca7ab13677",
+  discord_warnings: "aacbceaeca0164040a1ccefc43f253bdeefabaa84b1f44775eabbf9dcb072071",
+  discord_mod_notes: "5af03017c48d34013991c053ac39d8483bc68bd779633fbfe4959c4ef458ff4a",
+  discord_custom_commands: "69e497448463c970a74db519f0d2f22a3babad3e9802cf4e74bb2125fd21883d",
+  discord_component_votes: "7bc875ea6c149fecf1c8c49d96a8144a4f885296706b6e48d46a45ec52dae285",
+  discord_component_messages: "09981f7359857fb4ec9f5d237a71ba678aa69b3f0b2693a4551138fe954a1505",
+  discord_temp_bans: "352add8e5aa6485045237bf31aad99c1f243857babb1631beb6d83595ae6cee3",
+  discord_craft_plan_report_occurrences: "b8916806cd9732f82e96dcc832b686c3c87e00c818a486a798d2579edc7cc7e0",
+});
+
+const SUPPORTED_SOURCE_MARKET_WATCH_SCHEMA_FINGERPRINT = "ce59495a91bf6c7079856af0693e36347c7fc22d43524f8439bb7c77779d6b3f";
+
 const ACCOUNT_FIELDS = REQUIRED_COLUMNS.user_accounts.filter((column) => column !== "id");
 const ADMIN_FIELDS = REQUIRED_COLUMNS.admin_users.filter((column) => column !== "id");
 const WATCH_FIELDS = REQUIRED_COLUMNS.market_deal_watches.filter((column) => !["id", "user_id"].includes(column));
@@ -127,14 +159,21 @@ function sha256(value) {
 }
 
 function decimal(value, label) {
-  const normalized = String(value ?? "").trim();
-  if (!/^\d+$/.test(normalized)) throw new TypeError(`${label} must be an exact decimal ID`);
-  return normalized;
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d*)$/.test(value)) {
+    throw new TypeError(`${label} must be an exact decimal ID in canonical string form`);
+  }
+  return value;
 }
 
 function comparePaths(left, right) {
   const normalize = (value) => process.platform === "win32" ? value.toLowerCase() : value;
   return normalize(path.resolve(left)) === normalize(path.resolve(right));
+}
+
+function pathContains(root, candidate) {
+  const normalize = (value) => process.platform === "win32" ? value.toLowerCase() : value;
+  const relative = path.relative(normalize(path.resolve(root)), normalize(path.resolve(candidate)));
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
 function guardedExistingPath(inputPath, kind, label) {
@@ -147,6 +186,72 @@ function guardedExistingPath(inputPath, kind, label) {
   if (kind === "file" && !stats.isFile()) throw new Error(`${label} must be a regular file`);
   if (kind === "directory" && !stats.isDirectory()) throw new Error(`${label} must be a directory`);
   return resolved;
+}
+
+function guardedPlannedFilePath(inputPath, label, { allowExisting = false } = {}) {
+  const resolved = path.resolve(String(inputPath ?? ""));
+  const parent = guardedExistingPath(path.dirname(resolved), "directory", `${label} parent directory`);
+  const canonical = path.join(parent, path.basename(resolved));
+  if (!comparePaths(canonical, resolved)) throw new Error(`${label} must not traverse a symlink`);
+  if (existsSync(canonical)) {
+    if (!allowExisting) throw new Error(`${label} must be a new file`);
+    return guardedExistingPath(canonical, "file", label);
+  }
+  return canonical;
+}
+
+function guardedExistingOrPlannedDirectory(inputPath, label) {
+  const resolved = path.resolve(String(inputPath ?? ""));
+  if (existsSync(resolved)) return guardedExistingPath(resolved, "directory", label);
+  const parent = guardedExistingPath(path.dirname(resolved), "directory", `${label} parent directory`);
+  const canonical = path.join(parent, path.basename(resolved));
+  if (!comparePaths(canonical, resolved)) throw new Error(`${label} must not traverse a symlink`);
+  return canonical;
+}
+
+function assertCutoverPathsAreDisjoint({
+  sourceDatabasePath,
+  targetDatabasePath,
+  sourceBrandingDirectory,
+  targetBrandingDirectory,
+  backupBrandingDirectory,
+  manifestPath,
+  markerPath,
+  pendingMarkerPath,
+}) {
+  const files = [
+    ["source database", sourceDatabasePath],
+    ["target database", targetDatabasePath],
+    ["manifest", manifestPath],
+    ["applied marker", markerPath],
+    ["pending marker", pendingMarkerPath],
+  ];
+  const roots = [
+    ["source branding root", sourceBrandingDirectory],
+    ["target branding root", targetBrandingDirectory],
+    ["target branding backup root", backupBrandingDirectory],
+  ];
+  for (let leftIndex = 0; leftIndex < files.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < files.length; rightIndex += 1) {
+      if (comparePaths(files[leftIndex][1], files[rightIndex][1])) {
+        throw new Error(`Canonical cutover paths must be disjoint: ${files[leftIndex][0]} overlaps ${files[rightIndex][0]}`);
+      }
+    }
+  }
+  for (let leftIndex = 0; leftIndex < roots.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < roots.length; rightIndex += 1) {
+      if (pathContains(roots[leftIndex][1], roots[rightIndex][1]) || pathContains(roots[rightIndex][1], roots[leftIndex][1])) {
+        throw new Error(`Canonical cutover paths must be disjoint: ${roots[leftIndex][0]} overlaps ${roots[rightIndex][0]}`);
+      }
+    }
+  }
+  for (const [fileLabel, filePath] of files) {
+    for (const [rootLabel, rootPath] of roots) {
+      if (pathContains(rootPath, filePath)) {
+        throw new Error(`Canonical cutover paths must be disjoint: ${fileLabel} is inside ${rootLabel}`);
+      }
+    }
+  }
 }
 
 function parseJson(value, label, fallback = undefined) {
@@ -182,6 +287,80 @@ function tableNames(db) {
 
 function quoteIdentifier(identifier) {
   return `"${String(identifier).replaceAll('"', '""')}"`;
+}
+
+function normalizeSchemaSql(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function sqliteAffinity(declaredType) {
+  const type = String(declaredType ?? "").toUpperCase();
+  if (type.includes("INT")) return "INTEGER";
+  if (["CHAR", "CLOB", "TEXT"].some((token) => type.includes(token))) return "TEXT";
+  if (type === "" || type.includes("BLOB")) return "BLOB";
+  if (["REAL", "FLOA", "DOUB"].some((token) => type.includes(token))) return "REAL";
+  return "NUMERIC";
+}
+
+function selectedTableSchemaDescription(db, table, { allowLegacyMarketAverage = false } = {}) {
+  const normalizeMarketAverage = (column, value) => (
+    allowLegacyMarketAverage
+      && table === "market_deal_watches"
+      && column === "last_baseline_average"
+      && ["REAL", "TEXT"].includes(String(value).toUpperCase())
+      ? "TEXT_OR_REAL"
+      : value
+  );
+  const tableRow = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table);
+  if (!tableRow) throw new Error(`missing table ${table}`);
+  const columns = db.prepare(`PRAGMA table_xinfo(${quoteIdentifier(table)})`).all().map((column) => {
+    const name = String(column.name);
+    const declaredType = String(column.type ?? "").toUpperCase();
+    return {
+      affinity: normalizeMarketAverage(name, sqliteAffinity(declaredType)),
+      defaultValue: column.dflt_value == null ? null : normalizeSchemaSql(column.dflt_value),
+      declaredType: normalizeMarketAverage(name, declaredType),
+      hidden: Number(column.hidden),
+      name,
+      notNull: Boolean(column.notnull),
+      position: Number(column.cid),
+      primaryKeyPosition: Number(column.pk),
+    };
+  });
+  const foreignKeys = db.prepare(`PRAGMA foreign_key_list(${quoteIdentifier(table)})`).all().map((foreignKey) => ({
+    from: String(foreignKey.from),
+    id: Number(foreignKey.id),
+    match: String(foreignKey.match),
+    onDelete: String(foreignKey.on_delete),
+    onUpdate: String(foreignKey.on_update),
+    sequence: Number(foreignKey.seq),
+    table: String(foreignKey.table),
+    to: String(foreignKey.to),
+  }));
+  const indexes = db.prepare(`PRAGMA index_list(${quoteIdentifier(table)})`).all()
+    .map((index) => ({
+      columns: db.prepare(`PRAGMA index_xinfo(${quoteIdentifier(index.name)})`).all().map((column) => ({
+        collation: String(column.coll),
+        descending: Boolean(column.desc),
+        key: Boolean(column.key),
+        name: column.name == null ? null : String(column.name),
+        position: Number(column.seqno),
+        tableColumn: Number(column.cid),
+      })),
+      name: String(index.name),
+      origin: String(index.origin),
+      partial: Boolean(index.partial),
+      sql: normalizeSchemaSql(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = ?").get(index.name)?.sql),
+      unique: Boolean(index.unique),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const triggers = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ? ORDER BY name").all()
+    .map((trigger) => ({ name: String(trigger.name), sql: normalizeSchemaSql(trigger.sql) }));
+  let tableSql = normalizeSchemaSql(tableRow.sql);
+  if (allowLegacyMarketAverage && table === "market_deal_watches") {
+    tableSql = tableSql.replace(/(last_baseline_average\s+)(?:REAL|TEXT)\b/i, "$1TEXT_OR_REAL");
+  }
+  return { columns, foreignKeys, indexes, tableSql, triggers };
 }
 
 function tableCount(db, table) {
@@ -222,6 +401,17 @@ function databaseDescription(db, databasePath, { includeProtectedContent }) {
       ...(includeProtectedContent && !MUTATED_TABLES.has(table) ? { contentSha256: tableContentFingerprint(db, table) } : {}),
     }])),
   };
+}
+
+function databaseRecoveryFingerprint(db) {
+  const tables = [...MUTATED_TABLES].sort();
+  return sha256(canonicalJson({
+    schema: schemaDescription(db),
+    tables: Object.fromEntries(tables.map((table) => [table, {
+      count: tableCount(db, table),
+      contentSha256: tableContentFingerprint(db, table),
+    }])),
+  }));
 }
 
 function assertCleanCheckpoint(databasePath, label) {
@@ -272,12 +462,17 @@ function accountMappings(source, target) {
 }
 
 function assertSupportedSchema(db, label) {
-  for (const [table, requiredColumns] of Object.entries(REQUIRED_COLUMNS)) {
+  for (const table of Object.keys(REQUIRED_COLUMNS)) {
     const tableExists = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table);
     if (!tableExists) throw new Error(`${label} database is unsupported: missing table ${table}`);
-    const columns = new Set(db.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all().map((column) => String(column.name)));
-    const missing = requiredColumns.filter((column) => !columns.has(column));
-    if (missing.length) throw new Error(`${label} database is unsupported: ${table} is missing columns ${missing.join(", ")}`);
+    const allowLegacyMarketAverage = label === "Source" && table === "market_deal_watches";
+    const actual = sha256(canonicalJson(selectedTableSchemaDescription(db, table, { allowLegacyMarketAverage })));
+    const expected = allowLegacyMarketAverage
+      ? SUPPORTED_SOURCE_MARKET_WATCH_SCHEMA_FINGERPRINT
+      : SUPPORTED_SELECTED_SCHEMA_FINGERPRINTS[table];
+    if (actual !== expected) {
+      throw new Error(`${label} database is unsupported: ${table} schema fingerprint does not match an explicitly supported shape`);
+    }
   }
 }
 
@@ -288,7 +483,7 @@ function assertJsonObject(value, label) {
 }
 
 function optionalDecimal(value, label) {
-  if (value == null || String(value).trim() === "") return null;
+  if (value == null || value === "") return null;
   return decimal(value, label);
 }
 
@@ -307,10 +502,10 @@ function validateDiscordSettingsIds(value) {
       return;
     }
     for (const [key, child] of Object.entries(node)) {
-      if (child != null && String(child).trim() !== "" && /^(?:application|guild|channel|role|user|message)Id$/i.test(key)) {
+      if (child != null && child !== "" && /^(?:application|guild|channel|role|user|message)Id$/i.test(key)) {
         decimal(child, `source discord_json ${key}`);
       }
-      if (child != null && String(child).trim() !== "" && ["channels", "craftChannels"].includes(parentKey) && typeof child !== "object") {
+      if (child != null && child !== "" && ["channels", "craftChannels"].includes(parentKey) && typeof child !== "object") {
         decimal(child, `source discord_json ${parentKey}.${key}`);
       }
       visit(child, key);
@@ -399,7 +594,7 @@ function validateSelectedRows(source, target, claimId) {
       for (const id of Object.keys(access.accounts)) decimal(id, "source access-control account Discord ID");
     }
   }
-  if (sourceSettings.has("default_region") && String(sourceSettings.get("default_region")).trim()) {
+  if (sourceSettings.has("default_region") && sourceSettings.get("default_region") !== "") {
     decimal(sourceSettings.get("default_region"), "source default region ID");
   }
   if (sourceSettings.has("active_region_overrides")) {
@@ -584,18 +779,33 @@ function settingValue(db, key) {
   return db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key)?.value;
 }
 
+function canonicalBrandingSetting(description) {
+  return Object.fromEntries(Object.entries(description.assets).map(([type, asset]) => [type, {
+    fileName: asset.fileName,
+    contentType: asset.contentType,
+    updatedAt: asset.updatedAt,
+    url: asset.url,
+  }]));
+}
+
 function brandingDescription(db, directory, label) {
   const raw = settingValue(db, "branding_json");
   const branding = raw == null ? {} : parseJson(raw, `${label} branding_json`);
   if (!branding || typeof branding !== "object" || Array.isArray(branding)) {
     throw new Error(`${label} branding_json must contain an object`);
   }
+  const unsupportedTypes = Object.keys(branding).filter((type) => !["logo", "favicon"].includes(type));
+  if (unsupportedTypes.length) throw new Error(`${label} branding metadata is noncanonical`);
   const referenced = new Set();
   const assets = {};
   for (const type of ["logo", "favicon"]) {
     const asset = branding[type];
     if (asset == null) continue;
     if (!asset || typeof asset !== "object" || Array.isArray(asset)) throw new Error(`${label} ${type} branding metadata is invalid`);
+    const assetKeys = Object.keys(asset).sort();
+    if (canonicalJson(assetKeys) !== canonicalJson(["contentType", "fileName", "updatedAt", "url"])) {
+      throw new Error(`${label} ${type} branding metadata is noncanonical`);
+    }
     const fileName = String(asset.fileName ?? "");
     const extension = path.extname(fileName).toLowerCase();
     const format = IMAGE_TYPES[extension];
@@ -603,6 +813,11 @@ function brandingDescription(db, directory, label) {
       throw new Error(`${label} ${type} branding filename is unsupported`);
     }
     if (String(asset.contentType ?? "") !== format.contentType) throw new Error(`${label} ${type} branding content type is invalid`);
+    const canonicalUrl = `/api/local/branding/${type}`;
+    if (asset.url !== canonicalUrl) throw new Error(`${label} ${type} branding URL must be same-origin and canonical`);
+    if (typeof asset.updatedAt !== "string" || !Number.isFinite(Date.parse(asset.updatedAt)) || new Date(asset.updatedAt).toISOString() !== asset.updatedAt) {
+      throw new Error(`${label} ${type} branding metadata is noncanonical`);
+    }
     const filePath = path.resolve(directory, fileName);
     if (!comparePaths(path.dirname(filePath), directory)) throw new Error(`${label} branding asset escapes its supplied root`);
     guardedExistingPath(filePath, "file", `${label} ${type} branding asset`);
@@ -615,6 +830,8 @@ function brandingDescription(db, directory, label) {
       fileName,
       sha256: sha256(bytes),
       size: bytes.length,
+      updatedAt: asset.updatedAt,
+      url: canonicalUrl,
     };
   }
   const entries = readdirSync(directory, { withFileTypes: true });
@@ -746,9 +963,12 @@ function openReadOnly(databasePath) {
   return new DatabaseSync(databasePath, { readOnly: true, timeout: 5_000 });
 }
 
-export function createCanonicalCutoverManifest(input) {
+export function createCanonicalCutoverManifest(input, { allowExistingManifest = false } = {}) {
   const claimId = decimal(input.claimId, "claim ID");
   if (claimId !== CANONICAL_CLAIM_ID) throw new Error(`claim ID must be exactly ${CANONICAL_CLAIM_ID}`);
+  const manifestPath = guardedPlannedFilePath(input.manifestPath, "Manifest", { allowExisting: allowExistingManifest });
+  const markerPath = guardedPlannedFilePath(`${manifestPath}.applied`, "Applied marker");
+  const pendingMarkerPath = guardedPlannedFilePath(`${manifestPath}.applying`, "Pending marker");
   const options = {
     claimId,
     sourceDatabasePath: guardedExistingPath(input.sourceDatabasePath, "file", "Source database"),
@@ -756,7 +976,9 @@ export function createCanonicalCutoverManifest(input) {
     sourceBrandingDirectory: guardedExistingPath(input.sourceBrandingDirectory, "directory", "Source branding directory"),
     targetBrandingDirectory: guardedExistingPath(input.targetBrandingDirectory, "directory", "Target branding directory"),
   };
-  if (comparePaths(options.sourceDatabasePath, options.targetDatabasePath)) throw new Error("Source and target databases must be different files");
+  const backupBrandingDirectory = guardedExistingOrPlannedDirectory(`${options.targetBrandingDirectory}.canonical-cutover-backup`, "Target branding backup directory");
+  if (existsSync(backupBrandingDirectory)) throw new Error("Target branding backup directory must not exist before dry-run");
+  assertCutoverPathsAreDisjoint({ ...options, backupBrandingDirectory, manifestPath, markerPath, pendingMarkerPath });
   assertCleanCheckpoint(options.sourceDatabasePath, "Source database");
   assertCleanCheckpoint(options.targetDatabasePath, "Target database");
   const source = openReadOnly(options.sourceDatabasePath);
@@ -828,13 +1050,19 @@ function applyAdmins(db, manifest) {
   }
 }
 
-function applySettingsAndSecrets(db) {
+function applySettingsAndSecrets(db, manifest) {
   const upsertSetting = db.prepare(`
     INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
   `);
   for (const row of db.prepare("SELECT key, value, updated_at FROM source.app_settings ORDER BY key").iterate()) {
-    if (CANONICAL_SETTING_KEYS.includes(String(row.key))) upsertSetting.run(row.key, row.value, row.updated_at);
+    if (CANONICAL_SETTING_KEYS.includes(String(row.key)) && row.key !== "branding_json") {
+      upsertSetting.run(row.key, row.value, row.updated_at);
+    }
+  }
+  if (manifest.branding.source.settingPresent) {
+    const row = db.prepare("SELECT updated_at FROM source.app_settings WHERE key = 'branding_json'").get();
+    upsertSetting.run("branding_json", JSON.stringify(canonicalBrandingSetting(manifest.branding.source)), row.updated_at);
   }
   const token = db.prepare("SELECT key, value, updated_at FROM source.app_secrets WHERE key = 'discord_bot_token'").get();
   if (token && String(token.value).trim()) {
@@ -934,13 +1162,17 @@ function stageBranding(manifest) {
   }
 }
 
-function installStagedBranding({ stageDirectory, targetDirectory }) {
-  const backupDirectory = `${targetDirectory}.canonical-cutover-backup-${process.pid}`;
+function brandingBackupPath(manifest) {
+  return `${manifest.branding.target.path}.canonical-cutover-backup`;
+}
+
+function installStagedBranding({ stageDirectory, targetDirectory }, manifest) {
+  const backupDirectory = brandingBackupPath(manifest);
   if (existsSync(backupDirectory)) throw new Error("A canonical cutover branding backup already exists");
   renameSync(targetDirectory, backupDirectory);
   try {
     renameSync(stageDirectory, targetDirectory);
-    rmSync(backupDirectory, { recursive: true, force: true });
+    return backupDirectory;
   } catch (error) {
     if (!existsSync(targetDirectory) && existsSync(backupDirectory)) renameSync(backupDirectory, targetDirectory);
     throw error;
@@ -977,18 +1209,56 @@ function assertProtectedTablesUnchanged(db, manifest) {
   }
 }
 
-function writeAppliedMarker(markerPath, manifest) {
-  const temporaryPath = `${markerPath}.tmp-${process.pid}`;
-  writeFileSync(temporaryPath, `${JSON.stringify({
-    applied: true,
+function markerPayload(manifest, state, recovery) {
+  return {
+    applied: state === "applied",
     formatVersion: manifest.formatVersion,
+    preDatabaseStateFingerprint: recovery.preDatabaseStateFingerprint,
+    postDatabaseStateFingerprint: recovery.postDatabaseStateFingerprint,
     selectionHash: manifest.selectionHash,
-  }, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+    state,
+  };
+}
+
+function writeNewMarker(markerPath, payload) {
+  const temporaryPath = `${markerPath}.tmp-${process.pid}`;
+  writeFileSync(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, { flag: "wx", mode: 0o600 });
   try {
     renameSync(temporaryPath, markerPath);
   } catch (error) {
     rmSync(temporaryPath, { force: true });
     throw error;
+  }
+}
+
+function readRecoveryMarker(markerPath, manifest) {
+  const parsed = parseJson(readFileSync(guardedExistingPath(markerPath, "file", "Pending marker"), "utf8"), "Pending marker");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+    || parsed.state !== "pending" || parsed.applied !== false
+    || parsed.formatVersion !== manifest.formatVersion || parsed.selectionHash !== manifest.selectionHash
+    || !/^[a-f0-9]{64}$/.test(String(parsed.preDatabaseStateFingerprint ?? ""))
+    || !/^[a-f0-9]{64}$/.test(String(parsed.postDatabaseStateFingerprint ?? ""))) {
+    throw new Error("Pending canonical cutover marker is invalid");
+  }
+  return parsed;
+}
+
+function brandingFilesMatchManifest(manifest) {
+  const targetDirectory = manifest.branding.target.path;
+  if (!existsSync(targetDirectory)) return false;
+  try {
+    guardedExistingPath(targetDirectory, "directory", "Manifest target branding directory");
+    const expected = Object.values(manifest.branding.source.assets).sort((left, right) => left.fileName.localeCompare(right.fileName));
+    const entries = readdirSync(targetDirectory, { withFileTypes: true });
+    if (entries.length !== expected.length || entries.some((entry) => !entry.isFile() || entry.isSymbolicLink())) return false;
+    for (const asset of expected) {
+      const assetPath = guardedExistingPath(path.join(targetDirectory, asset.fileName), "file", "Recovered target branding asset");
+      const bytes = readFileSync(assetPath);
+      if (bytes.length !== asset.size || sha256(bytes) !== asset.sha256) return false;
+    }
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -999,14 +1269,111 @@ export function readCanonicalCutoverManifest(manifestPath) {
   return { manifest: parsed, manifestPath: resolved };
 }
 
+function applyResult(manifest, recovered = false) {
+  return {
+    claimId: manifest.claimId,
+    integrity: "ok",
+    recovered,
+    selectionHash: manifest.selectionHash,
+  };
+}
+
+function completePostCommit(manifest, markerPath, pendingMarkerPath, recovery, stagedBranding = null, recovered = true) {
+  let backupDirectory = null;
+  try {
+    if (manifest.branding.source.settingPresent) {
+      const expectedBackup = brandingBackupPath(manifest);
+      if (!brandingFilesMatchManifest(manifest)) {
+        if (!existsSync(manifest.branding.target.path) && existsSync(expectedBackup)) {
+          renameSync(expectedBackup, manifest.branding.target.path);
+        }
+        if (existsSync(expectedBackup)) throw new Error("Branding recovery found an ambiguous existing backup");
+        stagedBranding ??= stageBranding(manifest);
+        backupDirectory = installStagedBranding(stagedBranding, manifest);
+      } else if (stagedBranding?.stageDirectory && existsSync(stagedBranding.stageDirectory)) {
+        rmSync(stagedBranding.stageDirectory, { recursive: true, force: true });
+      }
+    }
+    writeNewMarker(markerPath, markerPayload(manifest, "applied", recovery));
+    try { rmSync(pendingMarkerPath, { force: true }); } catch {}
+    if (manifest.branding.source.settingPresent) {
+      const cleanupBackup = backupDirectory ?? brandingBackupPath(manifest);
+      if (existsSync(cleanupBackup)) {
+        try { rmSync(cleanupBackup, { recursive: true, force: true }); } catch {}
+      }
+    }
+    return applyResult(manifest, recovered);
+  } catch (error) {
+    if (stagedBranding?.stageDirectory && existsSync(stagedBranding.stageDirectory)) {
+      try { rmSync(stagedBranding.stageDirectory, { recursive: true, force: true }); } catch {}
+    }
+    throw new Error(`Canonical cutover database is committed; retry the same manifest to finish branding/marker recovery: ${error.message}`);
+  }
+}
+
+function recoverPendingApply(manifest, paths) {
+  const recovery = readRecoveryMarker(paths.pendingMarkerPath, manifest);
+  if (sha256(readFileSync(paths.sourcePath)) !== manifest.source.database.fileSha256) {
+    throw new Error("Canonical cutover source changed during pending recovery");
+  }
+  const db = openReadOnly(paths.targetPath);
+  let currentFingerprint;
+  try {
+    assertSupportedSchema(db, "Target");
+    assertProtectedTablesUnchanged(db, manifest);
+    assertCleanIntegrity(db);
+    if (!manifest.branding.source.settingPresent) {
+      const retainedBranding = brandingDescription(db, manifest.branding.target.path, "Recovery target");
+      if (canonicalJson(retainedBranding) !== canonicalJson(manifest.branding.target)) {
+        throw new Error("Retained target branding changed during pending recovery");
+      }
+    }
+    currentFingerprint = databaseRecoveryFingerprint(db);
+  } finally {
+    db.close();
+  }
+  if (currentFingerprint === recovery.preDatabaseStateFingerprint) {
+    rmSync(paths.pendingMarkerPath, { force: true });
+    return null;
+  }
+  if (currentFingerprint !== recovery.postDatabaseStateFingerprint) {
+    throw new Error("Pending canonical cutover database state matches neither the pre-apply nor committed fingerprint");
+  }
+  return completePostCommit(manifest, paths.markerPath, paths.pendingMarkerPath, recovery);
+}
+
 export function applyCanonicalCutoverManifest({ manifest, manifestPath }) {
   assertManifestIntegrity(manifest);
   const resolvedManifestPath = guardedExistingPath(manifestPath, "file", "Manifest");
-  const markerPath = `${resolvedManifestPath}.applied`;
-  if (existsSync(markerPath)) throw new Error("Canonical cutover manifest was already applied");
+  const markerPath = guardedPlannedFilePath(`${resolvedManifestPath}.applied`, "Applied marker", { allowExisting: true });
+  const pendingMarkerPath = guardedPlannedFilePath(`${resolvedManifestPath}.applying`, "Pending marker", { allowExisting: true });
   const targetPath = guardedExistingPath(manifest.target?.database?.path, "file", "Manifest target database");
   const sourcePath = guardedExistingPath(manifest.source?.database?.path, "file", "Manifest source database");
+  const sourceBrandingDirectory = guardedExistingPath(manifest.branding?.source?.path, "directory", "Manifest source branding directory");
+  const targetBrandingDirectory = guardedExistingOrPlannedDirectory(manifest.branding?.target?.path, "Manifest target branding directory");
+  const backupBrandingDirectory = guardedExistingOrPlannedDirectory(brandingBackupPath(manifest), "Manifest target branding backup directory");
+  assertCutoverPathsAreDisjoint({
+    sourceDatabasePath: sourcePath,
+    targetDatabasePath: targetPath,
+    sourceBrandingDirectory,
+    targetBrandingDirectory,
+    backupBrandingDirectory,
+    manifestPath: resolvedManifestPath,
+    markerPath,
+    pendingMarkerPath,
+  });
+  if (existsSync(markerPath)) throw new Error("Canonical cutover manifest was already applied");
+  if (existsSync(backupBrandingDirectory) && !existsSync(pendingMarkerPath)) {
+    throw new Error("Target branding backup directory exists without a pending recovery marker");
+  }
+  if (existsSync(pendingMarkerPath)) {
+    const recovered = recoverPendingApply(manifest, { markerPath, pendingMarkerPath, sourcePath, targetPath });
+    if (recovered) return recovered;
+  }
   let stagedBranding = null;
+  let recovery = null;
+  let pendingMarkerWritten = false;
+  let databaseCommitted = false;
   const db = new DatabaseSync(targetPath, { timeout: 5_000 });
   let transactionOpen = false;
   try {
@@ -1022,15 +1389,17 @@ export function applyCanonicalCutoverManifest({ manifest, manifestPath }) {
       targetDatabasePath: targetPath,
       sourceBrandingDirectory: manifest.branding?.source?.path,
       targetBrandingDirectory: manifest.branding?.target?.path,
-    });
+      manifestPath: resolvedManifestPath,
+    }, { allowExistingManifest: true });
     if (canonicalJson(recomputed) !== canonicalJson(manifest)) {
       throw new Error("Canonical cutover inputs changed since dry-run; refusing apply");
     }
+    const preDatabaseStateFingerprint = databaseRecoveryFingerprint(db);
     stagedBranding = stageBranding(manifest);
     db.exec("DELETE FROM user_sessions; DELETE FROM admin_sessions;");
     applyAccounts(db, manifest);
     applyAdmins(db, manifest);
-    applySettingsAndSecrets(db);
+    applySettingsAndSecrets(db, manifest);
     applyCraftPlans(db);
     applyMarketWatches(db, manifest);
     applyScheduledJobs(db);
@@ -1038,22 +1407,24 @@ export function applyCanonicalCutoverManifest({ manifest, manifestPath }) {
     applyAdminAudit(db, manifest);
     assertProtectedTablesUnchanged(db, manifest);
     assertCleanIntegrity(db);
+    recovery = {
+      preDatabaseStateFingerprint,
+      postDatabaseStateFingerprint: databaseRecoveryFingerprint(db),
+    };
+    writeNewMarker(pendingMarkerPath, markerPayload(manifest, "pending", recovery));
+    pendingMarkerWritten = true;
     db.exec("COMMIT");
     transactionOpen = false;
+    databaseCommitted = true;
   } catch (error) {
     if (transactionOpen) {
       try { db.exec("ROLLBACK"); } catch {}
     }
     if (stagedBranding?.stageDirectory) rmSync(stagedBranding.stageDirectory, { recursive: true, force: true });
+    if (pendingMarkerWritten && !databaseCommitted) rmSync(pendingMarkerPath, { force: true });
     throw error;
   } finally {
     db.close();
   }
-  if (stagedBranding) installStagedBranding(stagedBranding);
-  writeAppliedMarker(markerPath, manifest);
-  return {
-    claimId: manifest.claimId,
-    integrity: "ok",
-    selectionHash: manifest.selectionHash,
-  };
+  return completePostCommit(manifest, markerPath, pendingMarkerPath, recovery, stagedBranding, false);
 }
