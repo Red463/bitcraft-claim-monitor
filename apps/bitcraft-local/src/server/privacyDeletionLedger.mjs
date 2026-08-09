@@ -3,7 +3,9 @@ import {
   chmodSync,
   closeSync,
   existsSync,
+  fstatSync,
   fsyncSync,
+  lstatSync,
   openSync,
   readFileSync,
   renameSync,
@@ -21,13 +23,69 @@ const RECORD_KEYS = ["expiresAt", "keyId", "occurredAt", "operationId", "signatu
 const DEFAULT_ATOMIC_FILESYSTEM = Object.freeze({
   chmodSync,
   closeSync,
+  existsSync,
+  fstatSync,
   fsyncSync,
+  lstatSync,
   openSync,
   readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
 });
+
+function assertSingleLinkedFileDescriptor(filesystem, descriptor, filePath, label) {
+  const descriptorStats = filesystem.fstatSync(descriptor, { bigint: true });
+  const pathStats = filesystem.lstatSync(filePath, { bigint: true });
+  if (!descriptorStats.isFile() || !pathStats.isFile() || pathStats.isSymbolicLink()) {
+    throw new Error(`${label} must be a regular non-symlink file`);
+  }
+  if (descriptorStats.nlink !== 1n || pathStats.nlink !== 1n) {
+    throw new Error(`${label} must have exactly one filesystem link`);
+  }
+  if (descriptorStats.dev !== pathStats.dev || descriptorStats.ino !== pathStats.ino) {
+    throw new Error(`${label} changed filesystem identity before access`);
+  }
+}
+
+function assertAtomicDestination(filesystem, filePath) {
+  let descriptor;
+  try {
+    descriptor = filesystem.openSync(filePath, "r");
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  try {
+    assertSingleLinkedFileDescriptor(filesystem, descriptor, filePath, "Target privacy deletion ledger");
+  } finally {
+    filesystem.closeSync(descriptor);
+  }
+}
+
+function readSingleLinkedFile(filesystem, filePath, label) {
+  const descriptor = filesystem.openSync(filePath, "r");
+  try {
+    assertSingleLinkedFileDescriptor(filesystem, descriptor, filePath, label);
+    return filesystem.readFileSync(descriptor, "utf8");
+  } finally {
+    filesystem.closeSync(descriptor);
+  }
+}
+
+function syncAtomicParent(filesystem, filePath, platform) {
+  const directoryDescriptor = filesystem.openSync(path.dirname(filePath), platform === "win32" ? "r+" : "r");
+  try {
+    filesystem.fsyncSync(directoryDescriptor);
+  } finally {
+    filesystem.closeSync(directoryDescriptor);
+  }
+}
+
+function atomicPathIdentity(filePath, platform) {
+  const resolved = path.resolve(filePath);
+  return platform === "win32" ? resolved.toLowerCase() : resolved;
+}
 
 function canonical(record) {
   return JSON.stringify({
@@ -149,9 +207,16 @@ export function mergeDeletionLedgerRecords({
   let expired = 0;
   let expiredSource = 0;
   let expiredTarget = 0;
+  const verifiedIdentities = new Map();
   const addRecords = (records, keys, source) => {
     for (const record of records) {
       assertDeletionLedgerRecord(record, keys, `Privacy deletion ${source} ledger`);
+      const identity = recordIdentity(record);
+      const existing = verifiedIdentities.get(identity);
+      if (existing && canonicalSigned(existing) !== canonicalSigned(record)) {
+        throw new Error("Privacy deletion ledger contains a conflicting duplicate record");
+      }
+      if (!existing) verifiedIdentities.set(identity, record);
       if (Date.parse(record.occurredAt) > createdAtMs) {
         throw new Error(`Privacy deletion ${source} ledger record occurred after manifest creation`);
       }
@@ -214,40 +279,106 @@ export function readDeletionLedger(path, keys) {
   return parseDeletionLedgerContent(readFileSync(path, "utf8"), keys);
 }
 
-export function replaceDeletionLedgerAtomically(
-  { ledgerPath, content, verificationKeys },
-  { filesystem = DEFAULT_ATOMIC_FILESYSTEM, platform = process.platform, processId = process.pid } = {},
+export function stageDeletionLedgerReplacement(
+  { ledgerPath, temporaryPath: requestedTemporaryPath = null, content, verificationKeys },
+  {
+    filesystem = DEFAULT_ATOMIC_FILESYSTEM,
+    platform = process.platform,
+    processId = null,
+    randomUUID = cryptoRandomUUID,
+  } = {},
 ) {
   const resolved = path.resolve(ledgerPath);
-  const temporaryPath = path.join(path.dirname(resolved), `.${path.basename(resolved)}.tmp-${processId}`);
-  let renamed = false;
-  try {
-    const descriptor = filesystem.openSync(temporaryPath, "wx", 0o600);
+  const suffix = processId ?? randomUUID();
+  const temporaryPath = requestedTemporaryPath
+    ? path.resolve(requestedTemporaryPath)
+    : path.join(path.dirname(resolved), `.${path.basename(resolved)}.tmp-${suffix}`);
+  if (atomicPathIdentity(path.dirname(temporaryPath), platform) !== atomicPathIdentity(path.dirname(resolved), platform)
+    || atomicPathIdentity(temporaryPath, platform) === atomicPathIdentity(resolved, platform)) {
+    throw new Error("Staged privacy deletion ledger must be a distinct same-directory path");
+  }
+  const stagedDescription = () => Object.freeze({
+    content,
+    fileSha256: createHash("sha256").update(content).digest("hex"),
+    ledgerPath: resolved,
+    platform,
+    temporaryPath,
+    verificationKeys,
+  });
+  if (filesystem.existsSync(temporaryPath)) {
+    const stale = readSingleLinkedFile(filesystem, temporaryPath, "Stale staged privacy deletion ledger");
     try {
+      parseDeletionLedgerContent(stale, verificationKeys, "Stale staged privacy deletion");
+      if (stale === content) return stagedDescription();
+    } catch {}
+    filesystem.rmSync(temporaryPath, { force: true });
+    syncAtomicParent(filesystem, temporaryPath, platform);
+  }
+  let created = false;
+  try {
+    assertAtomicDestination(filesystem, resolved);
+    const descriptor = filesystem.openSync(temporaryPath, "wx", 0o600);
+    created = true;
+    try {
+      assertSingleLinkedFileDescriptor(filesystem, descriptor, temporaryPath, "Staged privacy deletion ledger");
       filesystem.writeFileSync(descriptor, content, "utf8");
       filesystem.fsyncSync(descriptor);
     } finally {
       filesystem.closeSync(descriptor);
     }
     filesystem.chmodSync(temporaryPath, 0o600);
-    const staged = filesystem.readFileSync(temporaryPath, "utf8");
+    const staged = readSingleLinkedFile(filesystem, temporaryPath, "Staged privacy deletion ledger");
     parseDeletionLedgerContent(staged, verificationKeys, "Staged privacy deletion");
     if (staged !== content) throw new Error("Staged privacy deletion ledger content changed before replacement");
-    filesystem.renameSync(temporaryPath, resolved);
-    renamed = true;
-    const directoryDescriptor = filesystem.openSync(path.dirname(resolved), platform === "win32" ? "r+" : "r");
-    try {
-      filesystem.fsyncSync(directoryDescriptor);
-    } finally {
-      filesystem.closeSync(directoryDescriptor);
-    }
   } catch (error) {
-    if (!renamed) {
+    if (created) {
       try { filesystem.rmSync(temporaryPath, { force: true }); } catch {}
     }
     throw error;
   }
-  return { fileSha256: createHash("sha256").update(content).digest("hex") };
+  return stagedDescription();
+}
+
+export function installStagedDeletionLedger(
+  stagedReplacement,
+  { filesystem = DEFAULT_ATOMIC_FILESYSTEM, platform = stagedReplacement.platform ?? process.platform } = {},
+) {
+  assertAtomicDestination(filesystem, stagedReplacement.ledgerPath);
+  const staged = readSingleLinkedFile(
+    filesystem,
+    stagedReplacement.temporaryPath,
+    "Staged privacy deletion ledger",
+  );
+  parseDeletionLedgerContent(staged, stagedReplacement.verificationKeys, "Staged privacy deletion");
+  if (staged !== stagedReplacement.content
+    || createHash("sha256").update(staged).digest("hex") !== stagedReplacement.fileSha256) {
+    throw new Error("Staged privacy deletion ledger changed before installation");
+  }
+  filesystem.renameSync(stagedReplacement.temporaryPath, stagedReplacement.ledgerPath);
+  syncAtomicParent(filesystem, stagedReplacement.ledgerPath, platform);
+  return { fileSha256: stagedReplacement.fileSha256 };
+}
+
+export function discardStagedDeletionLedger(
+  stagedReplacement,
+  { filesystem = DEFAULT_ATOMIC_FILESYSTEM, platform = stagedReplacement?.platform ?? process.platform } = {},
+) {
+  if (!stagedReplacement || !filesystem.existsSync(stagedReplacement.temporaryPath)) return;
+  filesystem.rmSync(stagedReplacement.temporaryPath, { force: true });
+  syncAtomicParent(filesystem, stagedReplacement.temporaryPath, platform);
+}
+
+export function replaceDeletionLedgerAtomically(
+  input,
+  options = {},
+) {
+  const staged = stageDeletionLedgerReplacement(input, options);
+  try {
+    return installStagedDeletionLedger(staged, options);
+  } catch (error) {
+    try { discardStagedDeletionLedger(staged, options); } catch {}
+    throw error;
+  }
 }
 
 export function appendDeletionLedgerRecord(path, record, key) {

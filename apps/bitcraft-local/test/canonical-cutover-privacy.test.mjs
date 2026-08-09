@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import * as filesystem from "node:fs";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -117,6 +117,23 @@ test("exact duplicate identities deduplicate while conflicting signed content fa
     targetKey: CURRENT_KEY,
     manifestCreatedAt: CREATED_AT,
   }), /conflicting duplicate/i);
+
+  const expiredRecord = signedRecord(OLD_KEY, {
+    occurredAt: "2026-05-10T12:00:00.000Z",
+    expiresAt: "2026-08-08T12:00:00.000Z",
+  });
+  const expiredConflict = signedRecord(OLD_KEY, {
+    subject: privacyLedger.deletionLedgerSubject("999999999999999999", OLD_KEY),
+    occurredAt: expiredRecord.occurredAt,
+    expiresAt: expiredRecord.expiresAt,
+  });
+  assert.throws(() => privacyLedger.mergeDeletionLedgerRecords({
+    sourceRecords: [expiredRecord, expiredConflict],
+    targetRecords: [],
+    sourceKey: OLD_KEY,
+    targetKey: CURRENT_KEY,
+    manifestCreatedAt: CREATED_AT,
+  }), /conflicting duplicate/i);
 });
 
 test("expiry is evaluated at manifest creation without extending old-key retirement", () => {
@@ -202,6 +219,8 @@ function privacyPaths() {
   const targetKeyFilePath = path.join(targetConfigRoot, "privacy.key");
   const sourceLedgerPath = path.join(sourceBackupRoot, "privacy.jsonl");
   const targetLedgerPath = path.join(targetBackupRoot, "privacy.jsonl");
+  const installedPreviousKeyFilePath = path.join(targetConfigRoot, "privacy-previous-old.key");
+  const readinessArtifactPath = path.join(targetBackupRoot, "privacy-cutover-ready.json");
   writeFileSync(sourceKeyFilePath, `${OLD_KEY}\n`, { mode: 0o600 });
   writeFileSync(targetKeyFilePath, `${CURRENT_KEY}\n`, { mode: 0o600 });
   writeFileSync(targetLedgerPath, "", { mode: 0o600 });
@@ -215,6 +234,8 @@ function privacyPaths() {
     targetKeyFilePath,
     sourceLedgerPath,
     targetLedgerPath,
+    installedPreviousKeyFilePath,
+    readinessArtifactPath,
     manifestCreatedAt: CREATED_AT,
   };
 }
@@ -268,14 +289,35 @@ test("privacy cutover plan exposes only redacted deterministic merge metadata", 
   });
   assert.deepEqual(plan.previousKeyConfiguration, {
     environmentVariable: "PRIVACY_LEDGER_PREVIOUS_KEY_FILES",
-    filePaths: [previousKeyFilePath, paths.sourceKeyFilePath],
-    value: `${previousKeyFilePath},${paths.sourceKeyFilePath}`,
+    installedOldKeyPath: paths.installedPreviousKeyFilePath,
+    filePaths: [previousKeyFilePath, paths.installedPreviousKeyFilePath],
+    value: `${previousKeyFilePath},${paths.installedPreviousKeyFilePath}`,
     retireAfter: oldRecord.expiresAt,
   });
+  assert.deepEqual(plan.readinessArtifact, {
+    formatVersion: 1,
+    path: paths.readinessArtifactPath,
+  });
+  assert.doesNotMatch(plan.previousKeyConfiguration.value, new RegExp(paths.sourceConfigRoot.replaceAll("\\", "\\\\"), "i"));
   const publicJson = JSON.stringify(plan);
   for (const forbidden of [OLD_KEY, CURRENT_KEY, PREVIOUS_TARGET_KEY, oldRecord.subject, currentRecord.subject, previousRecord.subject, "111111111111111111"]) {
     assert.doesNotMatch(publicJson, new RegExp(forbidden));
   }
+});
+
+test("old-key configuration always uses the explicit installed destination", () => {
+  const paths = privacyPaths();
+  const alreadyConfiguredOldKey = path.join(paths.targetConfigRoot, "existing-old.key");
+  writeFileSync(alreadyConfiguredOldKey, `${OLD_KEY}\n`, { mode: 0o600 });
+  writeFileSync(paths.sourceLedgerPath, `${JSON.stringify(signedRecord(OLD_KEY))}\n`, { mode: 0o600 });
+
+  const plan = cutoverPrivacy.createCanonicalCutoverPrivacyPlan({
+    ...paths,
+    targetPreviousKeyFilePaths: [alreadyConfiguredOldKey],
+  });
+
+  assert.deepEqual(plan.previousKeyConfiguration.filePaths, [paths.installedPreviousKeyFilePath]);
+  assert.equal(plan.previousKeyConfiguration.value, paths.installedPreviousKeyFilePath);
 });
 
 test("privacy cutover verification refuses ledger and key drift after manifest creation", () => {
@@ -312,6 +354,49 @@ test("privacy apply rechecks drift immediately before atomic replacement", () =>
   assert.equal(readFileSync(paths.targetLedgerPath, "utf8"), originalTarget);
 });
 
+test("privacy apply requires a manifest-bound Task 4 key and configuration readiness artifact", () => {
+  const paths = privacyPaths();
+  writeFileSync(paths.sourceLedgerPath, `${JSON.stringify(signedRecord(OLD_KEY))}\n`, { mode: 0o600 });
+  const plan = cutoverPrivacy.createCanonicalCutoverPrivacyPlan(paths);
+  const selectionHash = "a".repeat(64);
+  const expectedArtifact = cutoverPrivacy.createCanonicalCutoverPrivacyReadinessArtifact?.(plan, selectionHash);
+  const prepared = cutoverPrivacy.prepareCanonicalCutoverPrivacyApply(plan);
+
+  assert.throws(
+    () => prepared.assertReadiness({ readinessArtifactPath: paths.readinessArtifactPath, selectionHash }),
+    /installed previous key.*does not exist|readiness artifact.*does not exist/i,
+  );
+
+  writeFileSync(paths.installedPreviousKeyFilePath, `${OLD_KEY}\n`, { mode: 0o600 });
+  writeFileSync(paths.readinessArtifactPath, `${JSON.stringify(expectedArtifact)}\n`, { mode: 0o600 });
+  assert.doesNotThrow(() => prepared.assertReadiness({
+    readinessArtifactPath: paths.readinessArtifactPath,
+    selectionHash,
+  }));
+  assert.doesNotMatch(JSON.stringify(expectedArtifact), new RegExp(OLD_KEY));
+});
+
+test("privacy readiness rejects multiply linked installed keys and artifacts", () => {
+  for (const linkedEntry of ["key", "artifact"]) {
+    const paths = privacyPaths();
+    writeFileSync(paths.sourceLedgerPath, `${JSON.stringify(signedRecord(OLD_KEY))}\n`, { mode: 0o600 });
+    const plan = cutoverPrivacy.createCanonicalCutoverPrivacyPlan(paths);
+    const selectionHash = "b".repeat(64);
+    const artifact = cutoverPrivacy.createCanonicalCutoverPrivacyReadinessArtifact(plan, selectionHash);
+    writeFileSync(paths.installedPreviousKeyFilePath, `${OLD_KEY}\n`, { mode: 0o600 });
+    writeFileSync(paths.readinessArtifactPath, `${JSON.stringify(artifact)}\n`, { mode: 0o600 });
+    const linkedPath = linkedEntry === "key" ? paths.installedPreviousKeyFilePath : paths.readinessArtifactPath;
+    const linkedRoot = linkedEntry === "key" ? paths.targetConfigRoot : paths.targetBackupRoot;
+    linkSync(linkedPath, path.join(linkedRoot, `${linkedEntry}-alias`));
+
+    assert.throws(
+      () => cutoverPrivacy.prepareCanonicalCutoverPrivacyApply(plan)
+        .assertReadiness({ readinessArtifactPath: paths.readinessArtifactPath, selectionHash }),
+      /exactly one filesystem link/i,
+    );
+  }
+});
+
 test("privacy cutover rejects symlinked key paths", (context) => {
   const createPlan = cutoverPrivacy.createCanonicalCutoverPrivacyPlan;
   const linked = privacyPaths();
@@ -326,6 +411,52 @@ test("privacy cutover rejects symlinked key paths", (context) => {
     throw error;
   }
   assert.throws(() => createPlan({ ...linked, sourceKeyFilePath: symlinkPath }), /source key.*symlink/i);
+});
+
+test("privacy cutover rejects multiply linked key and ledger files", () => {
+  const linkedKey = privacyPaths();
+  linkSync(linkedKey.sourceKeyFilePath, path.join(linkedKey.sourceConfigRoot, "key-alias"));
+  assert.throws(
+    () => cutoverPrivacy.createCanonicalCutoverPrivacyPlan(linkedKey),
+    /source key.*exactly one filesystem link/i,
+  );
+
+  const linkedLedger = privacyPaths();
+  writeFileSync(linkedLedger.sourceLedgerPath, `${JSON.stringify(signedRecord(OLD_KEY))}\n`, { mode: 0o600 });
+  linkSync(linkedLedger.sourceLedgerPath, path.join(linkedLedger.sourceBackupRoot, "ledger-alias"));
+  assert.throws(
+    () => cutoverPrivacy.createCanonicalCutoverPrivacyPlan(linkedLedger),
+    /source ledger.*exactly one filesystem link/i,
+  );
+
+  const linkedTargetLedger = privacyPaths();
+  linkSync(linkedTargetLedger.targetLedgerPath, path.join(linkedTargetLedger.targetBackupRoot, "target-ledger-alias"));
+  assert.throws(
+    () => cutoverPrivacy.createCanonicalCutoverPrivacyPlan(linkedTargetLedger),
+    /target ledger.*exactly one filesystem link/i,
+  );
+});
+
+test("privacy cutover requires every key, ledger, destination, and artifact path to be disjoint", () => {
+  const installedAliasesSource = privacyPaths();
+  const oldKeyInsideTargetRoot = path.join(installedAliasesSource.targetConfigRoot, "old.key");
+  writeFileSync(oldKeyInsideTargetRoot, `${OLD_KEY}\n`, { mode: 0o600 });
+  assert.throws(() => cutoverPrivacy.createCanonicalCutoverPrivacyPlan({
+    ...installedAliasesSource,
+    sourceConfigRoot: installedAliasesSource.targetConfigRoot,
+    sourceKeyFilePath: oldKeyInsideTargetRoot,
+    installedPreviousKeyFilePath: oldKeyInsideTargetRoot,
+  }), /privacy cutover paths.*distinct/i);
+
+  const artifactAliasesCurrentKey = privacyPaths();
+  const targetLedgerInsideConfig = path.join(artifactAliasesCurrentKey.targetConfigRoot, "privacy.jsonl");
+  writeFileSync(targetLedgerInsideConfig, "", { mode: 0o600 });
+  assert.throws(() => cutoverPrivacy.createCanonicalCutoverPrivacyPlan({
+    ...artifactAliasesCurrentKey,
+    targetBackupRoot: artifactAliasesCurrentKey.targetConfigRoot,
+    targetLedgerPath: targetLedgerInsideConfig,
+    readinessArtifactPath: artifactAliasesCurrentKey.targetKeyFilePath,
+  }), /privacy cutover paths.*distinct/i);
 });
 
 test("atomic ledger replacement failure leaves the original ledger intact", () => {
@@ -361,6 +492,18 @@ test("atomic ledger replacement failure leaves the original ledger intact", () =
   assert.deepEqual(readdirSync(paths.targetBackupRoot), [path.basename(paths.targetLedgerPath)]);
 });
 
+test("atomic ledger replacement rejects a multiply linked destination before staging", () => {
+  const paths = privacyPaths();
+  linkSync(paths.targetLedgerPath, path.join(paths.targetBackupRoot, "ledger-alias"));
+
+  assert.throws(() => privacyLedger.replaceDeletionLedgerAtomically({
+    ledgerPath: paths.targetLedgerPath,
+    content: "",
+    verificationKeys: [CURRENT_KEY],
+  }), /target privacy deletion ledger.*exactly one filesystem link/i);
+  assert.deepEqual(readdirSync(paths.targetBackupRoot).sort(), ["ledger-alias", "privacy.jsonl"]);
+});
+
 test("atomic ledger replacement is durable and readable with current plus previous keys", () => {
   const paths = privacyPaths();
   const currentRecord = signedRecord(CURRENT_KEY, { operationId: "current-record" });
@@ -385,4 +528,70 @@ test("atomic ledger replacement is durable and readable with current plus previo
     ["current-record", "old-record"],
   );
   if (process.platform !== "win32") assert.equal(filesystem.statSync(paths.targetLedgerPath).mode & 0o777, 0o600);
+});
+
+test("a validated ledger stage leaves the current ledger readable until explicit installation", () => {
+  const paths = privacyPaths();
+  const currentRecord = signedRecord(CURRENT_KEY, { operationId: "current-record" });
+  const oldRecord = signedRecord(OLD_KEY, { operationId: "old-record" });
+  const original = `${JSON.stringify(currentRecord)}\n`;
+  writeFileSync(paths.targetLedgerPath, original, { mode: 0o600 });
+  const merged = privacyLedger.mergeDeletionLedgerRecords({
+    sourceRecords: [oldRecord],
+    targetRecords: [currentRecord],
+    sourceKey: OLD_KEY,
+    targetKey: CURRENT_KEY,
+    manifestCreatedAt: CREATED_AT,
+  });
+
+  const staged = privacyLedger.stageDeletionLedgerReplacement?.({
+    ledgerPath: paths.targetLedgerPath,
+    content: merged.content,
+    verificationKeys: [CURRENT_KEY, OLD_KEY],
+  });
+  assert.equal(readFileSync(paths.targetLedgerPath, "utf8"), original);
+  assert.deepEqual(
+    privacyLedger.readDeletionLedger(paths.targetLedgerPath, [CURRENT_KEY]).map((record) => record.operationId),
+    ["current-record"],
+  );
+
+  privacyLedger.installStagedDeletionLedger?.(staged);
+  assert.equal(readFileSync(paths.targetLedgerPath, "utf8"), merged.content);
+});
+
+test("a deterministic ledger stage is reused after interruption and replaces validated stale content", () => {
+  const paths = privacyPaths();
+  const stagePath = path.join(paths.targetBackupRoot, ".privacy.jsonl.canonical-cutover-stage");
+  const currentRecord = signedRecord(CURRENT_KEY, { operationId: "current-record" });
+  const oldRecord = signedRecord(OLD_KEY, { operationId: "old-record" });
+  const merged = privacyLedger.mergeDeletionLedgerRecords({
+    sourceRecords: [oldRecord],
+    targetRecords: [currentRecord],
+    sourceKey: OLD_KEY,
+    targetKey: CURRENT_KEY,
+    manifestCreatedAt: CREATED_AT,
+  });
+  const input = {
+    ledgerPath: paths.targetLedgerPath,
+    temporaryPath: stagePath,
+    content: merged.content,
+    verificationKeys: [CURRENT_KEY, OLD_KEY],
+  };
+
+  const first = privacyLedger.stageDeletionLedgerReplacement(input);
+  const resumed = privacyLedger.stageDeletionLedgerReplacement(input);
+  assert.equal(first.temporaryPath, stagePath);
+  assert.equal(resumed.temporaryPath, stagePath);
+  assert.equal(readFileSync(stagePath, "utf8"), merged.content);
+
+  writeFileSync(stagePath, `${JSON.stringify(currentRecord)}\n`, { mode: 0o600 });
+  const refreshed = privacyLedger.stageDeletionLedgerReplacement(input);
+  assert.equal(refreshed.temporaryPath, stagePath);
+  assert.equal(readFileSync(stagePath, "utf8"), merged.content);
+
+  writeFileSync(stagePath, "{interrupted-write", { mode: 0o600 });
+  const repaired = privacyLedger.stageDeletionLedgerReplacement(input);
+  assert.equal(readFileSync(stagePath, "utf8"), merged.content);
+  privacyLedger.discardStagedDeletionLedger(repaired);
+  assert.equal(existsSync(stagePath), false);
 });

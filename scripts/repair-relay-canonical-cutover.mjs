@@ -30,11 +30,12 @@ function parseArguments(argv) {
     ["--target-privacy-ledger", "targetLedgerPath"],
     ["--source-privacy-key", "sourceKeyFilePath"],
     ["--target-privacy-key", "targetKeyFilePath"],
+    ["--installed-previous-privacy-key", "installedPreviousKeyFilePath"],
+    ["--privacy-key-ready-artifact", "readinessArtifactPath"],
     ["--source-config-root", "sourceConfigRoot"],
     ["--target-config-root", "targetConfigRoot"],
     ["--source-backup-root", "sourceBackupRoot"],
     ["--target-backup-root", "targetBackupRoot"],
-    ["--privacy-manifest-created-at", "manifestCreatedAt"],
   ]);
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -63,23 +64,36 @@ function parseArguments(argv) {
     "targetLedgerPath",
     "sourceKeyFilePath",
     "targetKeyFilePath",
+    "installedPreviousKeyFilePath",
+    "readinessArtifactPath",
     "sourceConfigRoot",
     "targetConfigRoot",
     "sourceBackupRoot",
     "targetBackupRoot",
-    "manifestCreatedAt",
   ];
   if (options.mode === "dry-run") {
     const missing = privacyKeys.find((key) => options[key] == null);
-    if (missing) throw new TypeError("Privacy cutover requires explicit ledger paths, key paths, approved roots, and manifest creation time");
+    if (missing) {
+      throw new TypeError("Privacy cutover requires explicit ledger paths, key paths, approved roots, installed previous-key destination, and readiness artifact path");
+    }
     options.privacy = Object.fromEntries(privacyKeys.map((key) => [key, options[key]]));
     options.privacy.targetPreviousKeyFilePaths = options.targetPreviousKeyFilePaths;
   }
   if (options.mode === "apply") {
-    const forbidden = ["claimId", "sourceDatabasePath", "targetDatabasePath", "sourceBrandingDirectory", "targetBrandingDirectory", ...privacyKeys, "targetPreviousKeyFilePaths"];
+    const forbidden = [
+      "claimId",
+      "sourceDatabasePath",
+      "targetDatabasePath",
+      "sourceBrandingDirectory",
+      "targetBrandingDirectory",
+      ...privacyKeys.filter((key) => key !== "readinessArtifactPath"),
+      "targetPreviousKeyFilePaths",
+    ];
     const explicitlySet = new Set(argv.filter((argument) => values.has(argument)).map((argument) => values.get(argument)));
     if (argv.includes("--target-previous-privacy-key")) explicitlySet.add("targetPreviousKeyFilePaths");
-    if (forbidden.some((key) => explicitlySet.has(key))) throw new TypeError("--apply accepts only --manifest <path>");
+    if (forbidden.some((key) => explicitlySet.has(key))) {
+      throw new TypeError("--apply accepts only --manifest <path> and --privacy-key-ready-artifact <path>");
+    }
   }
   return options;
 }
@@ -95,7 +109,10 @@ try {
     const privacyApplyContext = loaded.manifest.privacyDeletionLedger
       ? prepareCanonicalCutoverPrivacyApply(loaded.manifest.privacyDeletionLedger)
       : null;
-    const result = applyCanonicalCutoverManifest(loaded, { privacyApplyContext });
+    const result = applyCanonicalCutoverManifest(loaded, {
+      privacyApplyContext,
+      privacyReadinessArtifactPath: options.readinessArtifactPath ?? null,
+    });
     process.stdout.write(`${JSON.stringify(result)}\n`);
   }
 } catch (error) {

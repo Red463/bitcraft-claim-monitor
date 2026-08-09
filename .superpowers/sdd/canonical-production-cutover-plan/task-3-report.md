@@ -77,3 +77,53 @@ The single skip is the focused symlink-path regression because this Windows host
 ## Operational concern
 
 Task 4 must supply the frozen production ledger/key/config/backup paths, install the old public verification-key file separately, and configure the exact manifest-recorded previous-key environment value until the recorded retirement time. This task deliberately did not install keys, access production, or run a VPS command.
+
+## Review remediation (2026-08-09)
+
+All six Important review findings were addressed through isolated RED/GREEN cycles.
+
+### Commit and ledger ordering
+
+- Dry-run now freezes an explicit target-installed old-key destination and a non-secret readiness-artifact path in the privacy plan. The previous-key environment value always uses the target destination, never the discovered legacy source path.
+- Task 4 must copy the frozen old key to `previousKeyConfiguration.installedOldKeyPath`, install the exact `previousKeyConfiguration.value`, and then write the manifest-bound artifact returned by `createCanonicalCutoverPrivacyReadinessArtifact(plan, selectionHash)` at `readinessArtifact.path`.
+- Apply accepts that artifact only through `--privacy-key-ready-artifact`. It verifies the installed file's key ID/hash, the exact environment metadata attested by Task 4, the merged-ledger hash, and the complete manifest selection hash before database mutation and again before ledger installation.
+- The merged ledger is fully written, file-fsynced, descriptor-revalidated, parsed, signature-verified, and read back at one reserved same-directory staging path. The original ledger remains in place throughout the database transaction and deletion replay.
+- The target database commits behind the durable pending marker before the staged ledger is atomically renamed. A pre-commit failure removes the stage and leaves the original current-key ledger readable. A post-commit install failure leaves the original ledger plus the pending marker; retry detects the committed database, installs the merge once readiness is restored, and finalizes without replaying the database.
+- The deterministic reserved stage is reused after interruption. A safely opened single-link stale or partial stage is durably replaced; symlinked or multiply-linked stages fail closed. This prevents undiscoverable UUID-named subject-bearing orphan files.
+
+### File identity, merge, and clock hardening
+
+- Source/current/previous/destination key paths, source/target/stage ledger paths, and the readiness artifact are pairwise disjoint.
+- Every existing key, ledger, destination key, readiness artifact, atomic target, and stage must be a regular non-symlink file with exactly one link. Reads and writes revalidate descriptor versus path device/inode/link identity before access.
+- Signed-content conflicts are detected across every fully verified record before expiry filtering, so two expired records cannot hide a conflicting identity.
+- The workflow no longer accepts `--privacy-manifest-created-at`. Dry-run captures the actual creation time internally and freezes it in the manifest; future-dated records fail the whole operation instead of being silently dropped.
+- Replay and `deleteUserAccount` use that same frozen manifest time, including persisted access-control timestamps.
+
+### Final self-review
+
+The Standards axis found two additional safety gaps during review: incomplete pairwise privacy-path disjointness and undiscoverable random stage files. Both received failing regressions and were corrected as described above. The duplicated low-level identity checks in the root-bound cutover reader and injectable atomic writer remain intentionally local to their different trust/injection boundaries.
+
+The Spec axis traced every original Task 3 requirement and all six review findings to direct unit or integration coverage. No remaining Critical or Important standards/specification finding was identified. The Task 2 selected-table mutation boundary remains unchanged.
+
+### Final review-remediation verification
+
+```text
+node --test apps/bitcraft-local/test/canonical-cutover-privacy.test.mjs apps/bitcraft-local/test/canonical-cutover-migration.test.mjs apps/bitcraft-local/test/server-privacy-deletion-ledger.test.mjs
+52 tests: 51 passed, 0 failed, 1 skipped
+
+corepack pnpm --filter @workspace/bitcraft-local test
+1799 tests: 1798 passed, 0 failed, 1 skipped
+
+corepack pnpm --filter @workspace/bitcraft-local run build
+exit 0; server/provider bindings, 1191 asset checks, TypeScript/Vite production build,
+and Relay runtime-boundary verification passed
+
+node --check apps/bitcraft-local/src/server/privacyDeletionLedger.mjs
+node --check apps/bitcraft-local/src/server/canonicalCutoverPrivacy.mjs
+node --check apps/bitcraft-local/src/server/canonicalCutoverMigration.mjs
+node --check scripts/repair-relay-canonical-cutover.mjs
+git diff --check
+all exited 0
+```
+
+The one skip remains the Windows-host symlink regression (`EPERM` while creating the test symlink); all real hard-link and descriptor-identity tests executed. No key was installed, no VPS/live path was accessed, and no production configuration was changed.

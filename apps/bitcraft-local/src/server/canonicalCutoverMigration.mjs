@@ -1075,19 +1075,22 @@ function openWritableTarget(databasePath) {
   return new DatabaseSync(databasePath, { timeout: 5_000 });
 }
 
-export function createCanonicalCutoverManifest(input, { allowExistingManifest = false } = {}) {
+export function createCanonicalCutoverManifest(input, { allowExistingManifest = false, now = () => new Date() } = {}) {
   const claimId = decimal(input.claimId, "claim ID");
   if (claimId !== CANONICAL_CLAIM_ID) throw new Error(`claim ID must be exactly ${CANONICAL_CLAIM_ID}`);
   const manifestPath = guardedPlannedFilePath(input.manifestPath, "Manifest", { allowExisting: allowExistingManifest });
   const markerPath = guardedPlannedFilePath(`${manifestPath}.applied`, "Applied marker");
   const pendingMarkerPath = guardedPlannedFilePath(`${manifestPath}.applying`, "Pending marker");
+  const privacy = input.privacy
+    ? { ...input.privacy, manifestCreatedAt: now().toISOString() }
+    : null;
   const options = {
     claimId,
     sourceDatabasePath: guardedExistingPath(input.sourceDatabasePath, "file", "Source database"),
     targetDatabasePath: guardedExistingPath(input.targetDatabasePath, "file", "Target database"),
     sourceBrandingDirectory: guardedExistingPath(input.sourceBrandingDirectory, "directory", "Source branding directory"),
     targetBrandingDirectory: guardedExistingPath(input.targetBrandingDirectory, "directory", "Target branding directory"),
-    privacyDeletionLedger: input.privacyPlan ?? (input.privacy ? createCanonicalCutoverPrivacyPlan(input.privacy) : null),
+    privacyDeletionLedger: input.privacyPlan ?? (privacy ? createCanonicalCutoverPrivacyPlan(privacy) : null),
   };
   const backupBrandingDirectory = guardedExistingOrPlannedDirectory(`${options.targetBrandingDirectory}.canonical-cutover-backup`, "Target branding backup directory");
   if (existsSync(backupBrandingDirectory)) throw new Error("Target branding backup directory must not exist before dry-run");
@@ -1519,6 +1522,7 @@ export function applyCanonicalCutoverManifest(
     durability = DEFAULT_CUTOVER_DURABILITY,
     openTargetDatabase = openWritableTarget,
     privacyApplyContext = null,
+    privacyReadinessArtifactPath = null,
   } = {},
 ) {
   assertManifestIntegrity(manifest);
@@ -1529,6 +1533,11 @@ export function applyCanonicalCutoverManifest(
     && canonicalJson(activePrivacyApplyContext.plan) !== canonicalJson(manifest.privacyDeletionLedger)) {
     throw new Error("Canonical cutover privacy apply context is missing or does not match the manifest");
   }
+  const privacyReadiness = {
+    readinessArtifactPath: privacyReadinessArtifactPath ?? undefined,
+    selectionHash: manifest.selectionHash,
+  };
+  activePrivacyApplyContext?.assertReadiness(privacyReadiness);
   const resolvedManifestPath = guardedExistingPath(manifestPath, "file", "Manifest");
   const markerPath = guardedPlannedFilePath(`${resolvedManifestPath}.applied`, "Applied marker", { allowExisting: true });
   const pendingMarkerPath = guardedPlannedFilePath(`${resolvedManifestPath}.applying`, "Pending marker", { allowExisting: true });
@@ -1567,11 +1576,12 @@ export function applyCanonicalCutoverManifest(
       manifest,
       { markerPath, pendingMarkerPath, sourcePath, targetPath },
       durability,
-      () => activePrivacyApplyContext?.assertLedgerInstalled(),
+      () => activePrivacyApplyContext?.installLedger(null, privacyReadiness),
     );
     if (recovered) return recovered;
   }
   let stagedBranding = null;
+  let stagedPrivacyLedger = null;
   let recovery = null;
   const db = openTargetDatabase(targetPath);
   let transactionOpen = false;
@@ -1594,7 +1604,7 @@ export function applyCanonicalCutoverManifest(
     if (canonicalJson(recomputed) !== canonicalJson(manifest)) {
       throw new Error("Canonical cutover inputs changed since dry-run; refusing apply");
     }
-    activePrivacyApplyContext?.installLedger();
+    stagedPrivacyLedger = activePrivacyApplyContext?.stageLedger() ?? null;
     const preDatabaseStateFingerprint = databaseRecoveryFingerprint(db);
     stagedBranding = stageBranding(manifest, durability);
     db.exec("DELETE FROM user_sessions; DELETE FROM admin_sessions;");
@@ -1623,11 +1633,18 @@ export function applyCanonicalCutoverManifest(
     if (stagedBranding?.stageDirectory) {
       try { durability.removePath(stagedBranding.stageDirectory, { recursive: true, force: true }); } catch {}
     }
+    try { activePrivacyApplyContext?.discardLedgerStage(stagedPrivacyLedger); } catch {}
     // Once `.applying` may have been durably renamed, never delete it on an
     // exception: COMMIT errors can be ambiguous and retry validates pre/post state.
     throw error;
   } finally {
     db.close();
+  }
+  try {
+    activePrivacyApplyContext?.installLedger(stagedPrivacyLedger, privacyReadiness);
+  } catch (error) {
+    try { activePrivacyApplyContext?.discardLedgerStage(stagedPrivacyLedger); } catch {}
+    throw new Error(`Canonical cutover database is committed; retry the same manifest after restoring privacy readiness: ${error.message}`);
   }
   return completePostCommit(manifest, markerPath, pendingMarkerPath, recovery, durability, stagedBranding, false);
 }

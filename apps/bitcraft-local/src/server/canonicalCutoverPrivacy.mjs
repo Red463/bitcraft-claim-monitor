@@ -1,13 +1,24 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 
 import {
   deletionLedgerKeyId,
+  discardStagedDeletionLedger,
+  installStagedDeletionLedger,
   mergeDeletionLedgerRecords,
   parseDeletionLedgerContent,
-  replaceDeletionLedgerAtomically,
   replayPrivacyDeletions,
+  stageDeletionLedgerReplacement,
 } from "./privacyDeletionLedger.mjs";
 import { deleteUserAccount } from "./accountDeletion.mjs";
 
@@ -27,6 +38,16 @@ function samePath(left, right) {
 function pathIsWithin(root, candidate) {
   const relative = path.relative(normalizePath(root), normalizePath(candidate));
   return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function assertDisjointPrivacyPaths(entries) {
+  const seen = new Map();
+  for (const [label, entryPath] of entries) {
+    const normalized = normalizePath(entryPath);
+    const existing = seen.get(normalized);
+    if (existing) throw new Error(`Privacy cutover paths must be distinct: ${existing} and ${label}`);
+    seen.set(normalized, label);
+  }
 }
 
 function approvedRoot(rootPath, label) {
@@ -54,13 +75,38 @@ function approvedFile(filePath, rootPath, label, { allowMissing = false } = {}) 
   if (lstatSync(resolved).isSymbolicLink() || !samePath(realpathSync.native(resolved), resolved)) {
     throw new Error(`${label} must not be or traverse a symlink`);
   }
-  if (!statSync(resolved).isFile()) throw new Error(`${label} must be a regular file`);
+  const stats = statSync(resolved, { bigint: true });
+  if (!stats.isFile()) throw new Error(`${label} must be a regular file`);
+  if (stats.nlink !== 1n) throw new Error(`${label} must have exactly one filesystem link`);
   return { exists: true, path: resolved };
+}
+
+function readApprovedFile(file, label) {
+  const descriptor = openSync(file.path, "r");
+  try {
+    const descriptorStats = fstatSync(descriptor, { bigint: true });
+    const pathStats = lstatSync(file.path, { bigint: true });
+    if (!descriptorStats.isFile() || !pathStats.isFile() || pathStats.isSymbolicLink()) {
+      throw new Error(`${label} must remain a regular non-symlink file`);
+    }
+    if (descriptorStats.nlink !== 1n || pathStats.nlink !== 1n) {
+      throw new Error(`${label} must have exactly one filesystem link`);
+    }
+    if (descriptorStats.dev !== pathStats.dev || descriptorStats.ino !== pathStats.ino) {
+      throw new Error(`${label} changed filesystem identity before read`);
+    }
+    if (!samePath(realpathSync.native(file.path), file.path)) {
+      throw new Error(`${label} must not traverse a symlink`);
+    }
+    return readFileSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function inspectKey(filePath, rootPath, label) {
   const file = approvedFile(filePath, rootPath, label);
-  const bytes = readFileSync(file.path);
+  const bytes = readApprovedFile(file, label);
   const key = bytes.toString("utf8").trim();
   if (!key) throw new Error(`${label} is empty`);
   return {
@@ -75,10 +121,12 @@ function inspectKey(filePath, rootPath, label) {
 
 function inspectLedger(filePath, rootPath, keys, label) {
   const file = approvedFile(filePath, rootPath, label, { allowMissing: true });
-  if (!file.exists) return { records: [], description: { path: file.path, exists: false, fileSha256: null, recordCount: 0 } };
-  const bytes = readFileSync(file.path);
-  const records = parseDeletionLedgerContent(bytes.toString("utf8"), keys, label);
+  if (!file.exists) return { content: "", records: [], description: { path: file.path, exists: false, fileSha256: null, recordCount: 0 } };
+  const bytes = readApprovedFile(file, label);
+  const content = bytes.toString("utf8");
+  const records = parseDeletionLedgerContent(content, keys, label);
   return {
+    content,
     records,
     description: {
       path: file.path,
@@ -99,6 +147,37 @@ function materializeCanonicalCutoverPrivacy(input) {
   const targetPreviousKeys = (input.targetPreviousKeyFilePaths ?? []).map((keyPath, index) => (
     inspectKey(keyPath, input.targetConfigRoot, `Target previous key ${index + 1}`)
   ));
+  const installedPreviousKey = approvedFile(
+    input.installedPreviousKeyFilePath,
+    input.targetConfigRoot,
+    "Installed previous key destination",
+    { allowMissing: true },
+  );
+  if (samePath(installedPreviousKey.path, targetKey.description.path)) {
+    throw new Error("Installed previous key destination must be distinct from the current key");
+  }
+  const readinessArtifact = approvedFile(
+    input.readinessArtifactPath,
+    input.targetBackupRoot,
+    "Privacy readiness artifact",
+    { allowMissing: true },
+  );
+  const sourceLedgerFile = approvedFile(input.sourceLedgerPath, input.sourceBackupRoot, "Source ledger", { allowMissing: true });
+  const targetLedgerFile = approvedFile(input.targetLedgerPath, input.targetBackupRoot, "Target ledger", { allowMissing: true });
+  const stagedLedgerPath = path.join(
+    path.dirname(targetLedgerFile.path),
+    `.${path.basename(targetLedgerFile.path)}.canonical-cutover-stage`,
+  );
+  assertDisjointPrivacyPaths([
+    ["source key", sourceKey.description.path],
+    ["target key", targetKey.description.path],
+    ...targetPreviousKeys.map((entry, index) => [`target previous key ${index + 1}`, entry.description.path]),
+    ["installed previous key destination", installedPreviousKey.path],
+    ["source ledger", sourceLedgerFile.path],
+    ["target ledger", targetLedgerFile.path],
+    ["staged target ledger", stagedLedgerPath],
+    ["privacy readiness artifact", readinessArtifact.path],
+  ]);
   const sourceLedger = inspectLedger(input.sourceLedgerPath, input.sourceBackupRoot, [sourceKey.key], "Source ledger");
   const targetLedger = inspectLedger(
     input.targetLedgerPath,
@@ -106,9 +185,6 @@ function materializeCanonicalCutoverPrivacy(input) {
     [targetKey.key, ...targetPreviousKeys.map((entry) => entry.key)],
     "Target ledger",
   );
-  if (samePath(sourceLedger.description.path, targetLedger.description.path)) {
-    throw new Error("Source and target privacy ledger paths must be distinct");
-  }
   const merged = mergeDeletionLedgerRecords({
     sourceRecords: sourceLedger.records,
     targetRecords: targetLedger.records,
@@ -117,11 +193,10 @@ function materializeCanonicalCutoverPrivacy(input) {
     targetPreviousKeys: targetPreviousKeys.map((entry) => entry.key),
     manifestCreatedAt: input.manifestCreatedAt,
   });
-  const previousKeyFilePaths = targetPreviousKeys.map((entry) => entry.description.path);
-  if (merged.previousKeyRetireAfter
-    && !targetPreviousKeys.some((entry) => entry.description.keyId === sourceKey.description.keyId)) {
-    previousKeyFilePaths.push(sourceKey.description.path);
-  }
+  const previousKeyFilePaths = targetPreviousKeys
+    .filter((entry) => entry.description.keyId !== sourceKey.description.keyId)
+    .map((entry) => entry.description.path);
+  if (merged.previousKeyRetireAfter) previousKeyFilePaths.push(installedPreviousKey.path);
   const plan = {
     manifestCreatedAt: input.manifestCreatedAt,
     source: {
@@ -136,6 +211,7 @@ function materializeCanonicalCutoverPrivacy(input) {
       key: targetKey.description,
       previousKeys: targetPreviousKeys.map((entry) => entry.description),
       ledger: targetLedger.description,
+      stagedLedgerPath,
     },
     merged: {
       fileSha256: merged.fileSha256,
@@ -145,9 +221,14 @@ function materializeCanonicalCutoverPrivacy(input) {
     },
     previousKeyConfiguration: {
       environmentVariable: "PRIVACY_LEDGER_PREVIOUS_KEY_FILES",
+      installedOldKeyPath: installedPreviousKey.path,
       filePaths: previousKeyFilePaths,
       value: previousKeyFilePaths.join(","),
       retireAfter: merged.previousKeyRetireAfter,
+    },
+    readinessArtifact: {
+      formatVersion: 1,
+      path: readinessArtifact.path,
     },
   };
   return { merged, plan, sourceKey, targetKey, targetPreviousKeys };
@@ -168,6 +249,8 @@ export function canonicalCutoverPrivacyInputFromPlan(plan) {
     targetBackupRoot: plan.target.approvedBackupRoot,
     targetKeyFilePath: plan.target.key.path,
     targetPreviousKeyFilePaths: plan.target.previousKeys.map((entry) => entry.path),
+    installedPreviousKeyFilePath: plan.previousKeyConfiguration.installedOldKeyPath,
+    readinessArtifactPath: plan.readinessArtifact.path,
     targetLedgerPath: plan.target.ledger.path,
   };
 }
@@ -180,6 +263,27 @@ export function verifyCanonicalCutoverPrivacyPlan(plan) {
   } catch (error) {
     throw new Error(`Privacy cutover inputs changed since manifest creation: ${error.message}`);
   }
+}
+
+export function createCanonicalCutoverPrivacyReadinessArtifact(plan, selectionHash) {
+  if (typeof selectionHash !== "string" || !/^[a-f0-9]{64}$/.test(selectionHash)) {
+    throw new Error("Canonical cutover selection hash is invalid");
+  }
+  return {
+    formatVersion: 1,
+    selectionHash,
+    mergedLedgerSha256: plan.merged.fileSha256,
+    installedPreviousKey: {
+      path: plan.previousKeyConfiguration.installedOldKeyPath,
+      fileSha256: plan.source.key.fileSha256,
+      keyId: plan.source.key.keyId,
+    },
+    configuration: {
+      environmentVariable: plan.previousKeyConfiguration.environmentVariable,
+      value: plan.previousKeyConfiguration.value,
+      retireAfter: plan.previousKeyConfiguration.retireAfter,
+    },
+  };
 }
 
 function materializeInstalledCanonicalCutoverPrivacy(plan) {
@@ -205,7 +309,7 @@ function materializeInstalledCanonicalCutoverPrivacy(plan) {
   return {
     alreadyInstalled: true,
     merged: {
-      content: readFileSync(targetLedger.description.path, "utf8"),
+      content: targetLedger.content,
       fileSha256: targetLedger.description.fileSha256,
       records: targetLedger.records,
     },
@@ -217,14 +321,19 @@ function materializeInstalledCanonicalCutoverPrivacy(plan) {
 }
 
 export function prepareCanonicalCutoverPrivacyApply(plan, options = {}) {
-  const { now = () => new Date(), ...atomicOptions } = options;
+  const atomicOptions = options;
+  const replayAt = new Date(plan.manifestCreatedAt);
   let materialized;
   try {
     try {
       materialized = materializeCanonicalCutoverPrivacy(canonicalCutoverPrivacyInputFromPlan(plan));
       if (JSON.stringify(materialized.plan) !== JSON.stringify(plan)) throw new Error("manifest mismatch");
-    } catch {
-      materialized = materializeInstalledCanonicalCutoverPrivacy(plan);
+    } catch (originalError) {
+      try {
+        materialized = materializeInstalledCanonicalCutoverPrivacy(plan);
+      } catch (installedError) {
+        throw new Error(`${originalError.message}; ${installedError.message}`);
+      }
     }
   } catch (error) {
     throw new Error(`Privacy cutover inputs changed since manifest creation: ${error.message}`);
@@ -237,6 +346,40 @@ export function prepareCanonicalCutoverPrivacyApply(plan, options = {}) {
   let installed = materialized.alreadyInstalled === true;
   return Object.freeze({
     plan,
+    assertReadiness({ readinessArtifactPath, selectionHash }) {
+      if (!plan.merged.previousKeyRetireAfter) return { required: false };
+      if (typeof readinessArtifactPath !== "string" || !readinessArtifactPath) {
+        throw new Error("Privacy readiness artifact path is required for retained old-key records");
+      }
+      if (!samePath(readinessArtifactPath, plan.readinessArtifact.path)) {
+        throw new Error("Privacy readiness artifact path does not match the manifest");
+      }
+      const installedKey = inspectKey(
+        plan.previousKeyConfiguration.installedOldKeyPath,
+        plan.target.approvedConfigRoot,
+        "Installed previous key",
+      );
+      if (installedKey.description.fileSha256 !== plan.source.key.fileSha256
+        || installedKey.description.keyId !== plan.source.key.keyId) {
+        throw new Error("Installed previous key does not match the frozen source key");
+      }
+      const artifactFile = approvedFile(
+        readinessArtifactPath,
+        plan.target.approvedBackupRoot,
+        "Privacy readiness artifact",
+      );
+      let artifact;
+      try {
+        artifact = JSON.parse(readApprovedFile(artifactFile, "Privacy readiness artifact").toString("utf8"));
+      } catch (error) {
+        throw new Error(`Privacy readiness artifact is invalid: ${error.message}`);
+      }
+      const expected = createCanonicalCutoverPrivacyReadinessArtifact(plan, selectionHash);
+      if (JSON.stringify(artifact) !== JSON.stringify(expected)) {
+        throw new Error("Privacy readiness artifact does not match the frozen cutover plan");
+      }
+      return { required: true };
+    },
     assertLedgerInstalled() {
       try {
         materializeInstalledCanonicalCutoverPrivacy(plan);
@@ -244,14 +387,25 @@ export function prepareCanonicalCutoverPrivacyApply(plan, options = {}) {
         throw new Error(`Installed privacy cutover ledger changed: ${error.message}`);
       }
     },
-    installLedger() {
-      if (installed) return { fileSha256: materialized.merged.fileSha256 };
+    stageLedger() {
+      if (installed) return null;
       verifyCanonicalCutoverPrivacyPlan(plan);
-      const result = replaceDeletionLedgerAtomically({
+      return stageDeletionLedgerReplacement({
         ledgerPath: plan.target.ledger.path,
+        temporaryPath: plan.target.stagedLedgerPath,
         content: materialized.merged.content,
         verificationKeys,
       }, atomicOptions);
+    },
+    discardLedgerStage(staged) {
+      discardStagedDeletionLedger(staged, atomicOptions);
+    },
+    installLedger(staged = null, readiness = {}) {
+      if (installed) return { fileSha256: materialized.merged.fileSha256 };
+      verifyCanonicalCutoverPrivacyPlan(plan);
+      this.assertReadiness(readiness);
+      const activeStage = staged ?? this.stageLedger();
+      const result = installStagedDeletionLedger(activeStage, atomicOptions);
       installed = true;
       return result;
     },
@@ -262,12 +416,13 @@ export function prepareCanonicalCutoverPrivacyApply(plan, options = {}) {
         accounts,
         key: materialized.targetKey.key,
         keys: verificationKeys,
-        now: now(),
+        now: replayAt,
         deleteAccount: (account) => deleteUserAccount(db, {
           userId: account.id,
           discordId: account.discordId,
           deletionKey: materialized.targetKey.key,
           manageTransaction: false,
+          now: () => replayAt,
         }),
       });
     },

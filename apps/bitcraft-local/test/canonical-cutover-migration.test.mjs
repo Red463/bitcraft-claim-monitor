@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import * as filesystem from "node:fs";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,6 +13,10 @@ import {
   createCanonicalCutoverDurability,
   readCanonicalCutoverManifest,
 } from "../src/server/canonicalCutoverMigration.mjs";
+import {
+  createCanonicalCutoverPrivacyReadinessArtifact,
+  prepareCanonicalCutoverPrivacyApply,
+} from "../src/server/canonicalCutoverPrivacy.mjs";
 import {
   deletionLedgerSubject,
   readDeletionLedger,
@@ -28,6 +33,11 @@ const PASSWORD_HASH = `scrypt:${"a".repeat(32)}:${"b".repeat(128)}`;
 const SOURCE_PRIVACY_KEY = Buffer.alloc(32, 31).toString("base64url");
 const TARGET_PRIVACY_KEY = Buffer.alloc(32, 47).toString("base64url");
 const PRIVACY_MANIFEST_CREATED_AT = "2026-08-09T12:00:00.000Z";
+const PRIVACY_TEST_BASE_MS = Date.now();
+const PRIVACY_RECORD_OCCURRED_AT = new Date(PRIVACY_TEST_BASE_MS - 24 * 60 * 60 * 1000).toISOString();
+const PRIVACY_RECORD_EXPIRES_AT = new Date(PRIVACY_TEST_BASE_MS + 89 * 24 * 60 * 60 * 1000).toISOString();
+const PRIVACY_EXPIRED_AT = new Date(PRIVACY_TEST_BASE_MS - 60 * 1000).toISOString();
+const PRIVACY_EXPIRED_OCCURRED_AT = new Date(PRIVACY_TEST_BASE_MS - (89 * 24 * 60 * 60 * 1000) - 60 * 1000).toISOString();
 
 const SOURCE_SETTINGS = Object.freeze({
   claim_id: CLAIM_ID,
@@ -128,6 +138,8 @@ function createFixture() {
   const targetKeyFilePath = path.join(targetConfigRoot, "privacy.key");
   const sourceLedgerPath = path.join(sourceBackupRoot, "privacy.jsonl");
   const targetLedgerPath = path.join(targetBackupRoot, "privacy.jsonl");
+  const installedPreviousKeyFilePath = path.join(targetConfigRoot, "privacy-previous-old.key");
+  const privacyReadinessArtifactPath = path.join(targetBackupRoot, "privacy-cutover-ready.json");
   mkdirSync(sourceBrandingDirectory);
   mkdirSync(targetBrandingDirectory);
   for (const root of [sourceConfigRoot, targetConfigRoot, sourceBackupRoot, targetBackupRoot]) mkdirSync(root);
@@ -318,6 +330,8 @@ function createFixture() {
     targetKeyFilePath,
     sourceLedgerPath,
     targetLedgerPath,
+    installedPreviousKeyFilePath,
+    privacyReadinessArtifactPath,
   };
 }
 
@@ -389,11 +403,12 @@ function dryRunArguments(fixture, manifestPath) {
     "--target-privacy-ledger", fixture.targetLedgerPath,
     "--source-privacy-key", fixture.sourceKeyFilePath,
     "--target-privacy-key", fixture.targetKeyFilePath,
+    "--installed-previous-privacy-key", fixture.installedPreviousKeyFilePath,
+    "--privacy-key-ready-artifact", fixture.privacyReadinessArtifactPath,
     "--source-config-root", fixture.sourceConfigRoot,
     "--target-config-root", fixture.targetConfigRoot,
     "--source-backup-root", fixture.sourceBackupRoot,
     "--target-backup-root", fixture.targetBackupRoot,
-    "--privacy-manifest-created-at", PRIVACY_MANIFEST_CREATED_AT,
     "--claim-id", CLAIM_ID,
     "--manifest", manifestPath,
   ];
@@ -438,34 +453,48 @@ function createManifest(fixture, name = "manifest.json") {
   return manifestPath;
 }
 
+function task4ReadinessArguments(fixture, manifestPath) {
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  writeFileSync(
+    fixture.installedPreviousKeyFilePath,
+    readFileSync(fixture.sourceKeyFilePath),
+    { mode: 0o600 },
+  );
+  const artifact = createCanonicalCutoverPrivacyReadinessArtifact(
+    manifest.privacyDeletionLedger,
+    manifest.selectionHash,
+  );
+  writeFileSync(fixture.privacyReadinessArtifactPath, `${JSON.stringify(artifact)}\n`, { mode: 0o600 });
+  return ["--privacy-key-ready-artifact", fixture.privacyReadinessArtifactPath];
+}
+
 function privacyRecord(key, discordId, overrides = {}) {
   return signDeletionLedgerRecord({
     version: 1,
     operationId: `operation-${discordId}`,
     state: "committed",
     subject: deletionLedgerSubject(discordId, key),
-    occurredAt: "2026-08-08T12:00:00.000Z",
-    expiresAt: "2026-11-06T12:00:00.000Z",
+    occurredAt: PRIVACY_RECORD_OCCURRED_AT,
+    expiresAt: PRIVACY_RECORD_EXPIRES_AT,
     ...overrides,
   }, key);
 }
 
-test("dry-run writes a deterministic redacted manifest for frozen source and target inputs", () => {
+test("dry-run writes a redacted manifest with an internally frozen privacy timestamp", () => {
   const fixture = createFixture();
   const firstManifestPath = path.join(fixture.directory, "manifest-1.json");
-  const secondManifestPath = path.join(fixture.directory, "manifest-2.json");
 
+  const before = Date.now();
   const first = runScript(dryRunArguments(fixture, firstManifestPath));
+  const after = Date.now();
   assert.equal(first.status, 0, first.stderr);
-  const second = runScript(dryRunArguments(fixture, secondManifestPath));
-  assert.equal(second.status, 0, second.stderr);
 
   const firstText = readFileSync(firstManifestPath, "utf8");
-  const secondText = readFileSync(secondManifestPath, "utf8");
-  assert.equal(firstText, secondText);
   assert.doesNotMatch(firstText, /super-secret-token|must-never-migrate|private-license|scrypt:|token_hash|password_hash/i);
 
   const manifest = JSON.parse(firstText);
+  const frozenPrivacyTime = Date.parse(manifest.privacyDeletionLedger.manifestCreatedAt);
+  assert.ok(frozenPrivacyTime >= before && frozenPrivacyTime <= after);
   assert.equal(manifest.formatVersion, 1);
   assert.equal(manifest.claimId, CLAIM_ID);
   assert.match(manifest.source.database.schemaFingerprint, /^[a-f0-9]{64}$/);
@@ -517,8 +546,8 @@ test("apply merges both ledgers and replays committed deletions without account 
     privacyRecord(SOURCE_PRIVACY_KEY, "999", { operationId: "old-aborted", state: "aborted" }),
     privacyRecord(SOURCE_PRIVACY_KEY, "999", {
       operationId: "old-expired",
-      occurredAt: "2026-05-11T12:00:00.000Z",
-      expiresAt: PRIVACY_MANIFEST_CREATED_AT,
+      occurredAt: PRIVACY_EXPIRED_OCCURRED_AT,
+      expiresAt: PRIVACY_EXPIRED_AT,
     }),
   ];
   const targetRecords = [
@@ -535,7 +564,11 @@ test("apply merges both ledgers and replays committed deletions without account 
   const manifestPath = createManifest(fixture, "privacy-replay-manifest.json");
   const manifestText = readFileSync(manifestPath, "utf8");
 
-  const applied = runScript(["--apply", "--manifest", manifestPath]);
+  const applied = runScript([
+    "--apply",
+    "--manifest", manifestPath,
+    ...task4ReadinessArguments(fixture, manifestPath),
+  ]);
   assert.equal(applied.status, 0, applied.stderr);
   const privacyManifestText = JSON.stringify(JSON.parse(manifestText).privacyDeletionLedger);
   for (const forbidden of [...sourceRecords.map((record) => record.subject), ...targetRecords.map((record) => record.subject)]) {
@@ -556,11 +589,32 @@ test("apply merges both ledgers and replays committed deletions without account 
       .rules.dashboard.allowedDiscordIds,
     ["999"],
   );
+  assert.equal(
+    target.prepare("SELECT updated_at FROM app_settings WHERE key = 'access_control_json'").get().updated_at,
+    JSON.parse(manifestText).privacyDeletionLedger.manifestCreatedAt,
+  );
   target.close();
 
   const merged = readDeletionLedger(fixture.targetLedgerPath, [TARGET_PRIVACY_KEY, SOURCE_PRIVACY_KEY]);
   assert.equal(merged.length, 5);
   assert.equal(merged.some((record) => record.operationId === "old-expired"), false);
+});
+
+test("apply refuses retained old-key records until Task 4 attests installed-key configuration", () => {
+  const fixture = createFixture();
+  const originalTargetLedger = `${JSON.stringify(privacyRecord(TARGET_PRIVACY_KEY, "999"))}\n`;
+  writeFileSync(fixture.sourceLedgerPath, `${JSON.stringify(privacyRecord(SOURCE_PRIVACY_KEY, "222"))}\n`, { mode: 0o600 });
+  writeFileSync(fixture.targetLedgerPath, originalTargetLedger, { mode: 0o600 });
+  const manifestPath = createManifest(fixture, "readiness-required.json");
+
+  const apply = runScript(["--apply", "--manifest", manifestPath]);
+
+  assert.notEqual(apply.status, 0);
+  assert.match(apply.stderr, /readiness artifact path is required/i);
+  assert.equal(readFileSync(fixture.targetLedgerPath, "utf8"), originalTargetLedger);
+  const target = new DatabaseSync(fixture.targetDatabasePath, { readOnly: true });
+  assert.equal(target.prepare("SELECT COUNT(*) AS count FROM user_sessions").get().count, 1);
+  target.close();
 });
 
 test("apply performs every approved merge while preserving Relay-only and explicitly excluded state", () => {
@@ -686,7 +740,11 @@ test("apply refuses a changed database, tampered manifest, and an already-applie
   mutateDatabase(driftFixture.sourceDatabasePath, (db) => {
     db.prepare("UPDATE craft_plan_settings SET config_json = '{\"drifted\":true}' WHERE plan_key = 'active'").run();
   });
-  const drift = runScript(["--apply", "--manifest", driftManifestPath]);
+  const drift = runScript([
+    "--apply",
+    "--manifest", driftManifestPath,
+    ...task4ReadinessArguments(driftFixture, driftManifestPath),
+  ]);
   assert.notEqual(drift.status, 0);
   assert.match(drift.stderr, /changed since dry-run/i);
   const driftTarget = new DatabaseSync(driftFixture.targetDatabasePath, { readOnly: true });
@@ -1028,6 +1086,10 @@ test("apply preserves pre-commit recovery and finalizes markers in durable order
   const originalTargetLedger = `${JSON.stringify(privacyRecord(TARGET_PRIVACY_KEY, "111"))}\n`;
   writeFileSync(interruptedFinalization.targetLedgerPath, originalTargetLedger, { mode: 0o600 });
   const interruptedFinalizationManifestPath = createManifest(interruptedFinalization);
+  const interruptedPrivacyReadiness = task4ReadinessArguments(
+    interruptedFinalization,
+    interruptedFinalizationManifestPath,
+  );
   const finalizationDurability = {
     ...realDurability,
     writeMarker(markerPath, payload) {
@@ -1038,7 +1100,10 @@ test("apply preserves pre-commit recovery and finalizes markers in durable order
   assert.throws(
     () => applyCanonicalCutoverManifest(
       readCanonicalCutoverManifest(interruptedFinalizationManifestPath),
-      { durability: finalizationDurability },
+      {
+        durability: finalizationDurability,
+        privacyReadinessArtifactPath: interruptedFinalization.privacyReadinessArtifactPath,
+      },
     ),
     /injected crash after durable applied marker/,
   );
@@ -1047,13 +1112,21 @@ test("apply preserves pre-commit recovery and finalizes markers in durable order
   const installedTargetLedger = readFileSync(interruptedFinalization.targetLedgerPath, "utf8");
 
   writeFileSync(interruptedFinalization.targetLedgerPath, originalTargetLedger, { mode: 0o600 });
-  const refusedLedgerRollback = runScript(["--apply", "--manifest", interruptedFinalizationManifestPath]);
+  const refusedLedgerRollback = runScript([
+    "--apply",
+    "--manifest", interruptedFinalizationManifestPath,
+    ...interruptedPrivacyReadiness,
+  ]);
   assert.notEqual(refusedLedgerRollback.status, 0);
   assert.match(refusedLedgerRollback.stderr, /installed target ledger does not match/i);
 
   writeFileSync(interruptedFinalization.targetLedgerPath, installedTargetLedger, { mode: 0o600 });
 
-  const finalized = runScript(["--apply", "--manifest", interruptedFinalizationManifestPath]);
+  const finalized = runScript([
+    "--apply",
+    "--manifest", interruptedFinalizationManifestPath,
+    ...interruptedPrivacyReadiness,
+  ]);
 
   assert.equal(finalized.status, 0, finalized.stderr);
   assert.equal(existsSync(`${interruptedFinalizationManifestPath}.applying`), false);
@@ -1250,6 +1323,9 @@ test("dry-run rejects an external branding URL instead of copying raw metadata",
 
 test("foreign-key integrity failure rolls back the entire target transaction", () => {
   const fixture = createFixture();
+  const originalTargetLedger = `${JSON.stringify(privacyRecord(TARGET_PRIVACY_KEY, "999"))}\n`;
+  writeFileSync(fixture.sourceLedgerPath, `${JSON.stringify(privacyRecord(SOURCE_PRIVACY_KEY, "222"))}\n`, { mode: 0o600 });
+  writeFileSync(fixture.targetLedgerPath, originalTargetLedger, { mode: 0o600 });
   mutateDatabase(fixture.targetDatabasePath, (db) => {
     db.exec("PRAGMA foreign_keys = OFF");
     db.prepare(`
@@ -1259,7 +1335,11 @@ test("foreign-key integrity failure rolls back the entire target transaction", (
     `).run();
   });
   const manifestPath = createManifest(fixture);
-  const apply = runScript(["--apply", "--manifest", manifestPath]);
+  const apply = runScript([
+    "--apply",
+    "--manifest", manifestPath,
+    ...task4ReadinessArguments(fixture, manifestPath),
+  ]);
   assert.notEqual(apply.status, 0);
   assert.match(apply.stderr, /foreign_key_check failed/i);
   const target = new DatabaseSync(fixture.targetDatabasePath, { readOnly: true });
@@ -1267,7 +1347,58 @@ test("foreign-key integrity failure rolls back the entire target transaction", (
   assert.equal(target.prepare("SELECT discord_username FROM user_accounts WHERE id = 1").get().discord_username, "relay-user");
   target.close();
   assert.equal(existsSync(`${manifestPath}.applied`), false);
+  assert.equal(readFileSync(fixture.targetLedgerPath, "utf8"), originalTargetLedger);
+  assert.doesNotThrow(() => readDeletionLedger(fixture.targetLedgerPath, [TARGET_PRIVACY_KEY]));
   assert.deepEqual(readFileSync(path.join(fixture.targetBrandingDirectory, "favicon.webp")), WEBP_BYTES);
+});
+
+test("post-commit ledger-install failure leaves the original readable and resumes from pending recovery", () => {
+  const fixture = createFixture();
+  writeFileSync(fixture.sourceLedgerPath, `${JSON.stringify(privacyRecord(SOURCE_PRIVACY_KEY, "222"))}\n`, { mode: 0o600 });
+  const originalTargetLedger = `${JSON.stringify(privacyRecord(TARGET_PRIVACY_KEY, "999", { state: "pending" }))}\n`;
+  writeFileSync(fixture.targetLedgerPath, originalTargetLedger, { mode: 0o600 });
+  const manifestPath = createManifest(fixture, "post-commit-ledger-recovery.json");
+  const readinessArguments = task4ReadinessArguments(fixture, manifestPath);
+  const loaded = readCanonicalCutoverManifest(manifestPath);
+  const privacyApplyContext = prepareCanonicalCutoverPrivacyApply(
+    loaded.manifest.privacyDeletionLedger,
+    {
+      filesystem: {
+        ...filesystem,
+        renameSync(sourcePath, destinationPath) {
+          if (destinationPath === fixture.targetLedgerPath) throw new Error("injected ledger rename failure");
+          return filesystem.renameSync(sourcePath, destinationPath);
+        },
+      },
+    },
+  );
+
+  assert.throws(
+    () => applyCanonicalCutoverManifest(loaded, {
+      privacyApplyContext,
+      privacyReadinessArtifactPath: fixture.privacyReadinessArtifactPath,
+    }),
+    /database is committed.*injected ledger rename failure/i,
+  );
+  assert.equal(readFileSync(fixture.targetLedgerPath, "utf8"), originalTargetLedger);
+  assert.doesNotThrow(() => readDeletionLedger(fixture.targetLedgerPath, [TARGET_PRIVACY_KEY]));
+  assert.equal(existsSync(`${manifestPath}.applying`), true);
+  assert.equal(existsSync(`${manifestPath}.applied`), false);
+  const committedTarget = new DatabaseSync(fixture.targetDatabasePath, { readOnly: true });
+  assert.deepEqual(
+    committedTarget.prepare("SELECT discord_id FROM user_accounts ORDER BY discord_id").all().map((row) => row.discord_id),
+    ["111", "999"],
+  );
+  committedTarget.close();
+
+  const recovered = runScript(["--apply", "--manifest", manifestPath, ...readinessArguments]);
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.equal(JSON.parse(recovered.stdout).recovered, true);
+  assert.deepEqual(
+    readDeletionLedger(fixture.targetLedgerPath, [TARGET_PRIVACY_KEY, SOURCE_PRIVACY_KEY])
+      .map((record) => record.operationId).sort(),
+    ["operation-222", "operation-999"],
+  );
 });
 
 test("SQLite CHECK integrity failure rolls back the entire target transaction", () => {
@@ -1293,6 +1424,13 @@ test("CLI rejects unknown arguments, missing files, and apply-time path override
   assert.match(unknown.stderr, /Unknown argument: --wat/);
 
   const fixture = createFixture();
+  const cutoffOverride = runScript([
+    ...dryRunArguments(fixture, path.join(fixture.directory, "operator-cutoff.json")),
+    "--privacy-manifest-created-at", PRIVACY_MANIFEST_CREATED_AT,
+  ]);
+  assert.notEqual(cutoffOverride.status, 0);
+  assert.match(cutoffOverride.stderr, /unknown argument.*privacy-manifest-created-at/i);
+
   const missingPrivacy = runScript([
     "--dry-run", "--source-db", fixture.sourceDatabasePath,
     "--target-db", fixture.targetDatabasePath,
@@ -1319,7 +1457,8 @@ test("CLI rejects unknown arguments, missing files, and apply-time path override
     "--target-config-root", fixture.targetConfigRoot,
     "--source-backup-root", fixture.sourceBackupRoot,
     "--target-backup-root", fixture.targetBackupRoot,
-    "--privacy-manifest-created-at", PRIVACY_MANIFEST_CREATED_AT,
+    "--installed-previous-privacy-key", fixture.installedPreviousKeyFilePath,
+    "--privacy-key-ready-artifact", fixture.privacyReadinessArtifactPath,
   ]);
   assert.notEqual(missing.status, 0);
   assert.match(missing.stderr, /does not exist/i);
