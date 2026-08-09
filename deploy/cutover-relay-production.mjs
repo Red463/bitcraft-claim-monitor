@@ -481,7 +481,7 @@ function adaptedCaddySites(adapted) {
 }
 
 function hasCanonicalRedirect(site) {
-  return site.responses.some((response) => response.status === 308
+  return site.responses.some((response) => response.status === 301
     && response.location === "https://app.timbersteeltrade.com{http.request.uri}");
 }
 
@@ -2520,7 +2520,7 @@ export function createSystemCutoverOperations({
       "--write-out", "%{http_code}\n%{redirect_url}",
       `${paths.relayPublicOrigin}/cutover-path?probe=1`,
     ], "Validate Relay canonical redirect").trim().split(/\r?\n/);
-    if (redirect[0] !== "308" || redirect[1] !== `${paths.sourcePublicOrigin}/cutover-path?probe=1`) {
+    if (redirect[0] !== "301" || redirect[1] !== `${paths.sourcePublicOrigin}/cutover-path?probe=1`) {
       throw new Error("Relay redirect does not preserve canonical path and query");
     }
     const subscriptions = providerSubscriptionSummary(paths.targetDatabasePath);

@@ -70,7 +70,7 @@ async function samplePublicRoutes(fetchImpl, { revision, version }) {
     throw new Error("Relay redirect request failed");
   }
   const location = String(redirect?.headers?.get?.("location") ?? "");
-  if (redirect?.status !== 308 || location !== `${CANONICAL_ORIGIN}/cutover-soak?probe=1`) {
+  if (redirect?.status !== 301 || location !== `${CANONICAL_ORIGIN}/cutover-soak?probe=1`) {
     throw new Error("Relay redirect did not preserve the canonical path and query");
   }
 }
