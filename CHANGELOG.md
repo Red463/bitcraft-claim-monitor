@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.51.0-beta.8] - 2026-08-09
+
+### Fixed
+
+- Restored reliable regional-claims refreshes by replacing excessive owner subscription fan-out with one bounded authoritative subscription.
+- Kept saved-data warnings active until a replacement regional snapshot commits successfully after a disconnect.
+
 ## [0.51.0-beta.7] - 2026-08-08
 
 ### Changed

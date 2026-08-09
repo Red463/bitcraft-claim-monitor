@@ -1,5 +1,4 @@
 import { normalizeRegionalClaims } from "./normalizers.ts";
-import { equalitySubscriptionQueries } from "./publicCraftRegionSession.ts";
 import {
   assertSchemaFingerprint,
   schemaBindingsReady,
@@ -48,7 +47,6 @@ type SessionConfig = {
   generation: number;
   regionId: string;
   maxClaims?: number;
-  maxIdsPerQuery?: number;
   maxApplyRows?: number;
 };
 type SessionDependencies = {
@@ -69,9 +67,6 @@ export type RegionalClaimsSnapshot = {
 type WireRecord = Record<string, unknown>;
 
 const DEFAULT_MAX_CLAIMS = 5_000;
-// Relay's current regional source applies indexed point subscriptions
-// reliably, while OR-combined username predicates can remain unapplied.
-const DEFAULT_MAX_IDS_PER_QUERY = 1;
 const DEFAULT_MAX_APPLY_ROWS = 12_000;
 
 async function loadBundledRegionalBindings(): Promise<RegionalBindingModule> {
@@ -107,20 +102,15 @@ export class RelayRegionClaimsSession {
   readonly #now: () => Date;
   #connection: BindingConnection | null = null;
   #baseSubscription: SubscriptionHandle | null = null;
-  #ownerSubscriptions: SubscriptionHandle[] = [];
-  #config: Required<Pick<SessionConfig, "maxClaims" | "maxIdsPerQuery" | "maxApplyRows">>
-    & Omit<SessionConfig, "maxClaims" | "maxIdsPerQuery" | "maxApplyRows"> | null = null;
+  #config: Required<Pick<SessionConfig, "maxClaims" | "maxApplyRows">>
+    & Omit<SessionConfig, "maxClaims" | "maxApplyRows"> | null = null;
   #nextGeneration = 0;
-  #ownerEpoch = 0;
-  #refreshingOwners = false;
-  #ownerRefreshQueued = false;
   #snapshotQueued = false;
   #applyInFlight = false;
   #applyPending = false;
   #listenersAttached = false;
   #stopping = false;
-  readonly #baseChanged = () => this.#queueOwnerRefresh();
-  readonly #ownerChanged = () => this.#queueSnapshot();
+  readonly #snapshotChanged = () => this.#queueSnapshot();
   #health = {
     connected: false,
     applied: false,
@@ -152,7 +142,6 @@ export class RelayRegionClaimsSession {
       generation: positiveInteger(config.generation, "Relay regional-claims generation"),
       regionId: decimalInteger(config.regionId, "Relay regional-claims region id"),
       maxClaims: positiveInteger(config.maxClaims ?? DEFAULT_MAX_CLAIMS, "Relay regional-claims claim budget"),
-      maxIdsPerQuery: positiveInteger(config.maxIdsPerQuery ?? DEFAULT_MAX_IDS_PER_QUERY, "Relay regional-claims owner query size"),
       maxApplyRows: positiveInteger(config.maxApplyRows ?? DEFAULT_MAX_APPLY_ROWS, "Relay regional-claims apply row budget"),
     };
     this.#nextGeneration = this.#config.generation;
@@ -163,17 +152,18 @@ export class RelayRegionClaimsSession {
       .onConnect((connection) => {
         this.#health.connected = true;
         this.#health.stage = "base";
-        this.#health.lastError = null;
         this.#baseSubscription = connection.subscriptionBuilder()
           .onApplied(() => this.#guard(() => {
             this.#attachListeners(connection);
-            this.#refreshOwners(connection);
+            this.#health.stage = "applying";
+            this.#applySnapshot(connection);
           }))
           .onError((_context, error) => this.#recordError(error))
           .subscribe([
             "SELECT * FROM claim_state",
             "SELECT * FROM claim_local_state",
             "SELECT * FROM building_claim_desc",
+            "SELECT * FROM player_username_state",
           ]);
       })
       .onConnectError((_context, error) => {
@@ -193,62 +183,9 @@ export class RelayRegionClaimsSession {
     return this.#config;
   }
 
-  #refreshOwners(connection: BindingConnection): void {
-    const config = this.#requiredConfig();
-    const claimRows = rows(connection.db.claimState);
-    this.#health.stage = "owners";
-    this.#health.claimRowCount = claimRows.length;
-    if (claimRows.length > config.maxClaims) {
-      throw new Error(`Relay regional-claims budget ${config.maxClaims} exceeded by ${claimRows.length} claims`);
-    }
-    const ownerIds = claimRows.map((value, index) => {
-      const claim = row(value, `Relay regional claim ${index}`);
-      return decimalInteger(
-        claim.ownerPlayerEntityId ?? claim.owner_player_entity_id,
-        `Relay regional claim ${index} owner id`,
-      );
-    });
-    this.#refreshingOwners = true;
-    this.#ownerEpoch += 1;
-    const epoch = this.#ownerEpoch;
-    this.#clearOwnerSubscriptions();
-    const queries = equalitySubscriptionQueries(
-      "player_username_state",
-      "entity_id",
-      ownerIds,
-      config.maxIdsPerQuery,
-    );
-    this.#health.ownerIdCount = new Set(ownerIds).size;
-    this.#health.ownerQueryCount = queries.length;
-    this.#health.ownerQueriesPending = queries.length;
-    if (!queries.length) {
-      this.#refreshingOwners = false;
-      this.#health.stage = "applying";
-      this.#applySnapshot(connection);
-      return;
-    }
-    let remaining = queries.length;
-    for (const query of queries) {
-      const subscription = connection.subscriptionBuilder()
-        .onApplied(() => this.#guard(() => {
-          if (epoch !== this.#ownerEpoch) return;
-          remaining -= 1;
-          this.#health.ownerQueriesPending = remaining;
-          if (remaining === 0) {
-            this.#refreshingOwners = false;
-            this.#health.stage = "applying";
-            this.#applySnapshot(connection);
-          }
-        }))
-        .onError((_context, error) => this.#recordError(error))
-        .subscribe([query]);
-      this.#ownerSubscriptions.push(subscription);
-    }
-  }
-
   #applySnapshot(connection: BindingConnection): void {
     const config = this.#config;
-    if (!config || this.#refreshingOwners) return;
+    if (!config) return;
     if (this.#applyInFlight) {
       this.#applyPending = true;
       return;
@@ -260,6 +197,21 @@ export class RelayRegionClaimsSession {
       const claimTypeRows = rows(connection.db.buildingClaimDesc);
       const usernameRows = rows(connection.db.playerUsernameState);
       const rowCount = claimRows.length + localRows.length + claimTypeRows.length + usernameRows.length;
+      this.#health.claimRowCount = claimRows.length;
+      if (claimRows.length > config.maxClaims) {
+        throw new Error(
+          `Relay regional-claims claim budget ${config.maxClaims} exceeded by ${claimRows.length} claims`,
+        );
+      }
+      this.#health.ownerIdCount = new Set(claimRows.map((value, index) => {
+        const claim = row(value, `Relay regional claim ${index}`);
+        return decimalInteger(
+          claim.ownerPlayerEntityId ?? claim.owner_player_entity_id,
+          `Relay regional claim ${index} owner id`,
+        );
+      })).size;
+      this.#health.ownerQueryCount = 1;
+      this.#health.ownerQueriesPending = 0;
       if (rowCount > config.maxApplyRows) {
         throw new Error(`Relay regional-claims apply budget ${config.maxApplyRows} exceeded by ${rowCount} rows`);
       }
@@ -307,17 +259,8 @@ export class RelayRegionClaimsSession {
     });
   }
 
-  #queueOwnerRefresh(): void {
-    if (this.#ownerRefreshQueued || !this.#connection) return;
-    this.#ownerRefreshQueued = true;
-    queueMicrotask(() => {
-      this.#ownerRefreshQueued = false;
-      if (this.#connection) this.#guard(() => this.#refreshOwners(this.#connection!));
-    });
-  }
-
   #queueSnapshot(): void {
-    if (this.#snapshotQueued || !this.#connection || this.#refreshingOwners) return;
+    if (this.#snapshotQueued || !this.#connection) return;
     this.#snapshotQueued = true;
     queueMicrotask(() => {
       this.#snapshotQueued = false;
@@ -331,14 +274,12 @@ export class RelayRegionClaimsSession {
       connection.db.claimState,
       connection.db.claimLocalState,
       connection.db.buildingClaimDesc,
+      connection.db.playerUsernameState,
     ]) {
-      table.onInsert?.(this.#baseChanged);
-      table.onUpdate?.(this.#baseChanged);
-      table.onDelete?.(this.#baseChanged);
+      table.onInsert?.(this.#snapshotChanged);
+      table.onUpdate?.(this.#snapshotChanged);
+      table.onDelete?.(this.#snapshotChanged);
     }
-    connection.db.playerUsernameState.onInsert?.(this.#ownerChanged);
-    connection.db.playerUsernameState.onUpdate?.(this.#ownerChanged);
-    connection.db.playerUsernameState.onDelete?.(this.#ownerChanged);
     this.#listenersAttached = true;
   }
 
@@ -348,20 +289,13 @@ export class RelayRegionClaimsSession {
       this.#connection.db.claimState,
       this.#connection.db.claimLocalState,
       this.#connection.db.buildingClaimDesc,
+      this.#connection.db.playerUsernameState,
     ]) {
-      table.removeOnInsert?.(this.#baseChanged);
-      table.removeOnUpdate?.(this.#baseChanged);
-      table.removeOnDelete?.(this.#baseChanged);
+      table.removeOnInsert?.(this.#snapshotChanged);
+      table.removeOnUpdate?.(this.#snapshotChanged);
+      table.removeOnDelete?.(this.#snapshotChanged);
     }
-    this.#connection.db.playerUsernameState.removeOnInsert?.(this.#ownerChanged);
-    this.#connection.db.playerUsernameState.removeOnUpdate?.(this.#ownerChanged);
-    this.#connection.db.playerUsernameState.removeOnDelete?.(this.#ownerChanged);
     this.#listenersAttached = false;
-  }
-
-  #clearOwnerSubscriptions(): void {
-    for (const subscription of this.#ownerSubscriptions) subscription.unsubscribe();
-    this.#ownerSubscriptions = [];
   }
 
   #guard(action: () => void): void {
@@ -383,15 +317,12 @@ export class RelayRegionClaimsSession {
 
   async stop(): Promise<void> {
     this.#stopping = true;
-    this.#ownerEpoch += 1;
     this.#removeListeners();
-    this.#clearOwnerSubscriptions();
     this.#baseSubscription?.unsubscribe();
     this.#baseSubscription = null;
     this.#connection?.disconnect();
     this.#connection = null;
     this.#config = null;
-    this.#refreshingOwners = false;
     this.#health.connected = false;
   }
 }

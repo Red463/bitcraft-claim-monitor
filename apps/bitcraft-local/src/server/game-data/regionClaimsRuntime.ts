@@ -119,8 +119,17 @@ export class RelayRegionClaimsRuntime {
     const regionId = decimalInteger(config.regionId, "Relay regional-claims region id");
     const sameScope = this.#session && this.#claimId === claimId && this.#regionId === regionId;
     const health = this.#session?.health();
-    const healthy = sameScope && health?.connected && !health.lastError;
+    const healthy = sameScope
+      && health?.connected
+      && health.applied
+      && !health.lastError
+      && !this.#lastError;
+    const applying = sameScope
+      && health?.connected
+      && !health.applied
+      && !health.lastError;
     const topologyDue = this.#now().getTime() - this.#lastTopologyCheckAt >= this.#topologyRefreshMs;
+    if (applying && !config.force) return;
     if (healthy && !config.force && !topologyDue) return;
     if (healthy) {
       try {
@@ -227,7 +236,6 @@ export class RelayRegionClaimsRuntime {
       this.#session = openingSession;
       this.#regionId = regionId;
       this.#source = source;
-      this.#lastError = null;
       await this.#persistSubscriptionHealth();
     } catch (error) {
       this.#lastError = error instanceof Error ? error.message : String(error);
@@ -244,13 +252,13 @@ export class RelayRegionClaimsRuntime {
   #enqueueSnapshot(snapshot: RegionalClaimsSnapshot, sessionEpoch: number): Promise<void> {
     const commit = this.#commitTail.then(async () => {
       if (sessionEpoch !== this.#sessionEpoch) return;
-      await this.#commitSnapshot(snapshot);
+      await this.#commitSnapshot(snapshot, sessionEpoch);
     });
     this.#commitTail = commit.catch(() => {});
     return commit;
   }
 
-  async #commitSnapshot(snapshot: RegionalClaimsSnapshot): Promise<void> {
+  async #commitSnapshot(snapshot: RegionalClaimsSnapshot, sessionEpoch: number): Promise<void> {
     const claimId = this.#claimId;
     if (!claimId) throw new Error("Relay regional-claims runtime has no configured claim");
     if (snapshot.regionId !== this.#regionId || snapshot.data.regionId !== this.#regionId) {
@@ -258,9 +266,10 @@ export class RelayRegionClaimsRuntime {
     }
     const sourceKey = `region:${snapshot.regionId}` as `region:${number}`;
     try {
+      const storedGeneration = this.#currentStateRepository.nextGeneration(claimId);
       await this.#currentStateRepository.commitGeneration({
         claimId,
-        generation: this.#currentStateRepository.nextGeneration(claimId),
+        generation: storedGeneration,
         domains: {
           "region-claims": {
             data: snapshot.data,
@@ -278,11 +287,12 @@ export class RelayRegionClaimsRuntime {
           },
         },
       });
-      this.#lastGeneration = snapshot.generation;
+      this.#lastGeneration = storedGeneration;
+      if (sessionEpoch !== this.#sessionEpoch) return;
       this.#connectionFailures = 0;
       this.#cancelReconnect();
       this.#lastError = null;
-      await this.#persistSubscriptionHealth();
+      await this.#persistSubscriptionHealth(null, snapshot.receivedAt, true);
     } catch (error) {
       this.#lastError = error instanceof Error ? error.message : String(error);
       throw error;
@@ -318,6 +328,7 @@ export class RelayRegionClaimsRuntime {
       || !this.#claimId
       || !this.#regionId
     ) return;
+    this.#sessionEpoch += 1;
     this.#connectionFailures += 1;
     const attempt = this.#connectionFailures;
     void this.#recordError(error);
@@ -356,6 +367,7 @@ export class RelayRegionClaimsRuntime {
   async #persistSubscriptionHealth(
     lastError = this.#lastError,
     observedAt = this.#now().toISOString(),
+    snapshotApplied = false,
   ): Promise<void> {
     const source = this.#source;
     if (!source) return;
@@ -364,7 +376,9 @@ export class RelayRegionClaimsRuntime {
       sourceKey: source.sourceKey,
       domain: "region-claims",
       generation: this.#lastGeneration,
-      connected: health?.connected === true && !lastError,
+      connected: health?.connected === true
+        && (snapshotApplied || health.applied === true)
+        && !lastError,
       applyDurationMs: health?.lastApplyDurationMs ?? null,
       reconnects: this.#reconnects,
       malformedRows: 0,
