@@ -7,6 +7,11 @@ on:
         description: Type app.timbersteeltrade.com exactly to prepare the production cutover
         required: true
         type: string
+      skip_soak:
+        description: Skip the timed post-admission soak after instantaneous canonical checks pass
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -145,7 +150,10 @@ jobs:
           RELAY_VPS_HOST: ${{ secrets.RELAY_VPS_HOST }}
           RELAY_VPS_DEPLOY_USER: ${{ secrets.RELAY_VPS_DEPLOY_USER }}
           MANIFEST_HASH: ${{ needs.prepare.outputs.manifest_hash }}
+          SKIP_SOAK: ${{ inputs.skip_soak }}
         run: |
+          SKIP_SOAK_ARG=""
+          if [[ "$SKIP_SOAK" == "true" ]]; then SKIP_SOAK_ARG="--skip-soak"; fi
           set +e
           APPLY_OUTPUT="$(ssh -i "$HOME/.ssh/id_ed25519" \
             -o BatchMode=yes \
@@ -156,7 +164,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -- "$RELAY_VPS_DEPLOY_USER@$RELAY_VPS_HOST" \
-            "sudo /usr/local/bin/update-bitcraft-claim-monitor-relay --revision '$GITHUB_SHA' --apply-cutover --manifest-hash '$MANIFEST_HASH'" 2>/dev/null)"
+            "sudo /usr/local/bin/update-bitcraft-claim-monitor-relay --revision '$GITHUB_SHA' --apply-cutover --manifest-hash '$MANIFEST_HASH' $SKIP_SOAK_ARG" 2>/dev/null)"
           APPLY_STATUS=$?
           set -e
           printf '## Relay production cutover apply\n\nRevision: `%s`  \nResult: `%s`\n\nFull diagnostics remain on the VPS.\n' \

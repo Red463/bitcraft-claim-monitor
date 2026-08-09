@@ -49,6 +49,8 @@ test("workflow leaves secrets remote, runs deployment contracts, and budgets the
   assert.match(workflow, /Full diagnostics remain on the VPS/);
   assert.doesNotMatch(workflow, /GITHUB_STEP_SUMMARY[^\n]*(?:TOKEN|PRIVATE_KEY|CLIENT_SECRET)/i);
   assert.doesNotMatch(workflow, /cat\s+[^\n]*(?:\.env|privacy-ledger\.key|backup-encryption\.key)/i);
+  assert.match(workflow, /skip_soak:[\s\S]*type: boolean[\s\S]*default: false/);
+  assert.match(workflow, /inputs\.skip_soak[\s\S]*--skip-soak/);
 });
 
 test("routine environment remains preview-safe and documents the exact canonical activation boundary", () => {

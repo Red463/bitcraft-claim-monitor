@@ -37,6 +37,7 @@ CUTOVER_CONFIRMATION=""
 CUTOVER_CONFIRMATION_SEEN=0
 CUTOVER_MANIFEST_HASH=""
 CUTOVER_MANIFEST_HASH_SEEN=0
+SKIP_CUTOVER_SOAK=0
 HEALTH_SUMMARY="Health: not checked"
 PUBLIC_SUMMARY="Public: skipped"
 deployment_succeeded=0
@@ -53,7 +54,7 @@ usage() {
   cat <<USAGE
 Usage: update-bitcraft-claim-monitor-relay --revision <full-sha> [--verbose] [--no-public-check] [--force-backup]
        update-bitcraft-claim-monitor-relay --revision <full-sha> --prepare-cutover --confirmation app.timbersteeltrade.com
-       update-bitcraft-claim-monitor-relay --revision <full-sha> --apply-cutover --manifest-hash <64hex>
+       update-bitcraft-claim-monitor-relay --revision <full-sha> --apply-cutover --manifest-hash <64hex> [--skip-soak]
        update-bitcraft-claim-monitor-relay --revision <full-sha> --abort-cutover --manifest-hash <64hex>
 
   --revision <sha>  Deploy this full lowercase commit SHA from origin/main.
@@ -63,6 +64,7 @@ Usage: update-bitcraft-claim-monitor-relay --revision <full-sha> [--verbose] [--
   --prepare-cutover Prepare the protected canonical production cutover.
   --apply-cutover   Apply the matching prepared cutover.
   --abort-cutover   Restore the matching prepared cutover before admission.
+  --skip-soak       Explicitly skip the timed post-admission soak during apply.
 USAGE
 }
 
@@ -108,6 +110,11 @@ parse_args() {
         CUTOVER_MANIFEST_HASH="$2"
         shift 2
         ;;
+      --skip-soak)
+        [[ "$SKIP_CUTOVER_SOAK" == "0" ]] || { echo "Duplicate --skip-soak is not allowed."; exit 2; }
+        SKIP_CUTOVER_SOAK=1
+        shift
+        ;;
       -h|--help)
         usage
         exit 0
@@ -134,7 +141,8 @@ parse_args() {
       prepare)
         [[ "$CUTOVER_CONFIRMATION_SEEN" == "1" \
           && "$CUTOVER_CONFIRMATION" == "app.timbersteeltrade.com" \
-          && "$CUTOVER_MANIFEST_HASH_SEEN" == "0" ]] \
+          && "$CUTOVER_MANIFEST_HASH_SEEN" == "0" \
+          && "$SKIP_CUTOVER_SOAK" == "0" ]] \
           || { echo "Unknown or mixed cutover mode."; exit 2; }
         ;;
       apply|abort)
@@ -142,13 +150,15 @@ parse_args() {
           && "$CUTOVER_MANIFEST_HASH_SEEN" == "1" \
           && "$CUTOVER_MANIFEST_HASH" =~ ^[0-9a-f]{64}$ ]] \
           || { echo "Unknown or mixed cutover mode."; exit 2; }
+        [[ "$CUTOVER_MODE" == "apply" || "$SKIP_CUTOVER_SOAK" == "0" ]] \
+          || { echo "Unknown or mixed cutover mode."; exit 2; }
         ;;
       *)
         echo "Unknown or mixed cutover mode."
         exit 2
         ;;
     esac
-  elif [[ "$CUTOVER_CONFIRMATION_SEEN" == "1" || "$CUTOVER_MANIFEST_HASH_SEEN" == "1" ]]; then
+  elif [[ "$CUTOVER_CONFIRMATION_SEEN" == "1" || "$CUTOVER_MANIFEST_HASH_SEEN" == "1" || "$SKIP_CUTOVER_SOAK" == "1" ]]; then
     echo "Unknown or mixed cutover mode."
     exit 2
   fi
@@ -165,6 +175,10 @@ delegate_cutover_mode() {
         --revision "$REVISION" --prepare-cutover --confirmation "$CUTOVER_CONFIRMATION"
       ;;
     apply)
+      if [[ "$SKIP_CUTOVER_SOAK" == "1" ]]; then
+        exec env BITCRAFT_CUTOVER_UPDATER=1 node "$CUTOVER_HELPER_PATH" \
+          --revision "$REVISION" --apply-cutover --manifest-hash "$CUTOVER_MANIFEST_HASH" --skip-soak
+      fi
       exec env BITCRAFT_CUTOVER_UPDATER=1 node "$CUTOVER_HELPER_PATH" \
         --revision "$REVISION" --apply-cutover --manifest-hash "$CUTOVER_MANIFEST_HASH"
       ;;

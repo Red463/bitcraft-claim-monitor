@@ -52,6 +52,32 @@ function requireAnnouncementState(state, revision) {
   if (state.postAdmission?.publicVerified !== true || !state.publicVerification) {
     throw new Error("Cutover announcement requires successful canonical public verification");
   }
+  const override = state.operatorOverrides?.skipIntensiveSoak;
+  if (state.postAdmission?.intensiveSoakSkipped === true
+    && override?.approved === true
+    && override.revision === revision) {
+    const local = state.localVerification;
+    const publicVerification = state.publicVerification;
+    if (local?.health?.deploymentMode !== "canonical"
+      || local.health.version !== "0.52.0-beta.1"
+      || !/^\d+$/.test(String(local.gatewayPid ?? ""))) {
+      throw new Error("Cutover announcement soak override requires verified local canonical health and one gateway");
+    }
+    if (publicVerification?.health !== true
+      || publicVerification.redirect !== true
+      || publicVerification.securityHeaders !== true) {
+      throw new Error("Cutover announcement soak override requires successful public canonical verification");
+    }
+    const expected = state.preflight?.subscriptions?.subscriptions ?? {};
+    for (const [key, generation] of Object.entries(expected)) {
+      if (Number(local.subscriptions?.subscriptions?.[key] ?? 0) <= Number(generation)
+        || Number(publicVerification.subscriptions?.subscriptions?.[key] ?? 0) <= Number(generation)) {
+        throw new Error("Cutover announcement soak override requires provider generation advancement");
+      }
+    }
+    if (!Object.keys(expected).length) throw new Error("Cutover announcement soak override requires the exact subscription set");
+    return { operatorSkipped: true, outboxFinal: null };
+  }
   const soak = state.intensiveSoak;
   if (state.postAdmission?.intensiveSoakVerified !== true || soak?.ok !== true || soak.profile !== "intensive") {
     throw new Error("Cutover announcement requires a successful 30-minute intensive soak");
@@ -157,7 +183,8 @@ export function enqueueCanonicalCutoverAnnouncement({
     }
 
     const soak = requireAnnouncementState(state, revision);
-    if (canonical(outboxSnapshot(db)) !== canonical(soak.outboxFinal)) {
+    const verifiedOutbox = soak.operatorSkipped ? outboxSnapshot(db) : soak.outboxFinal;
+    if (canonical(outboxSnapshot(db)) !== canonical(verifiedOutbox)) {
       throw new Error("Discord outbox changed after the successful intensive soak");
     }
     const channelId = readAnnouncementsChannel(db);
@@ -176,7 +203,7 @@ export function enqueueCanonicalCutoverAnnouncement({
     `).run(sourceKey, CANONICAL_CUTOVER_ANNOUNCEMENT, occurredAt, JSON.stringify(metadata), occurredAt, occurredAt, occurredAt);
     const finalSnapshot = outboxSnapshot(db);
     if (Number(result.changes) !== 1
-      || canonical(finalSnapshot.counts) !== canonical(expectedOutboxAfterAnnouncement(soak.outboxFinal))
+      || canonical(finalSnapshot.counts) !== canonical(expectedOutboxAfterAnnouncement(verifiedOutbox))
       || finalSnapshot.latestId !== Number(result.lastInsertRowid)) {
       throw new Error("Discord outbox changed at the canonical announcement boundary");
     }
