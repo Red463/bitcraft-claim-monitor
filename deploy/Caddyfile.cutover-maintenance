@@ -1,0 +1,35 @@
+# Canonical cutover maintenance candidate. Installed only by the protected
+# cutover helper after semantic validation of the live pre-cutover topology.
+app.timbersteeltrade.com {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		X-Frame-Options SAMEORIGIN
+	}
+
+	@cutover_canary remote_ip 127.0.0.1 ::1
+	handle @cutover_canary {
+		reverse_proxy 127.0.0.1:19430
+	}
+
+	handle {
+		header Retry-After 60
+		respond "Claim Monitor is temporarily unavailable for a protected production cutover." 503
+	}
+}
+
+relay.timbersteeltrade.com {
+	header Retry-After 60
+	respond "Claim Monitor is temporarily unavailable for a protected production cutover." 503
+}
+
+# Existing claim redirects remain available during maintenance.
+claim.timbersteeltrade.com {
+	redir https://app.timbersteeltrade.com{uri} permanent
+}
+
+claim.hostred.co.uk {
+	redir https://app.timbersteeltrade.com{uri} permanent
+}

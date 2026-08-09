@@ -43,6 +43,12 @@ function selectionHash(selection) {
   return createHash("sha256").update(JSON.stringify(selection)).digest("hex");
 }
 
+function assertRepairManifest(manifest) {
+  if (!manifest || manifest.schemaVersion !== 1 || selectionHash(manifest.selection) !== manifest.selectionHash) {
+    throw new Error("Profession repair manifest is invalid");
+  }
+}
+
 function selectRepairCandidates(db, claimId) {
   const evidence = evidenceByCraft(db, claimId);
   let unverifiableAggregates = 0;
@@ -100,10 +106,37 @@ export function createContributionProfessionManifest(db, claimIdValue) {
   };
 }
 
-export function applyContributionProfessionRepair(db, manifest) {
-  if (!manifest || manifest.schemaVersion !== 1 || selectionHash(manifest.selection) !== manifest.selectionHash) {
-    throw new Error("Profession repair manifest is invalid");
+export function projectContributionProfessionRepairRows(db, manifest) {
+  assertRepairManifest(manifest);
+  const current = createContributionProfessionManifest(db, manifest.claimId);
+  if (current.selectionHash !== manifest.selectionHash || JSON.stringify(current.counts) !== JSON.stringify(manifest.counts)) {
+    throw new Error("Profession repair selection changed since dry-run; refusing apply");
   }
+  const aggregates = new Map(current.selection.aggregates.map((row) => [row.id, row]));
+  const events = new Map(current.selection.events.map((row) => [row.id, row]));
+  return {
+    production_contributions: db.prepare("SELECT * FROM production_contributions ORDER BY rowid").all().map((row) => {
+      const selected = aggregates.get(String(row.contribution_key));
+      if (!selected) return row;
+      return {
+        ...row,
+        profession: selected.after,
+        raw_json: JSON.stringify({ ...parseRecord(row.raw_json), profession: selected.after }),
+      };
+    }),
+    production_contribution_events: db.prepare("SELECT * FROM production_contribution_events ORDER BY rowid").all().map((row) => {
+      const selected = events.get(String(row.source_key));
+      if (!selected) return row;
+      return {
+        ...row,
+        raw_json: JSON.stringify({ ...parseRecord(row.raw_json), profession: selected.after }),
+      };
+    }),
+  };
+}
+
+export function applyContributionProfessionRepair(db, manifest) {
+  assertRepairManifest(manifest);
   const current = createContributionProfessionManifest(db, manifest.claimId);
   if (current.selectionHash !== manifest.selectionHash || JSON.stringify(current.counts) !== JSON.stringify(manifest.counts)) {
     throw new Error("Profession repair selection changed since dry-run; refusing apply");

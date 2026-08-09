@@ -9,6 +9,25 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.52.0-beta.1] - 2026-08-09
+
+### Added
+
+- Added canonical cutover preparation with a typed hostname confirmation, a maintenance gate, encrypted recovery artifacts, a 15-minute abort watchdog, and post-admission monitoring.
+
+### Changed
+
+- Prepared guarded account and configuration migration so supported accounts, character links, access settings, preferences, market watches, planning configuration, branding, legal acceptance, and Discord tools carry across while everyone must sign in again.
+- Made the Relay-backed app the canonical application and redirected the Relay host while preserving path and query details.
+- Limited live Discord ownership to one Relay worker gateway and delayed the custom migration notice until the canonical app passes its 30-minute intensive soak.
+- Retained the stopped and masked legacy installation for a 14-day forensic window; deletion requires separate approval and a final encrypted archive.
+
+### Security
+
+- Added fail-closed deployment validation for preview and canonical runtime settings, including the approved OAuth callback, legal confirmation, privacy-ledger merge/replay, and previous-key rotation protection.
+- Added a selective migration boundary that preserves Relay game/history data, migrates only approved identity and operational configuration, and revokes every existing session for forced re-login.
+- Reduced public health output to safe deployment readiness and release metadata.
+
 ## [0.51.0-beta.9] - 2026-08-09
 
 ### Added

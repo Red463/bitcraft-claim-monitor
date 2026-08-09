@@ -140,6 +140,7 @@ export function deleteUserAccount(db, {
   deletionKey,
   now = () => new Date(),
   randomUUID = cryptoRandomUUID,
+  manageTransaction = true,
 } = {}) {
   const deletedAt = now().toISOString();
   const receiptId = randomUUID();
@@ -154,10 +155,10 @@ export function deleteUserAccount(db, {
   const anonymizedSubject = deletedSubjectMarker(account.discord_id, deletionKey);
 
   try {
-    db.exec("BEGIN IMMEDIATE");
+    if (manageTransaction) db.exec("BEGIN IMMEDIATE");
     const current = db.prepare("SELECT * FROM user_accounts WHERE id = ? AND discord_id = ?").get(userId, discordId);
     if (!current) {
-      db.exec("COMMIT");
+      if (manageTransaction) db.exec("COMMIT");
       return emptyReceipt;
     }
     const deleted = {};
@@ -178,10 +179,12 @@ export function deleteUserAccount(db, {
       discord_delivery_log: scrubDeliveryRows(db, current),
     };
     deleted.user_accounts = count(db.prepare("DELETE FROM user_accounts WHERE id = ? AND discord_id = ?").run(userId, discordId));
-    db.exec("COMMIT");
+    if (manageTransaction) db.exec("COMMIT");
     return { receiptId, deletedAt, deleted, anonymized };
   } catch (error) {
-    try { db.exec("ROLLBACK"); } catch {}
+    if (manageTransaction) {
+      try { db.exec("ROLLBACK"); } catch {}
+    }
     throw error;
   }
 }
