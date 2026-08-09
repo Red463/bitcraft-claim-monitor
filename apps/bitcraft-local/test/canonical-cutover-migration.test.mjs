@@ -131,7 +131,7 @@ function insertSetting(db, key, value, updatedAt = "2026-08-01T00:00:00.000Z") {
   db.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run(key, value, updatedAt);
 }
 
-function createFixture() {
+function createFixture({ liveSourceUserAccounts = false } = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), "canonical-cutover-"));
   const sourceDatabasePath = path.join(directory, "old.sqlite");
   const targetDatabasePath = path.join(directory, "relay.sqlite");
@@ -160,6 +160,27 @@ function createFixture() {
   applySchemaBootstrap(target);
   addMigratedColumns(source);
   addMigratedColumns(target);
+  if (liveSourceUserAccounts) {
+    source.exec(`
+      PRAGMA foreign_keys = OFF;
+      DROP TABLE user_accounts;
+      CREATE TABLE user_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        discord_id TEXT NOT NULL UNIQUE,
+        discord_username TEXT,
+        discord_global_name TEXT,
+        discord_avatar TEXT,
+        character_player_id TEXT,
+        character_name TEXT,
+        character_status TEXT NOT NULL DEFAULT 'unlinked',
+        settings_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        last_login_at TEXT
+      , inactivity_warning_sent_at TEXT);
+      CREATE INDEX idx_user_accounts_status ON user_accounts (character_status, last_login_at DESC);
+      PRAGMA foreign_keys = ON;
+    `);
+  }
 
   for (const [key, value] of Object.entries(SOURCE_SETTINGS)) insertSetting(source, key, value);
   insertSetting(source, "source_only_setting", "must-not-migrate");
@@ -573,6 +594,18 @@ test("dry-run writes a redacted manifest with an internally frozen privacy times
     assert.deepEqual(Object.keys(counts).sort(), ["conflicting", "excluded", "operation", "replaced", "retained", "selected", "source", "target"], table);
     assert.equal(counts.operation, APPROVED_TABLES.has(table) ? "approved" : "protected", table);
     assert.equal(counts.excluded, !APPROVED_TABLES.has(table), table);
+  }
+});
+
+test("dry-run accepts the exact live old-production user_accounts schema only as a source shape", () => {
+  const fixture = createFixture({ liveSourceUserAccounts: true });
+  try {
+    const manifestPath = path.join(fixture.directory, "live-source-schema-manifest.json");
+    const result = runScript(dryRunArguments(fixture, manifestPath));
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(JSON.parse(readFileSync(manifestPath, "utf8")).selectionHash, /^[a-f0-9]{64}$/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
   }
 });
 
