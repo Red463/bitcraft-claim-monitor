@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
   copyFileSync,
   existsSync,
+  fsyncSync,
   lstatSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -150,6 +153,73 @@ function stable(value) {
   return value;
 }
 
+const DEFAULT_DURABILITY_FILESYSTEM = Object.freeze({
+  closeSync,
+  fsyncSync,
+  openSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+});
+
+export function createCanonicalCutoverDurability(
+  filesystem = DEFAULT_DURABILITY_FILESYSTEM,
+  { platform = process.platform, processId = process.pid } = {},
+) {
+  const syncDirectory = (directoryPath) => {
+    // Windows requires a writable directory handle for FlushFileBuffers; POSIX
+    // directories must be opened read-only. Both paths execute a real fsync.
+    const descriptor = filesystem.openSync(directoryPath, platform === "win32" ? "r+" : "r");
+    try {
+      filesystem.fsyncSync(descriptor);
+    } finally {
+      filesystem.closeSync(descriptor);
+    }
+  };
+  const syncParent = (entryPath) => syncDirectory(path.dirname(entryPath));
+  const syncFile = (filePath) => {
+    const descriptor = filesystem.openSync(filePath, platform === "win32" ? "r+" : "r");
+    try {
+      filesystem.fsyncSync(descriptor);
+    } finally {
+      filesystem.closeSync(descriptor);
+    }
+  };
+  const removePath = (entryPath, options = {}) => {
+    filesystem.rmSync(entryPath, options);
+    syncParent(entryPath);
+  };
+  const renamePath = (fromPath, toPath) => {
+    filesystem.renameSync(fromPath, toPath);
+    syncParent(toPath);
+    if (!comparePaths(path.dirname(fromPath), path.dirname(toPath))) syncParent(fromPath);
+  };
+  const writeMarker = (markerPath, payload) => {
+    const temporaryPath = `${markerPath}.tmp-${processId}`;
+    let renamed = false;
+    try {
+      const descriptor = filesystem.openSync(temporaryPath, "wx", 0o600);
+      try {
+        filesystem.writeFileSync(descriptor, `${JSON.stringify(payload)}\n`);
+        filesystem.fsyncSync(descriptor);
+      } finally {
+        filesystem.closeSync(descriptor);
+      }
+      filesystem.renameSync(temporaryPath, markerPath);
+      renamed = true;
+      syncParent(markerPath);
+    } catch (error) {
+      if (!renamed) {
+        try { removePath(temporaryPath, { force: true }); } catch {}
+      }
+      throw error;
+    }
+  };
+  return Object.freeze({ removePath, renamePath, syncDirectory, syncFile, syncParent, writeMarker });
+}
+
+const DEFAULT_CUTOVER_DURABILITY = createCanonicalCutoverDurability();
+
 export function canonicalJson(value) {
   return JSON.stringify(stable(value));
 }
@@ -186,6 +256,31 @@ function guardedExistingPath(inputPath, kind, label) {
   if (kind === "file" && !stats.isFile()) throw new Error(`${label} must be a regular file`);
   if (kind === "directory" && !stats.isDirectory()) throw new Error(`${label} must be a directory`);
   return resolved;
+}
+
+function databaseFilesystemIdentity(databasePath, label) {
+  let stats;
+  try {
+    stats = statSync(databasePath, { bigint: true });
+  } catch (error) {
+    throw new Error(`${label} filesystem identity could not be established safely: ${error.message}`);
+  }
+  if (typeof stats.dev !== "bigint" || typeof stats.ino !== "bigint" || typeof stats.nlink !== "bigint"
+    || stats.dev < 0n || stats.ino <= 0n || stats.nlink <= 0n) {
+    throw new Error(`${label} filesystem identity metadata is unavailable or unsafe`);
+  }
+  return { device: stats.dev, inode: stats.ino, linkCount: stats.nlink };
+}
+
+function assertDatabaseFilesystemIdentity(sourceDatabasePath, targetDatabasePath) {
+  const source = databaseFilesystemIdentity(sourceDatabasePath, "Source database");
+  const target = databaseFilesystemIdentity(targetDatabasePath, "Target database");
+  if (source.device === target.device && source.inode === target.inode) {
+    throw new Error("Source and target databases have the same filesystem identity (hard link)");
+  }
+  if (target.linkCount !== 1n) {
+    throw new Error(`Target database hard-link count must be exactly 1; found ${target.linkCount}`);
+  }
 }
 
 function guardedPlannedFilePath(inputPath, label, { allowExisting = false } = {}) {
@@ -963,6 +1058,10 @@ function openReadOnly(databasePath) {
   return new DatabaseSync(databasePath, { readOnly: true, timeout: 5_000 });
 }
 
+function openWritableTarget(databasePath) {
+  return new DatabaseSync(databasePath, { timeout: 5_000 });
+}
+
 export function createCanonicalCutoverManifest(input, { allowExistingManifest = false } = {}) {
   const claimId = decimal(input.claimId, "claim ID");
   if (claimId !== CANONICAL_CLAIM_ID) throw new Error(`claim ID must be exactly ${CANONICAL_CLAIM_ID}`);
@@ -979,6 +1078,7 @@ export function createCanonicalCutoverManifest(input, { allowExistingManifest = 
   const backupBrandingDirectory = guardedExistingOrPlannedDirectory(`${options.targetBrandingDirectory}.canonical-cutover-backup`, "Target branding backup directory");
   if (existsSync(backupBrandingDirectory)) throw new Error("Target branding backup directory must not exist before dry-run");
   assertCutoverPathsAreDisjoint({ ...options, backupBrandingDirectory, manifestPath, markerPath, pendingMarkerPath });
+  assertDatabaseFilesystemIdentity(options.sourceDatabasePath, options.targetDatabasePath);
   assertCleanCheckpoint(options.sourceDatabasePath, "Source database");
   assertCleanCheckpoint(options.targetDatabasePath, "Target database");
   const source = openReadOnly(options.sourceDatabasePath);
@@ -1140,7 +1240,7 @@ function applyAdminAudit(db, manifest) {
   }
 }
 
-function stageBranding(manifest) {
+function stageBranding(manifest, durability) {
   if (!manifest.branding.source.settingPresent) return null;
   const sourceDirectory = guardedExistingPath(manifest.branding.source.path, "directory", "Manifest source branding directory");
   const targetDirectory = guardedExistingPath(manifest.branding.target.path, "directory", "Manifest target branding directory");
@@ -1154,7 +1254,9 @@ function stageBranding(manifest) {
       copyFileSync(sourcePath, stagePath);
       const bytes = readFileSync(stagePath);
       if (bytes.length !== asset.size || sha256(bytes) !== asset.sha256) throw new Error("Branding source changed while staging");
+      durability.syncFile(stagePath);
     }
+    durability.syncDirectory(stageDirectory);
     return { stageDirectory, targetDirectory };
   } catch (error) {
     rmSync(stageDirectory, { recursive: true, force: true });
@@ -1166,15 +1268,15 @@ function brandingBackupPath(manifest) {
   return `${manifest.branding.target.path}.canonical-cutover-backup`;
 }
 
-function installStagedBranding({ stageDirectory, targetDirectory }, manifest) {
+function installStagedBranding({ stageDirectory, targetDirectory }, manifest, durability) {
   const backupDirectory = brandingBackupPath(manifest);
   if (existsSync(backupDirectory)) throw new Error("A canonical cutover branding backup already exists");
-  renameSync(targetDirectory, backupDirectory);
+  durability.renamePath(targetDirectory, backupDirectory);
   try {
-    renameSync(stageDirectory, targetDirectory);
+    durability.renamePath(stageDirectory, targetDirectory);
     return backupDirectory;
   } catch (error) {
-    if (!existsSync(targetDirectory) && existsSync(backupDirectory)) renameSync(backupDirectory, targetDirectory);
+    if (!existsSync(targetDirectory) && existsSync(backupDirectory)) durability.renamePath(backupDirectory, targetDirectory);
     throw error;
   }
 }
@@ -1220,17 +1322,6 @@ function markerPayload(manifest, state, recovery) {
   };
 }
 
-function writeNewMarker(markerPath, payload) {
-  const temporaryPath = `${markerPath}.tmp-${process.pid}`;
-  writeFileSync(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-  try {
-    renameSync(temporaryPath, markerPath);
-  } catch (error) {
-    rmSync(temporaryPath, { force: true });
-    throw error;
-  }
-}
-
 function readRecoveryMarker(markerPath, manifest) {
   const parsed = parseJson(readFileSync(guardedExistingPath(markerPath, "file", "Pending marker"), "utf8"), "Pending marker");
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
@@ -1239,6 +1330,18 @@ function readRecoveryMarker(markerPath, manifest) {
     || !/^[a-f0-9]{64}$/.test(String(parsed.preDatabaseStateFingerprint ?? ""))
     || !/^[a-f0-9]{64}$/.test(String(parsed.postDatabaseStateFingerprint ?? ""))) {
     throw new Error("Pending canonical cutover marker is invalid");
+  }
+  return parsed;
+}
+
+function readAppliedMarker(markerPath, manifest) {
+  const parsed = parseJson(readFileSync(guardedExistingPath(markerPath, "file", "Applied marker"), "utf8"), "Applied marker");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+    || parsed.state !== "applied" || parsed.applied !== true
+    || parsed.formatVersion !== manifest.formatVersion || parsed.selectionHash !== manifest.selectionHash
+    || !/^[a-f0-9]{64}$/.test(String(parsed.preDatabaseStateFingerprint ?? ""))
+    || !/^[a-f0-9]{64}$/.test(String(parsed.postDatabaseStateFingerprint ?? ""))) {
+    throw new Error("Applied canonical cutover marker is invalid");
   }
   return parsed;
 }
@@ -1278,40 +1381,87 @@ function applyResult(manifest, recovered = false) {
   };
 }
 
-function completePostCommit(manifest, markerPath, pendingMarkerPath, recovery, stagedBranding = null, recovered = true) {
+function recoverAppliedFinalization(manifest, paths, durability) {
+  const applied = readAppliedMarker(paths.markerPath, manifest);
+  if (existsSync(paths.pendingMarkerPath)) {
+    const pending = readRecoveryMarker(paths.pendingMarkerPath, manifest);
+    if (pending.preDatabaseStateFingerprint !== applied.preDatabaseStateFingerprint
+      || pending.postDatabaseStateFingerprint !== applied.postDatabaseStateFingerprint) {
+      throw new Error("Applied and pending canonical cutover recovery markers disagree");
+    }
+  }
+  const db = openReadOnly(paths.targetPath);
+  try {
+    assertSupportedSchema(db, "Target");
+    assertProtectedTablesUnchanged(db, manifest);
+    assertCleanIntegrity(db);
+    if (databaseRecoveryFingerprint(db) !== applied.postDatabaseStateFingerprint) {
+      throw new Error("Applied canonical cutover marker does not match the target database state");
+    }
+    if (!manifest.branding.source.settingPresent) {
+      const retainedBranding = brandingDescription(db, manifest.branding.target.path, "Recovered applied target");
+      if (canonicalJson(retainedBranding) !== canonicalJson(manifest.branding.target)) {
+        throw new Error("Retained target branding changed after the applied marker was written");
+      }
+    }
+  } finally {
+    db.close();
+  }
+  if (manifest.branding.source.settingPresent && !brandingFilesMatchManifest(manifest)) {
+    throw new Error("Applied canonical cutover marker exists but target branding is incomplete");
+  }
+  // Re-sync the marker's rename before deleting either recovery resource. This
+  // makes a previous post-rename directory-fsync failure safely retryable.
+  durability.syncParent(paths.markerPath);
+  if (existsSync(paths.pendingMarkerPath)) durability.removePath(paths.pendingMarkerPath, { force: true });
+  if (existsSync(paths.backupBrandingDirectory)) {
+    durability.removePath(paths.backupBrandingDirectory, { recursive: true, force: true });
+  }
+  return applyResult(manifest, true);
+}
+
+function completePostCommit(
+  manifest,
+  markerPath,
+  pendingMarkerPath,
+  recovery,
+  durability,
+  stagedBranding = null,
+  recovered = true,
+) {
   let backupDirectory = null;
   try {
     if (manifest.branding.source.settingPresent) {
       const expectedBackup = brandingBackupPath(manifest);
       if (!brandingFilesMatchManifest(manifest)) {
         if (!existsSync(manifest.branding.target.path) && existsSync(expectedBackup)) {
-          renameSync(expectedBackup, manifest.branding.target.path);
+          durability.renamePath(expectedBackup, manifest.branding.target.path);
         }
         if (existsSync(expectedBackup)) throw new Error("Branding recovery found an ambiguous existing backup");
-        stagedBranding ??= stageBranding(manifest);
-        backupDirectory = installStagedBranding(stagedBranding, manifest);
+        stagedBranding ??= stageBranding(manifest, durability);
+        backupDirectory = installStagedBranding(stagedBranding, manifest, durability);
       } else if (stagedBranding?.stageDirectory && existsSync(stagedBranding.stageDirectory)) {
-        rmSync(stagedBranding.stageDirectory, { recursive: true, force: true });
+        durability.removePath(stagedBranding.stageDirectory, { recursive: true, force: true });
       }
     }
-    writeNewMarker(markerPath, markerPayload(manifest, "applied", recovery));
-    try { rmSync(pendingMarkerPath, { force: true }); } catch {}
+    durability.writeMarker(markerPath, markerPayload(manifest, "applied", recovery));
+    durability.removePath(pendingMarkerPath, { force: true });
     if (manifest.branding.source.settingPresent) {
       const cleanupBackup = backupDirectory ?? brandingBackupPath(manifest);
       if (existsSync(cleanupBackup)) {
-        try { rmSync(cleanupBackup, { recursive: true, force: true }); } catch {}
+        durability.removePath(cleanupBackup, { recursive: true, force: true });
       }
     }
     return applyResult(manifest, recovered);
   } catch (error) {
     if (stagedBranding?.stageDirectory && existsSync(stagedBranding.stageDirectory)) {
-      try { rmSync(stagedBranding.stageDirectory, { recursive: true, force: true }); } catch {}
+      try { durability.removePath(stagedBranding.stageDirectory, { recursive: true, force: true }); } catch {}
     }
     throw new Error(`Canonical cutover database is committed; retry the same manifest to finish branding/marker recovery: ${error.message}`);
   }
 }
 
-function recoverPendingApply(manifest, paths) {
+function recoverPendingApply(manifest, paths, durability) {
   const recovery = readRecoveryMarker(paths.pendingMarkerPath, manifest);
   if (sha256(readFileSync(paths.sourcePath)) !== manifest.source.database.fileSha256) {
     throw new Error("Canonical cutover source changed during pending recovery");
@@ -1333,16 +1483,22 @@ function recoverPendingApply(manifest, paths) {
     db.close();
   }
   if (currentFingerprint === recovery.preDatabaseStateFingerprint) {
-    rmSync(paths.pendingMarkerPath, { force: true });
+    durability.removePath(paths.pendingMarkerPath, { force: true });
     return null;
   }
   if (currentFingerprint !== recovery.postDatabaseStateFingerprint) {
     throw new Error("Pending canonical cutover database state matches neither the pre-apply nor committed fingerprint");
   }
-  return completePostCommit(manifest, paths.markerPath, paths.pendingMarkerPath, recovery);
+  return completePostCommit(manifest, paths.markerPath, paths.pendingMarkerPath, recovery, durability);
 }
 
-export function applyCanonicalCutoverManifest({ manifest, manifestPath }) {
+export function applyCanonicalCutoverManifest(
+  { manifest, manifestPath },
+  {
+    durability = DEFAULT_CUTOVER_DURABILITY,
+    openTargetDatabase = openWritableTarget,
+  } = {},
+) {
   assertManifestIntegrity(manifest);
   const resolvedManifestPath = guardedExistingPath(manifestPath, "file", "Manifest");
   const markerPath = guardedPlannedFilePath(`${resolvedManifestPath}.applied`, "Applied marker", { allowExisting: true });
@@ -1362,19 +1518,28 @@ export function applyCanonicalCutoverManifest({ manifest, manifestPath }) {
     markerPath,
     pendingMarkerPath,
   });
-  if (existsSync(markerPath)) throw new Error("Canonical cutover manifest was already applied");
+  assertDatabaseFilesystemIdentity(sourcePath, targetPath);
+  if (existsSync(markerPath)) {
+    if (existsSync(pendingMarkerPath) || existsSync(backupBrandingDirectory)) {
+      return recoverAppliedFinalization(manifest, {
+        backupBrandingDirectory,
+        markerPath,
+        pendingMarkerPath,
+        targetPath,
+      }, durability);
+    }
+    throw new Error("Canonical cutover manifest was already applied");
+  }
   if (existsSync(backupBrandingDirectory) && !existsSync(pendingMarkerPath)) {
     throw new Error("Target branding backup directory exists without a pending recovery marker");
   }
   if (existsSync(pendingMarkerPath)) {
-    const recovered = recoverPendingApply(manifest, { markerPath, pendingMarkerPath, sourcePath, targetPath });
+    const recovered = recoverPendingApply(manifest, { markerPath, pendingMarkerPath, sourcePath, targetPath }, durability);
     if (recovered) return recovered;
   }
   let stagedBranding = null;
   let recovery = null;
-  let pendingMarkerWritten = false;
-  let databaseCommitted = false;
-  const db = new DatabaseSync(targetPath, { timeout: 5_000 });
+  const db = openTargetDatabase(targetPath);
   let transactionOpen = false;
   try {
     db.exec("PRAGMA foreign_keys = ON");
@@ -1395,7 +1560,7 @@ export function applyCanonicalCutoverManifest({ manifest, manifestPath }) {
       throw new Error("Canonical cutover inputs changed since dry-run; refusing apply");
     }
     const preDatabaseStateFingerprint = databaseRecoveryFingerprint(db);
-    stagedBranding = stageBranding(manifest);
+    stagedBranding = stageBranding(manifest, durability);
     db.exec("DELETE FROM user_sessions; DELETE FROM admin_sessions;");
     applyAccounts(db, manifest);
     applyAdmins(db, manifest);
@@ -1411,20 +1576,21 @@ export function applyCanonicalCutoverManifest({ manifest, manifestPath }) {
       preDatabaseStateFingerprint,
       postDatabaseStateFingerprint: databaseRecoveryFingerprint(db),
     };
-    writeNewMarker(pendingMarkerPath, markerPayload(manifest, "pending", recovery));
-    pendingMarkerWritten = true;
+    durability.writeMarker(pendingMarkerPath, markerPayload(manifest, "pending", recovery));
     db.exec("COMMIT");
     transactionOpen = false;
-    databaseCommitted = true;
   } catch (error) {
     if (transactionOpen) {
       try { db.exec("ROLLBACK"); } catch {}
     }
-    if (stagedBranding?.stageDirectory) rmSync(stagedBranding.stageDirectory, { recursive: true, force: true });
-    if (pendingMarkerWritten && !databaseCommitted) rmSync(pendingMarkerPath, { force: true });
+    if (stagedBranding?.stageDirectory) {
+      try { durability.removePath(stagedBranding.stageDirectory, { recursive: true, force: true }); } catch {}
+    }
+    // Once `.applying` may have been durably renamed, never delete it on an
+    // exception: COMMIT errors can be ambiguous and retry validates pre/post state.
     throw error;
   } finally {
     db.close();
   }
-  return completePostCommit(manifest, markerPath, pendingMarkerPath, recovery, stagedBranding, false);
+  return completePostCommit(manifest, markerPath, pendingMarkerPath, recovery, durability, stagedBranding, false);
 }

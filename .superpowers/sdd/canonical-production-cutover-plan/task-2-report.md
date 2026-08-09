@@ -126,3 +126,49 @@ all exited 0
 ```
 
 No production/live path was read or written, no VPS command was run, and `BITCRAFTSYNC_EXPLORER_AUDIT.md` remains untouched.
+
+## Second review remediation (2026-08-09)
+
+The two remaining re-review findings were addressed with isolated RED/GREEN cycles. This section extends the recovery contract above: filesystem path equality is not considered sufficient identity proof, and marker transitions are now explicitly durable rather than merely atomic.
+
+### Hard-link identity and target write safety
+
+- Dry-run and apply obtain `statSync(..., { bigint: true })` metadata for both databases before any SQLite handle is opened. Missing/non-BigInt metadata, a negative device ID, or a zero/negative inode or link count fails closed; device ID zero remains a valid comparable filesystem identity.
+- Equal `(dev, ino)` pairs are rejected even when source and target use different canonical paths, closing the reproduced hard-link alias that bypassed realpath comparison.
+- The writable target must have a link count of exactly one. A target with any additional hard link is rejected even when the source database has a different filesystem identity.
+- The regression uses real isolated `linkSync` files for both cases and verifies dry-run exits nonzero without creating a manifest.
+
+### Durable recovery-marker protocol
+
+- Marker I/O now goes through an injectable durability boundary. A marker is created as a mode-0600 exclusive temporary file, fully written, file-fsynced, and closed; it is then atomically renamed and its parent directory is fsynced. POSIX opens directory handles read-only; Windows uses a writable directory handle so its real `FlushFileBuffers`/`fsync` path succeeds rather than being skipped.
+- `.applying` completes that entire durable sequence before SQLite `COMMIT`. If marker durability fails after rename, the marker is retained and the target transaction rolls back; a retry validates the pre-state fingerprint, durably removes the stale pending marker, and starts normally.
+- Once `.applying` may exist, every later exception retains it. In particular, a `COMMIT` error is treated as ambiguous even if `ROLLBACK` also errors: retry inspects the target and accepts only the frozen pre-state or post-state fingerprint instead of deleting the sole recovery record.
+- Every verified copied branding asset is file-fsynced and the completed stage directory is directory-fsynced before database mutation or installation. Branding directory renames then fsync the affected parent directory. After database commit and branding verification/installation, `.applied` completes the same write/fsync/rename/directory-fsync sequence before either `.applying` or the branding backup is deleted.
+- Pending-marker and branding-backup cleanup use remove-then-parent-directory-fsync. Cleanup errors are no longer silently swallowed after commit; transaction-error cleanup uses the same durability boundary once a branding stage has been returned.
+- A post-rename `.applied` fsync/interruption can leave `.applied`, `.applying`, and the backup together. Retry validates both marker payloads, the committed target recovery fingerprint, protected-table integrity, and branding; it re-fsyncs the terminal marker before durably deleting the pending marker and backup. A complete applied marker with no recovery artifacts still refuses replay.
+- Injectable call-contract coverage asserts the exact file-fsync/close/rename/directory-fsync order and the remove/directory-fsync order. Crash-order coverage proves a directory-fsync failure does not delete a renamed recovery marker, a durable-pending interruption leaves the database rolled back and retryable, a `COMMIT`-succeeds-then-throws ambiguity retains pending recovery and resumes the post-state without replay, a durable-applied interruption is finalizable without database replay, and normal finalization writes `pending` then `applied` before cleanup.
+
+### Second follow-up verification
+
+Passed on the final second-remediation code:
+
+```text
+node --experimental-strip-types --test test/canonical-cutover-migration.test.mjs
+26 tests, 26 passed, 0 failed
+
+corepack pnpm --filter @workspace/bitcraft-local test
+1775 tests, 1775 passed, 0 failed
+
+corepack pnpm --filter @workspace/bitcraft-local run build
+exit 0; server/provider bindings, 1191 asset checks, TypeScript, Vite production build,
+and Relay runtime-boundary verification passed
+
+node --check apps/bitcraft-local/src/server/canonicalCutoverMigration.mjs
+node --check scripts/repair-relay-canonical-cutover.mjs
+git diff --check
+all exited 0
+```
+
+The first aggregate-suite attempt had one diagnostic-free worker failure for unrelated `dashboard-members-view.test.mjs`; that file passed 5/5 in isolation, and the unchanged aggregate rerun produced the 1775/1775 result above.
+
+No production/live path was read or written, no VPS command was run, and `BITCRAFTSYNC_EXPLORER_AUDIT.md` remains untouched.

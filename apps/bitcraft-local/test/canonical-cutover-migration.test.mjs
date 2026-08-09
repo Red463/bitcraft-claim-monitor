@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+import {
+  applyCanonicalCutoverManifest,
+  createCanonicalCutoverDurability,
+  readCanonicalCutoverManifest,
+} from "../src/server/canonicalCutoverMigration.mjs";
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 
 const CLAIM_ID = "1369094286777412590";
@@ -745,6 +750,233 @@ test("dry-run requires branding roots, databases, manifest, and markers to be mu
   ));
   assert.notEqual(nestedRoots.status, 0);
   assert.match(nestedRoots.stderr, /disjoint|overlap|branding root/i);
+});
+
+test("dry-run rejects database hard links before creating a manifest", () => {
+  const sharedIdentity = createFixture();
+  rmSync(sharedIdentity.targetDatabasePath);
+  linkSync(sharedIdentity.sourceDatabasePath, sharedIdentity.targetDatabasePath);
+  rmSync(path.join(sharedIdentity.targetBrandingDirectory, "favicon.webp"));
+  writeFileSync(path.join(sharedIdentity.targetBrandingDirectory, "logo.png"), PNG_BYTES);
+  const sharedManifestPath = path.join(sharedIdentity.directory, "shared-identity.json");
+
+  const shared = runScript(dryRunArguments(sharedIdentity, sharedManifestPath));
+
+  assert.notEqual(shared.status, 0);
+  assert.match(shared.stderr, /same filesystem identity|hard link/i);
+  assert.equal(existsSync(sharedManifestPath), false);
+
+  const multiplyLinkedTarget = createFixture();
+  const targetAliasPath = path.join(multiplyLinkedTarget.directory, "relay-alias.sqlite");
+  linkSync(multiplyLinkedTarget.targetDatabasePath, targetAliasPath);
+  const linkedManifestPath = path.join(multiplyLinkedTarget.directory, "multiply-linked-target.json");
+
+  const linked = runScript(dryRunArguments(multiplyLinkedTarget, linkedManifestPath));
+
+  assert.notEqual(linked.status, 0);
+  assert.match(linked.stderr, /target database.*hard link|link count/i);
+  assert.equal(existsSync(linkedManifestPath), false);
+});
+
+test("marker durability orders file fsync, atomic rename, directory fsync, and durable deletion", () => {
+  const events = [];
+  let nextDescriptor = 40;
+  const filesystem = {
+    closeSync(descriptor) { events.push(["close", descriptor]); },
+    fsyncSync(descriptor) { events.push(["fsync", descriptor]); },
+    openSync(filePath, flags, mode) {
+      const descriptor = nextDescriptor;
+      nextDescriptor += 1;
+      events.push(["open", filePath, flags, mode, descriptor]);
+      return descriptor;
+    },
+    renameSync(fromPath, toPath) { events.push(["rename", fromPath, toPath]); },
+    rmSync(filePath, options) { events.push(["remove", filePath, options]); },
+    writeFileSync(descriptor, contents) { events.push(["write", descriptor, String(contents)]); },
+  };
+  const markerPath = path.join("durability-root", "manifest.json.applying");
+  const temporaryPath = `${markerPath}.tmp-4242`;
+  const durability = createCanonicalCutoverDurability(filesystem, { platform: "linux", processId: 4242 });
+
+  durability.writeMarker(markerPath, { state: "pending" });
+  durability.removePath(markerPath, { force: true });
+
+  assert.deepEqual(events, [
+    ["open", temporaryPath, "wx", 0o600, 40],
+    ["write", 40, '{"state":"pending"}\n'],
+    ["fsync", 40],
+    ["close", 40],
+    ["rename", temporaryPath, markerPath],
+    ["open", path.dirname(markerPath), "r", undefined, 41],
+    ["fsync", 41],
+    ["close", 41],
+    ["remove", markerPath, { force: true }],
+    ["open", path.dirname(markerPath), "r", undefined, 42],
+    ["fsync", 42],
+    ["close", 42],
+  ]);
+});
+
+test("a marker directory-fsync failure leaves the renamed recovery marker in place", () => {
+  const events = [];
+  let nextDescriptor = 50;
+  const filesystem = {
+    closeSync(descriptor) { events.push(["close", descriptor]); },
+    fsyncSync(descriptor) {
+      events.push(["fsync", descriptor]);
+      if (descriptor === 51) throw new Error("injected directory fsync failure");
+    },
+    openSync(filePath, flags, mode) {
+      const descriptor = nextDescriptor;
+      nextDescriptor += 1;
+      events.push(["open", filePath, flags, mode, descriptor]);
+      return descriptor;
+    },
+    renameSync(fromPath, toPath) { events.push(["rename", fromPath, toPath]); },
+    rmSync(filePath, options) { events.push(["remove", filePath, options]); },
+    writeFileSync(descriptor, contents) { events.push(["write", descriptor, String(contents)]); },
+  };
+  const markerPath = path.join("durability-root", "manifest.json.applying");
+  const temporaryPath = `${markerPath}.tmp-5252`;
+  const durability = createCanonicalCutoverDurability(filesystem, { platform: "linux", processId: 5252 });
+
+  assert.throws(
+    () => durability.writeMarker(markerPath, { state: "pending" }),
+    /injected directory fsync failure/,
+  );
+  assert.deepEqual(events.filter(([operation]) => operation === "rename"), [
+    ["rename", temporaryPath, markerPath],
+  ]);
+  assert.equal(events.some(([operation, filePath]) => operation === "remove" && filePath === markerPath), false);
+});
+
+test("apply preserves pre-commit recovery and finalizes markers in durable order", () => {
+  const interrupted = createFixture();
+  const interruptedManifestPath = createManifest(interrupted);
+  const realDurability = createCanonicalCutoverDurability();
+  const interruptedDurability = {
+    ...realDurability,
+    writeMarker(markerPath, payload) {
+      realDurability.writeMarker(markerPath, payload);
+      if (payload.state === "pending") throw new Error("injected crash after durable pending marker");
+    },
+  };
+
+  assert.throws(
+    () => applyCanonicalCutoverManifest(
+      readCanonicalCutoverManifest(interruptedManifestPath),
+      { durability: interruptedDurability },
+    ),
+    /injected crash after durable pending marker/,
+  );
+  assert.equal(existsSync(`${interruptedManifestPath}.applying`), true);
+  assert.equal(existsSync(`${interruptedManifestPath}.applied`), false);
+  const interruptedTarget = new DatabaseSync(interrupted.targetDatabasePath, { readOnly: true });
+  assert.equal(interruptedTarget.prepare("SELECT COUNT(*) AS count FROM user_sessions").get().count, 1);
+  interruptedTarget.close();
+  const recovered = runScript(["--apply", "--manifest", interruptedManifestPath]);
+  assert.equal(recovered.status, 0, recovered.stderr);
+
+  const ambiguousCommit = createFixture();
+  const ambiguousCommitManifestPath = createManifest(ambiguousCommit);
+  const openAmbiguousTargetDatabase = (databasePath) => {
+    const database = new DatabaseSync(databasePath, { timeout: 5_000 });
+    return new Proxy(database, {
+      get(target, property) {
+        if (property === "exec") {
+          return (sql) => {
+            const result = target.exec(sql);
+            if (sql === "COMMIT") throw new Error("injected ambiguous error after successful commit");
+            return result;
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  };
+
+  assert.throws(
+    () => applyCanonicalCutoverManifest(
+      readCanonicalCutoverManifest(ambiguousCommitManifestPath),
+      { openTargetDatabase: openAmbiguousTargetDatabase },
+    ),
+    /injected ambiguous error after successful commit/,
+  );
+  assert.equal(existsSync(`${ambiguousCommitManifestPath}.applying`), true);
+  assert.equal(existsSync(`${ambiguousCommitManifestPath}.applied`), false);
+  const ambiguousTarget = new DatabaseSync(ambiguousCommit.targetDatabasePath, { readOnly: true });
+  assert.equal(ambiguousTarget.prepare("SELECT COUNT(*) AS count FROM user_sessions").get().count, 0);
+  ambiguousTarget.close();
+
+  const ambiguityRecovered = runScript(["--apply", "--manifest", ambiguousCommitManifestPath]);
+
+  assert.equal(ambiguityRecovered.status, 0, ambiguityRecovered.stderr);
+  assert.equal(JSON.parse(ambiguityRecovered.stdout).recovered, true);
+
+  const interruptedFinalization = createFixture();
+  const interruptedFinalizationManifestPath = createManifest(interruptedFinalization);
+  const finalizationDurability = {
+    ...realDurability,
+    writeMarker(markerPath, payload) {
+      realDurability.writeMarker(markerPath, payload);
+      if (payload.state === "applied") throw new Error("injected crash after durable applied marker");
+    },
+  };
+  assert.throws(
+    () => applyCanonicalCutoverManifest(
+      readCanonicalCutoverManifest(interruptedFinalizationManifestPath),
+      { durability: finalizationDurability },
+    ),
+    /injected crash after durable applied marker/,
+  );
+  assert.equal(existsSync(`${interruptedFinalizationManifestPath}.applying`), true);
+  assert.equal(existsSync(`${interruptedFinalizationManifestPath}.applied`), true);
+
+  const finalized = runScript(["--apply", "--manifest", interruptedFinalizationManifestPath]);
+
+  assert.equal(finalized.status, 0, finalized.stderr);
+  assert.equal(existsSync(`${interruptedFinalizationManifestPath}.applying`), false);
+  assert.equal(existsSync(`${interruptedFinalization.targetBrandingDirectory}.canonical-cutover-backup`), false);
+
+  const ordered = createFixture();
+  const orderedManifestPath = createManifest(ordered);
+  const events = [];
+  const orderedDurability = {
+    ...realDurability,
+    removePath(entryPath, options) {
+      events.push(["remove", path.basename(entryPath)]);
+      return realDurability.removePath(entryPath, options);
+    },
+    writeMarker(markerPath, payload) {
+      events.push(["write", payload.state, path.basename(markerPath)]);
+      return realDurability.writeMarker(markerPath, payload);
+    },
+    syncDirectory(directoryPath) {
+      const directoryName = path.basename(directoryPath);
+      events.push(["sync-directory", directoryName.startsWith(".canonical-cutover-branding-stage-") ? "branding-stage" : directoryName]);
+      return realDurability.syncDirectory(directoryPath);
+    },
+    syncFile(filePath) {
+      events.push(["sync-file", path.basename(filePath)]);
+      return realDurability.syncFile(filePath);
+    },
+  };
+
+  const result = applyCanonicalCutoverManifest(
+    readCanonicalCutoverManifest(orderedManifestPath),
+    { durability: orderedDurability },
+  );
+
+  assert.equal(result.integrity, "ok");
+  assert.deepEqual(events, [
+    ["sync-file", "logo.png"],
+    ["sync-directory", "branding-stage"],
+    ["write", "pending", "manifest.json.applying"],
+    ["write", "applied", "manifest.json.applied"],
+    ["remove", "manifest.json.applying"],
+    ["remove", "relay-branding.canonical-cutover-backup"],
+  ]);
 });
 
 test("dry-run refuses a database with uncheckpointed WAL content", () => {
