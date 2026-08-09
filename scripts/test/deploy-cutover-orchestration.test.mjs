@@ -126,6 +126,9 @@ test("cutover arguments accept only the three exact full-SHA modes", () => {
     "--revision", REVISION, "--apply-cutover", "--manifest-hash", MANIFEST_HASH,
   ]), { mode: "apply", revision: REVISION, confirmation: null, manifestHash: MANIFEST_HASH });
   assert.deepEqual(parseCutoverArguments([
+    "--revision", REVISION, "--apply-cutover", "--manifest-hash", MANIFEST_HASH, "--skip-soak",
+  ]), { mode: "apply", revision: REVISION, confirmation: null, manifestHash: MANIFEST_HASH, skipSoak: true });
+  assert.deepEqual(parseCutoverArguments([
     "--revision", REVISION, "--abort-cutover", "--manifest-hash", MANIFEST_HASH,
   ]), { mode: "abort", revision: REVISION, confirmation: null, manifestHash: MANIFEST_HASH });
 
@@ -272,6 +275,28 @@ test("zero-selection apply skips repair mutation but still verifies the frozen n
     await cutover.orchestrator.apply({ revision: REVISION, manifestHash: MANIFEST_HASH });
     assert.equal(cutover.events.includes("apply-repair"), false);
     assert.ok(cutover.events.indexOf("verify-repair") < cutover.events.indexOf("install-privacy-key"));
+  } finally {
+    rmSync(cutover.directory, { recursive: true, force: true });
+  }
+});
+
+test("explicit apply override skips only the timed soak and records the operator decision", async () => {
+  const cutover = fixture();
+  try {
+    await cutover.orchestrator.prepare({ revision: REVISION, confirmation: CANONICAL_CONFIRMATION });
+    cutover.events.length = 0;
+    const result = await cutover.orchestrator.apply({ revision: REVISION, manifestHash: MANIFEST_HASH, skipSoak: true });
+    assert.equal(result.status, "complete");
+    assert.equal(cutover.events.includes("verify-intensive-soak"), false);
+    assert.equal(cutover.events.includes("enqueue-cutover-announcement"), true);
+    const state = JSON.parse(readFileSync(path.join(cutover.directory, "state.json"), "utf8"));
+    assert.deepEqual(state.operatorOverrides.skipIntensiveSoak, {
+      approved: true,
+      revision: REVISION,
+      requestedAt: "2026-08-09T12:00:00.000Z",
+    });
+    assert.equal(state.postAdmission.intensiveSoakSkipped, true);
+    assert.equal(state.postAdmission.intensiveSoakVerified, false);
   } finally {
     rmSync(cutover.directory, { recursive: true, force: true });
   }

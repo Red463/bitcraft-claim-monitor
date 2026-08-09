@@ -140,15 +140,17 @@ export function parseCutoverArguments(argv) {
     && argv[4] === CANONICAL_CONFIRMATION) {
     return { mode: "prepare", revision, confirmation: argv[4], manifestHash: null };
   }
-  if (argv.length === 5
+  if ((argv.length === 5 || argv.length === 6)
     && (argv[2] === "--apply-cutover" || argv[2] === "--abort-cutover")
     && argv[3] === "--manifest-hash"
-    && CANONICAL_MANIFEST_HASH_PATTERN.test(String(argv[4] ?? ""))) {
+    && CANONICAL_MANIFEST_HASH_PATTERN.test(String(argv[4] ?? ""))
+    && (argv.length === 5 || (argv[2] === "--apply-cutover" && argv[5] === "--skip-soak"))) {
     return {
       mode: argv[2] === "--apply-cutover" ? "apply" : "abort",
       revision,
       confirmation: null,
       manifestHash: argv[4],
+      ...(argv[5] === "--skip-soak" ? { skipSoak: true } : {}),
     };
   }
   throw argumentError("unknown or mixed cutover mode");
@@ -730,8 +732,13 @@ export function createCutoverOrchestrator({ operations, stateDirectory, now = ()
       save(state);
     }
     if (!state.postAdmission.intensiveSoakVerified) {
-      state.intensiveSoak = await invoke(operations, "verifyIntensiveSoak", state);
-      state.postAdmission.intensiveSoakVerified = true;
+      if (state.operatorOverrides?.skipIntensiveSoak?.approved === true) {
+        state.postAdmission.intensiveSoakSkipped = true;
+        state.postAdmission.intensiveSoakVerified = false;
+      } else {
+        state.intensiveSoak = await invoke(operations, "verifyIntensiveSoak", state);
+        state.postAdmission.intensiveSoakVerified = true;
+      }
       save(state);
     }
     if (!state.postAdmission.cutoverAnnouncementEnqueued) {
@@ -745,9 +752,26 @@ export function createCutoverOrchestrator({ operations, stateDirectory, now = ()
     return { revision, manifestHash, status: "complete" };
   }
 
-  async function apply({ revision, manifestHash }) {
+  async function apply({ revision, manifestHash, skipSoak = false }) {
     let state = readState(statePath);
     assertMatchingState(state, { revision, manifestHash });
+    const recordedSkip = state.operatorOverrides?.skipIntensiveSoak;
+    if (skipSoak) {
+      if (recordedSkip && (recordedSkip.approved !== true || recordedSkip.revision !== revision)) {
+        throw new Error("Recorded intensive-soak override does not match this revision");
+      }
+      if (!recordedSkip) {
+        state.operatorOverrides ??= {};
+        state.operatorOverrides.skipIntensiveSoak = {
+          approved: true,
+          revision,
+          requestedAt: now().toISOString(),
+        };
+        save(state);
+      }
+    } else if (recordedSkip?.approved === true) {
+      throw new Error("Fix-forward apply must repeat the approved --skip-soak override");
+    }
     if (existsSync(admissionPath)) {
       const admission = matchingAdmission(revision, manifestHash);
       if (state.status === "complete") return { revision, manifestHash, status: "complete" };

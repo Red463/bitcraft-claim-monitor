@@ -8,7 +8,7 @@ const workflow = readFileSync(new URL("../../.github/workflows/cutover-relay-pro
 const deployment = readFileSync(new URL("../../DEPLOYMENT.md", import.meta.url), "utf8");
 
 test("restricted updater delegates only exact cutover modes before its routine transaction", () => {
-  for (const option of ["--prepare-cutover", "--apply-cutover", "--abort-cutover", "--confirmation", "--manifest-hash"]) {
+  for (const option of ["--prepare-cutover", "--apply-cutover", "--abort-cutover", "--confirmation", "--manifest-hash", "--skip-soak"]) {
     assert.match(updater, new RegExp(option.replaceAll("-", "\\-")));
   }
   assert.match(updater, /CUTOVER_HELPER_PATH=.*cutover-relay-production\.mjs/);
@@ -27,6 +27,8 @@ test("restricted updater delegates only exact cutover modes before its routine t
   );
   assert.match(cutoverValidation, /prepare\)[\s\S]*"\$CUTOVER_MANIFEST_HASH_SEEN" == "0"[\s\S]*apply\|abort\)/);
   assert.match(cutoverValidation, /apply\|abort\)[\s\S]*"\$CUTOVER_CONFIRMATION_SEEN" == "0"/);
+  assert.match(cutoverValidation, /prepare\)[\s\S]*"\$SKIP_CUTOVER_SOAK" == "0"/);
+  assert.match(cutoverValidation, /elif \[\[.*SKIP_CUTOVER_SOAK/s);
 
   const main = updater.slice(updater.indexOf("main()"));
   const delegation = main.indexOf("delegate_cutover_mode");

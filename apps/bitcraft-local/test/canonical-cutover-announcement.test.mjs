@@ -122,6 +122,42 @@ test("admitted, publicly verified, stable 30-minute soak enqueues one revision-b
   }
 });
 
+test("explicit revision-bound operator override can enqueue after local and public canonical verification", () => {
+  const current = fixture();
+  try {
+    current.state.postAdmission.intensiveSoakVerified = false;
+    current.state.postAdmission.intensiveSoakSkipped = true;
+    current.state.operatorOverrides = {
+      skipIntensiveSoak: {
+        approved: true,
+        revision: REVISION,
+        requestedAt: "2026-08-09T12:34:00.000Z",
+      },
+    };
+    current.state.localVerification = {
+      health: { ok: true, deploymentMode: "canonical", version: "0.52.0-beta.1" },
+      gatewayPid: "42",
+      subscriptions: { subscriptions: { "relay:global:catalogs": 8 } },
+      outbox: { counts: {}, latestId: 0 },
+    };
+    current.state.publicVerification = {
+      health: true,
+      redirect: true,
+      securityHeaders: true,
+      subscriptions: { subscriptions: { "relay:global:catalogs": 8 } },
+    };
+    current.db.close();
+    assert.deepEqual(enqueueCanonicalCutoverAnnouncement({
+      databasePath: current.databasePath,
+      revision: REVISION,
+      state: current.state,
+      now: () => new Date("2026-08-09T12:35:00.000Z"),
+    }), { inserted: true, sourceKey: `canonical-cutover:${REVISION}`, status: "pending" });
+  } finally {
+    rmSync(current.directory, { recursive: true, force: true });
+  }
+});
+
 test("announcement refuses every pre-admission, public, gateway, outbox, and soak boundary", () => {
   const cases = [
     ["admission", (state) => { delete state.admission; }],
