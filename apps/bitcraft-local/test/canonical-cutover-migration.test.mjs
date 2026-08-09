@@ -13,6 +13,7 @@ import {
   createCanonicalCutoverManifest,
   createCanonicalCutoverDurability,
   readCanonicalCutoverManifest,
+  verifyAppliedCanonicalCutoverManifest,
 } from "../src/server/canonicalCutoverMigration.mjs";
 import {
   createCanonicalCutoverPrivacyPlan,
@@ -25,6 +26,10 @@ import {
   signDeletionLedgerRecord,
 } from "../src/server/privacyDeletionLedger.mjs";
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
+import {
+  applyContributionProfessionRepair,
+  createContributionProfessionManifest,
+} from "../src/server/contributionProfessionRepair.mjs";
 
 const CLAIM_ID = "1369094286777412590";
 const SCRIPT_PATH = fileURLToPath(new URL("../../../scripts/repair-relay-canonical-cutover.mjs", import.meta.url));
@@ -470,6 +475,37 @@ function task4ReadinessArguments(fixture, manifestPath) {
   return ["--privacy-key-ready-artifact", fixture.privacyReadinessArtifactPath];
 }
 
+function createRepairTransitionFixture({ selected = true } = {}) {
+  const fixture = createFixture();
+  mutateDatabase(fixture.targetDatabasePath, (db) => {
+    if (selected) {
+      db.prepare("UPDATE production_contributions SET craft_entity_id = '100' WHERE contribution_key = 'relay-contribution'").run();
+      db.prepare("UPDATE production_contribution_events SET craft_entity_id = '100' WHERE source_key = 'relay-event'").run();
+      db.prepare(`
+        INSERT INTO domain_payload_current
+          (claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at,
+           updated_at, provider, freshness, confidence, generation, warnings_json)
+        VALUES (?, 'crafts', ?, 'relay-time', 'relay-time', 'relay-time',
+          'relay-time', 'relay', 'fresh', 'high', 7, '[]')
+      `).run(CLAIM_ID, JSON.stringify({
+        craftResults: [{ entityId: "100", levelRequirements: [{ skillId: "3" }] }],
+      }));
+    }
+  });
+  const target = new DatabaseSync(fixture.targetDatabasePath, { readOnly: true });
+  const repairManifest = createContributionProfessionManifest(target, CLAIM_ID);
+  target.close();
+  const repairManifestPath = path.join(fixture.directory, "profession-repair.json");
+  writeFileSync(repairManifestPath, `${JSON.stringify(repairManifest, null, 2)}\n`, { mode: 0o600 });
+  const manifestPath = path.join(fixture.directory, "manifest-with-repair.json");
+  const dryRun = runScript([
+    ...dryRunArguments(fixture, manifestPath),
+    "--contribution-repair-manifest", repairManifestPath,
+  ]);
+  assert.equal(dryRun.status, 0, dryRun.stderr);
+  return { ...fixture, manifestPath, repairManifest };
+}
+
 function privacyRecord(key, discordId, overrides = {}) {
   return signDeletionLedgerRecord({
     version: 1,
@@ -626,6 +662,7 @@ test("apply performs every approved merge while preserving Relay-only and explic
   assert.equal(dryRun.status, 0, dryRun.stderr);
 
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  assert.equal("approvedPreMigrationRepair" in manifest, false);
   assert.deepEqual(manifest.adminMappings, [
     { action: "overwrite", sourceId: 10, targetId: 2 },
     { action: "insert", sourceId: 20, targetId: 4 },
@@ -731,6 +768,77 @@ test("apply performs every approved merge while preserving Relay-only and explic
 
   assert.deepEqual(readFileSync(path.join(fixture.targetBrandingDirectory, "logo.png")), PNG_BYTES);
   assert.equal(existsSync(path.join(fixture.targetBrandingDirectory, "favicon.webp")), false);
+});
+
+test("dry-run freezes the exact approved contribution repair and apply accepts only its post-repair fingerprints", () => {
+  const fixture = createRepairTransitionFixture();
+  try {
+    const manifest = JSON.parse(readFileSync(fixture.manifestPath, "utf8"));
+    assert.equal(manifest.approvedPreMigrationRepair.selectionHash, fixture.repairManifest.selectionHash);
+    assert.equal(manifest.approvedPreMigrationRepair.selectedCount, 2);
+    assert.deepEqual(manifest.approvedPreMigrationRepair.selectedIds, {
+      aggregates: ["relay-contribution"],
+      events: ["relay-event"],
+    });
+    assert.match(manifest.approvedPreMigrationRepair.expectedPostRepair.databaseLogicalSha256, /^[a-f0-9]{64}$/);
+    assert.match(manifest.approvedPreMigrationRepair.expectedPostRepair.tables.production_contributions.contentSha256, /^[a-f0-9]{64}$/);
+    assert.match(manifest.approvedPreMigrationRepair.expectedPostRepair.tables.production_contribution_events.contentSha256, /^[a-f0-9]{64}$/);
+
+    mutateDatabase(fixture.targetDatabasePath, (db) => applyContributionProfessionRepair(db, fixture.repairManifest));
+    const readiness = task4ReadinessArguments(fixture, fixture.manifestPath);
+    const apply = runScript(["--apply", "--manifest", fixture.manifestPath, ...readiness]);
+    assert.equal(apply.status, 0, apply.stderr);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("zero-selection approved contribution repair preserves ordinary Task 2 apply behavior", () => {
+  const fixture = createRepairTransitionFixture({ selected: false });
+  try {
+    const manifest = JSON.parse(readFileSync(fixture.manifestPath, "utf8"));
+    assert.equal(manifest.approvedPreMigrationRepair.selectedCount, 0);
+    assert.deepEqual(manifest.approvedPreMigrationRepair.selectedIds, { aggregates: [], events: [] });
+    const readiness = task4ReadinessArguments(fixture, fixture.manifestPath);
+    const apply = runScript(["--apply", "--manifest", fixture.manifestPath, ...readiness]);
+    assert.equal(apply.status, 0, apply.stderr);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("apply refuses an altered contribution repair transition", () => {
+  const fixture = createRepairTransitionFixture();
+  try {
+    mutateDatabase(fixture.targetDatabasePath, (db) => {
+      db.prepare("UPDATE production_contributions SET profession = 'Masonry', raw_json = ? WHERE contribution_key = 'relay-contribution'")
+        .run(JSON.stringify({ profession: "Masonry" }));
+      db.prepare("UPDATE production_contribution_events SET raw_json = ? WHERE source_key = 'relay-event'")
+        .run(JSON.stringify({ profession: "Masonry" }));
+    });
+    const readiness = task4ReadinessArguments(fixture, fixture.manifestPath);
+    const apply = runScript(["--apply", "--manifest", fixture.manifestPath, ...readiness]);
+    assert.notEqual(apply.status, 0);
+    assert.match(apply.stderr, /approved contribution repair transition|protected.*changed/i);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("approved contribution repair never permits unrelated protected-table drift", () => {
+  const fixture = createRepairTransitionFixture();
+  try {
+    mutateDatabase(fixture.targetDatabasePath, (db) => {
+      applyContributionProfessionRepair(db, fixture.repairManifest);
+      db.prepare("UPDATE market_events SET item_name = 'unexpected drift' WHERE id = 1").run();
+    });
+    const readiness = task4ReadinessArguments(fixture, fixture.manifestPath);
+    const apply = runScript(["--apply", "--manifest", fixture.manifestPath, ...readiness]);
+    assert.notEqual(apply.status, 0);
+    assert.match(apply.stderr, /approved contribution repair transition|protected.*changed|inputs changed/i);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
 });
 
 test("apply refuses a changed database, tampered manifest, and an already-applied marker", () => {
@@ -1251,6 +1359,17 @@ test("apply preserves pre-commit recovery and finalizes markers in durable order
   );
 
   assert.equal(result.integrity, "ok");
+  assert.equal(
+    verifyAppliedCanonicalCutoverManifest(readCanonicalCutoverManifest(orderedManifestPath)).postDatabaseStateFingerprint.length,
+    64,
+  );
+  mutateDatabase(ordered.targetDatabasePath, (db) => {
+    db.prepare("UPDATE app_settings SET value = 'post-apply-drift' WHERE key = 'theme_json'").run();
+  });
+  assert.throws(
+    () => verifyAppliedCanonicalCutoverManifest(readCanonicalCutoverManifest(orderedManifestPath)),
+    /applied.*marker.*database state/i,
+  );
   assert.deepEqual(events, [
     ["sync-file", "logo.png"],
     ["sync-directory", "branding-stage"],

@@ -24,6 +24,7 @@ import {
   createCanonicalCutoverPrivacyPlan,
   prepareCanonicalCutoverPrivacyApply,
 } from "./canonicalCutoverPrivacy.mjs";
+import { projectContributionProfessionRepairRows } from "./contributionProfessionRepair.mjs";
 
 export const CANONICAL_CLAIM_ID = "1369094286777412590";
 export const CANONICAL_CUTOVER_MANIFEST_VERSION = 1;
@@ -494,18 +495,9 @@ function tableCount(db, table) {
   return Number(db.prepare(`SELECT COUNT(*) AS count FROM ${quoteIdentifier(table)}`).get().count);
 }
 
-function tableContentFingerprint(db, table) {
-  const columnInfo = db.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all();
-  const columns = columnInfo.map((column) => String(column.name));
+function rowsContentFingerprint(columns, rows) {
   const hash = createHash("sha256");
-  const tableSql = String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)?.sql ?? "");
-  const primaryKey = columnInfo.filter((column) => Number(column.pk) > 0)
-    .sort((left, right) => Number(left.pk) - Number(right.pk))
-    .map((column) => quoteIdentifier(column.name));
-  const ordering = /\bWITHOUT\s+ROWID\b/i.test(tableSql)
-    ? (primaryKey.length ? ` ORDER BY ${primaryKey.join(", ")}` : "")
-    : " ORDER BY rowid";
-  for (const row of db.prepare(`SELECT * FROM ${quoteIdentifier(table)}${ordering}`).iterate()) {
+  for (const row of rows) {
     const normalized = {};
     for (const column of columns) {
       const value = row[column];
@@ -515,6 +507,36 @@ function tableContentFingerprint(db, table) {
     hash.update("\n");
   }
   return hash.digest("hex");
+}
+
+function orderedTableRows(db, table) {
+  const columnInfo = db.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all();
+  const tableSql = String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)?.sql ?? "");
+  const primaryKey = columnInfo.filter((column) => Number(column.pk) > 0)
+    .sort((left, right) => Number(left.pk) - Number(right.pk))
+    .map((column) => quoteIdentifier(column.name));
+  const ordering = /\bWITHOUT\s+ROWID\b/i.test(tableSql)
+    ? (primaryKey.length ? ` ORDER BY ${primaryKey.join(", ")}` : "")
+    : " ORDER BY rowid";
+  return {
+    columns: columnInfo.map((column) => String(column.name)),
+    rows: db.prepare(`SELECT * FROM ${quoteIdentifier(table)}${ordering}`).all(),
+  };
+}
+
+function tableContentFingerprint(db, table, projectedRows = null) {
+  const { columns, rows } = orderedTableRows(db, table);
+  return rowsContentFingerprint(columns, projectedRows ?? rows);
+}
+
+function databaseLogicalFingerprint(db, projectedTables = {}) {
+  return sha256(canonicalJson({
+    schema: schemaDescription(db),
+    tables: Object.fromEntries(tableNames(db).map((table) => [table, {
+      count: projectedTables[table]?.length ?? tableCount(db, table),
+      contentSha256: tableContentFingerprint(db, table, projectedTables[table] ?? null),
+    }])),
+  }));
 }
 
 function databaseDescription(db, databasePath, { includeProtectedContent }) {
@@ -1052,6 +1074,40 @@ function collectTableCounts(sourceDescription, targetDescription, source, target
   return counts;
 }
 
+function approvedContributionRepairDescription(target, repairManifest) {
+  const projectedTables = projectContributionProfessionRepairRows(target, repairManifest);
+  const tableDescription = (table, rows = null) => ({
+    count: rows?.length ?? tableCount(target, table),
+    contentSha256: tableContentFingerprint(target, table, rows),
+  });
+  const selectedIds = {
+    aggregates: repairManifest.selection.aggregates.map((row) => String(row.id)),
+    events: repairManifest.selection.events.map((row) => String(row.id)),
+  };
+  return {
+    formatVersion: 1,
+    manifestSha256: sha256(canonicalJson(repairManifest)),
+    selectionHash: repairManifest.selectionHash,
+    selectedCount: selectedIds.aggregates.length + selectedIds.events.length,
+    selectedIds,
+    counts: repairManifest.counts,
+    expectedPreRepair: {
+      databaseLogicalSha256: databaseLogicalFingerprint(target),
+      tables: {
+        production_contributions: tableDescription("production_contributions"),
+        production_contribution_events: tableDescription("production_contribution_events"),
+      },
+    },
+    expectedPostRepair: {
+      databaseLogicalSha256: databaseLogicalFingerprint(target, projectedTables),
+      tables: {
+        production_contributions: tableDescription("production_contributions", projectedTables.production_contributions),
+        production_contribution_events: tableDescription("production_contribution_events", projectedTables.production_contribution_events),
+      },
+    },
+  };
+}
+
 function manifestWithoutHash(options, source, target) {
   validateSelectedRows(source, target, options.claimId);
   const sourceDatabase = databaseDescription(source, options.sourceDatabasePath, { includeProtectedContent: false });
@@ -1088,6 +1144,9 @@ function manifestWithoutHash(options, source, target) {
         }
       : { source: null, target: null },
   };
+  if (options.contributionRepairManifest) {
+    manifest.approvedPreMigrationRepair = approvedContributionRepairDescription(target, options.contributionRepairManifest);
+  }
   if (options.privacyDeletionLedger) manifest.privacyDeletionLedger = options.privacyDeletionLedger;
   return manifest;
 }
@@ -1116,6 +1175,7 @@ export function createCanonicalCutoverManifest(input, { allowExistingManifest = 
     sourceBrandingDirectory: guardedExistingPath(input.sourceBrandingDirectory, "directory", "Source branding directory"),
     targetBrandingDirectory: guardedExistingPath(input.targetBrandingDirectory, "directory", "Target branding directory"),
     privacyDeletionLedger: input.privacyPlan ?? (privacy ? createCanonicalCutoverPrivacyPlan(privacy) : null),
+    contributionRepairManifest: input.contributionRepairManifest ?? null,
   };
   const backupBrandingDirectory = guardedExistingOrPlannedDirectory(`${options.targetBrandingDirectory}.canonical-cutover-backup`, "Target branding backup directory");
   if (existsSync(backupBrandingDirectory)) throw new Error("Target branding backup directory must not exist before dry-run");
@@ -1348,11 +1408,63 @@ function assertCleanIntegrity(db) {
   }
 }
 
+const CONTRIBUTION_REPAIR_TABLES = new Set([
+  "production_contributions",
+  "production_contribution_events",
+]);
+
+function approvedRepairExpectedTable(manifest, table) {
+  if (!CONTRIBUTION_REPAIR_TABLES.has(table)) return null;
+  return manifest.approvedPreMigrationRepair?.expectedPostRepair?.tables?.[table] ?? null;
+}
+
+function assertApprovedContributionRepairTransition(db, manifest) {
+  const approved = manifest.approvedPreMigrationRepair;
+  if (!approved) return;
+  if (approved.formatVersion !== 1
+    || !/^[a-f0-9]{64}$/.test(String(approved.manifestSha256 ?? ""))
+    || !/^[a-f0-9]{64}$/.test(String(approved.selectionHash ?? ""))
+    || !Number.isSafeInteger(approved.selectedCount)
+    || approved.selectedCount < 0) {
+    throw new Error("Approved contribution repair transition is invalid");
+  }
+  const selectedCount = (approved.selectedIds?.aggregates?.length ?? -1)
+    + (approved.selectedIds?.events?.length ?? -1);
+  if (selectedCount !== approved.selectedCount) throw new Error("Approved contribution repair transition selected IDs are invalid");
+  const expected = String(approved.expectedPostRepair?.databaseLogicalSha256 ?? "");
+  if (!/^[a-f0-9]{64}$/.test(expected) || databaseLogicalFingerprint(db) !== expected) {
+    throw new Error("Target database does not match the approved contribution repair transition");
+  }
+  for (const table of CONTRIBUTION_REPAIR_TABLES) {
+    const expectedTable = approvedRepairExpectedTable(manifest, table);
+    if (!expectedTable
+      || tableCount(db, table) !== expectedTable.count
+      || tableContentFingerprint(db, table) !== expectedTable.contentSha256) {
+      throw new Error(`Protected table ${table} does not match the approved contribution repair transition`);
+    }
+  }
+}
+
+function normalizeManifestForApprovedRepairComparison(value) {
+  const normalized = JSON.parse(canonicalJson(value));
+  delete normalized.selectionHash;
+  delete normalized.approvedPreMigrationRepair;
+  if (normalized.target?.database) {
+    normalized.target.database.fileSha256 = "<approved-contribution-repair-transition>";
+    for (const table of CONTRIBUTION_REPAIR_TABLES) {
+      if (normalized.target.database.tables?.[table]) {
+        normalized.target.database.tables[table].contentSha256 = "<approved-contribution-repair-transition>";
+      }
+    }
+  }
+  return normalized;
+}
+
 function assertProtectedTablesUnchanged(db, manifest, { allowPrivacyReplay = false } = {}) {
   for (const [table, counts] of Object.entries(manifest.tableCounts)) {
     if (!counts.excluded || !manifest.target.database.tables[table]) continue;
     if (allowPrivacyReplay && manifest.privacyDeletionLedger && PRIVACY_REPLAY_TABLES.has(table)) continue;
-    const expected = manifest.target.database.tables[table];
+    const expected = approvedRepairExpectedTable(manifest, table) ?? manifest.target.database.tables[table];
     const actualCount = tableCount(db, table);
     const actualHash = tableContentFingerprint(db, table);
     if (actualCount !== expected.count || actualHash !== expected.contentSha256) {
@@ -1420,6 +1532,47 @@ export function readCanonicalCutoverManifest(manifestPath) {
   const parsed = parseJson(readFileSync(resolved, "utf8"), "Manifest");
   assertManifestIntegrity(parsed);
   return { manifest: parsed, manifestPath: resolved };
+}
+
+// Task 4 needs a read-only admission check against Task 2's durable applied
+// marker. Re-running apply is intentionally not a verifier: an already-applied
+// manifest must be rejected by the mutation entry point. This narrow seam
+// exposes the same exact recovery fingerprint and protected-table checks used
+// by Task 2 without opening a writable transaction or changing recovery state.
+export function verifyAppliedCanonicalCutoverManifest({ manifest, manifestPath }) {
+  assertManifestIntegrity(manifest);
+  const resolvedManifestPath = guardedExistingPath(manifestPath, "file", "Manifest");
+  const markerPath = guardedExistingPath(`${resolvedManifestPath}.applied`, "file", "Applied marker");
+  const targetPath = guardedExistingPath(manifest.target?.database?.path, "file", "Manifest target database");
+  const applied = readAppliedMarker(markerPath, manifest);
+  const db = openReadOnly(targetPath);
+  let tableCounts;
+  try {
+    assertSupportedSchema(db, "Target");
+    assertProtectedTablesUnchanged(db, manifest, { allowPrivacyReplay: true });
+    assertCleanIntegrity(db);
+    if (databaseRecoveryFingerprint(db) !== applied.postDatabaseStateFingerprint) {
+      throw new Error("Applied canonical cutover marker does not match the target database state");
+    }
+    if (!manifest.branding.source.settingPresent) {
+      const retainedBranding = brandingDescription(db, manifest.branding.target.path, "Verified applied target");
+      if (canonicalJson(retainedBranding) !== canonicalJson(manifest.branding.target)) {
+        throw new Error("Retained target branding changed after the applied marker was written");
+      }
+    }
+    tableCounts = Object.fromEntries(tableNames(db).map((table) => [table, tableCount(db, table)]));
+  } finally {
+    db.close();
+  }
+  if (manifest.branding.source.settingPresent && !brandingFilesMatchManifest(manifest)) {
+    throw new Error("Applied canonical cutover marker exists but target branding is incomplete");
+  }
+  return {
+    integrity: "ok",
+    postDatabaseStateFingerprint: applied.postDatabaseStateFingerprint,
+    selectionHash: manifest.selectionHash,
+    tableCounts,
+  };
 }
 
 function applyResult(manifest, recovered = false) {
@@ -1625,6 +1778,7 @@ export function applyCanonicalCutoverManifest(
     db.prepare("ATTACH DATABASE ? AS source").run(sourceUri);
     db.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
+    assertApprovedContributionRepairTransition(db, manifest);
     const recomputed = createCanonicalCutoverManifest({
       claimId: manifest.claimId,
       sourceDatabasePath: sourcePath,
@@ -1634,7 +1788,13 @@ export function applyCanonicalCutoverManifest(
       manifestPath: resolvedManifestPath,
       privacyPlan: manifest.privacyDeletionLedger ?? undefined,
     }, { allowExistingManifest: true });
-    if (canonicalJson(recomputed) !== canonicalJson(manifest)) {
+    const frozenComparison = manifest.approvedPreMigrationRepair
+      ? normalizeManifestForApprovedRepairComparison(manifest)
+      : manifest;
+    const recomputedComparison = manifest.approvedPreMigrationRepair
+      ? normalizeManifestForApprovedRepairComparison(recomputed)
+      : recomputed;
+    if (canonicalJson(recomputedComparison) !== canonicalJson(frozenComparison)) {
       throw new Error("Canonical cutover inputs changed since dry-run; refusing apply");
     }
     stagedPrivacyLedger = activePrivacyApplyContext?.stageLedger() ?? null;

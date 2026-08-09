@@ -1,0 +1,203 @@
+name: Cut over Relay production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type app.timbersteeltrade.com exactly to prepare the production cutover
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-production-cutover
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Require exact main revision and typed canonical host
+        env:
+          CUTOVER_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$CUTOVER_CONFIRMATION" = "app.timbersteeltrade.com"
+          test "${#GITHUB_SHA}" -eq 40
+      - name: Check out verified revision
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+      - name: Test application
+        run: corepack pnpm --filter @workspace/bitcraft-local test
+      - name: Build application
+        run: corepack pnpm --filter @workspace/bitcraft-local run build
+      - name: Test deployment contracts
+        run: node --test scripts/test/deploy-*.test.mjs
+      - name: Validate Relay systemd units
+        run: |
+          test -x /usr/bin/node || sudo ln -s "$(command -v node)" /usr/bin/node
+          systemd-analyze verify \
+            deploy/bitcraft-claim-monitor-relay.service \
+            deploy/bitcraft-claim-monitor-relay-worker.service \
+            deploy/bitcraft-claim-monitor-relay-collector.service \
+            deploy/bitcraft-claim-monitor-relay-collector.timer \
+            deploy/bitcraft-claim-monitor-relay-backup.service \
+            deploy/bitcraft-claim-monitor-relay-backup.timer
+      - name: Install Caddy validator
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes caddy
+      - name: Validate tracked cutover Caddy candidates
+        run: |
+          caddy validate --config deploy/Caddyfile.example
+          caddy validate --config deploy/Caddyfile.cutover-maintenance
+
+  prepare:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: relay-preview
+    outputs:
+      manifest_hash: ${{ steps.prepare.outputs.manifest_hash }}
+    steps:
+      - name: Configure pinned SSH identity
+        env:
+          RELAY_VPS_SSH_PRIVATE_KEY: ${{ secrets.RELAY_VPS_SSH_PRIVATE_KEY }}
+          RELAY_VPS_KNOWN_HOSTS: ${{ secrets.RELAY_VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$RELAY_VPS_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$RELAY_VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Prepare protected cutover
+        id: prepare
+        env:
+          RELAY_VPS_HOST: ${{ secrets.RELAY_VPS_HOST }}
+          RELAY_VPS_DEPLOY_USER: ${{ secrets.RELAY_VPS_DEPLOY_USER }}
+        run: |
+          set +e
+          PREPARE_OUTPUT="$(ssh -i "$HOME/.ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -- "$RELAY_VPS_DEPLOY_USER@$RELAY_VPS_HOST" \
+            "sudo /usr/local/bin/update-bitcraft-claim-monitor-relay --revision '$GITHUB_SHA' --prepare-cutover --confirmation 'app.timbersteeltrade.com'" 2>/dev/null)"
+          PREPARE_STATUS=$?
+          set -e
+          if [[ "$PREPARE_STATUS" -ne 0 ]]; then
+            printf '## Relay production cutover prepare\n\nResult: `failed`\n\nFull diagnostics remain on the VPS.\n' >> "$GITHUB_STEP_SUMMARY"
+            exit "$PREPARE_STATUS"
+          fi
+          MANIFEST_HASH="$(node -e '
+            const value = JSON.parse(process.argv[1]);
+            if (!/^[a-f0-9]{64}$/.test(String(value.manifestHash || ""))) process.exit(2);
+            process.stdout.write(value.manifestHash);
+          ' "$PREPARE_OUTPUT")"
+          printf 'manifest_hash=%s\n' "$MANIFEST_HASH" >> "$GITHUB_OUTPUT"
+          node -e '
+            const value = JSON.parse(process.argv[1]);
+            const safe = {
+              revision: String(value.revision || ""),
+              manifestHash: String(value.manifestHash || ""),
+              repairHash: value.repairHash == null ? null : String(value.repairHash),
+              repairCount: Number(value.repairCount || 0),
+              counts: value.counts && typeof value.counts === "object" ? value.counts : {},
+              backupIdentifiers: Array.isArray(value.backupIdentifiers) ? value.backupIdentifiers.map(String) : [],
+              watchdogDeadline: String(value.watchdogDeadline || ""),
+            };
+            process.stdout.write(`## Relay production cutover prepared\n\nRevision: \`${safe.revision}\`  \nManifest/selection hash: \`${safe.manifestHash}\`  \nRepair manifest hash: \`${safe.repairHash ?? "none"}\`  \nRepair rows: \`${safe.repairCount}\`  \nFrozen counts: \`${JSON.stringify(safe.counts)}\`  \nWatchdog: \`${safe.watchdogDeadline}\`\n\nEncrypted backups: ${safe.backupIdentifiers.map((item) => `\`${item}\``).join(", ")}\n`);
+          ' "$PREPARE_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: relay-cutover
+    steps:
+      - name: Configure pinned SSH identity
+        env:
+          RELAY_VPS_SSH_PRIVATE_KEY: ${{ secrets.RELAY_VPS_SSH_PRIVATE_KEY }}
+          RELAY_VPS_KNOWN_HOSTS: ${{ secrets.RELAY_VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$RELAY_VPS_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$RELAY_VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Apply approved cutover
+        env:
+          RELAY_VPS_HOST: ${{ secrets.RELAY_VPS_HOST }}
+          RELAY_VPS_DEPLOY_USER: ${{ secrets.RELAY_VPS_DEPLOY_USER }}
+          MANIFEST_HASH: ${{ needs.prepare.outputs.manifest_hash }}
+        run: |
+          set +e
+          APPLY_OUTPUT="$(ssh -i "$HOME/.ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -- "$RELAY_VPS_DEPLOY_USER@$RELAY_VPS_HOST" \
+            "sudo /usr/local/bin/update-bitcraft-claim-monitor-relay --revision '$GITHUB_SHA' --apply-cutover --manifest-hash '$MANIFEST_HASH'" 2>/dev/null)"
+          APPLY_STATUS=$?
+          set -e
+          printf '## Relay production cutover apply\n\nRevision: `%s`  \nResult: `%s`\n\nFull diagnostics remain on the VPS.\n' \
+            "$GITHUB_SHA" "$([[ "$APPLY_STATUS" -eq 0 ]] && printf success || printf failed)" >> "$GITHUB_STEP_SUMMARY"
+          exit "$APPLY_STATUS"
+
+  abort:
+    needs: [prepare, apply]
+    if: ${{ always() && needs.prepare.result == 'success' && needs.apply.result != 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: relay-preview
+    steps:
+      - name: Configure pinned SSH identity
+        env:
+          RELAY_VPS_SSH_PRIVATE_KEY: ${{ secrets.RELAY_VPS_SSH_PRIVATE_KEY }}
+          RELAY_VPS_KNOWN_HOSTS: ${{ secrets.RELAY_VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$RELAY_VPS_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$RELAY_VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Abort before admission
+        env:
+          RELAY_VPS_HOST: ${{ secrets.RELAY_VPS_HOST }}
+          RELAY_VPS_DEPLOY_USER: ${{ secrets.RELAY_VPS_DEPLOY_USER }}
+          MANIFEST_HASH: ${{ needs.prepare.outputs.manifest_hash }}
+        run: |
+          set +e
+          ABORT_OUTPUT="$(ssh -i "$HOME/.ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -- "$RELAY_VPS_DEPLOY_USER@$RELAY_VPS_HOST" \
+            "sudo /usr/local/bin/update-bitcraft-claim-monitor-relay --revision '$GITHUB_SHA' --abort-cutover --manifest-hash '$MANIFEST_HASH'" 2>/dev/null)"
+          ABORT_STATUS=$?
+          set -e
+          printf '## Relay production cutover abort\n\nRevision: `%s`  \nResult: `%s`\n\nFull diagnostics remain on the VPS.\n' \
+            "$GITHUB_SHA" "$([[ "$ABORT_STATUS" -eq 0 ]] && printf restored || printf failed-or-admitted)" >> "$GITHUB_STEP_SUMMARY"
+          exit "$ABORT_STATUS"

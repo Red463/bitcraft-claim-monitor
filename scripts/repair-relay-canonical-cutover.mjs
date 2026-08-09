@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -36,6 +36,7 @@ function parseArguments(argv) {
     ["--target-config-root", "targetConfigRoot"],
     ["--source-backup-root", "sourceBackupRoot"],
     ["--target-backup-root", "targetBackupRoot"],
+    ["--contribution-repair-manifest", "contributionRepairManifestPath"],
   ]);
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -88,6 +89,7 @@ function parseArguments(argv) {
       "targetBrandingDirectory",
       ...privacyKeys.filter((key) => key !== "readinessArtifactPath"),
       "targetPreviousKeyFilePaths",
+      "contributionRepairManifestPath",
     ];
     const explicitlySet = new Set(argv.filter((argument) => values.has(argument)).map((argument) => values.get(argument)));
     if (argv.includes("--target-previous-privacy-key")) explicitlySet.add("targetPreviousKeyFilePaths");
@@ -101,6 +103,9 @@ function parseArguments(argv) {
 try {
   const options = parseArguments(process.argv.slice(2));
   if (options.mode === "dry-run") {
+    if (options.contributionRepairManifestPath) {
+      options.contributionRepairManifest = JSON.parse(readFileSync(path.resolve(options.contributionRepairManifestPath), "utf8"));
+    }
     const manifest = createCanonicalCutoverManifest(options);
     writeFileSync(path.resolve(options.manifestPath), `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx", mode: 0o600 });
     process.stdout.write(`${JSON.stringify({ claimId: manifest.claimId, selectionHash: manifest.selectionHash })}\n`);

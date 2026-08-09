@@ -399,6 +399,73 @@ previous release.
 Before relying on unattended preview deployments, perform one successful
 deployment and one forced-failure rollback in a supervised window.
 
+## Protected canonical production cutover workflow
+
+Production admission is available only through
+`.github/workflows/cutover-relay-production.yml` on `main`. The operator must
+type `app.timbersteeltrade.com` exactly. Do not run the tracked cutover helper
+directly: the restricted updater is the only supported entry point and accepts
+only the exact full-SHA prepare, apply, and abort modes.
+
+The helper takes all three locks in one fixed order: cutover -> deploy -> backup.
+It never calls the ordinary backup or deploy entry points while holding those
+locks, so neither helper can recursively reacquire them.
+
+Create a distinct GitHub environment named `relay-cutover`. Limit its
+deployment branch to `main`, add at least one required reviewer who is not the
+workflow initiator, prevent administrators from bypassing the protection, and
+disable self-review where the GitHub plan supports it. Configure the same four
+SSH secrets already used by `relay-preview`:
+
+- `RELAY_VPS_HOST`
+- `RELAY_VPS_DEPLOY_USER`
+- `RELAY_VPS_SSH_PRIVATE_KEY`
+- `RELAY_VPS_KNOWN_HOSTS`
+
+Keep the key read-only/restricted to the existing deployment account and keep
+the known-hosts value pinned. Do not add application tokens, privacy keys,
+backup keys, provider credentials, or environment-file contents to either
+GitHub environment. The prepare job uses the existing `relay-preview`
+environment; the admission-changing apply job alone waits for the required
+`relay-cutover` reviewer. The automatic recovery job uses `relay-preview` so a
+second approval cannot delay recovery after an apply failure.
+
+Prepare validates the installed topology, enters maintenance, stops writers,
+creates and decrypt-verifies the encrypted recovery set, freezes the repair and
+migration manifests, and arms a uniquely named 15-minute abort watchdog. Its
+GitHub output is limited to the reviewed revision, frozen counts and hashes,
+encrypted-backup identifiers, and watchdog deadline. Full command diagnostics
+remain only in mode-0600 files below
+`/var/log/bitcraft-claim-monitor-relay`; protected manifests/state remain below
+`/var/lib/bitcraft-claim-monitor-relay/cutover`. Encrypted cutover artifacts are
+one migration recovery set per cutover and follow the existing three-recovery-
+point/90-day policy; the active set remains protected for the 14-day forensic
+window.
+
+The repair-to-migration seam is intentionally narrow. The outstanding
+contribution repair must run after the Task 2 dry-run freezes its inputs, while
+Task 2 normally rejects every target-database change as drift. Prepare therefore
+binds the exact repair manifest hash, selected IDs/count, and expected post-repair
+database/table fingerprints into the migration manifest. Apply accepts only that
+one verified transition; a no-repair selection keeps the ordinary zero-drift
+path, and any altered repair or unrelated protected-table change still refuses.
+
+The recovery boundary is deliberate: before admission, abort restores the
+saved Caddy file, exact Relay environment bytes/metadata, created privacy-key
+and readiness files, and recorded service states while retaining encrypted
+evidence. Immediately before final Caddy installation, apply writes the
+irreversible admission marker. After admission, recovery is fix-forward only;
+abort refuses. If GitHub is interrupted, the 15-minute
+watchdog invokes the same revision/hash-bound abort; an admitted run will refuse
+that abort rather than roll production back across the boundary. The watchdog
+waits for any in-flight apply to release the same ordered locks before deciding
+whether abort is still permitted. If apply fails after recording admission,
+rerun the exact same revision/hash-bound apply command: it resumes only the
+unfinished fix-forward phases and never re-runs a completed migration.
+After successful admission the old units are persistently disabled and
+runtime-masked. Their unit files and durable data remain in place for supervised
+fix-forward or forensic work.
+
 ## Diagnostics
 
 ```sh

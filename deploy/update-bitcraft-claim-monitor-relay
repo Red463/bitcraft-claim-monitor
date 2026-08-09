@@ -12,6 +12,7 @@ BACKUP_HELPER_PATH="${BACKUP_HELPER_PATH:-/usr/local/bin/backup-bitcraft-claim-m
 BACKUP_CRYPTO_HELPER_PATH="${BACKUP_CRYPTO_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor-relay/backup-crypto.mjs}"
 PRIVACY_REPLAY_HELPER_PATH="${PRIVACY_REPLAY_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor-relay/replay-privacy-deletions.mjs}"
 UPDATER_PATH="${UPDATER_PATH:-/usr/local/bin/update-bitcraft-claim-monitor-relay}"
+CUTOVER_HELPER_PATH="${CUTOVER_HELPER_PATH:-$CURRENT_LINK/deploy/cutover-relay-production.mjs}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 LOCK_FILE="${LOCK_FILE:-/run/lock/bitcraft-claim-monitor-relay-deploy.lock}"
 KEEP_RELEASES="${KEEP_RELEASES:-3}"
@@ -30,6 +31,12 @@ VERBOSE=0
 SKIP_PUBLIC_CHECK=0
 FORCE_BACKUP=0
 REVISION=""
+REVISION_SEEN=0
+CUTOVER_MODE=""
+CUTOVER_CONFIRMATION=""
+CUTOVER_CONFIRMATION_SEEN=0
+CUTOVER_MANIFEST_HASH=""
+CUTOVER_MANIFEST_HASH_SEEN=0
 HEALTH_SUMMARY="Health: not checked"
 PUBLIC_SUMMARY="Public: skipped"
 deployment_succeeded=0
@@ -45,11 +52,17 @@ backup_timer_was_enabled=0
 usage() {
   cat <<USAGE
 Usage: update-bitcraft-claim-monitor-relay --revision <full-sha> [--verbose] [--no-public-check] [--force-backup]
+       update-bitcraft-claim-monitor-relay --revision <full-sha> --prepare-cutover --confirmation app.timbersteeltrade.com
+       update-bitcraft-claim-monitor-relay --revision <full-sha> --apply-cutover --manifest-hash <64hex>
+       update-bitcraft-claim-monitor-relay --revision <full-sha> --abort-cutover --manifest-hash <64hex>
 
   --revision <sha>  Deploy this full lowercase commit SHA from origin/main.
   --verbose         Stream install/build output while also logging it.
   --no-public-check Skip the public HTTPS check after local health passes.
   --force-backup    Create a manual backup even when the schema is unchanged.
+  --prepare-cutover Prepare the protected canonical production cutover.
+  --apply-cutover   Apply the matching prepared cutover.
+  --abort-cutover   Restore the matching prepared cutover before admission.
 USAGE
 }
 
@@ -58,6 +71,8 @@ parse_args() {
     case "$1" in
       --revision)
         [[ $# -ge 2 ]] || { echo "--revision requires a value."; exit 2; }
+        [[ "$REVISION_SEEN" == "0" ]] || { echo "Duplicate --revision is not allowed."; exit 2; }
+        REVISION_SEEN=1
         REVISION="$2"
         shift 2
         ;;
@@ -72,6 +87,26 @@ parse_args() {
       --force-backup)
         FORCE_BACKUP=1
         shift
+        ;;
+      --prepare-cutover|--apply-cutover|--abort-cutover)
+        [[ -z "$CUTOVER_MODE" ]] || { echo "Unknown or mixed cutover mode."; exit 2; }
+        CUTOVER_MODE="${1#--}"
+        CUTOVER_MODE="${CUTOVER_MODE%-cutover}"
+        shift
+        ;;
+      --confirmation)
+        [[ $# -ge 2 ]] || { echo "--confirmation requires a value."; exit 2; }
+        [[ "$CUTOVER_CONFIRMATION_SEEN" == "0" ]] || { echo "Duplicate --confirmation is not allowed."; exit 2; }
+        CUTOVER_CONFIRMATION_SEEN=1
+        CUTOVER_CONFIRMATION="$2"
+        shift 2
+        ;;
+      --manifest-hash)
+        [[ $# -ge 2 ]] || { echo "--manifest-hash requires a value."; exit 2; }
+        [[ "$CUTOVER_MANIFEST_HASH_SEEN" == "0" ]] || { echo "Duplicate --manifest-hash is not allowed."; exit 2; }
+        CUTOVER_MANIFEST_HASH_SEEN=1
+        CUTOVER_MANIFEST_HASH="$2"
+        shift 2
         ;;
       -h|--help)
         usage
@@ -89,6 +124,55 @@ parse_args() {
     echo "--revision must be a full 40-character lowercase Git commit SHA."
     exit 2
   fi
+
+  if [[ -n "$CUTOVER_MODE" ]]; then
+    if [[ "$VERBOSE" == "1" || "$SKIP_PUBLIC_CHECK" == "1" || "$FORCE_BACKUP" == "1" ]]; then
+      echo "Unknown or mixed cutover mode."
+      exit 2
+    fi
+    case "$CUTOVER_MODE" in
+      prepare)
+        [[ "$CUTOVER_CONFIRMATION_SEEN" == "1" \
+          && "$CUTOVER_CONFIRMATION" == "app.timbersteeltrade.com" \
+          && "$CUTOVER_MANIFEST_HASH_SEEN" == "0" ]] \
+          || { echo "Unknown or mixed cutover mode."; exit 2; }
+        ;;
+      apply|abort)
+        [[ "$CUTOVER_CONFIRMATION_SEEN" == "0" \
+          && "$CUTOVER_MANIFEST_HASH_SEEN" == "1" \
+          && "$CUTOVER_MANIFEST_HASH" =~ ^[0-9a-f]{64}$ ]] \
+          || { echo "Unknown or mixed cutover mode."; exit 2; }
+        ;;
+      *)
+        echo "Unknown or mixed cutover mode."
+        exit 2
+        ;;
+    esac
+  elif [[ "$CUTOVER_CONFIRMATION_SEEN" == "1" || "$CUTOVER_MANIFEST_HASH_SEEN" == "1" ]]; then
+    echo "Unknown or mixed cutover mode."
+    exit 2
+  fi
+}
+
+delegate_cutover_mode() {
+  [[ -f "$CUTOVER_HELPER_PATH" && ! -L "$CUTOVER_HELPER_PATH" ]] || {
+    printf "Cutover helper is unavailable: %s\n" "$CUTOVER_HELPER_PATH" >&2
+    return 1
+  }
+  case "$CUTOVER_MODE" in
+    prepare)
+      exec env BITCRAFT_CUTOVER_UPDATER=1 node "$CUTOVER_HELPER_PATH" \
+        --revision "$REVISION" --prepare-cutover --confirmation "$CUTOVER_CONFIRMATION"
+      ;;
+    apply)
+      exec env BITCRAFT_CUTOVER_UPDATER=1 node "$CUTOVER_HELPER_PATH" \
+        --revision "$REVISION" --apply-cutover --manifest-hash "$CUTOVER_MANIFEST_HASH"
+      ;;
+    abort)
+      exec env BITCRAFT_CUTOVER_UPDATER=1 node "$CUTOVER_HELPER_PATH" \
+        --revision "$REVISION" --abort-cutover --manifest-hash "$CUTOVER_MANIFEST_HASH"
+      ;;
+  esac
 }
 
 log() {
@@ -529,6 +613,10 @@ validate_release_config() {
     "${units[@]}"
   run_logged "Validating Caddy configuration" caddy validate \
     --config "$release_dir/deploy/Caddyfile.example"
+  run_logged "Validating cutover maintenance Caddy configuration" caddy validate \
+    --config "$release_dir/deploy/Caddyfile.cutover-maintenance"
+  run_logged "Validating cutover orchestration helper" node --check \
+    "$release_dir/deploy/cutover-relay-production.mjs"
 }
 
 install_release_config() {
@@ -640,6 +728,9 @@ print_failure_summary() {
 main() {
   [[ "${EUID:-$(id -u)}" -eq 0 ]] || { echo "Run this script as root."; exit 1; }
   parse_args "$@"
+  if [[ -n "$CUTOVER_MODE" ]]; then
+    delegate_cutover_mode
+  fi
   trap cleanup_deployment_transaction EXIT
   exec 9>"$LOCK_FILE"
   flock -n 9 || { echo "Another deployment is already running."; exit 1; }
