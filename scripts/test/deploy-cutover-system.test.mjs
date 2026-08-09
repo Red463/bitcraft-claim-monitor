@@ -59,8 +59,8 @@ function caddy(routes) {
 
 test("semantic Caddy validation accepts only the supported preflight, maintenance, and final topologies", () => {
   const claims = [
-    hostRoute("claim.timbersteeltrade.com", [response(308, "https://app.timbersteeltrade.com{http.request.uri}")]),
-    hostRoute("claim.hostred.co.uk", [response(308, "https://app.timbersteeltrade.com{http.request.uri}")]),
+    hostRoute("claim.timbersteeltrade.com", [response(301, "https://app.timbersteeltrade.com{http.request.uri}")]),
+    hostRoute("claim.hostred.co.uk", [response(301, "https://app.timbersteeltrade.com{http.request.uri}")]),
   ];
   const preflight = caddy([
     hostRoute("app.timbersteeltrade.com", [proxy("127.0.0.1:18430")]),
@@ -77,7 +77,7 @@ test("semantic Caddy validation accepts only the supported preflight, maintenanc
   ]);
   const final = caddy([
     hostRoute("app.timbersteeltrade.com", [proxy("127.0.0.1:19430")]),
-    hostRoute("relay.timbersteeltrade.com", [response(308, "https://app.timbersteeltrade.com{http.request.uri}")]),
+    hostRoute("relay.timbersteeltrade.com", [response(301, "https://app.timbersteeltrade.com{http.request.uri}")]),
     ...claims,
   ]);
 
@@ -389,8 +389,8 @@ test("privacy recovery intents remove abandoned pre-publication staging files", 
 
 function preflightCaddy(mode) {
   const claims = [
-    hostRoute("claim.timbersteeltrade.com", [response(308, "https://app.timbersteeltrade.com{http.request.uri}")]),
-    hostRoute("claim.hostred.co.uk", [response(308, "https://app.timbersteeltrade.com{http.request.uri}")]),
+    hostRoute("claim.timbersteeltrade.com", [response(301, "https://app.timbersteeltrade.com{http.request.uri}")]),
+    hostRoute("claim.hostred.co.uk", [response(301, "https://app.timbersteeltrade.com{http.request.uri}")]),
   ];
   if (mode === "preflight") return caddy([
     hostRoute("app.timbersteeltrade.com", [proxy("127.0.0.1:18430")]),
@@ -407,7 +407,7 @@ function preflightCaddy(mode) {
   ]);
   return caddy([
     hostRoute("app.timbersteeltrade.com", [proxy("127.0.0.1:19430")]),
-    hostRoute("relay.timbersteeltrade.com", [response(308, "https://app.timbersteeltrade.com{http.request.uri}")]),
+    hostRoute("relay.timbersteeltrade.com", [response(301, "https://app.timbersteeltrade.com{http.request.uri}")]),
     ...claims,
   ]);
 }
@@ -621,7 +621,7 @@ function systemFixture() {
       return { status: active.length ? 0 : 1, stdout: active.join("\n"), stderr: "" };
     }
     if (command === "curl") {
-      if (args.includes("--write-out")) return { status: 0, stdout: "308\nhttps://app.timbersteeltrade.com/cutover-path?probe=1", stderr: "" };
+      if (args.includes("--write-out")) return { status: 0, stdout: "301\nhttps://app.timbersteeltrade.com/cutover-path?probe=1", stderr: "" };
       if (args.includes("--head")) return { status: 0, stdout: [
         "HTTP/2 200", "x-content-type-options: nosniff", "referrer-policy: strict-origin-when-cross-origin",
         "permissions-policy: camera=()", "x-frame-options: SAMEORIGIN", "",

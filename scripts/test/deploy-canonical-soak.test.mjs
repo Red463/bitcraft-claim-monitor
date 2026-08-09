@@ -68,7 +68,7 @@ function successfulFixture({ operationalForSample } = {}) {
       requests.push({ url: String(url), method: init.method ?? "GET", redirect: init.redirect });
       if (String(url) === `${CANONICAL}/api/local/health`) return response({ json: health() });
       if (String(url) === `${RELAY}/cutover-soak?probe=1`) {
-        return response({ status: 308, location: `${CANONICAL}/cutover-soak?probe=1` });
+        return response({ status: 301, location: `${CANONICAL}/cutover-soak?probe=1` });
       }
       return response();
     },
@@ -206,7 +206,7 @@ test("soak verifier fails malformed canonical health and a redirect that loses p
     fixture.fetchImpl = async (url) => String(url).endsWith("/api/local/health")
       ? response({ json: { ...health(), deploymentMode: "preview" } })
       : String(url).startsWith(RELAY)
-        ? response({ status: 308, location: `${CANONICAL}/cutover-soak?probe=1` })
+        ? response({ status: 301, location: `${CANONICAL}/cutover-soak?probe=1` })
         : response();
     await assert.rejects(
       runCanonicalSoak({ profile: "intensive", revision: REVISION, version: VERSION, ...fixture }),
@@ -218,7 +218,7 @@ test("soak verifier fails malformed canonical health and a redirect that loses p
     fixture.fetchImpl = async (url) => String(url).endsWith("/api/local/health")
       ? response({ json: health() })
       : String(url).startsWith(RELAY)
-        ? response({ status: 308, location: `${CANONICAL}/wrong` })
+        ? response({ status: 301, location: `${CANONICAL}/wrong` })
         : response();
     await assert.rejects(
       runCanonicalSoak({ profile: "intensive", revision: REVISION, version: VERSION, ...fixture }),
