@@ -28,7 +28,7 @@ import { useGameData } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
 import { pageDomains } from "./api/pageDomains";
 import { pageGameDataWarnings, staleDataWarning } from "./api/pageGameDataWarnings";
-import { ApiErrorState, ApiStatusBanner, AppSkeleton, RefreshStatus, type ApiStatusDiagnostics } from "./components/main/AppChrome";
+import { ApiErrorState, AppSkeleton, RefreshStatus, type ApiStatusDiagnostics } from "./components/main/AppChrome";
 import { RouteLoadingState } from "./components/main/RouteLoadingState";
 import { CommandPalette } from "./components/main/CommandPalette";
 import { NotificationDrawer, ToastStack } from "./components/main/Notifications";
@@ -1008,6 +1008,8 @@ function DashboardApp() {
           lastUpdated={lastUpdated}
           collectorStatus={data.raw?.collectorStatus}
           intervalSeconds={appSettings.refreshSeconds}
+          warnings={apiWarnings}
+          diagnostics={apiDiagnostics}
         />
       </aside>
       {collapsedNavTooltip ? <span className="collapsed-nav-tooltip" aria-hidden="true" style={{ left: collapsedNavTooltip.left, top: collapsedNavTooltip.top }}>{collapsedNavTooltip.label}</span> : null}
@@ -1022,12 +1024,6 @@ function DashboardApp() {
           </>
         ) : (
           <>
-            <ApiStatusBanner
-              warnings={apiWarnings}
-              lastUpdated={lastUpdated}
-              diagnostics={apiDiagnostics}
-              status={state.error || state.stale ? "stale" : "partial"}
-            />
             <div className="page-view" key={active}>
               <RouteErrorBoundary routeKey={active}>
                 <React.Suspense fallback={<RouteLoadingState label={activePageLabel} />}>

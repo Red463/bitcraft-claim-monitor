@@ -470,9 +470,20 @@ export function regionalMarketCatalogView(snapshot, catalogRows, options = {}) {
   const counts = new Map();
   for (const order of scopedOrders(snapshot, options)) {
     const key = `${itemType(order.itemType)}:${decimal(order.itemId)}`;
-    const current = counts.get(key) ?? { sell: 0, buy: 0 };
-    if (String(order.side ?? "buy").toLowerCase() === "sell") current.sell += 1;
-    else current.buy += 1;
+    const current = counts.get(key) ?? { sell: 0, buy: 0, bestSell: null, bestBuy: null };
+    const rawPrice = String(order.price ?? order.priceThreshold ?? "").trim();
+    const price = /^\d+$/.test(rawPrice) ? rawPrice : null;
+    if (String(order.side ?? "buy").toLowerCase() === "sell") {
+      current.sell += 1;
+      if (price != null && (!current.bestSell || compareBigInt(price, current.bestSell.price) < 0)) {
+        current.bestSell = { price, location: String(order.claimName ?? order.regionName ?? "") };
+      }
+    } else {
+      current.buy += 1;
+      if (price != null && (!current.bestBuy || compareBigInt(price, current.bestBuy.price) > 0)) {
+        current.bestBuy = { price, location: String(order.claimName ?? order.regionName ?? "") };
+      }
+    }
     counts.set(key, current);
   }
 
@@ -486,7 +497,7 @@ export function regionalMarketCatalogView(snapshot, catalogRows, options = {}) {
     const item = catalogItem(value);
     if (query && !item.name.toLowerCase().includes(query)) return [];
     if (category && item.category !== category) return [];
-    const orderCounts = counts.get(`${item.itemType}:${item.itemId}`) ?? { sell: 0, buy: 0 };
+    const orderCounts = counts.get(`${item.itemType}:${item.itemId}`) ?? { sell: 0, buy: 0, bestSell: null, bestBuy: null };
     if (availableOnly && orderCounts.sell + orderCounts.buy === 0) return [];
     if (hasSell && orderCounts.sell === 0) return [];
     if (hasBuy && orderCounts.buy === 0) return [];
@@ -497,6 +508,10 @@ export function regionalMarketCatalogView(snapshot, catalogRows, options = {}) {
       orderCount: orderCounts.sell + orderCounts.buy,
       hasSellOrders: orderCounts.sell > 0,
       hasBuyOrders: orderCounts.buy > 0,
+      lowestSellPrice: orderCounts.bestSell?.price ?? null,
+      lowestSellLocation: orderCounts.bestSell?.location ?? "",
+      highestBuyPrice: orderCounts.bestBuy?.price ?? null,
+      highestBuyLocation: orderCounts.bestBuy?.location ?? "",
     }];
   });
   const sort = String(options.sort ?? "relevance").toLowerCase();

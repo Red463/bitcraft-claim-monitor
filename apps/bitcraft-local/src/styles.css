@@ -191,10 +191,16 @@ button.sidebar-account-main:hover { background: rgba(108,123,145,.14); }
 .discord-cta:hover { color: #fff; transform: translateY(-1px); filter: saturate(1.08); box-shadow: 0 12px 24px rgba(88,101,242,.18), inset 0 1px 0 rgba(255,255,255,.16); }
 .discord-cta svg:last-child { opacity: .78; }
 .discord-logo-icon { width: 18px; height: 18px; flex: 0 0 auto; }
-.refresh-status { position: relative; z-index: 1; margin: auto 14px 14px; padding-top: 10px; border-top: 1px solid rgba(108,123,145,.2); display: grid; grid-template-columns: 9px minmax(0, 1fr); align-items: center; gap: 9px; }
+.refresh-status { position: relative; z-index: 1; margin: auto 14px 14px; padding-top: 10px; border-top: 1px solid rgba(108,123,145,.2); display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 9px; }
 .refresh-copy { display: grid; gap: 3px; min-width: 0; overflow: hidden; transition: opacity .16s ease, max-width .24s cubic-bezier(.2,.8,.2,1), transform .2s ease; max-width: 150px; }
 .refresh-status small { color: #8793a4; font-size: var(--font-micro); line-height: 1; text-transform: uppercase; letter-spacing: .08em; }
 .refresh-status time { color: #f7f8fb; font-family: "JetBrains Mono", monospace; font-size: 12px; line-height: 1.2; text-transform: none; }
+.refresh-warning { position: relative; }
+.refresh-warning > button { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--gold); cursor: pointer; }
+.refresh-warning > button:hover, .refresh-warning > button:focus-visible { background: var(--gold-dim); outline: 1px solid var(--gold); }
+.refresh-warning-panel { display: grid; gap: 8px; position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 12; width: min(360px, calc(100vw - 32px)); max-height: 360px; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); box-shadow: 0 16px 40px rgba(0,0,0,.42); color: var(--text); }
+.refresh-warning-panel ul { margin: 0; padding-left: 18px; }
+.refresh-warning-panel code { display: block; max-height: 170px; overflow: auto; white-space: pre-wrap; font-size: 10px; color: var(--muted); }
 .refresh-dot { width: 8px; height: 8px; border-radius: 99px; background: var(--good); box-shadow: 0 0 0 3px rgba(78,226,138,.12), 0 0 14px rgba(78,226,138,.28); }
 .refresh-dot.refreshing { background: var(--gold); box-shadow: 0 0 0 3px rgba(240,198,79,.14); animation: refresh-pulse .9s ease-in-out infinite; }
 .refresh-breakdown {
@@ -441,187 +447,6 @@ main { position: relative; min-width: 0; height: 100vh; max-height: 100vh; overf
 .loading, .error { margin: 26px; }
 .panel > .loading, .panel > .error { margin: 0; }
 .error { border-color: rgba(239,100,97,.5); color: #ffb9b6; }
-.api-status-banner {
-  position: fixed;
-  top: 14px;
-  left: 260px;
-  right: 22px;
-  z-index: calc(var(--z-overlay) + 2);
-  max-height: min(56vh, 520px);
-  overflow: auto;
-  isolation: isolate;
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid rgba(255,179,71,.28);
-  border-radius: var(--radius-card);
-  background:
-    linear-gradient(90deg, rgba(255,179,71,.10), transparent 28%),
-    linear-gradient(180deg, color-mix(in srgb, var(--card-top) 96%, #000), color-mix(in srgb, var(--card-bottom) 98%, #000));
-  color: var(--text);
-  box-shadow: 0 22px 60px rgba(0,0,0,.56), 0 0 0 1px rgba(0,0,0,.26);
-  backdrop-filter: blur(12px);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-}
-.app-shell.sidebar-collapsed .api-status-banner {
-  left: 92px;
-}
-.api-status-main {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 30px minmax(0, auto) minmax(160px, 1fr);
-  align-items: center;
-  gap: 10px;
-}
-.api-status-main > .async-state {
-  grid-column: span 2;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  grid-template-columns: 30px minmax(0, auto);
-}
-.api-status-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
-  display: grid;
-  place-items: center;
-  color: #ffb347;
-  background: rgba(255,179,71,.12);
-  border: 1px solid rgba(255,179,71,.22);
-}
-.api-status-copy {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
-.api-status-copy strong {
-  color: #ffcf7a;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  white-space: nowrap;
-}
-.api-status-copy span {
-  color: var(--muted);
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.api-status-meta {
-  justify-self: end;
-  color: #8792a3;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.api-status-details {
-  min-width: 96px;
-  color: var(--muted);
-  font-size: 12px;
-  justify-self: end;
-}
-.api-status-details summary {
-  color: #ffcf7a;
-  cursor: pointer;
-  list-style-position: inside;
-  text-align: right;
-  font-size: 12px;
-  font-weight: 800;
-}
-.api-status-details[open] {
-  grid-column: 1 / -1;
-  justify-self: stretch;
-  border-top: 1px solid rgba(255,179,71,.14);
-  padding-top: 10px;
-}
-.api-status-diagnostic-grid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(120px, 1fr));
-  gap: 8px;
-  margin-top: 10px;
-}
-.api-status-diagnostic-grid .info-row {
-  min-height: 58px;
-  border: 1px solid rgba(255,179,71,.14);
-  border-radius: 7px;
-  background: rgba(255,255,255,.025);
-  padding: 8px;
-}
-.api-status-diagnostic-grid .info-row span {
-  color: #8f99aa;
-  font-size: 10px;
-  letter-spacing: .07em;
-  text-transform: uppercase;
-}
-.api-status-diagnostic-grid .info-row strong {
-  color: #f7f8fb;
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.api-status-details ul {
-  margin: 8px 0 0;
-  padding-left: 18px;
-}
-.api-status-details li + li { margin-top: 5px; }
-.api-status-log {
-  display: grid;
-  gap: 6px;
-  margin-top: 10px;
-}
-.api-status-log span {
-  color: #ffcf7a;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .07em;
-  text-transform: uppercase;
-}
-.api-status-log code {
-  display: block;
-  max-height: 180px;
-  overflow: auto;
-  border: 1px solid rgba(255,179,71,.16);
-  border-radius: 7px;
-  background: #050608;
-  color: #d7e4ff;
-  padding: 10px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font: 11px/1.45 "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
-}
-@media (max-width: 920px) {
-  .api-status-banner {
-    top: 10px;
-    left: 10px;
-    right: 10px;
-    max-height: min(68vh, 520px);
-    grid-template-columns: 1fr;
-  }
-  .app-shell.sidebar-collapsed .api-status-banner {
-    left: 10px;
-  }
-  .api-status-main {
-    grid-template-columns: 30px minmax(0, 1fr);
-  }
-  .api-status-copy {
-    display: grid;
-    gap: 2px;
-  }
-  .api-status-meta {
-    grid-column: 2;
-    justify-self: start;
-  }
-  .api-status-details {
-    justify-self: start;
-  }
-  .api-status-diagnostic-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
 .api-error-state {
   margin: 26px;
   padding: 24px;

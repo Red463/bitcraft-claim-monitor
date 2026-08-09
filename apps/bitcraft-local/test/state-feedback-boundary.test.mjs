@@ -49,8 +49,8 @@ test("public routes distinguish initial loading, settled empty, no match, restri
     assert.match(files, new RegExp(`kind=[{]?\\"${kind}\\"`));
   }
   const appChrome = source("../src/components/main/AppChrome.tsx");
-  assert.match(appChrome, /kind: "stale" as const/);
-  assert.match(appChrome, /kind: "warning" as const/);
+  assert.match(appChrome, /className="refresh-warning"/);
+  assert.match(appChrome, /role="dialog" aria-label="Refresh warning details"/);
   assert.match(files, /AppSkeleton/);
 });
 

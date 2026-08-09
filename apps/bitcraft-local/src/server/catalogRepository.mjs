@@ -422,6 +422,9 @@ export function createProviderCatalogRepository(db) {
     findEntities(query) {
       return catalog.findEntities(query);
     },
+    listEntities() {
+      return catalog.listEntities();
+    },
     getSourceState() {
       return mapSourceState(statements.getSourceState.get(SOURCE_KEY));
     },

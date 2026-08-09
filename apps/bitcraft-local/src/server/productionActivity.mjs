@@ -84,10 +84,23 @@ const skillNames = {
   14: "Foraging",
 };
 
+export function professionNameForSkillId(value) {
+  return skillNames[toNumber(value)] ?? null;
+}
+
+export function productionSkillIdValue(job) {
+  return job.levelRequirements?.[0]?.skillId
+    ?? job.levelRequirements?.[0]?.skill_id
+    ?? job.experiencePerProgress?.[0]?.skillId
+    ?? job.experiencePerProgress?.[0]?.skill_id;
+}
+
 export function productionMetrics(job) {
-  const skillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
-  const skillName = job.levelRequirements?.[0]?.skillName ?? skillNames[skillId] ?? "";
-  const xpPerEffort = toNumber(job.experiencePerProgress?.find((xp) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
+  const skillId = toNumber(productionSkillIdValue(job));
+  const skillName = professionNameForSkillId(skillId) ?? job.levelRequirements?.[0]?.skillName ?? "";
+  const xpPerEffort = toNumber(job.experiencePerProgress?.find((xp) => (
+    toNumber(xp.skillId ?? xp.skill_id) === skillId
+  ))?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
   const totalEffort = toNumber(job.totalActionsRequired ?? job.totalCraftWork ?? job.requiredCraftWork ?? job.craftWorkRequired ?? job.effortRequired ?? job.totalEffort);
   const completedEffort = toNumber(job.progress ?? job.completedCraftWork ?? job.completedEffort ?? job.actionsCompleted);
   const remainingEffort = toNumber(job.remainingCraftWork ?? job.actionsRemaining ?? job.effortRemaining ?? job.remainingEffort ?? (totalEffort ? totalEffort - completedEffort : 0));

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 let leaderboardModule = null;
@@ -83,4 +84,37 @@ test("craft contribution leaderboard excludes historic unknown rows", () => {
 
   assert.equal(projected.summary.totalProgress, "2");
   assert.deepEqual(projected.contributors.map((row) => row.name), ["Known"]);
+});
+
+test("craft contribution leaderboard retains unclassified player totals without creating an Unknown profession", () => {
+  const projected = leaderboardModule.projectCraftContributionLeaderboard([
+    {
+      craft_entity_id: "classified",
+      contributor_entity_id: "1",
+      contributor_name: "Mosswick",
+      attribution_confidence: "authoritative",
+      profession: "Forestry",
+      contributed_progress: "7",
+      contributed_xp: "8",
+      contribution_count: "1",
+    },
+    {
+      craft_entity_id: "unclassified",
+      contributor_entity_id: "1",
+      contributor_name: "Mosswick",
+      attribution_confidence: "matched_action",
+      profession: "Unknown",
+      contributed_progress: "5",
+      contributed_xp: "6",
+      contribution_count: "1",
+    },
+  ]);
+
+  assert.equal(projected.summary.totalProgress, "12");
+  assert.equal(Object.hasOwn(projected.summary, "unclassifiedRecordCount"), false);
+  assert.equal(projected.contributors[0].totalProgress, "12");
+  assert.deepEqual(projected.contributors[0].professions.map((row) => row.profession), ["Forestry"]);
+  assert.deepEqual(projected.professions.map((row) => row.profession), ["Forestry"]);
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /label: "Contribution classification"[\s\S]*unclassifiedRecordCount: unclassifiedContributionRecords/);
 });

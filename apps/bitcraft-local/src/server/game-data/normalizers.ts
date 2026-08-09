@@ -1978,6 +1978,12 @@ export function normalizeRegionalEquipment(options: {
           buffs: { buffs },
         };
       }),
+      coverage: {
+        unexpectedPresetRowCount: [...presetsByPlayer.values()].reduce(
+          (total, rows) => total + Math.max(0, rows.length - 2),
+          0,
+        ),
+      },
     },
     warnings: [],
   };

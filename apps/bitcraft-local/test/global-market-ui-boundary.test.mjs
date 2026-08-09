@@ -158,9 +158,22 @@ test("Browse labels progressive locally observed history without blocking live o
 test("Market source copy identifies every migrated live Relay workspace", () => {
   const marketPage = source("../src/pages/MarketPage.tsx");
 
-  assert.match(marketPage, /Browse, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data/);
+  assert.match(marketPage, /Search, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data/);
   assert.doesNotMatch(marketPage, /Deal Watch remains on its legacy source/);
   assert.doesNotMatch(marketPage, /Live market data is provided by BitJita/);
+});
+
+test("global Market opens on a search-first alphabetical catalog", () => {
+  const marketPage = source("../src/pages/MarketPage.tsx");
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+
+  assert.match(marketPage, /id: "browse" as const, label: "Search"/);
+  assert.match(marketPage, /usePersistedState<GlobalMarketViewId>\("globalMarket\.view", "browse"\)/);
+  assert.match(browse, /sort: catalogSort/);
+  assert.match(browse, /catalogItems\.map/);
+  assert.match(browse, /lowestSellPrice/);
+  assert.match(browse, /highestBuyPrice/);
+  assert.doesNotMatch(browse, /query\.trim\(\)\.length < 2 \|\| selectedItem/);
 });
 
 test("Deal Watch renders operational facts as labelled units", () => {

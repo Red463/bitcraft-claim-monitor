@@ -6329,7 +6329,22 @@ async function apiDiagnostics() {
       }),
     );
   });
-  return [...core, ...storage].map((check) => check.result);
+  const unclassifiedContributionRecords = Number(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM production_contributions
+    WHERE claim_id = ? AND (profession IS NULL OR trim(profession) = '' OR lower(trim(profession)) = 'unknown')
+  `).get(claimId)?.count ?? 0);
+  return [
+    ...[...core, ...storage].map((check) => check.result),
+    {
+      label: "Contribution classification",
+      endpoint: "local durable contribution records",
+      ok: true,
+      durationMs: 0,
+      checkedAt: new Date().toISOString(),
+      unclassifiedRecordCount: unclassifiedContributionRecords,
+    },
+  ];
 }
 
 function csvValue(value) {
@@ -9024,7 +9039,9 @@ const server = createServer(async (req, res) => {
         return send(res, 403, { error: "Region is outside the configured active-region scope" });
       }
       const query = String(url.searchParams.get("q") ?? "").trim();
-      const catalogRows = providerCatalogRepository.findEntities(query);
+      const catalogRows = query.length >= 2
+        ? providerCatalogRepository.findEntities(query)
+        : providerCatalogRepository.listEntities();
       return send(res, 200, {
         ...regionalMarketCatalogView(
           current?.data,

@@ -58,6 +58,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const params = React.useMemo(() => new URLSearchParams(locationSearch), [locationSearch]);
   const [query, setQuery] = React.useState(mode === "browse" ? params.get("q") ?? "" : params.get("buyQ") ?? "");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
+  const [catalogItems, setCatalogItems] = React.useState<AnyRecord[]>([]);
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(() => {
     const id = params.get(mode === "browse" ? "item" : "buyItem");
     const name = params.get(mode === "browse" ? "itemName" : "buyItemName");
@@ -67,12 +68,12 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const [catalogState, setCatalogState] = React.useState<{ loading: boolean; error: string; categories: string[] }>({ loading: false, error: "", categories: [] });
   const [detailState, setDetailState] = React.useState<{ loading: boolean; error: string; historyError: string; detail: AnyRecord | null; history: AnyRecord | null }>({ loading: false, error: "", historyError: "", detail: null, history: null });
   const [category, setCategory] = React.useState(params.get("category") ?? "");
-  const [availableOnly, setAvailableOnly] = React.useState(params.get("available") !== "false");
-  const [hasSell, setHasSell] = React.useState(params.get("sell") !== "false");
+  const [availableOnly, setAvailableOnly] = React.useState(params.get("available") === "true");
+  const [hasSell, setHasSell] = React.useState(params.get("sell") === "true");
   const [hasBuy, setHasBuy] = React.useState(mode === "buy" || params.get("buy") === "true");
   const [catalogSort, setCatalogSort] = React.useState<"relevance" | "name" | "orders">(() => {
     const saved = params.get("sort");
-    return saved === "name" || saved === "orders" ? saved : "relevance";
+    return saved === "relevance" || saved === "orders" ? saved : "name";
   });
   const [orderTab, setOrderTab] = React.useState<"sell" | "buy">(mode === "buy" ? "buy" : "sell");
   const [minimumQuantity, setMinimumQuantity] = React.useState("0");
@@ -85,7 +86,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const generationSequence = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
 
   React.useEffect(() => {
-    if (query.trim().length < 2 || selectedItem?.name === query.trim()) {
+    if (mode === "buy" && query.trim().length < 2) {
       setSuggestions([]);
       return;
     }
@@ -108,7 +109,8 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       .then((payload) => {
         const items = Array.isArray(payload.items) ? payload.items : [];
         const categories = Array.isArray(payload.categories) ? payload.categories.map(String) : [];
-        setSuggestions(items.slice(0, 12));
+        setCatalogItems(items);
+        setSuggestions(query.trim().length >= 2 && selectedItem?.name !== query.trim() ? items.slice(0, 12) : []);
         setCatalogState({ loading: false, error: "", categories });
       })
       .catch((error) => {
@@ -125,10 +127,10 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       updateQueryState(mode === "browse" ? {
         q: query || null,
         category: category || null,
-        available: availableOnly ? null : "false",
-        sell: hasSell ? null : "false",
+        available: availableOnly ? "true" : null,
+        sell: hasSell ? "true" : null,
         buy: hasBuy ? "true" : null,
-        sort: catalogSort === "relevance" ? null : catalogSort,
+        sort: catalogSort === "name" ? null : catalogSort,
       } : {
         buyQ: query || null,
       });
@@ -279,7 +281,20 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
         </> : null}
       </div>
       {catalogState.error ? <div className="error">Market search unavailable: {catalogState.error}</div> : null}
-      {!selectedItem ? <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>{mode === "buy" ? "Choose an item to inspect live demand" : "Search the global market catalog"}</strong><span>{mode === "buy" ? "Buy orders are loaded live after item selection; no monitored-settlement cache is used." : "Use the filters above, then select an item for live Relay orders. Trade history appears only when an authoritative signal is available."}</span></div> : (
+      {!selectedItem ? mode === "browse" ? (
+        <div className="market-catalog-results" aria-label="Market item catalog">
+          {catalogState.loading && !catalogItems.length ? <div className="market-loading-strip">Loading market catalog…</div> : null}
+          {catalogItems.map((item) => (
+            <button className="market-catalog-result" type="button" key={`${item.itemType}-${item.id}`} onClick={() => chooseItem(item)}>
+              <ItemIcon item={item} />
+              <span className="market-catalog-result-name"><strong>{item.name}</strong><small>{item.category || "Uncategorised"}</small></span>
+              <span><small>Lowest sell</small><strong>{item.lowestSellPrice == null ? "Unavailable" : formatGoldAmount(item.lowestSellPrice)}</strong><small>{item.lowestSellLocation || "No seller location"}</small></span>
+              <span><small>Highest buy</small><strong>{item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount(item.highestBuyPrice)}</strong><small>{item.highestBuyLocation || "No buyer location"}</small></span>
+            </button>
+          ))}
+          {!catalogState.loading && !catalogItems.length ? <div className="empty-state"><ShoppingBag size={28} /><strong>No catalog items match these filters</strong><span>Clear a filter or search for another item or cargo name.</span></div> : null}
+        </div>
+      ) : <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>Choose an item to inspect live demand</strong><span>Buy orders are loaded live after item selection; no monitored-settlement cache is used.</span></div> : (
         <div className="market-item-detail">
           <header>
             <div className="market-item-identity">

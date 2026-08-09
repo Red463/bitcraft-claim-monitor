@@ -501,6 +501,10 @@ test("regional market catalog view joins live order counts to item and cargo ide
     orderCount: 2,
     hasSellOrders: true,
     hasBuyOrders: true,
+    lowestSellPrice: "25",
+    lowestSellLocation: "Timbersteel Trade",
+    highestBuyPrice: "25",
+    highestBuyLocation: "Timbersteel Trade",
   }]);
 });
 
@@ -527,6 +531,24 @@ test("regional market catalog applies live-order filters before its response lim
   });
 
   assert.deepEqual(result.items.map((item) => item.itemId), ["75"]);
+});
+
+test("regional market catalog exposes exact best prices and locations", () => {
+  const result = views.regionalMarketCatalogView({
+    orders: [
+      { entityId: "1", side: "sell", regionId: "19", itemType: "item", itemId: "44", price: "120", claimName: "High Market" },
+      { entityId: "2", side: "sell", regionId: "19", itemType: "item", itemId: "44", price: "90", claimName: "Low Market" },
+      { entityId: "3", side: "buy", regionId: "19", itemType: "item", itemId: "44", priceThreshold: "70", claimName: "Buyer Hall" },
+    ],
+  }, [{ kind: "items", targetId: "44", name: "Leather Strap", tag: "Leather" }], {
+    regionId: "19",
+    sort: "name",
+  });
+
+  assert.equal(result.items[0].lowestSellPrice, "90");
+  assert.equal(result.items[0].lowestSellLocation, "Low Market");
+  assert.equal(result.items[0].highestBuyPrice, "70");
+  assert.equal(result.items[0].highestBuyLocation, "Buyer Hall");
 });
 
 test("market response freshness includes the older global catalog dependency", () => {

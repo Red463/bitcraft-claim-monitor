@@ -158,6 +158,7 @@ test("public craft runtime merges independently arriving regions into one durabl
             publicJob("7", "70"),
             publicJob("19", "190"),
           ],
+          coverage: { missingCrafterUsernameCount: 0 },
           regions: [
             {
               regionId: "7",
@@ -334,5 +335,114 @@ test("public craft runtime restarts its pool when the monitored claim changes", 
   assert.equal(await runtime.reconcile({ ...firstConfig, claimId: "2" }), true);
   assert.equal(starts, 2);
   assert.equal(stops.length, 1);
+  await runtime.stop();
+});
+
+test("public craft runtime resolves cross-region crafter names and records optional coverage", async () => {
+  const writes = [];
+  let handler;
+  const runtime = new runtimeModule.RelayPublicCraftRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createPlayerResolver: () => ({ resolveExactPlayerName: async (id) => id === "1903" ? "Zephyr" : null }),
+    createSession: (options) => ({
+      start: async () => { handler = options.onSnapshot; },
+      stop: async () => {},
+      health: () => ({ connected: true, applied: true, lastError: null }),
+    }),
+    currentStateRepository: {
+      read: () => null,
+      nextGeneration: () => writes.length + 1,
+      commitGeneration: (batch) => writes.push(batch),
+    },
+    poolOptions: { maxSessions: 1, staggerMs: 0, sleep: async () => {}, scheduleSweep: () => () => {} },
+  });
+  await runtime.start({ relayBaseUrl: "https://relay.example", claimId: "1", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const job = { ...publicJob("19", "190"), ownerUsername: "" };
+  await handler({
+    data: { craftResults: [job] },
+    warnings: ["Regional public crafts missing crafter usernames: 1."],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 1,
+    receivedAt: "2026-07-30T12:01:00.000Z",
+  });
+
+  const published = writes[0].domains["public-crafts"];
+  assert.equal(published.data.craftResults[0].ownerUsername, "Zephyr");
+  assert.deepEqual(published.data.coverage, { missingCrafterUsernameCount: 0 });
+  assert.equal(published.confidence, "authoritative");
+  assert.deepEqual(published.warnings, []);
+  await runtime.stop();
+});
+
+test("public craft reconcile advances subscription health without rewriting an unchanged snapshot", async () => {
+  const healthWrites = [];
+  let handler;
+  const config = { relayBaseUrl: "https://relay.example", claimId: "1", primaryRegionId: "19", activeRegionIds: ["19"] };
+  const runtime = new runtimeModule.RelayPublicCraftRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: (options) => ({
+      start: async () => { handler = options.onSnapshot; },
+      stop: async () => {},
+      health: () => ({ connected: true, applied: true, lastError: null, lastApplyDurationMs: 7 }),
+    }),
+    currentStateRepository: {
+      read: () => null,
+      nextGeneration: () => 4,
+      commitGeneration: () => {},
+      recordSubscriptionHealth: (health, observedAt) => healthWrites.push({ health, observedAt }),
+    },
+    now: () => new Date("2026-07-30T12:05:00.000Z"),
+    poolOptions: { maxSessions: 1, staggerMs: 0, sleep: async () => {}, scheduleSweep: () => () => {} },
+  });
+  await runtime.start(config);
+  await handler({ data: { craftResults: [publicJob("19", "190")] }, warnings: [], database: "relay-region-19", regionId: "19", schemaFingerprint: "regional-v1", generation: 1, receivedAt: "2026-07-30T12:01:00.000Z" });
+  const before = healthWrites.length;
+  assert.equal(await runtime.reconcile(config), false);
+  assert.equal(healthWrites.length, before + 1);
+  assert.deepEqual(healthWrites.at(-1), {
+    health: { sourceKey: "region:19", domain: "public-crafts", generation: 4, connected: true, applyDurationMs: 7, reconnects: 0, malformedRows: 0, lastError: null },
+    observedAt: "2026-07-30T12:05:00.000Z",
+  });
+  await runtime.stop();
+});
+
+test("public craft disconnect stays stale until a replacement session applies", async () => {
+  const errors = [];
+  const handlers = [];
+  let connected = true;
+  let starts = 0;
+  const config = { relayBaseUrl: "https://relay.example", claimId: "1", primaryRegionId: "19", activeRegionIds: ["19"] };
+  const runtime = new runtimeModule.RelayPublicCraftRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createPlayerResolver: () => ({ resolveExactPlayerName: async () => null }),
+    createSession: (options) => ({
+      start: async () => { starts += 1; handlers.push(options.onSnapshot); connected = true; },
+      stop: async () => {},
+      health: () => ({ connected, applied: true, lastError: connected ? null : "socket closed" }),
+    }),
+    currentStateRepository: {
+      read: () => null,
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+      markError: (...args) => errors.push(args),
+      recordSubscriptionHealth: () => {},
+    },
+    poolOptions: { maxSessions: 1, staggerMs: 0, sleep: async () => {}, scheduleSweep: () => () => {} },
+  });
+  await runtime.start(config);
+  await handlers[0]({ data: { craftResults: [publicJob("19", "190")] }, warnings: [], database: "relay-region-19", regionId: "19", schemaFingerprint: "regional-v1", generation: 1, receivedAt: "2026-07-30T12:01:00.000Z" });
+  connected = false;
+  assert.equal(await runtime.reconcile(config), true);
+  assert.equal(starts, 2);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0][2], /socket closed/);
+  assert.match(runtime.health().lastError, /socket closed/);
+  await handlers[1]({ data: { craftResults: [publicJob("19", "190")] }, warnings: [], database: "relay-region-19", regionId: "19", schemaFingerprint: "regional-v1", generation: 1, receivedAt: "2026-07-30T12:02:00.000Z" });
+  assert.equal(runtime.health().lastError, null);
   await runtime.stop();
 });

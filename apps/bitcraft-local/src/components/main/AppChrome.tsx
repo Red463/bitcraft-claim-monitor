@@ -1,9 +1,8 @@
 import React from "react";
+import { TriangleAlert } from "lucide-react";
 import { parseDateValue, toNumber, type AnyRecord } from "../../main-app-data";
 import { unique } from "../../utils/array";
-import { formatNumber } from "../../utils/format";
 import { DataTable } from "./DataTable";
-import { Info } from "./Stats";
 import { AsyncState } from "./AsyncState";
 
 /*
@@ -46,61 +45,6 @@ export type ApiStatusDiagnostics = {
   warnings: string[];
 };
 
-export function ApiStatusBanner({
-  warnings,
-  lastUpdated,
-  diagnostics,
-  status,
-}: {
-  warnings: string[];
-  lastUpdated: Date | null;
-  diagnostics: ApiStatusDiagnostics;
-  status: "stale" | "partial";
-}) {
-  const uniqueWarnings = unique(warnings).slice(0, 6);
-  if (!uniqueWarnings.length) return null;
-  const diagnosticLog = JSON.stringify({ ...diagnostics, warnings: uniqueWarnings }, null, 2);
-  const statusCopy = status === "stale"
-    ? {
-        kind: "stale" as const,
-        title: "Live game data refresh issue",
-        detail: "Showing latest saved data. Some live details may be stale.",
-      }
-    : {
-        kind: "warning" as const,
-        title: "Some live details are incomplete",
-        detail: "Relay data is live, but some optional names or calculated fields are unavailable.",
-      };
-  return (
-    <section className="api-status-banner">
-      <div className="api-status-main">
-        <AsyncState kind={statusCopy.kind} title={statusCopy.title} detail={statusCopy.detail} compact />
-        <small className="api-status-meta">{lastUpdated ? `Last successful refresh: ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Waiting for a successful refresh."}</small>
-      </div>
-      <details className="api-status-details">
-        <summary>Details</summary>
-        <div className="api-status-diagnostic-grid">
-          <Info label="Page" value={diagnostics.page} />
-          <Info label="Settlement ID" value={diagnostics.claimId} />
-          <Info label="Warnings" value={formatNumber(uniqueWarnings.length)} />
-          <Info label="Refresh state" value={diagnostics.loading ? "Refreshing" : "Idle"} />
-          <Info label="Members loaded" value={formatNumber(diagnostics.dataCounts.members)} />
-          <Info label="Crafts loaded" value={formatNumber(diagnostics.dataCounts.crafts)} />
-        </div>
-        <ul>
-          {uniqueWarnings.map((warning) => <li key={warning}>{warning}</li>)}
-        </ul>
-        <div className="api-status-log">
-          {/* The diagnostic block is intentionally copyable so users can send
-              enough context to debug transient data-provider issues. */}
-          <span>Copyable diagnostic context</span>
-          <code>{diagnosticLog}</code>
-        </div>
-      </details>
-    </section>
-  );
-}
-
 function collectorTimeLabel(value: unknown): string {
   const date = parseDateValue(value);
   return date ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting";
@@ -111,13 +55,36 @@ export function RefreshStatus({
   lastUpdated,
   collectorStatus,
   intervalSeconds,
+  warnings,
+  diagnostics,
 }: {
   loading: boolean;
   lastUpdated: Date | null;
   collectorStatus: AnyRecord | null | undefined;
   intervalSeconds: number;
+  warnings: string[];
+  diagnostics: ApiStatusDiagnostics;
 }) {
   const collectors = Object.entries((collectorStatus?.collectors ?? {}) as Record<string, AnyRecord>);
+  const warningDetails = unique(warnings).slice(0, 6);
+  const diagnosticLog = JSON.stringify({ ...diagnostics, warnings: warningDetails }, null, 2);
+  const [warningOpen, setWarningOpen] = React.useState(false);
+  const warningRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!warningOpen) return undefined;
+    const closeOnOutside = (event: PointerEvent) => {
+      if (!warningRef.current?.contains(event.target as Node)) setWarningOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setWarningOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [warningOpen]);
   const collectorDetail = (collector: AnyRecord) => {
     if (collector.running) {
       const hasProgress = collector.progressCurrent != null && collector.progressTotal != null;
@@ -133,6 +100,21 @@ export function RefreshStatus({
         <small>{loading ? "Refreshing" : "Last refresh"}</small>
         <time>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}</time>
       </span>
+      {warningDetails.length ? (
+        <div className="refresh-warning" ref={warningRef} onMouseEnter={() => setWarningOpen(true)} onMouseLeave={() => {
+          if (!warningRef.current?.contains(document.activeElement)) setWarningOpen(false);
+        }}>
+          <button type="button" aria-expanded={warningOpen} aria-controls="refresh-warning-details" aria-label={`${warningDetails.length} refresh warning${warningDetails.length === 1 ? "" : "s"}. Technical warning details.`} onFocus={() => setWarningOpen(true)} onClick={() => setWarningOpen(true)}>
+            <TriangleAlert size={16} />
+          </button>
+          {warningOpen ? <div className="refresh-warning-panel" id="refresh-warning-details" role="dialog" aria-label="Refresh warning details">
+            <strong>Technical warning details</strong>
+            <ul>{warningDetails.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+            <span>Copyable diagnostic context</span>
+            <code>{diagnosticLog}</code>
+          </div> : null}
+        </div>
+      ) : null}
       {collectors.length ? (
         <div className="refresh-breakdown" role="tooltip">
           {/* This hover panel reports background reconciliation. It is

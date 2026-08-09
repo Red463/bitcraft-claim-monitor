@@ -865,6 +865,7 @@ test("regional equipment and buff rows are decoded into member-scoped provider d
           }],
         },
       }],
+      coverage: { unexpectedPresetRowCount: 0 },
     },
     warnings: [],
   });

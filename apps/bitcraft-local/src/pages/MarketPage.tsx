@@ -24,7 +24,7 @@ const FAVORITES_KEY = "bitcraft.market.favorites.v1";
 
 const MARKET_VIEWS = [
   { id: "overview" as const, label: "Overview", icon: Activity },
-  { id: "browse" as const, label: "Browse", icon: Search },
+  { id: "browse" as const, label: "Search", icon: Search },
   { id: "deals" as const, label: "Deals", icon: TrendingUp },
   { id: "buy-orders" as const, label: "Buy Orders", icon: ShoppingBag },
   { id: "deal-watch" as const, label: "Deal Watch", icon: Bell },
@@ -54,7 +54,7 @@ export function Market({
 }) {
   const location = React.useMemo(() => marketViewLocation(new URLSearchParams(locationSearch).get("tab")), [locationSearch]);
   const { request, trackPromise } = useManualRefresh();
-  const [view, setView] = usePersistedState<GlobalMarketViewId>("globalMarket.view", "overview");
+  const [view, setView] = usePersistedState<GlobalMarketViewId>("globalMarket.view", "browse");
   const [regionChoice, setRegionChoice] = usePersistedState("globalMarket.region", "All");
   const [favorites, setFavorites] = React.useState<MarketItemKey[]>(() => {
     try {
@@ -148,7 +148,7 @@ export function Market({
       {currentView === "buy-orders" ? <BuyOrderFinder {...marketRefresh} claimId={claimId} regionId={regionId} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
       {currentView === "deal-watch" ? <DealWatchlist {...marketRefresh} claimId={claimId} monitoredRegionId={regionId || fallbackRegionId} onDiscordLogin={onDiscordLogin} /> : null}
       {currentView === "stalls" ? <MarketStalls {...marketRefresh} claimId={claimId} regionId={regionId} onShowMap={onShowMap} /> : null}
-      <footer className="global-market-source"><CircleDollarSign size={14} /><span>Browse, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data. Confirmed-sale charts contain only authoritative closures observed locally and mature progressively.</span></footer>
+      <footer className="global-market-source"><CircleDollarSign size={14} /><span>Search, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data. Confirmed-sale charts contain only authoritative closures observed locally and mature progressively.</span></footer>
     </div>
   );
 }
