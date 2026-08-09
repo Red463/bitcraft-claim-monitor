@@ -258,3 +258,38 @@ then passed. The 15 deployment skips remain Linux shell integration cases on
 Windows; the application skip remains the existing Windows symlink case. No
 workflow, live service, VPS, database, environment, key, Caddy, or Discord state
 was touched.
+
+## Final independent-review remediation (2026-08-09)
+
+The final review identified three additional cutover-boundary gaps. Strict
+RED/GREEN tests first reproduced each one, then the implementation was narrowed
+to the affected recovery and admission seams:
+
+- abort now snapshots the complete pre-cutover Relay branding directory, backs
+  every regular member with a verified encrypted `relay-branding-*` artifact,
+  and restores the exact directory contents plus file/directory ownership and
+  modes before any preview service restart; absent directories, displaced
+  publish crashes, idempotent retry, and unsafe migrated extras are covered;
+- post-admission old-unit prevention records each captured local unit's exact
+  identity, atomically relocates the original beside its systemd path for at
+  least 14 days, and applies a persistent `systemctl mask --force`; the fake
+  systemd contract now reproduces the real non-force refusal, and retry resumes
+  after a crash between archive and mask without losing the original; and
+- each intensive-soak attempt establishes a fresh validated outbox baseline,
+  allows monotonic healthy enqueue/delivery transitions, and still rejects
+  delivery/source errors, backwards or ambiguous state, and pre-gate canonical
+  duplicates. The announcement transaction continues to require an exact match
+  with the final soak snapshot immediately before its single insert.
+
+Final verification for this pass:
+
+```text
+Focused orchestration/system/soak/announcement: 84 passed, 0 failed
+Complete deploy contracts: 139 passed, 0 failed, 15 Windows skips
+Full backend (test concurrency 4): 1812 passed, 0 failed, 1 Windows skip
+Production build: passed, including 1191 asset checks and runtime boundaries
+git diff --check: passed
+```
+
+No workflow, live service, VPS, database, environment, key, Caddy, or Discord
+state was touched.

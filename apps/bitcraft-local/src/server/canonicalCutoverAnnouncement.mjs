@@ -71,8 +71,8 @@ function requireAnnouncementState(state, revision) {
   }
   if (soak.gatewayCount !== 1) throw new Error("Cutover announcement requires exactly one live Discord gateway");
   if (soak.oldProcessCount !== 0) throw new Error("Cutover announcement requires no old process health");
-  if (soak.outboxUnchanged !== true || !soak.outboxFinal) {
-    throw new Error("Cutover announcement requires an unchanged Discord outbox");
+  if (soak.outboxValidated !== true || !soak.outboxBaseline || !soak.outboxFinal) {
+    throw new Error("Cutover announcement requires a validated Discord outbox baseline");
   }
   return soak;
 }

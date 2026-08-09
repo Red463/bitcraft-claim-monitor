@@ -15,6 +15,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   realpathSync,
   renameSync,
@@ -956,6 +957,7 @@ function unitSnapshot(run, paths, unit) {
     unit,
     loadState,
     fragmentPath,
+    fragmentIdentity: fileIdentity(fragmentPath),
     activeState: systemctlValue(run, paths, unit, "ActiveState"),
     unitFileState: systemctlValue(run, paths, unit, "UnitFileState"),
     mainPid: systemctlValue(run, paths, unit, "MainPID"),
@@ -1036,6 +1038,24 @@ function referencedBrandingFiles(databasePath, directory, label) {
   } finally {
     db.close();
   }
+}
+
+function brandingDirectorySnapshot(directory, label) {
+  if (!existsSync(directory)) return { existed: false, metadata: null, files: [] };
+  const stat = regularDirectory(directory, `${label} branding directory`);
+  const files = readdirSync(directory, { withFileTypes: true }).map((entry) => {
+    if (!entry.isFile() || entry.isSymbolicLink()) {
+      throw new Error(`${label} branding directory contains an unsafe entry: ${entry.name}`);
+    }
+    const filePath = path.join(directory, entry.name);
+    regularFile(filePath, `${label} branding file`);
+    return filePath;
+  }).sort();
+  return {
+    existed: true,
+    metadata: { mode: Number(stat.mode & 0o777n), uid: Number(stat.uid), gid: Number(stat.gid) },
+    files,
+  };
 }
 
 function decimalParts(value, label) {
@@ -1815,15 +1835,141 @@ export function createSystemCutoverOperations({
         || (identity.uid === backup.originalMetadata.uid && identity.gid === backup.originalMetadata.gid));
   }
 
+  function safeBrandingDirectoryEntries(directory, label) {
+    const stat = regularDirectory(directory, label);
+    const files = readdirSync(directory, { withFileTypes: true }).map((entry) => {
+      if (!entry.isFile() || entry.isSymbolicLink()) throw new Error(`${label} contains an unsafe entry: ${entry.name}`);
+      const filePath = path.join(directory, entry.name);
+      regularFile(filePath, `${label} file`);
+      return filePath;
+    });
+    return { stat, files };
+  }
+
+  function recoveredBrandingMatches(recovery, backups) {
+    if (!recovery.brandingExisted) return !existsSync(recovery.brandingDirectory);
+    if (!existsSync(recovery.brandingDirectory)) return false;
+    const { stat, files } = safeBrandingDirectoryEntries(recovery.brandingDirectory, "Recovered Relay branding directory");
+    const expected = new Map(recovery.brandingFiles.map((file) => [file.fileName, backups.get(file.backupLabel)]));
+    if (files.length !== expected.size) return false;
+    if (Number(stat.mode & 0o777n) !== recovery.brandingMetadata.mode
+      || (process.platform !== "win32"
+        && (Number(stat.uid) !== recovery.brandingMetadata.uid || Number(stat.gid) !== recovery.brandingMetadata.gid))) return false;
+    return files.every((filePath) => {
+      const backup = expected.get(path.basename(filePath));
+      return backup && recoveredFileMatches(filePath, backup);
+    });
+  }
+
+  function stagePreCutoverBranding(state, recovery, brandingBackups) {
+    const directory = recovery.brandingDirectory;
+    const stage = `${directory}.pre-cutover-recovery-${state.revision.slice(0, 12)}`;
+    if (!recovery.brandingExisted || recoveredBrandingMatches(recovery, brandingBackups)) return null;
+    if (existsSync(stage)) {
+      safeBrandingDirectoryEntries(stage, "Stale Relay branding recovery stage");
+      rmSync(stage, { recursive: true });
+    }
+    mkdirSync(stage, { mode: 0o700 });
+    try {
+      for (const file of recovery.brandingFiles) {
+        const backup = brandingBackups.get(file.backupLabel);
+        const stagedFile = decryptedRecoveryStage(state, backup, path.join(stage, file.fileName), `relay-branding-${file.fileName}`);
+        renameSync(stagedFile, path.join(stage, file.fileName));
+      }
+      applyMetadata(stage, recovery.brandingMetadata);
+      syncDirectory(stage);
+      const stagedRecovery = { ...recovery, brandingDirectory: stage };
+      if (!recoveredBrandingMatches(stagedRecovery, brandingBackups)) {
+        throw new Error("Staged Relay branding does not match its verified encrypted backups");
+      }
+      return stage;
+    } catch (error) {
+      if (existsSync(stage)) {
+        safeBrandingDirectoryEntries(stage, "Failed Relay branding recovery stage");
+        rmSync(stage, { recursive: true });
+      }
+      throw error;
+    }
+  }
+
+  function validateBrandingRecoveryDestination(state, recovery) {
+    if (existsSync(recovery.brandingDirectory)) {
+      safeBrandingDirectoryEntries(recovery.brandingDirectory, "Relay branding directory selected for recovery");
+    }
+    const displaced = `${recovery.brandingDirectory}.cutover-displaced-${state.revision.slice(0, 12)}`;
+    if (existsSync(displaced)) safeBrandingDirectoryEntries(displaced, "Displaced Relay branding directory");
+  }
+
+  function restorePreCutoverBranding(state, recovery, brandingBackups, stage) {
+    const directory = recovery.brandingDirectory;
+    const expectedStage = `${directory}.pre-cutover-recovery-${state.revision.slice(0, 12)}`;
+    const displaced = `${directory}.cutover-displaced-${state.revision.slice(0, 12)}`;
+    if (recoveredBrandingMatches(recovery, brandingBackups)) {
+      if (existsSync(expectedStage)) {
+        safeBrandingDirectoryEntries(expectedStage, "Stale Relay branding recovery stage");
+        rmSync(expectedStage, { recursive: true });
+      }
+      if (existsSync(displaced)) {
+        safeBrandingDirectoryEntries(displaced, "Displaced Relay branding directory");
+        rmSync(displaced, { recursive: true });
+      }
+      return;
+    }
+    if (!recovery.brandingExisted) {
+      if (existsSync(directory)) {
+        safeBrandingDirectoryEntries(directory, "Relay branding directory created during cutover");
+        rmSync(directory, { recursive: true });
+      }
+      if (existsSync(displaced)) {
+        safeBrandingDirectoryEntries(displaced, "Displaced Relay branding directory");
+        rmSync(displaced, { recursive: true });
+      }
+      syncDirectory(path.dirname(directory));
+      return;
+    }
+    if (stage !== expectedStage || !existsSync(stage)) throw new Error("Verified Relay branding recovery stage is unavailable");
+    try {
+      if (existsSync(directory)) {
+        safeBrandingDirectoryEntries(directory, "Relay branding directory selected for recovery");
+        if (existsSync(displaced)) {
+          safeBrandingDirectoryEntries(displaced, "Displaced Relay branding directory");
+          rmSync(directory, { recursive: true });
+        } else {
+          renameSync(directory, displaced);
+        }
+      }
+      renameSync(stage, directory);
+      syncDirectory(path.dirname(directory));
+      if (!recoveredBrandingMatches(recovery, brandingBackups)) {
+        throw new Error("Restored Relay branding does not match its verified encrypted backups");
+      }
+      if (existsSync(displaced)) {
+        safeBrandingDirectoryEntries(displaced, "Displaced Relay branding directory");
+        rmSync(displaced, { recursive: true });
+        syncDirectory(path.dirname(directory));
+      }
+    } catch (error) {
+      if (existsSync(expectedStage)) {
+        safeBrandingDirectoryEntries(expectedStage, "Failed Relay branding recovery stage");
+        rmSync(expectedStage, { recursive: true });
+      }
+      throw error;
+    }
+  }
+
   async function restorePreCutoverRelayData(state) {
     if (!state.applyStartedAt && !["applying", "abort-failed"].includes(state.status)) return;
     audit("restore-pre-cutover-relay-data");
     const recovery = state.preCutoverRelayData;
     const discovered = state.preflight?.discoveredPaths ?? {};
-    if (recovery?.formatVersion !== 1
+    if (recovery?.formatVersion !== 2
       || recovery.databasePath !== paths.targetDatabasePath
       || recovery.ledgerPath !== discovered.targetLedgerPath
-      || typeof recovery.ledgerExisted !== "boolean") {
+      || typeof recovery.ledgerExisted !== "boolean"
+      || recovery.brandingDirectory !== paths.targetBrandingDirectory
+      || typeof recovery.brandingExisted !== "boolean"
+      || !Array.isArray(recovery.brandingFiles)
+      || (recovery.brandingExisted && !recovery.brandingMetadata)) {
       throw new Error("Pre-cutover Relay data recovery record is invalid");
     }
 
@@ -1832,6 +1978,14 @@ export function createSystemCutoverOperations({
     if (!recovery.ledgerExisted && ledgerBackup) {
       throw new Error("Pre-cutover Relay ledger recovery record conflicts with its encrypted backup");
     }
+    const brandingBackups = new Map(recovery.brandingFiles.map((file) => {
+      if (!file || path.basename(String(file.fileName ?? "")) !== file.fileName
+        || !/^relay-branding-\d+$/.test(String(file.backupLabel ?? ""))) {
+        throw new Error("Pre-cutover Relay branding recovery record is invalid");
+      }
+      return [file.backupLabel, verifiedRecoveryBackup(state, file.backupLabel)];
+    }));
+    validateBrandingRecoveryDestination(state, recovery);
 
     const databaseAlreadyRestored = recoveredFileMatches(recovery.databasePath, databaseBackup);
     const ledgerAlreadyRestored = recovery.ledgerExisted
@@ -1852,6 +2006,9 @@ export function createSystemCutoverOperations({
       );
     }
 
+    // All encrypted members are authenticated and staged before any live recovery target is replaced.
+    const brandingStage = stagePreCutoverBranding(state, recovery, brandingBackups);
+
     removeSqliteRecoverySidecars(recovery.databasePath);
     if (databaseStage) {
       if (existsSync(recovery.databasePath)) regularFile(recovery.databasePath, "Relay database selected for recovery");
@@ -1867,6 +2024,7 @@ export function createSystemCutoverOperations({
       rmSync(recovery.ledgerPath);
       syncDirectory(path.dirname(recovery.ledgerPath));
     }
+    restorePreCutoverBranding(state, recovery, brandingBackups, brandingStage);
 
     removeSqliteRecoverySidecars(recovery.databasePath);
     if (!recoveredFileMatches(recovery.databasePath, databaseBackup)) {
@@ -1912,11 +2070,19 @@ export function createSystemCutoverOperations({
     chmodSync(stageDirectory, 0o700);
     const discovered = state.preflight?.discoveredPaths ?? {};
     if (!discovered.targetLedgerPath) throw new Error("Relay privacy ledger path was not discovered before backup");
+    const relayBranding = brandingDirectorySnapshot(paths.targetBrandingDirectory, "Relay");
     state.preCutoverRelayData = {
-      formatVersion: 1,
+      formatVersion: 2,
       databasePath: paths.targetDatabasePath,
       ledgerPath: discovered.targetLedgerPath,
       ledgerExisted: existsSync(discovered.targetLedgerPath),
+      brandingDirectory: paths.targetBrandingDirectory,
+      brandingExisted: relayBranding.existed,
+      brandingMetadata: relayBranding.metadata,
+      brandingFiles: relayBranding.files.map((filePath, index) => ({
+        fileName: path.basename(filePath),
+        backupLabel: `relay-branding-${index + 1}`,
+      })),
     };
     const artifacts = [
       { label: "old-db", source: paths.sourceDatabasePath, sqlite: true },
@@ -1925,7 +2091,7 @@ export function createSystemCutoverOperations({
       { label: "relay-environment", source: paths.relayEnvironmentFile },
       { label: "caddy", source: state.maintenance?.savedPath ?? paths.liveCaddyFile },
       ...referencedBrandingFiles(paths.sourceDatabasePath, paths.sourceBrandingDirectory, "Old").map((source, index) => ({ label: `old-branding-${index + 1}`, source })),
-      ...referencedBrandingFiles(paths.targetDatabasePath, paths.targetBrandingDirectory, "Relay").map((source, index) => ({ label: `relay-branding-${index + 1}`, source })),
+      ...relayBranding.files.map((source, index) => ({ label: `relay-branding-${index + 1}`, source })),
       { label: "old-ledger", source: discovered.sourceLedgerPath, optional: true },
       { label: "relay-ledger", source: discovered.targetLedgerPath, optional: true },
       { label: "old-privacy-key", source: discovered.sourceKeyPath },
@@ -2366,17 +2532,64 @@ export function createSystemCutoverOperations({
     return { health: true, pages: 2, redirect: true, securityHeaders: true, subscriptions };
   }
 
-  async function maskOldUnits() {
+  function relocatedUnitMatches(archivePath, captured) {
+    const archived = fileIdentity(archivePath);
+    return ["dev", "ino", "nlink", "mode", "uid", "gid", "size", "sha256"]
+      .every((key) => String(archived[key]) === String(captured[key]));
+  }
+
+  function archiveOldUnit(state, unit) {
+    const captured = state.serviceCapture?.units?.[unit];
+    if (!captured?.fragmentIdentity || captured.fragmentPath !== captured.fragmentIdentity.path
+      || path.basename(captured.fragmentPath) !== unit) {
+      throw new Error(`Captured local unit identity is missing for ${unit}`);
+    }
+    const archivePath = `${captured.fragmentPath}.canonical-cutover-${state.revision.slice(0, 12)}.retained`;
+    if (existsSync(archivePath)) {
+      if (!relocatedUnitMatches(archivePath, captured.fragmentIdentity)) {
+        throw new Error(`Archived old unit identity changed for ${unit}`);
+      }
+    } else {
+      if (!existsSync(captured.fragmentPath)) throw new Error(`Old unit file and its archive are both missing for ${unit}`);
+      const current = lstatSync(captured.fragmentPath);
+      if (current.isSymbolicLink()) {
+        if (readlinkSync(captured.fragmentPath) !== "/dev/null") throw new Error(`Old unit ${unit} has an unsafe mask link`);
+        throw new Error(`Old unit archive is missing for already-masked unit ${unit}`);
+      }
+      if (!relocatedUnitMatches(captured.fragmentPath, captured.fragmentIdentity)) {
+        throw new Error(`Old unit identity changed before archival for ${unit}`);
+      }
+      renameSync(captured.fragmentPath, archivePath);
+      syncDirectory(path.dirname(captured.fragmentPath));
+    }
+    if (existsSync(captured.fragmentPath)) {
+      const current = lstatSync(captured.fragmentPath);
+      if (!current.isSymbolicLink() || readlinkSync(captured.fragmentPath) !== "/dev/null") {
+        throw new Error(`Old unit path is occupied after archival for ${unit}`);
+      }
+    }
+    return {
+      unit,
+      originalPath: captured.fragmentPath,
+      archivePath,
+      identity: fileIdentity(archivePath),
+      retainedUntil: new Date(now().getTime() + (14 * 24 * 60 * 60 * 1000)).toISOString(),
+    };
+  }
+
+  async function maskOldUnits(state) {
     audit("mask-old-units");
+    const archivedUnits = [];
     for (const unit of SOURCE_UNITS) {
       requireCommand(run, paths.systemctlBinary, ["disable", "--now", unit], `Disable old unit ${unit}`);
-      requireCommand(run, paths.systemctlBinary, ["mask", unit], `Persistently mask old unit ${unit}`);
+      archivedUnits.push(archiveOldUnit(state, unit));
+      requireCommand(run, paths.systemctlBinary, ["mask", "--force", unit], `Persistently mask old unit ${unit}`);
       if (systemctlValue(run, paths, unit, "ActiveState") !== "inactive"
         || systemctlValue(run, paths, unit, "UnitFileState") !== "masked") {
         throw new Error(`Old unit ${unit} was not stopped, disabled, and masked`);
       }
     }
-    return { units: [...SOURCE_UNITS], maskScope: "persistent" };
+    return { units: [...SOURCE_UNITS], maskScope: "persistent", archivedUnits };
   }
 
   async function cancelWatchdog(state) {
@@ -2389,6 +2602,12 @@ export function createSystemCutoverOperations({
   async function recordForensicRetention(state) {
     audit("record-forensic-retention", { revision: state.revision });
     for (const backup of state.backups ?? []) assertRecordedIdentity(backup.identity, `Forensic backup ${backup.identifier}`);
+    for (const archived of state.oldUnitsMasked?.archivedUnits ?? []) {
+      assertRecordedIdentity(archived.identity, `Archived old unit ${archived.unit}`);
+      if (new Date(archived.retainedUntil).getTime() < now().getTime()) {
+        throw new Error(`Archived old unit retention expired prematurely for ${archived.unit}`);
+      }
+    }
     const currentIdentifiers = new Set((state.backups ?? []).map((backup) => backup.identifier));
     const recoverySets = new Map();
     regularDirectory(paths.relayBackupRoot, "Relay backup root");
@@ -2448,8 +2667,8 @@ export function createSystemCutoverOperations({
         run: (command, arguments_) => run(command === "systemctl" ? paths.systemctlBinary : command, arguments_),
       }),
     });
-    if (canonicalJson(summary?.outboxFinal?.counts ?? {}) !== canonicalJson(state.outboxBeforeStart ?? {})) {
-      throw new Error("Discord outbox changed between canonical startup and intensive soak completion");
+    if (summary?.outboxValidated !== true || !summary.outboxBaseline || !summary.outboxFinal) {
+      throw new Error("Discord outbox did not produce a validated intensive-soak baseline");
     }
     return summary;
   }

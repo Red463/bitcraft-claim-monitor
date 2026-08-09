@@ -9,7 +9,9 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -541,6 +543,8 @@ function systemFixture() {
     updater: path.join(root, "updater"),
   };
   const unitState = new Map();
+  const unitDirectory = path.join(root, "systemd-system");
+  mkdirSync(unitDirectory);
   const allUnits = [
     "bitcraft-claim-monitor.service", "bitcraft-claim-monitor-worker.service",
     "bitcraft-monitor-collector.service", "bitcraft-monitor-collector.timer",
@@ -554,6 +558,7 @@ function systemFixture() {
     enabled: unit.endsWith(".timer") || /(?:^|-)worker\.service$/.test(unit) || /monitor(?:-relay)?\.service$/.test(unit) ? "enabled" : "static",
     pid: unit === "bitcraft-claim-monitor-worker.service" ? "101" : unit === "bitcraft-claim-monitor-relay-worker.service" ? "202" : "0",
   });
+  for (const unit of allUnits) writeFileSync(path.join(unitDirectory, unit), `[Unit]\nDescription=${unit}\n`, { mode: 0o644 });
   const calls = [];
   const runtime = { mode: "preview" };
   const modeForConfig = (configPath) => readFileSync(configPath, "utf8").trim();
@@ -575,7 +580,7 @@ function systemFixture() {
       const property = args.find((argument) => argument.startsWith("--property="))?.slice("--property=".length);
       const state = unitState.get(unit) ?? { active: "active", enabled: "enabled", pid: "0" };
       const values = {
-        LoadState: "loaded", FragmentPath: `/etc/systemd/system/${unit}`,
+        LoadState: "loaded", FragmentPath: path.join(unitDirectory, unit),
         ActiveState: state.active, UnitFileState: state.enabled, MainPID: state.pid,
         EnvironmentFiles: unit === "bitcraft-claim-monitor.service" ? sourceEnvironmentFile
           : unit === "bitcraft-claim-monitor-relay.service" ? relayEnvironmentFile : "",
@@ -587,6 +592,10 @@ function systemFixture() {
       return { status: 0, stdout: `${values[property] ?? ""}\n`, stderr: "" };
     }
     if (command === "systemctl" && ["stop", "start", "enable", "disable", "mask"].includes(args[0])) {
+      if (args[0] === "mask" && !args.includes("--force")
+        && args.some((argument) => unitState.has(argument) && existsSync(path.join(unitDirectory, argument)))) {
+        return { status: 1, stdout: "", stderr: "File exists" };
+      }
       for (const unit of args.filter((argument) => unitState.has(argument))) {
         const state = unitState.get(unit);
         if (args[0] === "stop" || (args[0] === "disable" && args.includes("--now"))) { state.active = "inactive"; state.pid = "0"; }
@@ -897,8 +906,10 @@ test("system admission starts only Relay, verifies generation/gateway/outbox/can
           subscriptionCount: 1,
           gatewayCount: 1,
           oldProcessCount: 0,
-          outboxUnchanged: true,
-          outboxFinal: { counts: state.outboxBeforeStart, latestId: 0 },
+          outboxValidated: true,
+          outboxChanged: true,
+          outboxBaseline: { counts: state.outboxBeforeStart, latestId: 0 },
+          outboxFinal: { counts: { sent: 1 }, latestId: 1 },
         };
       },
     });
@@ -936,7 +947,7 @@ test("system admission starts only Relay, verifies generation/gateway/outbox/can
     assert.equal(readFileSync(fixture.paths.liveCaddyFile, "utf8"), "final\n");
     const publicResult = await operations.verifyPublicCanonical(state);
     assert.equal(publicResult.redirect, true);
-    await operations.maskOldUnits(state);
+    const masks = await operations.maskOldUnits(state);
     const soak = await operations.verifyIntensiveSoak(state);
     assert.equal(soak.profile, "intensive");
     assert.equal(soakInput.revision, REVISION);
@@ -950,10 +961,97 @@ test("system admission starts only Relay, verifies generation/gateway/outbox/can
     }
     for (const unit of fixture.unitState.keys()) {
       if (!unit.startsWith("bitcraft-claim-monitor-relay")) {
-        assert.ok(fixture.calls.some((call) => call[0] === "systemctl" && call[1] === "mask" && call[2] === unit));
+        assert.ok(fixture.calls.some((call) => call[0] === "systemctl" && call[1] === "mask" && call[2] === "--force" && call[3] === unit));
         assert.equal(fixture.calls.some((call) => call[0] === "systemctl" && call[1] === "mask" && call.includes("--runtime")), false);
       }
     }
+    assert.equal(masks.archivedUnits.length, 6);
+    for (const archived of masks.archivedUnits) {
+      assert.equal(existsSync(archived.originalPath), false);
+      assert.equal(readFileSync(archived.archivePath, "utf8"), `[Unit]\nDescription=${archived.unit}\n`);
+    }
+    const callsBeforeRetry = fixture.calls.length;
+    const retriedMasks = await operations.maskOldUnits(state);
+    assert.deepEqual(retriedMasks.archivedUnits, masks.archivedUnits);
+    assert.equal(fixture.calls.slice(callsBeforeRetry).some((call) => call[0] === "systemctl" && call[1] === "mask" && call[2] === "--force"), true);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("old-unit archival and forced masking resume after a crash between the two durable steps", async () => {
+  const fixture = systemFixture();
+  let failFirstMask = true;
+  const run = (command, args) => {
+    if (command === "systemctl" && args[0] === "mask" && failFirstMask) {
+      failFirstMask = false;
+      return { status: 1, stdout: "", stderr: "simulated crash after archive" };
+    }
+    return fixture.run(command, args);
+  };
+  try {
+    const operations = createSystemCutoverOperations({
+      paths: fixture.paths,
+      run,
+      request: fixture.request,
+      statFilesystem: () => ({ bavail: 4n * 1024n * 1024n, bsize: 1024n }),
+      now: () => new Date("2026-08-09T12:00:00.000Z"),
+    });
+    const preflight = await operations.validatePrepare({ revision: REVISION });
+    const state = { revision: REVISION, preflight, serviceCapture: { units: preflight.units } };
+    await assert.rejects(operations.maskOldUnits(state), /Persistently mask old unit/i);
+    const firstUnit = "bitcraft-claim-monitor.service";
+    const firstPath = preflight.units[firstUnit].fragmentPath;
+    assert.equal(existsSync(firstPath), false);
+    assert.equal(existsSync(`${firstPath}.canonical-cutover-${REVISION.slice(0, 12)}.retained`), true);
+
+    const result = await operations.maskOldUnits(state);
+    assert.equal(result.archivedUnits.length, 6);
+    assert.equal(result.archivedUnits.every((entry) => existsSync(entry.archivePath)), true);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("same-revision intensive-soak retry accepts a fresh validated outbox baseline", async () => {
+  const fixture = systemFixture();
+  let attempt = 0;
+  try {
+    const operations = createSystemCutoverOperations({
+      paths: fixture.paths,
+      run: fixture.run,
+      soakVerifier: async ({ revision }) => {
+        attempt += 1;
+        if (attempt === 1) throw new Error("first soak attempt observed a transient source error");
+        return {
+          ok: true,
+          profile: "intensive",
+          revision,
+          version: "0.52.0-beta.1",
+          deploymentMode: "canonical",
+          durationMs: 30 * 60 * 1000,
+          sampleCount: 31,
+          failedSamples: 0,
+          generationAdvanced: true,
+          subscriptionCount: 1,
+          gatewayCount: 1,
+          oldProcessCount: 0,
+          outboxValidated: true,
+          outboxChanged: true,
+          outboxBaseline: { counts: { sent: 4 }, latestId: 4 },
+          outboxFinal: { counts: { sent: 5 }, latestId: 5 },
+        };
+      },
+    });
+    const state = {
+      revision: REVISION,
+      outboxBeforeStart: {},
+      preflight: { subscriptions: { subscriptions: { "relay:global:catalogs": 7 } } },
+    };
+    await assert.rejects(operations.verifyIntensiveSoak(state), /transient source error/i);
+    const summary = await operations.verifyIntensiveSoak(state);
+    assert.deepEqual(summary.outboxBaseline, { counts: { sent: 4 }, latestId: 4 });
+    assert.deepEqual(summary.outboxFinal, { counts: { sent: 5 }, latestId: 5 });
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -1113,6 +1211,188 @@ test("pre-admission restore reinstalls the verified target database and readable
     await operations.restorePreCutoverRelayData(state);
     const decryptsAfterRetry = commands.filter(([command, , mode]) => command === process.execPath && mode === "decrypt").length;
     assert.equal(decryptsAfterRetry, decryptsBeforeRetry, "an already-restored target must not be decrypted or replaced again");
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("pre-admission restore reinstalls Relay branding as an exact verified set with metadata", async () => {
+  const fixture = backupFixture();
+  const run = (command, args) => {
+    if (command === "sqlite3") {
+      const sql = args[1];
+      if (sql.startsWith(".backup ")) {
+        const destination = sql.slice(".backup ".length).replace(/^'|'$/g, "").replaceAll("''", "'");
+        copyFileSync(args[0], destination);
+      }
+      return { status: 0, stdout: sql === "PRAGMA integrity_check;" ? "ok\n" : "0|0|0\n", stderr: "" };
+    }
+    const result = spawnSync(command, args, { encoding: "utf8" });
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  };
+  try {
+    const database = new DatabaseSync(fixture.paths.targetDatabasePath);
+    try {
+      database.prepare("INSERT INTO app_settings (key, value) VALUES ('branding_json', ?)")
+        .run(JSON.stringify({ favicon: { fileName: "favicon.webp" } }));
+    } finally {
+      database.close();
+    }
+    const faviconPath = path.join(fixture.paths.targetBrandingDirectory, "favicon.webp");
+    chmodSync(fixture.paths.targetBrandingDirectory, 0o750);
+    chmodSync(faviconPath, 0o640);
+    const originalBytes = readFileSync(faviconPath);
+    const originalFileMode = statSync(faviconPath).mode & 0o777;
+    const originalDirectoryMode = statSync(fixture.paths.targetBrandingDirectory).mode & 0o777;
+    const state = {
+      revision: REVISION,
+      manifestHash: MANIFEST_HASH,
+      status: "applying",
+      preflight: { discoveredPaths: fixture.extra },
+    };
+    const operations = createSystemCutoverOperations({ paths: fixture.paths, run, now: () => new Date("2026-08-09T12:00:00.000Z") });
+    state.backups = await operations.createAndVerifyEncryptedBackups(state);
+    assert.equal(state.backups.filter((entry) => entry.sourceLabel.startsWith("relay-branding-")).length, 1);
+
+    writeFileSync(faviconPath, "migrated-branding");
+    writeFileSync(path.join(fixture.paths.targetBrandingDirectory, "logo.png"), "migrated-extra");
+    chmodSync(fixture.paths.targetBrandingDirectory, 0o777);
+    chmodSync(faviconPath, 0o600);
+
+    await operations.restorePreCutoverRelayData(state);
+    assert.deepEqual(readdirSync(fixture.paths.targetBrandingDirectory), ["favicon.webp"]);
+    assert.deepEqual(readFileSync(faviconPath), originalBytes);
+    assert.equal(statSync(faviconPath).mode & 0o777, originalFileMode);
+    assert.equal(statSync(fixture.paths.targetBrandingDirectory).mode & 0o777, originalDirectoryMode);
+
+    await operations.restorePreCutoverRelayData(state);
+    assert.deepEqual(readdirSync(fixture.paths.targetBrandingDirectory), ["favicon.webp"]);
+    assert.deepEqual(readFileSync(faviconPath), originalBytes);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("pre-admission branding restore removes a directory absent before cutover and converges after a publish crash", async (context) => {
+  for (const scenario of ["originally absent", "displaced before publish"]) await context.test(scenario, async () => {
+    const fixture = backupFixture();
+    if (scenario === "originally absent") rmSync(fixture.paths.targetBrandingDirectory, { recursive: true });
+    const run = (command, args) => {
+      if (command === "sqlite3") {
+        const sql = args[1];
+        if (sql.startsWith(".backup ")) {
+          const destination = sql.slice(".backup ".length).replace(/^'|'$/g, "").replaceAll("''", "'");
+          copyFileSync(args[0], destination);
+        }
+        return { status: 0, stdout: sql === "PRAGMA integrity_check;" ? "ok\n" : "0|0|0\n", stderr: "" };
+      }
+      const result = spawnSync(command, args, { encoding: "utf8" });
+      return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+    };
+    try {
+      const state = {
+        revision: REVISION,
+        manifestHash: MANIFEST_HASH,
+        status: "abort-failed",
+        applyStartedAt: "2026-08-09T12:00:00.000Z",
+        preflight: { discoveredPaths: fixture.extra },
+      };
+      const operations = createSystemCutoverOperations({ paths: fixture.paths, run, now: () => new Date("2026-08-09T12:00:00.000Z") });
+      state.backups = await operations.createAndVerifyEncryptedBackups(state);
+      if (scenario === "originally absent") {
+        mkdirSync(fixture.paths.targetBrandingDirectory);
+        writeFileSync(path.join(fixture.paths.targetBrandingDirectory, "migrated.webp"), "migrated");
+      } else {
+        const displaced = `${fixture.paths.targetBrandingDirectory}.cutover-displaced-${REVISION.slice(0, 12)}`;
+        renameSync(fixture.paths.targetBrandingDirectory, displaced);
+      }
+
+      await operations.restorePreCutoverRelayData(state);
+      assert.equal(existsSync(fixture.paths.targetBrandingDirectory), scenario !== "originally absent");
+      if (scenario !== "originally absent") {
+        assert.deepEqual(readdirSync(fixture.paths.targetBrandingDirectory), ["favicon.webp"]);
+        assert.equal(existsSync(`${fixture.paths.targetBrandingDirectory}.cutover-displaced-${REVISION.slice(0, 12)}`), false);
+      }
+      await operations.restorePreCutoverRelayData(state);
+      assert.equal(existsSync(fixture.paths.targetBrandingDirectory), scenario !== "originally absent");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+});
+
+test("pre-admission restore refuses unsafe migrated branding entries before replacing the database", async () => {
+  const fixture = backupFixture();
+  const run = (command, args) => {
+    if (command === "sqlite3") {
+      const sql = args[1];
+      if (sql.startsWith(".backup ")) {
+        const destination = sql.slice(".backup ".length).replace(/^'|'$/g, "").replaceAll("''", "'");
+        copyFileSync(args[0], destination);
+      }
+      return { status: 0, stdout: sql === "PRAGMA integrity_check;" ? "ok\n" : "0|0|0\n", stderr: "" };
+    }
+    const result = spawnSync(command, args, { encoding: "utf8" });
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  };
+  try {
+    const state = { revision: REVISION, status: "applying", preflight: { discoveredPaths: fixture.extra } };
+    const operations = createSystemCutoverOperations({ paths: fixture.paths, run, now: () => new Date("2026-08-09T12:00:00.000Z") });
+    state.backups = await operations.createAndVerifyEncryptedBackups(state);
+    const database = new DatabaseSync(fixture.paths.targetDatabasePath);
+    try {
+      database.prepare("INSERT INTO app_settings (key, value) VALUES ('post_cutover', 'mutated')").run();
+    } finally {
+      database.close();
+    }
+    mkdirSync(path.join(fixture.paths.targetBrandingDirectory, "unsafe-extra"));
+
+    await assert.rejects(operations.restorePreCutoverRelayData(state), /branding.*unsafe entry/i);
+    const stillMutated = new DatabaseSync(fixture.paths.targetDatabasePath, { readOnly: true });
+    try {
+      assert.equal(stillMutated.prepare("SELECT COUNT(*) AS count FROM app_settings WHERE key = 'post_cutover'").get().count, 1);
+    } finally {
+      stillMutated.close();
+    }
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("pre-admission restore validates an unsafe cutover-created branding directory before restoring an originally absent one", async () => {
+  const fixture = backupFixture();
+  rmSync(fixture.paths.targetBrandingDirectory, { recursive: true });
+  const run = (command, args) => {
+    if (command === "sqlite3") {
+      const sql = args[1];
+      if (sql.startsWith(".backup ")) {
+        const destination = sql.slice(".backup ".length).replace(/^'|'$/g, "").replaceAll("''", "'");
+        copyFileSync(args[0], destination);
+      }
+      return { status: 0, stdout: sql === "PRAGMA integrity_check;" ? "ok\n" : "0|0|0\n", stderr: "" };
+    }
+    const result = spawnSync(command, args, { encoding: "utf8" });
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  };
+  try {
+    const state = { revision: REVISION, status: "applying", preflight: { discoveredPaths: fixture.extra } };
+    const operations = createSystemCutoverOperations({ paths: fixture.paths, run, now: () => new Date("2026-08-09T12:00:00.000Z") });
+    state.backups = await operations.createAndVerifyEncryptedBackups(state);
+    const database = new DatabaseSync(fixture.paths.targetDatabasePath);
+    try {
+      database.prepare("INSERT INTO app_settings (key, value) VALUES ('post_cutover', 'mutated')").run();
+    } finally {
+      database.close();
+    }
+    mkdirSync(path.join(fixture.paths.targetBrandingDirectory, "unsafe-extra"), { recursive: true });
+
+    await assert.rejects(operations.restorePreCutoverRelayData(state), /branding.*unsafe entry/i);
+    const stillMutated = new DatabaseSync(fixture.paths.targetDatabasePath, { readOnly: true });
+    try {
+      assert.equal(stillMutated.prepare("SELECT COUNT(*) AS count FROM app_settings WHERE key = 'post_cutover'").get().count, 1);
+    } finally {
+      stillMutated.close();
+    }
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

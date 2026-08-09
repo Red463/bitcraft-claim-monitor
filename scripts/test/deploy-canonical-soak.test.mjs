@@ -49,6 +49,7 @@ function operational(generation = 7, overrides = {}) {
     restartCounts: { web: 0, worker: 0, collector: 0 },
     sourceErrorCount: 0,
     outboxErrorCount: 0,
+    canonicalAnnouncementCount: 0,
     outbox: { counts: { sent: 8 }, latestId: 8 },
     ...overrides,
   };
@@ -109,7 +110,9 @@ test("intensive verifier uses only GETs and returns a bounded release/gateway/ou
     gatewayCount: 1,
     oldProcessCount: 0,
     outboxHealthy: true,
-    outboxUnchanged: true,
+    outboxValidated: true,
+    outboxChanged: false,
+    outboxBaseline: { counts: { sent: 8 }, latestId: 8 },
     outboxFinal: { counts: { sent: 8 }, latestId: 8 },
     startedAt: "2026-08-09T12:00:00.000Z",
     completedAt: "2026-08-09T12:30:00.000Z",
@@ -118,6 +121,23 @@ test("intensive verifier uses only GETs and returns a bounded release/gateway/ou
   assert.equal(fixture.requests.every((entry) => entry.method === "GET"), true);
   assert.equal(fixture.requests.filter((entry) => entry.redirect === "manual").length, 31);
   assert.ok(JSON.stringify(result).length < 1_000);
+});
+
+test("intensive soak permits legitimate notification enqueue and delivery while preserving a monotonic attempt baseline", async () => {
+  const fixture = successfulFixture({
+    operationalForSample: (sample) => operational(sample === 0 ? 7 : 8, {
+      outbox: sample === 0
+        ? { counts: { sent: 8 }, latestId: 8 }
+        : sample === 1
+          ? { counts: { pending: 1, sent: 8 }, latestId: 9 }
+          : { counts: { sent: 9 }, latestId: 9 },
+    }),
+  });
+  const summary = await runCanonicalSoak({ profile: "intensive", revision: REVISION, version: VERSION, ...fixture });
+  assert.equal(summary.outboxValidated, true);
+  assert.equal(summary.outboxChanged, true);
+  assert.deepEqual(summary.outboxBaseline, { counts: { sent: 8 }, latestId: 8 });
+  assert.deepEqual(summary.outboxFinal, { counts: { sent: 9 }, latestId: 9 });
 });
 
 test("soak verifier fails closed for generation stalls", async () => {
@@ -148,7 +168,8 @@ test("follow-up permits healthy live outbox progress but rejects delivery errors
   const summary = await runCanonicalSoak({ profile: "follow-up", revision: REVISION, version: VERSION, ...healthy });
   assert.equal(summary.sampleCount, 97);
   assert.equal(summary.outboxHealthy, true);
-  assert.equal(summary.outboxUnchanged, false);
+  assert.equal(summary.outboxValidated, true);
+  assert.equal(summary.outboxChanged, true);
   assert.deepEqual(summary.outboxFinal, { counts: { sent: 10 }, latestId: 10 });
 
   const errored = successfulFixture({
@@ -164,7 +185,8 @@ test("soak verifier fails the current sample for gateway, source, and outbox cha
   const cases = [
     ["gateway", { gatewayCount: 2 }, /exactly one.*gateway/i],
     ["source", { sourceErrorCount: 1, secret: "never-print-this-token" }, /source error/i],
-    ["outbox", { outbox: { counts: { sent: 9 }, latestId: 9 } }, /outbox.*changed/i],
+    ["outbox", { outbox: { counts: { sent: 7 }, latestId: 7 } }, /outbox.*backwards/i],
+    ["canonical duplicate", { canonicalAnnouncementCount: 2 }, /canonical.*duplicate/i],
     ["restart", { restartCounts: { web: 0, worker: 1, collector: 0 } }, /restart/i],
   ];
   for (const [name, changed, pattern] of cases) await context.test(name, async () => {

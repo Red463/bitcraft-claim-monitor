@@ -108,12 +108,36 @@ function subscriptionSetHash(keys) {
   return createHash("sha256").update(keys.join("\n"), "utf8").digest("hex");
 }
 
+function validatedOutboxSnapshot(outbox) {
+  if (!outbox || !Number.isSafeInteger(Number(outbox.latestId)) || Number(outbox.latestId) < 0
+    || !outbox.counts || typeof outbox.counts !== "object" || Array.isArray(outbox.counts)) {
+    throw new Error("Discord outbox delivery snapshot is invalid");
+  }
+  const counts = Object.fromEntries(Object.entries(outbox.counts).map(([status, count]) => {
+    const numeric = Number(count);
+    if (!["pending", "sending", "sent", "failed", "skipped"].includes(status)
+      || !Number.isSafeInteger(numeric) || numeric < 0) throw new Error("Discord outbox delivery snapshot is invalid");
+    return [status, numeric];
+  }));
+  return { counts, latestId: Number(outbox.latestId), total: Object.values(counts).reduce((sum, count) => sum + count, 0) };
+}
+
 function validateOperationalSample(sample, baseline, { profile, expectedSubscriptionKeys }) {
   if (!sample || typeof sample !== "object") throw new Error("Operational soak snapshot is unavailable");
   if (sample.gatewayCount !== 1) throw new Error("Canonical soak requires exactly one live Discord gateway");
   if (sample.oldProcessCount !== 0) throw new Error("Canonical soak detected old process health");
   if (sample.sourceErrorCount !== 0) throw new Error("Canonical soak detected a provider source error");
   if (sample.outboxErrorCount !== 0) throw new Error("Canonical soak detected an outbox delivery error");
+  if (!Number.isSafeInteger(Number(sample.canonicalAnnouncementCount)) || Number(sample.canonicalAnnouncementCount) < 0) {
+    throw new Error("Canonical soak announcement state is ambiguous");
+  }
+  if (profile === "intensive" && sample.canonicalAnnouncementCount !== 0) {
+    throw new Error("Canonical soak detected a canonical announcement duplicate before the exact announcement gate");
+  }
+  if (profile === "follow-up" && sample.canonicalAnnouncementCount > 1) {
+    throw new Error("Canonical soak detected a canonical announcement duplicate");
+  }
+  const outbox = validatedOutboxSnapshot(sample.outbox);
   const subscriptions = subscriptionMap(sample.subscriptions);
   if (subscriptions.size !== expectedSubscriptionKeys.length
     || expectedSubscriptionKeys.some((key) => !subscriptions.has(key))) {
@@ -123,10 +147,8 @@ function validateOperationalSample(sample, baseline, { profile, expectedSubscrip
     if (canonical(sample.restartCounts) !== canonical(baseline.restartCounts)) {
       throw new Error("Canonical service restart counts changed during the soak");
     }
-    if (profile === "intensive" && canonical(sample.outbox) !== canonical(baseline.initialOutbox)) {
-      throw new Error("Discord outbox delivery state changed during the soak");
-    }
-    if (profile === "follow-up" && Number(sample.outbox?.latestId) < Number(baseline.previousOutbox?.latestId)) {
+    const previous = validatedOutboxSnapshot(baseline.previousOutbox);
+    if (outbox.latestId < previous.latestId || outbox.total < previous.total) {
       throw new Error("Discord outbox delivery state moved backwards during the follow-up soak");
     }
   }
@@ -198,7 +220,9 @@ export async function runCanonicalSoak({
     gatewayCount: finalSample.gatewayCount,
     oldProcessCount: finalSample.oldProcessCount,
     outboxHealthy: true,
-    outboxUnchanged: profile === "intensive",
+    outboxValidated: true,
+    outboxChanged: canonical(finalSample.outbox) !== canonical(baseline.initialOutbox),
+    outboxBaseline: baseline.initialOutbox,
     outboxFinal: finalSample.outbox,
     startedAt: startedAt.toISOString(),
     completedAt: now().toISOString(),
@@ -243,6 +267,7 @@ export function createSystemOperationalSampler({
     let outbox;
     let sourceErrorCount;
     let outboxErrorCount;
+    let canonicalAnnouncementCount;
     try {
       const rows = db.prepare(`
         SELECT provider, source_key, domain, generation, connected, last_error
@@ -263,6 +288,11 @@ export function createSystemOperationalSampler({
         FROM discord_notification_outbox
         WHERE status IN ('failed', 'sending')
            OR (status = 'pending' AND (attempts > 0 OR last_error IS NOT NULL))
+      `).get().count);
+      canonicalAnnouncementCount = Number(db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM discord_notification_outbox
+        WHERE event_type = 'canonical_cutover'
       `).get().count);
     } finally {
       db.close();
@@ -288,7 +318,7 @@ export function createSystemOperationalSampler({
       const pid = systemctlValue(run, unit, "MainPID");
       return active === "active" || (/^\d+$/.test(pid) && pid !== "0");
     }).length;
-    return { subscriptions, gatewayCount, oldProcessCount, restartCounts, sourceErrorCount, outboxErrorCount, outbox };
+    return { subscriptions, gatewayCount, oldProcessCount, restartCounts, sourceErrorCount, outboxErrorCount, canonicalAnnouncementCount, outbox };
   };
 }
 

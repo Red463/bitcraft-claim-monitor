@@ -49,7 +49,9 @@ function fixture() {
       subscriptionSetHash: "fce01caf4eef1b43a0db5a1a780a8383eb6b03bc87c4ae1a8ad96dd3cc0708c4",
       gatewayCount: 1,
       oldProcessCount: 0,
-      outboxUnchanged: true,
+      outboxValidated: true,
+      outboxChanged: false,
+      outboxBaseline: outbox,
       outboxFinal: outbox,
     },
   };
@@ -130,7 +132,7 @@ test("announcement refuses every pre-admission, public, gateway, outbox, and soa
     ["old process", (state) => { state.intensiveSoak.oldProcessCount = 1; }],
     ["generation", (state) => { state.intensiveSoak.generationAdvanced = false; }],
     ["subscription", (state) => { state.intensiveSoak.subscriptionSetHash = "b".repeat(64); }],
-    ["outbox", (state) => { state.intensiveSoak.outboxUnchanged = false; }],
+    ["outbox", (state) => { state.intensiveSoak.outboxValidated = false; }],
     ["failed sample", (state) => { state.intensiveSoak.failedSamples = 1; }],
   ];
   for (const [label, mutate] of cases) {
