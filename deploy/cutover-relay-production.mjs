@@ -15,6 +15,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   readlinkSync,
   readdirSync,
   realpathSync,
@@ -204,6 +205,22 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+function sha256File(filePath) {
+  const descriptor = openSync(filePath, "r");
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(8 * 1024 * 1024);
+  try {
+    while (true) {
+      const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+    return hash.digest("hex");
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function regularFile(filePath, label, { allowMissing = false } = {}) {
   if (!existsSync(filePath)) {
     if (allowMissing) return null;
@@ -245,7 +262,6 @@ function pathIsWithin(rootPath, candidatePath) {
 
 function fileIdentity(filePath) {
   const stat = regularFile(filePath, "Protected cutover file");
-  const bytes = readFileSync(filePath);
   return {
     path: filePath,
     dev: String(stat.dev),
@@ -255,7 +271,7 @@ function fileIdentity(filePath) {
     uid: Number(stat.uid),
     gid: Number(stat.gid),
     size: Number(stat.size),
-    sha256: sha256(bytes),
+    sha256: sha256File(filePath),
   };
 }
 
@@ -1809,7 +1825,7 @@ export function createSystemCutoverOperations({
     const temporary = cutoverTemporaryPath(destination, state, `abort-${label}`);
     if (existsSync(temporary)) {
       regularFile(temporary, `${label} recovery stage`);
-      if (sha256(readFileSync(temporary)) !== backup.originalSha256) {
+      if (sha256File(temporary) !== backup.originalSha256) {
         rmSync(temporary);
         syncDirectory(path.dirname(temporary));
       }
@@ -1825,7 +1841,7 @@ export function createSystemCutoverOperations({
     }
     regularFile(temporary, `${label} recovery stage`);
     syncFile(temporary);
-    if (sha256(readFileSync(temporary)) !== backup.originalSha256) {
+    if (sha256File(temporary) !== backup.originalSha256) {
       throw new Error(`${label} recovery plaintext hash mismatch`);
     }
     if (sqlite) sqliteIntegrity(temporary);
@@ -2146,10 +2162,10 @@ export function createSystemCutoverOperations({
         }
         const sourceIdentity = fileIdentity(artifact.source);
         chmodSync(plaintext, 0o600);
-        const originalSha256 = sha256(readFileSync(plaintext));
+        const originalSha256 = sha256File(plaintext);
         requireCommand(run, process.execPath, [paths.backupCryptoHelper, "encrypt", plaintext, encrypted, paths.backupEncryptionKeyFile], `Encrypt ${artifact.label}`);
         requireCommand(run, process.execPath, [paths.backupCryptoHelper, "decrypt", encrypted, validation, paths.backupEncryptionKeyFile], `Decrypt-verify ${artifact.label}`);
-        if (sha256(readFileSync(validation)) !== originalSha256) throw new Error(`Decrypted backup hash mismatch for ${artifact.label}`);
+        if (sha256File(validation) !== originalSha256) throw new Error(`Decrypted backup hash mismatch for ${artifact.label}`);
         if (artifact.sqlite) {
           const integrity = requireCommand(run, paths.sqliteBinary, [validation, "PRAGMA integrity_check;"], `Validate SQLite ${artifact.label}`).trim();
           if (integrity !== "ok") throw new Error(`Encrypted SQLite backup failed integrity validation for ${artifact.label}`);
@@ -2159,7 +2175,7 @@ export function createSystemCutoverOperations({
           path: encrypted,
           sourceLabel: artifact.label,
           originalSha256,
-          encryptedSha256: sha256(readFileSync(encrypted)),
+          encryptedSha256: sha256File(encrypted),
           size: statSync(encrypted).size,
           identity: fileIdentity(encrypted),
           originalMetadata: {
