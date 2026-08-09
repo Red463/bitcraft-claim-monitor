@@ -47,7 +47,6 @@ type SessionConfig = {
   generation: number;
   regionId: string;
   maxClaims?: number;
-  maxIdsPerQuery?: number;
   maxApplyRows?: number;
 };
 type SessionDependencies = {
@@ -68,9 +67,6 @@ export type RegionalClaimsSnapshot = {
 type WireRecord = Record<string, unknown>;
 
 const DEFAULT_MAX_CLAIMS = 5_000;
-// Relay's current regional source applies indexed point subscriptions
-// reliably, while OR-combined username predicates can remain unapplied.
-const DEFAULT_MAX_IDS_PER_QUERY = 1;
 const DEFAULT_MAX_APPLY_ROWS = 12_000;
 
 async function loadBundledRegionalBindings(): Promise<RegionalBindingModule> {
@@ -106,8 +102,8 @@ export class RelayRegionClaimsSession {
   readonly #now: () => Date;
   #connection: BindingConnection | null = null;
   #baseSubscription: SubscriptionHandle | null = null;
-  #config: Required<Pick<SessionConfig, "maxClaims" | "maxIdsPerQuery" | "maxApplyRows">>
-    & Omit<SessionConfig, "maxClaims" | "maxIdsPerQuery" | "maxApplyRows"> | null = null;
+  #config: Required<Pick<SessionConfig, "maxClaims" | "maxApplyRows">>
+    & Omit<SessionConfig, "maxClaims" | "maxApplyRows"> | null = null;
   #nextGeneration = 0;
   #snapshotQueued = false;
   #applyInFlight = false;
@@ -146,7 +142,6 @@ export class RelayRegionClaimsSession {
       generation: positiveInteger(config.generation, "Relay regional-claims generation"),
       regionId: decimalInteger(config.regionId, "Relay regional-claims region id"),
       maxClaims: positiveInteger(config.maxClaims ?? DEFAULT_MAX_CLAIMS, "Relay regional-claims claim budget"),
-      maxIdsPerQuery: positiveInteger(config.maxIdsPerQuery ?? DEFAULT_MAX_IDS_PER_QUERY, "Relay regional-claims owner query size"),
       maxApplyRows: positiveInteger(config.maxApplyRows ?? DEFAULT_MAX_APPLY_ROWS, "Relay regional-claims apply row budget"),
     };
     this.#nextGeneration = this.#config.generation;
