@@ -617,7 +617,7 @@ function systemFixture() {
         canonicalOrigin: "https://app.timbersteeltrade.com",
         discordReady: runtime.mode === "canonical",
         version: "0.52.0-beta.1",
-        buildSha: REVISION,
+        buildSha: REVISION.slice(0, 12),
       }), stderr: "" };
       return { status: 0, stdout: "", stderr: "" };
     }
@@ -842,6 +842,7 @@ test("system transition operations persist rollback identities before a later co
 
 test("system admission starts only Relay, verifies generation/gateway/outbox/canary, installs final Caddy, and masks old units", async () => {
   const fixture = systemFixture();
+  let soakInput;
   try {
     const operations = createSystemCutoverOperations({
       paths: fixture.paths,
@@ -850,6 +851,25 @@ test("system admission starts only Relay, verifies generation/gateway/outbox/can
       statFilesystem: () => ({ bavail: 4n * 1024n * 1024n, bsize: 1024n }),
       wait: async () => {},
       now: () => new Date("2026-08-09T12:00:00.000Z"),
+      soakVerifier: async (input) => {
+        soakInput = input;
+        return {
+          ok: true,
+          profile: "intensive",
+          revision: REVISION,
+          version: "0.52.0-beta.1",
+          deploymentMode: "canonical",
+          durationMs: 30 * 60 * 1000,
+          sampleCount: 31,
+          failedSamples: 0,
+          generationAdvanced: true,
+          subscriptionCount: 1,
+          gatewayCount: 1,
+          oldProcessCount: 0,
+          outboxUnchanged: true,
+          outboxFinal: { counts: state.outboxBeforeStart, latestId: 0 },
+        };
+      },
     });
     const state = {
       revision: REVISION,
@@ -886,6 +906,11 @@ test("system admission starts only Relay, verifies generation/gateway/outbox/can
     const publicResult = await operations.verifyPublicCanonical(state);
     assert.equal(publicResult.redirect, true);
     await operations.maskOldUnits(state);
+    const soak = await operations.verifyIntensiveSoak(state);
+    assert.equal(soak.profile, "intensive");
+    assert.equal(soakInput.revision, REVISION);
+    assert.deepEqual(soakInput.expectedSubscriptionKeys, ["relay:global:catalogs"]);
+    assert.equal(typeof soakInput.sampleOperations, "function");
     for (const [unit, unitState] of fixture.unitState) {
       if (!unit.startsWith("bitcraft-claim-monitor-relay")) {
         assert.equal(unitState.active, "inactive", unit);

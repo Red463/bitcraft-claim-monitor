@@ -66,6 +66,11 @@ import { buildProbabilityWorkbookBuffer } from "./src/server/probabilityWorkbook
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
+import {
+  canonicalCutoverDiscordDelivery,
+  claimCanonicalCutoverDelivery,
+  recoverInterruptedCanonicalCutoverDeliveries,
+} from "./src/server/canonicalCutoverAnnouncement.mjs";
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import {
@@ -435,6 +440,7 @@ cleanupRetiredRegionalMarketState();
 installRetiredTableAuthorizer(db);
 
 const statements = createPreparedStatements(db);
+if (processRoleConfig.runBackgroundJobs) recoverInterruptedCanonicalCutoverDeliveries(db, new Date().toISOString());
 const gameDataGenerationListeners = new Set();
 let productionRelayLifecycleCoordinator = null;
 let settlementRelayTransitionCoordinator = null;
@@ -3384,6 +3390,7 @@ function supplyRunwayMetadata(claim, supplies = toNumber(claim?.supplies)) {
 
 function discordEnabledFor(eventType, settings, metadata) {
   if (!settings.enabled || !settings.botToken) return false;
+  if (eventType === "canonical_cutover") return Boolean(String(settings.channels?.announcements ?? "").trim());
   if (eventType === "craft_plan_report") return settings.craftPlanReports.scheduledEnabled && Boolean(String(metadata?.channelId ?? "").trim());
   if (eventType === "market_new_listing") return false;
   if (eventType === "market_sale" || eventType === "market_sale_confirmed") {
@@ -3445,6 +3452,7 @@ function youtubeChannelSelection(settings = getDiscordSettingsRaw()) {
 }
 
 function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (eventType === "canonical_cutover") return String(settings.channels?.announcements ?? "").trim();
   if (eventType === "craft_plan_report") return String(metadata.channelId ?? "").trim();
   if (eventType === "market_new_listing") return "";
   if ((eventType === "market_sale" || eventType === "market_sale_confirmed") && settings.marketSalesDelivery === "dm") return "";
@@ -3467,6 +3475,7 @@ function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordS
 }
 
 function discordChannelKeyForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (eventType === "canonical_cutover") return "announcements";
   if (eventType === "craft_plan_report") return "craftPlanReports";
   if (eventType === "production_started" || eventType === "production_completed") {
     const selectionKey = eventType === "production_started" ? "productionStarted" : "productionCompleted";
@@ -3794,10 +3803,15 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
       : eventType === "youtube_video" ? "YouTube notifications are disabled or the announcements channel is not configured"
       : eventType === "market_new_listing" ? "Market listing Discord notifications are disabled"
       : "Notification disabled or below configured threshold";
-    recordDiscordDeliverySafe({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata: diagnostics });
+    if (eventType !== "canonical_cutover") recordDiscordDeliverySafe({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata: diagnostics });
     return { ok: true, skipped: true, reason, channelId, channelKey };
   }
   try {
+    if (eventType === "canonical_cutover") {
+      const delivery = canonicalCutoverDiscordDelivery({ summary, revision: metadata.admittedRevision, settings });
+      const response = await sendDiscordMessage(delivery.payload, settings, delivery.channelId);
+      return { ok: true, skipped: false, channelId: delivery.channelId, channelKey: delivery.channelKey, response: discordDeliveryResponse(response) };
+    }
     if (eventType === "craft_plan_report") {
       const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(metadata.report), settings, channelId);
       recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: discordDeliveryResponse(response) });
@@ -3818,7 +3832,7 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
     return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    recordDiscordDeliverySafe({ status: "failed", eventType, channelId, channelKey, summary, error: message, metadata: diagnostics });
+    if (eventType !== "canonical_cutover") recordDiscordDeliverySafe({ status: "failed", eventType, channelId, channelKey, summary, error: message, metadata: diagnostics });
     throw error;
   }
 }
@@ -3855,6 +3869,8 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
     const rows = statements.pendingDiscordNotifications.all(discordNotificationMaxAttempts, new Date().toISOString(), limit);
     for (const row of rows) {
       const metadata = safeJson(row.metadata_json, {});
+      const canonicalCutoverAttempt = row.event_type === "canonical_cutover";
+      if (canonicalCutoverAttempt && !claimCanonicalCutoverDelivery(db, row.id, new Date().toISOString())) continue;
       try {
         const result = await sendDiscordActivity(row.event_type, row.summary, row.occurred_at, metadata);
         const finishedAt = new Date().toISOString();
@@ -3875,11 +3891,21 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
       } catch (error) {
         const failedAt = new Date().toISOString();
         const message = error instanceof Error ? error.message : String(error);
-        statements.markDiscordNotificationFailed.run(discordNotificationMaxAttempts, discordNotificationRetryAt(toNumber(row.attempts)), failedAt, message, failedAt, row.id);
+        if (canonicalCutoverAttempt) {
+          statements.markDiscordNotificationSkipped.run(
+            failedAt,
+            "Canonical announcement delivery outcome is unknown; automatic retry is suppressed",
+            failedAt,
+            row.id,
+          );
+        } else {
+          statements.markDiscordNotificationFailed.run(discordNotificationMaxAttempts, discordNotificationRetryAt(toNumber(row.attempts)), failedAt, message, failedAt, row.id);
+        }
         if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
           statements.updateDiscordCraftPlanReportOccurrence.run("failed", null, redactServerHealthText(message).slice(0, 500), failedAt, metadata.ruleId, metadata.occurrenceKey);
         }
-        failed += 1;
+        if (canonicalCutoverAttempt) skipped += 1;
+        else failed += 1;
       }
     }
     return { checked: rows.length, sent, skipped, failed };

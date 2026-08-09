@@ -617,6 +617,8 @@ validate_release_config() {
     --config "$release_dir/deploy/Caddyfile.cutover-maintenance"
   run_logged "Validating cutover orchestration helper" node --check \
     "$release_dir/deploy/cutover-relay-production.mjs"
+  run_logged "Validating canonical soak verifier" node --check \
+    "$release_dir/deploy/verify-canonical-soak.mjs"
 }
 
 install_release_config() {

@@ -46,6 +46,8 @@ import {
   deletionLedgerSubject,
   parseDeletionLedgerContent,
 } from "../apps/bitcraft-local/src/server/privacyDeletionLedger.mjs";
+import { enqueueCanonicalCutoverAnnouncement } from "../apps/bitcraft-local/src/server/canonicalCutoverAnnouncement.mjs";
+import { createSystemOperationalSampler, runCanonicalSoak } from "./verify-canonical-soak.mjs";
 
 export const CANONICAL_CONFIRMATION = "app.timbersteeltrade.com";
 export const CANONICAL_CLAIM_ID = "1369094286777412590";
@@ -715,6 +717,16 @@ export function createCutoverOrchestrator({ operations, stateDirectory, now = ()
       state.postAdmission.forensicRetentionRecorded = true;
       save(state);
     }
+    if (!state.postAdmission.intensiveSoakVerified) {
+      state.intensiveSoak = await invoke(operations, "verifyIntensiveSoak", state);
+      state.postAdmission.intensiveSoakVerified = true;
+      save(state);
+    }
+    if (!state.postAdmission.cutoverAnnouncementEnqueued) {
+      state.cutoverAnnouncement = await invoke(operations, "enqueueCutoverAnnouncement", state);
+      state.postAdmission.cutoverAnnouncementEnqueued = true;
+      save(state);
+    }
     state.status = "complete";
     state.completedAt ??= now().toISOString();
     save(state);
@@ -1185,7 +1197,7 @@ function assertCanonicalHealth(health, revision) {
     || health.canonicalOrigin !== "https://app.timbersteeltrade.com"
     || health.discordReady !== true
     || health.version !== CANONICAL_VERSION
-    || health.buildSha !== revision) {
+    || health.buildSha !== revision.slice(0, 12)) {
     throw new Error("Canonical health payload does not match the admitted revision and runtime");
   }
 }
@@ -1224,6 +1236,8 @@ export function createSystemCutoverOperations({
   request = globalThis.fetch,
   statFilesystem = statfsSync,
   wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  soakVerifier = runCanonicalSoak,
+  soakFetch = globalThis.fetch,
   log = () => {},
 } = {}) {
   const paths = { ...DEFAULT_SYSTEM_PATHS, ...pathOverrides };
@@ -1420,7 +1434,7 @@ export function createSystemCutoverOperations({
     if (availableBytes < requiredBytes) throw new Error("Insufficient disk space for cutover staging, encryption, verification, and 1 GiB reserve");
 
     const health = healthJson(run, paths, "http://127.0.0.1:19430/api/local/health", "Validate Relay preview health");
-    if (health.ok !== true || health.deploymentMode !== "preview" || health.version !== CANONICAL_VERSION || health.buildSha !== revision) {
+    if (health.ok !== true || health.deploymentMode !== "preview" || health.version !== CANONICAL_VERSION || health.buildSha !== revision.slice(0, 12)) {
       throw new Error("Relay preview health does not match the requested cutover revision");
     }
     return {
@@ -2234,6 +2248,35 @@ export function createSystemCutoverOperations({
     };
   }
 
+  async function verifyIntensiveSoak(state) {
+    audit("verify-intensive-soak", { revision: state.revision });
+    const summary = await soakVerifier({
+      profile: "intensive",
+      revision: state.revision,
+      version: CANONICAL_VERSION,
+      expectedSubscriptionKeys: Object.keys(state.preflight?.subscriptions?.subscriptions ?? {}).sort(),
+      fetchImpl: soakFetch,
+      sampleOperations: createSystemOperationalSampler({
+        databasePath: paths.targetDatabasePath,
+        run: (command, arguments_) => run(command === "systemctl" ? paths.systemctlBinary : command, arguments_),
+      }),
+    });
+    if (canonicalJson(summary?.outboxFinal?.counts ?? {}) !== canonicalJson(state.outboxBeforeStart ?? {})) {
+      throw new Error("Discord outbox changed between canonical startup and intensive soak completion");
+    }
+    return summary;
+  }
+
+  async function enqueueCutoverAnnouncement(state) {
+    audit("enqueue-cutover-announcement", { revision: state.revision });
+    return enqueueCanonicalCutoverAnnouncement({
+      databasePath: paths.targetDatabasePath,
+      revision: state.revision,
+      state,
+      now,
+    });
+  }
+
   async function restoreCaddy(state) {
     if (!state.maintenance?.savedPath) return;
     audit("restore-caddy");
@@ -2296,6 +2339,7 @@ export function createSystemCutoverOperations({
     createMigrationManifest,
     createRepairManifest,
     editCanonicalEnvironment,
+    enqueueCutoverAnnouncement,
     installPreviousPrivacyKey,
     installFinalCaddy,
     installMaintenance,
@@ -2314,6 +2358,7 @@ export function createSystemCutoverOperations({
     validateFinalCaddyForAdmission,
     validatePrepare,
     verifyContributionRepair,
+    verifyIntensiveSoak,
     verifyLocalCanonical,
     verifyMaintenanceCanary,
     verifyMigratedData,

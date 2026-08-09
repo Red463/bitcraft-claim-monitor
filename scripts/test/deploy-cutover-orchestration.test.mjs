@@ -30,6 +30,7 @@ function fixture({ repairCount = 1, failAt = null } = {}) {
     validatePrepare: () => record("validate-prepare", {
       revision: REVISION,
       version: "0.52.0-beta.1",
+      deploymentMode: "canonical",
       claimId: "1369094286777412590",
       caddy: { originalSha256: "c".repeat(64), savedPath: "/protected/original-caddy" },
       services: { oldWeb: { active: true, enabled: true }, relayWeb: { active: true, enabled: true } },
@@ -82,6 +83,20 @@ function fixture({ repairCount = 1, failAt = null } = {}) {
     maskOldUnits: () => record("mask-old"),
     cancelWatchdog: () => record("cancel-watchdog"),
     recordForensicRetention: () => record("record-retention", { deadline: "2026-08-23T12:00:00.000Z" }),
+    verifyIntensiveSoak: () => record("verify-intensive-soak", {
+      ok: true,
+      profile: "intensive",
+      revision: REVISION,
+      version: "0.52.0-beta.1",
+      durationMs: 30 * 60 * 1000,
+      failedSamples: 0,
+      generationAdvanced: true,
+      gatewayCount: 1,
+      oldProcessCount: 0,
+      outboxUnchanged: true,
+      outboxFinal: { counts: { pending: 2, sent: 8 }, latestId: 10 },
+    }),
+    enqueueCutoverAnnouncement: () => record("enqueue-cutover-announcement", { inserted: true, sourceKey: `canonical-cutover:${REVISION}`, status: "pending" }),
     quiesceServicesForRestore: () => record("quiesce-services"),
     restoreEnvironment: () => record("restore-environment"),
     removeCreatedReadiness: () => record("remove-readiness"),
@@ -229,6 +244,7 @@ test("apply verifies the repair and privacy handshake before migration and marks
       "write-readiness", "verify-readiness", "apply-migration", "verify-migrated-data",
       "seed-release-marker", "capture-outbox", "start-relay", "verify-local", "verify-canary",
       "validate-final-caddy", "install-final-caddy", "verify-public", "mask-old", "cancel-watchdog", "record-retention",
+      "verify-intensive-soak", "enqueue-cutover-announcement",
     ]);
     assert.equal(existsSync(path.join(cutover.directory, "admission.json")), true);
     const state = JSON.parse(readFileSync(path.join(cutover.directory, "state.json"), "utf8"));
@@ -296,11 +312,13 @@ test("abort continues every restoration after partial failures and retains retry
 
 test("every post-admission failure is resumable only through fix-forward apply", async (context) => {
   const cases = [
-    ["install-final-caddy", ["install-final-caddy", "verify-public", "mask-old", "cancel-watchdog", "record-retention"]],
-    ["verify-public", ["verify-public", "mask-old", "cancel-watchdog", "record-retention"]],
-    ["mask-old", ["mask-old", "cancel-watchdog", "record-retention"]],
-    ["cancel-watchdog", ["cancel-watchdog", "record-retention"]],
-    ["record-retention", ["record-retention"]],
+    ["install-final-caddy", ["install-final-caddy", "verify-public", "mask-old", "cancel-watchdog", "record-retention", "verify-intensive-soak", "enqueue-cutover-announcement"]],
+    ["verify-public", ["verify-public", "mask-old", "cancel-watchdog", "record-retention", "verify-intensive-soak", "enqueue-cutover-announcement"]],
+    ["mask-old", ["mask-old", "cancel-watchdog", "record-retention", "verify-intensive-soak", "enqueue-cutover-announcement"]],
+    ["cancel-watchdog", ["cancel-watchdog", "record-retention", "verify-intensive-soak", "enqueue-cutover-announcement"]],
+    ["record-retention", ["record-retention", "verify-intensive-soak", "enqueue-cutover-announcement"]],
+    ["verify-intensive-soak", ["verify-intensive-soak", "enqueue-cutover-announcement"]],
+    ["enqueue-cutover-announcement", ["enqueue-cutover-announcement"]],
   ];
   for (const [failure, expectedResumeEvents] of cases) await context.test(failure, async () => {
     const cutover = fixture({ failAt: failure });

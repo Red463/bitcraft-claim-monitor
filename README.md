@@ -155,6 +155,35 @@ authenticated manual test can post to the configured sandbox Discord channel.
 Caddy routing is a one-time supervised bootstrap and the updater never
 overwrites the live Caddyfile.
 
+Production has two fail-closed modes. `preview` is record-only and has no
+Discord gateway. `canonical` uses live Discord delivery, exactly one worker
+gateway, and the exact OAuth callback
+`https://app.timbersteeltrade.com/api/local/auth/discord/callback`. Routine
+deployment stays in preview; it cannot change the installed mode. Canonical
+activation is available only from `main` through the protected cutover workflow:
+prepare uses the `relay-preview` GitHub environment and apply uses the separate
+`relay-cutover` environment with its required reviewer.
+
+The operator types `app.timbersteeltrade.com` exactly. Prepare takes the
+cutover -> deploy -> backup locks, enters maintenance, stops writers, freezes
+the profession repair and selective migration manifests, and validates an
+encrypted recovery set. Apply has a 10-minute target and a 15-minute watchdog;
+it migrates only approved account/configuration data, forces re-login, merges
+and replays privacy deletions, starts canonical Relay services, and opens Caddy.
+Abort is available only before admission; post-admission recovery is
+fix-forward. Pre-admission abort restores the saved routing and service state;
+post-admission fix-forward resumes the exact admitted revision. The exactly-once no-mentions cutover announcement waits for the
+30-minute intensive soak. A schedulable 24-hour follow-up then runs without a
+browser. The stopped and masked legacy installation remains for 14-day forensic
+retention. Legacy deletion requires a separate approval and final encrypted
+archive; no cleanup command is part of this release.
+
+Workflow summaries stay non-secret: prepare reports only revision-bound frozen
+counts/hashes, encrypted-backup identifiers, and watchdog deadline; apply
+reports revision plus success/failed; abort reports revision plus
+restored/failed-or-admitted. Detailed diagnostics and protected state remain on
+the VPS.
+
 See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for setup, diagnostics, backups, rollback,
 and cutover gates.
 

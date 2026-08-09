@@ -26,3 +26,19 @@ test("Discord notification tests use only the explicit sandbox sender", () => {
 test("Discord craft notifications pass settings into embed rendering for profession emojis", () => {
   assert.match(server, /discordEmbedForActivity\(eventType, summary, occurredAt, metadata, settings\)/);
 });
+
+test("Discord outbox worker delivers canonical cutover rows through the exact no-mentions announcement seam", () => {
+  assert.match(server, /canonicalCutoverDiscordDelivery/);
+  assert.match(server, /eventType === "canonical_cutover"/);
+  assert.match(server, /revision: metadata\.admittedRevision/);
+  assert.match(server, /sendDiscordMessage\(delivery\.payload, settings, delivery\.channelId\)/);
+  const canonicalBranch = server.slice(
+    server.indexOf('if (eventType === "canonical_cutover")'),
+    server.indexOf('if (eventType === "craft_plan_report")'),
+  );
+  assert.doesNotMatch(canonicalBranch, /recordDiscordDeliverySafe/);
+  assert.match(server, /eventType !== "canonical_cutover"[^\n]*recordDiscordDeliverySafe/);
+  assert.match(server, /claimCanonicalCutoverDelivery\(db, row\.id/);
+  assert.match(server, /recoverInterruptedCanonicalCutoverDeliveries\(db/);
+  assert.match(server, /canonicalCutoverAttempt[\s\S]*?markDiscordNotificationSkipped/);
+});

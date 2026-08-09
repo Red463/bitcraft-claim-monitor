@@ -126,7 +126,7 @@ jobs:
   apply:
     needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     environment: relay-cutover
     steps:
       - name: Configure pinned SSH identity

@@ -411,6 +411,14 @@ The helper takes all three locks in one fixed order: cutover -> deploy -> backup
 It never calls the ordinary backup or deploy entry points while holding those
 locks, so neither helper can recursively reacquire them.
 
+The installed environment has two exact modes. Routine deployments preserve
+`BITCRAFT_DEPLOYMENT_MODE=preview`, `DISCORD_DELIVERY_MODE=record`, and
+`ENABLE_DISCORD_STARTUP=false`; preview is record-only and has no live gateway.
+Only approved apply writes `BITCRAFT_DEPLOYMENT_MODE=canonical`,
+`DISCORD_DELIVERY_MODE=live`, `ENABLE_DISCORD_STARTUP=true`, legal confirmation,
+and `DISCORD_OAUTH_REDIRECT_URI=https://app.timbersteeltrade.com/api/local/auth/discord/callback`.
+Canonical mode owns live Discord through exactly one Relay worker gateway.
+
 Create a distinct GitHub environment named `relay-cutover`. Limit its
 deployment branch to `main`, add at least one required reviewer who is not the
 workflow initiator, prevent administrators from bypassing the protection, and
@@ -442,6 +450,22 @@ one migration recovery set per cutover and follow the existing three-recovery-
 point/90-day policy; the active set remains protected for the 14-day forensic
 window.
 
+The apply GitHub summary contains only the revision and `success` or `failed`;
+the abort summary contains only the revision and `restored` or
+`failed-or-admitted`. Neither summary publishes command output, state, paths,
+tokens, keys, configuration values, or remote logs. A failed-or-admitted abort
+means the admission marker exists and the same revision/hash-bound apply must
+be resumed as fix-forward.
+
+The maintenance window has a 10-minute target and a 15-minute abort watchdog.
+Prepare must bind the outstanding profession repair prerequisite before it
+freezes the selective migration. Old production wins only for approved account,
+character-link, access, legal-acceptance, preference, market-watch, planning,
+branding, durable Discord, audit, and scheduled-job configuration. Relay-only
+ordinary accounts and Relay game/history/provider data remain; Relay-only admin
+grants are removed or deactivated; all sessions are revoked; runtime job state,
+delivery/outbox data, security telemetry, and provider caches are not copied.
+
 The repair-to-migration seam is intentionally narrow. The outstanding
 contribution repair must run after the Task 2 dry-run freezes its inputs, while
 Task 2 normally rejects every target-database change as drift. Prepare therefore
@@ -463,8 +487,55 @@ whether abort is still permitted. If apply fails after recording admission,
 rerun the exact same revision/hash-bound apply command: it resumes only the
 unfinished fix-forward phases and never re-runs a completed migration.
 After successful admission the old units are persistently disabled and
-runtime-masked. Their unit files and durable data remain in place for supervised
-fix-forward or forensic work.
+runtime-masked. Their unit files and durable data remain stopped and masked for
+the full 14-day forensic window for supervised fix-forward or forensic work.
+
+### Post-admission announcement and soak monitoring
+
+Public verification, exactly one healthy gateway, zero old process health, an
+unchanged outbox, connected/applied subscriptions, provider generation
+advancement, and every sample of the 30-minute intensive soak must succeed
+before the revision-bound custom announcement is inserted into the durable
+outbox. Its source key is `canonical-cutover:<40hex>`, it targets the configured
+`announcements` channel, disables all mentions, and uses Discord's enforced
+revision-derived nonce as defense in depth. Delivery is claimed once before
+the network request; an interrupted or ambiguous attempt becomes terminal
+`skipped` and is never resent automatically. Verify Discord manually before
+any separately approved operator follow-up. The ordinary
+`0.52.0-beta.1` update notice is pre-seeded as already announced before Relay
+services start.
+
+Apply runs the intensive profile automatically. A supervised operator can run
+the same non-mutating, bounded, secret-free verifier from the active release:
+
+```sh
+REVISION=0123456789abcdef0123456789abcdef01234567
+sudo node /opt/bitcraft-claim-monitor-relay/current/deploy/verify-canonical-soak.mjs --profile intensive --revision "$REVISION"
+```
+
+After apply succeeds, schedule the 24-hour follow-up cadence as a transient
+systemd service so monitoring does not require an open browser or SSH session:
+
+```sh
+REVISION=0123456789abcdef0123456789abcdef01234567
+sudo systemd-run \
+  --unit="bitcraft-claim-monitor-relay-follow-up-${REVISION:0:12}" \
+  --description="BitCraft canonical 24-hour follow-up" \
+  --collect \
+  /usr/bin/node /opt/bitcraft-claim-monitor-relay/current/deploy/verify-canonical-soak.mjs \
+  --profile follow-up --revision "$REVISION"
+sudo systemctl status "bitcraft-claim-monitor-relay-follow-up-${REVISION:0:12}" --no-pager -l
+sudo journalctl -u "bitcraft-claim-monitor-relay-follow-up-${REVISION:0:12}" -f
+```
+
+Both profiles make only GET requests and read-only SQLite/systemd/process
+checks. They exit nonzero on any failed sample and print only a bounded JSON
+summary. The intensive cadence is one sample per minute for 30 minutes; the
+follow-up cadence is one sample every 15 minutes for 24 hours. Both bind the
+exact preflight subscription set from the protected cutover state without
+printing that state or requiring application secrets. Intensive requires a
+frozen outbox before announcement; follow-up permits monotonic healthy live
+notification delivery but fails on retry/error state.
 
 ## Diagnostics
 
@@ -516,6 +587,11 @@ encrypted backups. A database restore must replay the privacy deletion ledger
 before the restored database can serve traffic, so deleted accounts cannot
 reappear.
 
+During canonical cutover the old signing key is installed only as a previous
+verification key. Retire it as soon as no unexpired record bears its key ID and
+never retain it beyond the remaining 90-day signed-record lifetime. Verify the
+ledger with the current and configured previous keys before every restore.
+
 Supervised restore outline:
 
 ```sh
@@ -553,3 +629,8 @@ curl --fail --silent --show-error http://127.0.0.1:19430/api/local/health
 Never restore or copy preview data into the maintained application. Finish by
 checking both public health endpoints and recording that the maintained app
 remains running and untouched.
+
+Legacy deletion requires a separate approval and a final encrypted archive
+that has been decrypt- and restore-verified. No cleanup command is part of this
+release; the cutover workflow does not delete legacy unit files, databases,
+configuration, ledgers, keys, branding, or forensic evidence.
