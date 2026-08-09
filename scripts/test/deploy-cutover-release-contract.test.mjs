@@ -44,7 +44,7 @@ test("Task 4 marker suppresses the ordinary beta.1 update before Relay services 
 test("workflow leaves secrets remote, runs deployment contracts, and budgets the post-admission intensive soak", () => {
   assert.match(workflow, /environment: relay-preview/);
   assert.match(workflow, /environment: relay-cutover/);
-  assert.match(workflow, /node --test scripts\/test\/deploy-\*\.test\.mjs/);
+  assert.match(workflow, /sudo "\$\(command -v node\)" --test scripts\/test\/deploy-\*\.test\.mjs/);
   assert.match(workflow, /apply:[\s\S]*?timeout-minutes: 75/);
   assert.match(workflow, /Full diagnostics remain on the VPS/);
   assert.doesNotMatch(workflow, /GITHUB_STEP_SUMMARY[^\n]*(?:TOKEN|PRIVATE_KEY|CLIENT_SECRET)/i);

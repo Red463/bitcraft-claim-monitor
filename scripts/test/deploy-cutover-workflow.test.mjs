@@ -54,7 +54,7 @@ test("workflow verifies all contracts and invokes exact revision-bound prepare/a
   for (const expected of [
     /pnpm --filter @workspace\/bitcraft-local test/,
     /pnpm --filter @workspace\/bitcraft-local run build/,
-    /node --test scripts\/test\/deploy-\*\.test\.mjs/,
+    /sudo "\$\(command -v node\)" --test scripts\/test\/deploy-\*\.test\.mjs/,
     /systemd-analyze verify/,
     /caddy validate --config deploy\/Caddyfile\.example/,
     /caddy validate --config deploy\/Caddyfile\.cutover-maintenance/,
