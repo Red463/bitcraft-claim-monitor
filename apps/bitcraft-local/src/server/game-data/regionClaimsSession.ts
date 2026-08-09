@@ -152,7 +152,6 @@ export class RelayRegionClaimsSession {
       .onConnect((connection) => {
         this.#health.connected = true;
         this.#health.stage = "base";
-        this.#health.lastError = null;
         this.#baseSubscription = connection.subscriptionBuilder()
           .onApplied(() => this.#guard(() => {
             this.#attachListeners(connection);
@@ -199,6 +198,11 @@ export class RelayRegionClaimsSession {
       const usernameRows = rows(connection.db.playerUsernameState);
       const rowCount = claimRows.length + localRows.length + claimTypeRows.length + usernameRows.length;
       this.#health.claimRowCount = claimRows.length;
+      if (claimRows.length > config.maxClaims) {
+        throw new Error(
+          `Relay regional-claims claim budget ${config.maxClaims} exceeded by ${claimRows.length} claims`,
+        );
+      }
       this.#health.ownerIdCount = new Set(claimRows.map((value, index) => {
         const claim = row(value, `Relay regional claim ${index}`);
         return decimalInteger(

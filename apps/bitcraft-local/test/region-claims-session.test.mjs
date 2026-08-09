@@ -128,6 +128,7 @@ test("regional claims session applies claims and usernames through one authorita
     manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
     generation: 1,
     regionId: "19",
+    maxClaims: 2,
   });
   const snapshot = await snapshotPromise;
 
@@ -167,6 +168,18 @@ test("regional claims session applies claims and usernames through one authorita
   db.claimState.emit("insert");
   const insertedSnapshot = await insertedSnapshotPromise;
   assert.equal(insertedSnapshot.data.claims[0].entityId, "1369094286777412590");
+
+  claimRows.push({
+    entityId: 1369094286777412592n,
+    ownerPlayerEntityId: 1224979098736429553n,
+    ownerBuildingEntityId: 1369094286778488969n,
+    name: "Over Budget Claim",
+    neutral: false,
+  });
+  db.claimState.emit("insert");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(String(failures.at(-1) ?? ""), /claim budget 2 exceeded by 3 claims/);
+  failures.length = 0;
 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(session.health().applied, true);

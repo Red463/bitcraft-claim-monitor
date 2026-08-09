@@ -252,13 +252,13 @@ export class RelayRegionClaimsRuntime {
   #enqueueSnapshot(snapshot: RegionalClaimsSnapshot, sessionEpoch: number): Promise<void> {
     const commit = this.#commitTail.then(async () => {
       if (sessionEpoch !== this.#sessionEpoch) return;
-      await this.#commitSnapshot(snapshot);
+      await this.#commitSnapshot(snapshot, sessionEpoch);
     });
     this.#commitTail = commit.catch(() => {});
     return commit;
   }
 
-  async #commitSnapshot(snapshot: RegionalClaimsSnapshot): Promise<void> {
+  async #commitSnapshot(snapshot: RegionalClaimsSnapshot, sessionEpoch: number): Promise<void> {
     const claimId = this.#claimId;
     if (!claimId) throw new Error("Relay regional-claims runtime has no configured claim");
     if (snapshot.regionId !== this.#regionId || snapshot.data.regionId !== this.#regionId) {
@@ -288,6 +288,7 @@ export class RelayRegionClaimsRuntime {
         },
       });
       this.#lastGeneration = storedGeneration;
+      if (sessionEpoch !== this.#sessionEpoch) return;
       this.#connectionFailures = 0;
       this.#cancelReconnect();
       this.#lastError = null;
@@ -327,6 +328,7 @@ export class RelayRegionClaimsRuntime {
       || !this.#claimId
       || !this.#regionId
     ) return;
+    this.#sessionEpoch += 1;
     this.#connectionFailures += 1;
     const attempt = this.#connectionFailures;
     void this.#recordError(error);
