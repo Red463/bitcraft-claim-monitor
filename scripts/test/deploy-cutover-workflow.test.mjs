@@ -13,6 +13,8 @@ test("restricted updater delegates only exact cutover modes before its routine t
   }
   assert.match(updater, /CUTOVER_HELPER_PATH=.*cutover-relay-production\.mjs/);
   assert.match(updater, /BITCRAFT_CUTOVER_UPDATER=1/);
+  assert.match(helper, /realpathSync\(process\.argv\[1\]\)/);
+  assert.match(helper, /realpathSync\(fileURLToPath\(import\.meta\.url\)\)/);
   assert.match(updater, /node "\$CUTOVER_HELPER_PATH"/);
   assert.match(updater, /Unknown or mixed cutover mode/);
   for (const guard of ["REVISION_SEEN", "CUTOVER_CONFIRMATION_SEEN", "CUTOVER_MANIFEST_HASH_SEEN"]) {
