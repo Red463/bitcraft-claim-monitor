@@ -24,7 +24,7 @@ function table(rows) {
   };
 }
 
-test("regional claims session subscribes to region-bounded parents then exact owner usernames", async () => {
+test("regional claims session applies claims and usernames through one authoritative subscription", async () => {
   assert.ok(sessionModule, "regional claims session module must exist");
   const subscriptions = [];
   const failures = [];
@@ -57,17 +57,18 @@ test("regional claims session subscribes to region-bounded parents then exact ow
     buildingDescriptionId: 6020,
     location: { x: 30, z: 40, dimension: 0n },
   }];
+  const usernameRows = [{
+    entityId: 1224979098736429551n,
+    username: "Red463",
+  }, {
+    entityId: 1224979098736429552n,
+    username: "SecondOwner",
+  }];
   const db = {
     claimState: table(claimRows),
     claimLocalState: table(localRows),
     buildingClaimDesc: table([{ buildingId: 6020, tier: 6 }]),
-    playerUsernameState: table([{
-      entityId: 1224979098736429551n,
-      username: "Red463",
-    }, {
-      entityId: 1224979098736429552n,
-      username: "SecondOwner",
-    }]),
+    playerUsernameState: table(usernameRows),
   };
   const connection = {
     db,
@@ -134,17 +135,19 @@ test("regional claims session subscribes to region-bounded parents then exact ow
     "SELECT * FROM claim_state",
     "SELECT * FROM claim_local_state",
     "SELECT * FROM building_claim_desc",
+    "SELECT * FROM player_username_state",
   ]);
-  assert.deepEqual(subscriptions[1], [
-    "SELECT * FROM player_username_state WHERE entity_id = 1224979098736429551",
-  ]);
-  assert.deepEqual(subscriptions[2], [
-    "SELECT * FROM player_username_state WHERE entity_id = 1224979098736429552",
-  ]);
-  assert.equal(subscriptions.flat().includes("SELECT * FROM player_username_state"), false);
+  assert.equal(subscriptions.length, 1);
   assert.equal(snapshot.data.claims[0].ownerPlayerUsername, "Red463");
   assert.equal(snapshot.data.claims[0].tier, 6);
   assert.equal(snapshot.regionId, "19");
+
+  const usernameSnapshotPromise = waitForSnapshot();
+  usernameRows[0].username = "Modular";
+  db.playerUsernameState.emit("update");
+  const usernameSnapshot = await usernameSnapshotPromise;
+  assert.equal(usernameSnapshot.data.claims[0].ownerPlayerUsername, "Modular");
+  assert.equal(subscriptions.length, 1, "username changes must not rebuild subscriptions");
 
   const updatedSnapshotPromise = waitForSnapshot();
   localRows[0].supplies = 101;
