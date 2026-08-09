@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
+import { OLD_PRODUCTION_UNITS } from "./canonical-unit-inventory.mjs";
+
 const CANONICAL_ORIGIN = "https://app.timbersteeltrade.com";
 const RELAY_ORIGIN = "https://relay.timbersteeltrade.com";
 const CANONICAL_VERSION = "0.52.0-beta.1";
@@ -16,14 +18,6 @@ const RELAY_UNITS = {
   worker: "bitcraft-claim-monitor-relay-worker.service",
   collector: "bitcraft-claim-monitor-relay-collector.service",
 };
-const OLD_UNITS = [
-  "bitcraft-claim-monitor.service",
-  "bitcraft-claim-monitor-worker.service",
-  "bitcraft-claim-monitor-collector.service",
-  "bitcraft-claim-monitor-collector.timer",
-  "bitcraft-claim-monitor-backup.service",
-  "bitcraft-claim-monitor-backup.timer",
-];
 
 export const CANONICAL_SOAK_PROFILES = Object.freeze({
   intensive: Object.freeze({ durationMs: 30 * 60 * 1000, intervalMs: 60 * 1000 }),
@@ -289,7 +283,7 @@ export function createSystemOperationalSampler({
     const gatewayPids = gatewayOutput.split(/\r?\n/).filter(Boolean).map((line) => line.trim().split(/\s+/, 1)[0]);
     const gatewayMatchesWorker = gatewayPids.length === 1 && gatewayPids[0] === relayWorkerPid;
     const gatewayCount = gatewayMatchesWorker ? 1 : gatewayPids.length === 0 ? 0 : gatewayPids.length + 1;
-    const oldProcessCount = OLD_UNITS.filter((unit) => {
+    const oldProcessCount = OLD_PRODUCTION_UNITS.filter((unit) => {
       const active = systemctlValue(run, unit, "ActiveState");
       const pid = systemctlValue(run, unit, "MainPID");
       return active === "active" || (/^\d+$/.test(pid) && pid !== "0");

@@ -47,6 +47,7 @@ import {
   parseDeletionLedgerContent,
 } from "../apps/bitcraft-local/src/server/privacyDeletionLedger.mjs";
 import { enqueueCanonicalCutoverAnnouncement } from "../apps/bitcraft-local/src/server/canonicalCutoverAnnouncement.mjs";
+import { OLD_PRODUCTION_UNITS } from "./canonical-unit-inventory.mjs";
 import { createSystemOperationalSampler, runCanonicalSoak } from "./verify-canonical-soak.mjs";
 
 export const CANONICAL_CONFIRMATION = "app.timbersteeltrade.com";
@@ -64,18 +65,12 @@ const CANONICAL_ENVIRONMENT_UPDATES = new Set([
   "BITCRAFT_DEPLOYMENT_MODE",
   "DISCORD_DELIVERY_MODE",
   "ENABLE_DISCORD_STARTUP",
+  "LEGAL_CONFIGURATION_CONFIRMED",
   "DISCORD_OAUTH_REDIRECT_URI",
   "PRIVACY_LEDGER_PREVIOUS_KEY_FILES",
 ]);
 
-const SOURCE_UNITS = Object.freeze([
-  "bitcraft-claim-monitor.service",
-  "bitcraft-claim-monitor-worker.service",
-  "bitcraft-monitor-collector.service",
-  "bitcraft-monitor-collector.timer",
-  "bitcraft-claim-monitor-backup.service",
-  "bitcraft-claim-monitor-backup.timer",
-]);
+const SOURCE_UNITS = OLD_PRODUCTION_UNITS;
 const RELAY_UNITS = Object.freeze([
   "bitcraft-claim-monitor-relay.service",
   "bitcraft-claim-monitor-relay-worker.service",
@@ -546,6 +541,15 @@ function syncDirectory(directory) {
   }
 }
 
+function syncFile(filePath) {
+  const descriptor = openSync(filePath, process.platform === "win32" ? "r+" : "r");
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function writePrivateJsonAtomic(filePath, payload) {
   const directory = path.dirname(filePath);
   if (existsSync(directory)) regularDirectory(directory, "Protected cutover state directory");
@@ -604,25 +608,32 @@ export function createCutoverOrchestrator({ operations, stateDirectory, now = ()
   const statePath = path.join(stateDirectory, "state.json");
   const admissionPath = path.join(stateDirectory, "admission.json");
   const save = (state) => writePrivateJsonAtomic(statePath, state);
-  const restoreOperationNames = [
-    "cancelWatchdog",
-    "quiesceServicesForRestore",
-    "restoreEnvironment",
-    "removeCreatedReadiness",
-    "removeCreatedPreviousKey",
-    "restoreCaddy",
-    "restoreServiceStates",
-    "validateAndReloadRestoredCaddy",
-    "verifyOldPublicHealth",
-    "cleanupPlaintext",
+  const restoreOperations = [
+    { name: "cancelWatchdog", recoveryCritical: false },
+    { name: "quiesceServicesForRestore", recoveryCritical: true },
+    { name: "restorePreCutoverRelayData", recoveryCritical: true },
+    { name: "restoreEnvironment", recoveryCritical: true },
+    { name: "removeCreatedReadiness", recoveryCritical: true },
+    { name: "removeCreatedPreviousKey", recoveryCritical: true },
+    { name: "restoreCaddy", recoveryCritical: true },
+    { name: "restoreServiceStates", recoveryCritical: true },
+    { name: "validateAndReloadRestoredCaddy", recoveryCritical: true },
+    { name: "verifyOldPublicHealth", recoveryCritical: true },
+    { name: "cleanupPlaintext", recoveryCritical: false, alwaysAttempt: true },
   ];
   const attemptRestoration = async (state) => {
     const failures = [];
-    for (const name of restoreOperationNames) {
+    let recoveryCoherent = true;
+    for (const { name, recoveryCritical, alwaysAttempt = false } of restoreOperations) {
+      if (!recoveryCoherent && !alwaysAttempt) {
+        failures.push(`${name}: skipped because coherent restoration prerequisites failed`);
+        continue;
+      }
       try {
         await invoke(operations, name, state);
       } catch (error) {
         failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+        if (recoveryCritical) recoveryCoherent = false;
       }
     }
     return failures;
@@ -1340,16 +1351,12 @@ export function createSystemCutoverOperations({
     const sourceDb = new DatabaseSync(paths.sourceDatabasePath, { readOnly: true });
     const relayDb = new DatabaseSync(paths.targetDatabasePath, { readOnly: true });
     let sourceDiscord;
-    let sourceDatabaseToken;
     try {
       if (String(databaseSetting(sourceDb, "claim_id") ?? "") !== CANONICAL_CLAIM_ID
         || String(databaseSetting(relayDb, "claim_id") ?? "") !== CANONICAL_CLAIM_ID) {
         throw new Error(`Both database claim settings must be exactly ${CANONICAL_CLAIM_ID}`);
       }
       sourceDiscord = safeJsonObject(databaseSetting(sourceDb, "discord_json"), "Old production discord_json");
-      sourceDatabaseToken = String(
-        sourceDb.prepare("SELECT value FROM app_secrets WHERE key = 'discord_bot_token'").get()?.value ?? "",
-      ).trim();
     } finally {
       sourceDb.close();
       relayDb.close();
@@ -1384,11 +1391,16 @@ export function createSystemCutoverOperations({
     if (String(relayEnvironment.ENABLE_RELAY_PROVIDER ?? "").toLowerCase() !== "true") {
       throw new Error("Relay provider must be enabled before cutover");
     }
-    const botToken = String(relayEnvironment.DISCORD_BOT_TOKEN ?? "").trim() || sourceDatabaseToken;
-    const applicationId = String(relayEnvironment.DISCORD_APPLICATION_ID ?? sourceDiscord.applicationId ?? "").trim();
+    for (const key of ["DISCORD_BOT_TOKEN", "DISCORD_OAUTH_CLIENT_ID", "DISCORD_OAUTH_CLIENT_SECRET"]) {
+      if (!String(relayEnvironment[key] ?? "").trim()) {
+        throw new Error(`Canonical runtime credential ${key} is required in the Relay environment`);
+      }
+    }
+    const botToken = String(relayEnvironment.DISCORD_BOT_TOKEN).trim();
+    const applicationId = String(relayEnvironment.DISCORD_OAUTH_CLIENT_ID).trim();
     const guildId = String(relayEnvironment.DISCORD_GUILD_ID ?? sourceDiscord.guildId ?? "").trim();
     const announcementsChannelId = String(sourceDiscord.channels?.announcements ?? "").trim();
-    if (!botToken || !sourceDiscord.enabled || sourceDiscord.presence?.enabled === false
+    if (!sourceDiscord.enabled || sourceDiscord.presence?.enabled === false
       || !/^\d+$/.test(applicationId) || !/^\d+$/.test(guildId) || !/^\d+$/.test(announcementsChannelId)) {
       throw new Error("Canonical Discord identity, guild, announcements channel, and gateway presence must be configured");
     }
@@ -1397,7 +1409,8 @@ export function createSystemCutoverOperations({
     const guild = await discordJson(botToken, `/guilds/${guildId}`, "Discord guild access preflight");
     const channel = await discordJson(botToken, `/channels/${announcementsChannelId}`, "Discord announcements-channel access preflight");
     const callback = "https://app.timbersteeltrade.com/api/local/auth/discord/callback";
-    if (String(bot.id ?? "") !== applicationId || String(application.id ?? "") !== applicationId
+    if (String(sourceDiscord.applicationId ?? "") !== applicationId
+      || String(bot.id ?? "") !== applicationId || String(application.id ?? "") !== applicationId
       || !Array.isArray(application.redirect_uris) || !application.redirect_uris.includes(callback)
       || String(guild.id ?? "") !== guildId || String(channel.guild_id ?? "") !== guildId
       || String(channel.id ?? "") !== announcementsChannelId || ![0, 5].includes(Number(channel.type))) {
@@ -1568,6 +1581,7 @@ export function createSystemCutoverOperations({
       BITCRAFT_DEPLOYMENT_MODE: "canonical",
       DISCORD_DELIVERY_MODE: "live",
       ENABLE_DISCORD_STARTUP: "true",
+      LEGAL_CONFIGURATION_CONFIRMED: "true",
       DISCORD_OAUTH_REDIRECT_URI: "https://app.timbersteeltrade.com/api/local/auth/discord/callback",
       PRIVACY_LEDGER_PREVIOUS_KEY_FILES: plan.previousKeyConfiguration.value,
     });
@@ -1648,6 +1662,7 @@ export function createSystemCutoverOperations({
       BITCRAFT_DEPLOYMENT_MODE: "canonical",
       DISCORD_DELIVERY_MODE: "live",
       ENABLE_DISCORD_STARTUP: "true",
+      LEGAL_CONFIGURATION_CONFIRMED: "true",
       DISCORD_OAUTH_REDIRECT_URI: "https://app.timbersteeltrade.com/api/local/auth/discord/callback",
       PRIVACY_LEDGER_PREVIOUS_KEY_FILES: plan.previousKeyConfiguration.value,
     };
@@ -1713,6 +1728,165 @@ export function createSystemCutoverOperations({
     if (failures.length) throw new Error(`Service quiescence before restoration was incomplete: ${failures.join("; ")}`);
   }
 
+  function verifiedRecoveryBackup(state, sourceLabel, { required = true } = {}) {
+    const matches = (state.backups ?? []).filter((backup) => backup.sourceLabel === sourceLabel);
+    if (!matches.length) {
+      if (!required) return null;
+      throw new Error(`Verified encrypted ${sourceLabel} recovery backup is missing`);
+    }
+    if (matches.length !== 1) throw new Error(`Verified encrypted ${sourceLabel} recovery backup is ambiguous`);
+    const backup = matches[0];
+    const identity = assertRecordedIdentity(backup.identity, `Encrypted recovery backup ${sourceLabel}`);
+    if (identity.sha256 !== backup.encryptedSha256 || identity.size !== backup.size) {
+      throw new Error(`Encrypted recovery backup changed: ${sourceLabel}`);
+    }
+    if (!CANONICAL_MANIFEST_HASH_PATTERN.test(String(backup.originalSha256 ?? ""))) {
+      throw new Error(`Encrypted recovery backup has an invalid original hash: ${sourceLabel}`);
+    }
+    if (!backup.originalMetadata || !Number.isInteger(backup.originalMetadata.mode)) {
+      throw new Error(`Encrypted recovery backup has no original metadata: ${sourceLabel}`);
+    }
+    return backup;
+  }
+
+  function removeSqliteRecoverySidecars(databasePath) {
+    let removed = false;
+    for (const suffix of ["-wal", "-shm", "-journal"]) {
+      const sidecar = `${databasePath}${suffix}`;
+      if (!existsSync(sidecar)) continue;
+      regularFile(sidecar, `Relay SQLite recovery sidecar ${suffix}`);
+      rmSync(sidecar);
+      removed = true;
+    }
+    if (removed) syncDirectory(path.dirname(databasePath));
+  }
+
+  function decryptedRecoveryStage(state, backup, destination, label, { sqlite = false } = {}) {
+    const temporary = cutoverTemporaryPath(destination, state, `abort-${label}`);
+    if (existsSync(temporary)) {
+      regularFile(temporary, `${label} recovery stage`);
+      if (sha256(readFileSync(temporary)) !== backup.originalSha256) {
+        rmSync(temporary);
+        syncDirectory(path.dirname(temporary));
+      }
+    }
+    if (!existsSync(temporary)) {
+      requireCommand(
+        run,
+        process.execPath,
+        [paths.backupCryptoHelper, "decrypt", backup.path, temporary, paths.backupEncryptionKeyFile],
+        `Decrypt ${label} recovery backup`,
+      );
+      syncDirectory(path.dirname(temporary));
+    }
+    regularFile(temporary, `${label} recovery stage`);
+    syncFile(temporary);
+    if (sha256(readFileSync(temporary)) !== backup.originalSha256) {
+      throw new Error(`${label} recovery plaintext hash mismatch`);
+    }
+    if (sqlite) sqliteIntegrity(temporary);
+    applyMetadata(temporary, backup.originalMetadata);
+    syncFile(temporary);
+    return temporary;
+  }
+
+  function privacyRecoveryKeys(state) {
+    const discovered = state.preflight?.discoveredPaths ?? {};
+    const keyPaths = [
+      discovered.targetKeyPath,
+      ...(discovered.targetPreviousKeyPaths ?? []),
+    ].filter(Boolean);
+    return [...new Set(keyPaths)].map((keyPath) => {
+      regularFile(keyPath, "Privacy recovery key");
+      const key = readFileSync(keyPath, "utf8").trim();
+      if (!/^[A-Za-z0-9_-]{43}$/.test(key) || Buffer.from(key, "base64url").length !== 32) {
+        throw new Error("Privacy recovery key is invalid");
+      }
+      return key;
+    });
+  }
+
+  function recoveredFileMatches(filePath, backup) {
+    if (!existsSync(filePath)) return false;
+    const identity = fileIdentity(filePath);
+    return identity.sha256 === backup.originalSha256
+      && identity.mode === backup.originalMetadata.mode
+      && (process.platform === "win32"
+        || (identity.uid === backup.originalMetadata.uid && identity.gid === backup.originalMetadata.gid));
+  }
+
+  async function restorePreCutoverRelayData(state) {
+    if (!state.applyStartedAt && !["applying", "abort-failed"].includes(state.status)) return;
+    audit("restore-pre-cutover-relay-data");
+    const recovery = state.preCutoverRelayData;
+    const discovered = state.preflight?.discoveredPaths ?? {};
+    if (recovery?.formatVersion !== 1
+      || recovery.databasePath !== paths.targetDatabasePath
+      || recovery.ledgerPath !== discovered.targetLedgerPath
+      || typeof recovery.ledgerExisted !== "boolean") {
+      throw new Error("Pre-cutover Relay data recovery record is invalid");
+    }
+
+    const databaseBackup = verifiedRecoveryBackup(state, "relay-db");
+    const ledgerBackup = verifiedRecoveryBackup(state, "relay-ledger", { required: recovery.ledgerExisted });
+    if (!recovery.ledgerExisted && ledgerBackup) {
+      throw new Error("Pre-cutover Relay ledger recovery record conflicts with its encrypted backup");
+    }
+
+    const databaseAlreadyRestored = recoveredFileMatches(recovery.databasePath, databaseBackup);
+    const ledgerAlreadyRestored = recovery.ledgerExisted
+      ? recoveredFileMatches(recovery.ledgerPath, ledgerBackup)
+      : !existsSync(recovery.ledgerPath);
+    const databaseStage = databaseAlreadyRestored
+      ? null
+      : decryptedRecoveryStage(state, databaseBackup, recovery.databasePath, "relay-database", { sqlite: true });
+    const ledgerStage = recovery.ledgerExisted && !ledgerAlreadyRestored
+      ? decryptedRecoveryStage(state, ledgerBackup, recovery.ledgerPath, "relay-ledger")
+      : null;
+
+    if (ledgerStage) {
+      parseDeletionLedgerContent(
+        readFileSync(ledgerStage, "utf8"),
+        privacyRecoveryKeys(state),
+        "Staged pre-cutover Relay privacy ledger",
+      );
+    }
+
+    removeSqliteRecoverySidecars(recovery.databasePath);
+    if (databaseStage) {
+      if (existsSync(recovery.databasePath)) regularFile(recovery.databasePath, "Relay database selected for recovery");
+      renameSync(databaseStage, recovery.databasePath);
+      syncDirectory(path.dirname(recovery.databasePath));
+    }
+    if (ledgerStage) {
+      if (existsSync(recovery.ledgerPath)) regularFile(recovery.ledgerPath, "Relay privacy ledger selected for recovery");
+      renameSync(ledgerStage, recovery.ledgerPath);
+      syncDirectory(path.dirname(recovery.ledgerPath));
+    } else if (!recovery.ledgerExisted && existsSync(recovery.ledgerPath)) {
+      regularFile(recovery.ledgerPath, "Relay privacy ledger created during cutover");
+      rmSync(recovery.ledgerPath);
+      syncDirectory(path.dirname(recovery.ledgerPath));
+    }
+
+    removeSqliteRecoverySidecars(recovery.databasePath);
+    if (!recoveredFileMatches(recovery.databasePath, databaseBackup)) {
+      throw new Error("Restored Relay database does not match its verified encrypted backup");
+    }
+    sqliteIntegrity(recovery.databasePath);
+    if (recovery.ledgerExisted) {
+      if (!recoveredFileMatches(recovery.ledgerPath, ledgerBackup)) {
+        throw new Error("Restored Relay privacy ledger does not match its verified encrypted backup");
+      }
+      parseDeletionLedgerContent(
+        readFileSync(recovery.ledgerPath, "utf8"),
+        privacyRecoveryKeys(state),
+        "Restored pre-cutover Relay privacy ledger",
+      );
+    } else if (existsSync(recovery.ledgerPath)) {
+      throw new Error("Relay privacy ledger created during cutover was not removed");
+    }
+  }
+
   async function removeCreatedReadiness(state) {
     removeRecordedOrIntendedFile(
       state.preApply?.readiness,
@@ -1737,6 +1911,13 @@ export function createSystemCutoverOperations({
     mkdirSync(stageDirectory, { recursive: true, mode: 0o700 });
     chmodSync(stageDirectory, 0o700);
     const discovered = state.preflight?.discoveredPaths ?? {};
+    if (!discovered.targetLedgerPath) throw new Error("Relay privacy ledger path was not discovered before backup");
+    state.preCutoverRelayData = {
+      formatVersion: 1,
+      databasePath: paths.targetDatabasePath,
+      ledgerPath: discovered.targetLedgerPath,
+      ledgerExisted: existsSync(discovered.targetLedgerPath),
+    };
     const artifacts = [
       { label: "old-db", source: paths.sourceDatabasePath, sqlite: true },
       { label: "relay-db", source: paths.targetDatabasePath, sqlite: true },
@@ -1773,6 +1954,7 @@ export function createSystemCutoverOperations({
         } else {
           copyFileSync(artifact.source, plaintext);
         }
+        const sourceIdentity = fileIdentity(artifact.source);
         chmodSync(plaintext, 0o600);
         const originalSha256 = sha256(readFileSync(plaintext));
         requireCommand(run, process.execPath, [paths.backupCryptoHelper, "encrypt", plaintext, encrypted, paths.backupEncryptionKeyFile], `Encrypt ${artifact.label}`);
@@ -1790,6 +1972,11 @@ export function createSystemCutoverOperations({
           encryptedSha256: sha256(readFileSync(encrypted)),
           size: statSync(encrypted).size,
           identity: fileIdentity(encrypted),
+          originalMetadata: {
+            mode: sourceIdentity.mode,
+            uid: sourceIdentity.uid,
+            gid: sourceIdentity.gid,
+          },
         });
       } catch (error) {
         if (existsSync(encrypted)) rmSync(encrypted);
@@ -2183,13 +2370,13 @@ export function createSystemCutoverOperations({
     audit("mask-old-units");
     for (const unit of SOURCE_UNITS) {
       requireCommand(run, paths.systemctlBinary, ["disable", "--now", unit], `Disable old unit ${unit}`);
-      requireCommand(run, paths.systemctlBinary, ["mask", "--runtime", unit], `Runtime-mask old unit ${unit}`);
+      requireCommand(run, paths.systemctlBinary, ["mask", unit], `Persistently mask old unit ${unit}`);
       if (systemctlValue(run, paths, unit, "ActiveState") !== "inactive"
-        || !["masked", "masked-runtime"].includes(systemctlValue(run, paths, unit, "UnitFileState"))) {
+        || systemctlValue(run, paths, unit, "UnitFileState") !== "masked") {
         throw new Error(`Old unit ${unit} was not stopped, disabled, and masked`);
       }
     }
-    return { units: [...SOURCE_UNITS], maskScope: "runtime" };
+    return { units: [...SOURCE_UNITS], maskScope: "persistent" };
   }
 
   async function cancelWatchdog(state) {
@@ -2350,6 +2537,7 @@ export function createSystemCutoverOperations({
     removeCreatedReadiness,
     restoreCaddy,
     restoreEnvironment,
+    restorePreCutoverRelayData,
     restoreServiceStates,
     seedReleaseAnnouncementMarker,
     startRelayServices,

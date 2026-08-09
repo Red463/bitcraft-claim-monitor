@@ -115,7 +115,7 @@ repair transition from arbitrary mutation.
   a no-op; abort always refuses after admission.
 - Public verification covers health, pages/assets, security headers, Relay's
   permanent path/query-preserving redirect, and generation. Old units are
-  stopped, disabled, and runtime-masked while files/data remain for the 14-day
+  stopped, disabled, and persistently masked while files/data remain for the 14-day
   forensic window. Cutover backups retain the migration-class three-point/
   90-day policy.
 
@@ -199,3 +199,62 @@ Windows; the workflow installs/runs them before any remote prepare job.
   sent here. Task 4 only suppresses the ordinary beta announcement marker.
 - Production rollback is permitted only before the admission marker. A failure
   after admission must be handled by rerunning exact apply for fix-forward.
+
+## Whole-branch review remediation (2026-08-09)
+
+A later whole-branch Standards/Spec review found that pre-admission abort
+restored configuration and services without first restoring the target Relay
+database and privacy ledger changed by migration. The remediation now:
+
+- records whether the target ledger existed and preserves original metadata for
+  every encrypted recovery artifact;
+- quiesces all captured writers, authenticates and decrypts the exact recorded
+  Relay database/ledger backups, validates SQLite integrity and ledger
+  signatures, removes SQLite sidecars, atomically reinstalls the coherent pair,
+  and verifies the installed hashes before touching environment/key/readiness
+  state or restarting any service;
+- resumes safely when a crash leaves only the database or only the ledger
+  already restored, removes a cutover-created ledger when the target had none,
+  and retains recovery inputs while refusing every unsafe downstream restore
+  after any critical failure;
+- requires `DISCORD_BOT_TOKEN`, `DISCORD_OAUTH_CLIENT_ID`, and
+  `DISCORD_OAUTH_CLIENT_SECRET` from the Relay environment during prepare,
+  writes `LEGAL_CONFIGURATION_CONFIRMED=true` in the protected apply edit, and
+  restores the exact original environment on abort; and
+- uses one shared old-production unit inventory with the installed
+  `bitcraft-monitor-collector.*` names and persistent, rather than runtime-only,
+  masks for the complete 14-day forensic window.
+
+Focused RED/GREEN coverage exercises every post-migration/pre-admission abort
+boundary, refusal after a failed data restore, exact pair restoration,
+idempotent retry, both half-published pair crash states, an originally absent
+ledger, SQLite sidecars, and a failed ledger decrypt before either target is
+replaced.
+
+Final verification for this remediation:
+
+```text
+node --test scripts/test/deploy-cutover-orchestration.test.mjs \
+  scripts/test/deploy-cutover-system.test.mjs \
+  scripts/test/deploy-canonical-soak.test.mjs
+68 tests: 68 passed, 0 failed
+
+node --test scripts/test/deploy-*.test.mjs
+144 tests: 129 passed, 0 failed, 15 skipped
+
+corepack pnpm exec node --experimental-strip-types --test \
+  --test-concurrency=4 test/*.test.mjs
+1813 tests: 1812 passed, 0 failed, 1 skipped
+
+corepack pnpm --filter @workspace/bitcraft-local run build
+exit 0; server/provider bindings, 1191 asset checks, TypeScript/Vite production
+build, and Relay runtime-boundary verification passed
+```
+
+The ordinary full-backend command initially hit three unrelated 10-second
+child-server startup deadlines under unrestricted file concurrency. All three
+exact tests passed in isolation, and the complete bounded-concurrency run above
+then passed. The 15 deployment skips remain Linux shell integration cases on
+Windows; the application skip remains the existing Windows symlink case. No
+workflow, live service, VPS, database, environment, key, Caddy, or Discord state
+was touched.

@@ -219,7 +219,9 @@ test("system sampler rejects a lone gateway process that is not the Relay worker
   } finally {
     db.close();
   }
+  const calls = [];
   const run = (command, arguments_) => {
+    calls.push([command, ...arguments_]);
     if (command === "pgrep") return { status: 0, stdout: "303 node worker.mjs\n", stderr: "" };
     if (command === "systemctl" && arguments_.includes("--property=NRestarts")) return { status: 0, stdout: "0\n", stderr: "" };
     if (command === "systemctl" && arguments_[1] === "bitcraft-claim-monitor-relay-worker.service" && arguments_.includes("--property=MainPID")) {
@@ -232,6 +234,13 @@ test("system sampler rejects a lone gateway process that is not the Relay worker
   try {
     const sample = await createSystemOperationalSampler({ databasePath, run })();
     assert.notEqual(sample.gatewayCount, 1);
+    const queriedUnits = calls
+      .filter(([command]) => command === "systemctl")
+      .map(([, , unit]) => unit);
+    assert.ok(queriedUnits.includes("bitcraft-monitor-collector.service"));
+    assert.ok(queriedUnits.includes("bitcraft-monitor-collector.timer"));
+    assert.equal(queriedUnits.includes("bitcraft-claim-monitor-collector.service"), false);
+    assert.equal(queriedUnits.includes("bitcraft-claim-monitor-collector.timer"), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

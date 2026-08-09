@@ -98,6 +98,7 @@ function fixture({ repairCount = 1, failAt = null } = {}) {
     }),
     enqueueCutoverAnnouncement: () => record("enqueue-cutover-announcement", { inserted: true, sourceKey: `canonical-cutover:${REVISION}`, status: "pending" }),
     quiesceServicesForRestore: () => record("quiesce-services"),
+    restorePreCutoverRelayData: () => record("restore-relay-data"),
     restoreEnvironment: () => record("restore-environment"),
     removeCreatedReadiness: () => record("remove-readiness"),
     removeCreatedPreviousKey: () => record("remove-privacy-key"),
@@ -158,6 +159,7 @@ test("safe environment editing changes only canonical keys without evaluating va
     "BITCRAFT_DEPLOYMENT_MODE=preview",
     "DISCORD_DELIVERY_MODE=record",
     "ENABLE_DISCORD_STARTUP=false",
+    "LEGAL_CONFIGURATION_CONFIRMED=false",
     "UNRELATED=$(touch /tmp/must-not-run)",
     "",
   ].join("\n"));
@@ -165,6 +167,7 @@ test("safe environment editing changes only canonical keys without evaluating va
     BITCRAFT_DEPLOYMENT_MODE: "canonical",
     DISCORD_DELIVERY_MODE: "live",
     ENABLE_DISCORD_STARTUP: "true",
+    LEGAL_CONFIGURATION_CONFIRMED: "true",
     DISCORD_OAUTH_REDIRECT_URI: "https://app.timbersteeltrade.com/api/local/auth/discord/callback",
     PRIVACY_LEDGER_PREVIOUS_KEY_FILES: "/etc/relay/privacy-old.key",
   }).toString("utf8");
@@ -174,6 +177,7 @@ test("safe environment editing changes only canonical keys without evaluating va
   assert.match(edited, /^BITCRAFT_DEPLOYMENT_MODE=canonical$/m);
   assert.match(edited, /^DISCORD_DELIVERY_MODE=live$/m);
   assert.match(edited, /^ENABLE_DISCORD_STARTUP=true$/m);
+  assert.match(edited, /^LEGAL_CONFIGURATION_CONFIRMED=true$/m);
   assert.equal((edited.match(/^BITCRAFT_DEPLOYMENT_MODE=/gm) ?? []).length, 1);
   assert.throws(
     () => editEnvironmentDocument(Buffer.from("BITCRAFT_DEPLOYMENT_MODE=preview\nBITCRAFT_DEPLOYMENT_MODE=preview\n"), { BITCRAFT_DEPLOYMENT_MODE: "canonical" }),
@@ -218,6 +222,7 @@ test("prepare failure after maintenance restores every reversible surface withou
     );
     for (const expected of [
       "cancel-watchdog", "quiesce-services", "restore-environment", "remove-readiness", "remove-privacy-key",
+      "restore-relay-data",
       "restore-caddy", "restore-services", "validate-restored-caddy", "verify-old-public", "cleanup-plaintext",
     ]) assert.equal(cutover.events.includes(expected), true, expected);
     const state = JSON.parse(readFileSync(path.join(cutover.directory, "state.json"), "utf8"));
@@ -281,7 +286,7 @@ test("pre-admission failure can abort with full restoration and retry idempotent
     const aborted = await cutover.orchestrator.abort({ revision: REVISION, manifestHash: MANIFEST_HASH });
     assert.equal(aborted.status, "aborted");
     assert.deepEqual(cutover.events, [
-      "cancel-watchdog", "quiesce-services", "restore-environment", "remove-readiness", "remove-privacy-key",
+      "cancel-watchdog", "quiesce-services", "restore-relay-data", "restore-environment", "remove-readiness", "remove-privacy-key",
       "restore-caddy", "restore-services", "validate-restored-caddy", "verify-old-public", "cleanup-plaintext",
     ]);
     cutover.events.length = 0;
@@ -292,22 +297,62 @@ test("pre-admission failure can abort with full restoration and retry idempotent
   }
 });
 
-test("abort continues every restoration after partial failures and retains retry evidence", async () => {
-  const cutover = fixture({ failAt: ["restore-caddy", "restore-services"] });
+test("abort never removes recovery inputs or re-exposes services after a critical data restore failure", async () => {
+  const cutover = fixture({ failAt: "restore-relay-data" });
   try {
     await cutover.orchestrator.prepare({ revision: REVISION, confirmation: CANONICAL_CONFIRMATION });
     cutover.events.length = 0;
-    await assert.rejects(cutover.orchestrator.abort({ revision: REVISION, manifestHash: MANIFEST_HASH }), /restore-caddy.*restore-services|restore-services.*restore-caddy/i);
-    for (const expected of [
-      "quiesce-services", "restore-environment", "remove-readiness", "remove-privacy-key", "restore-caddy", "restore-services",
-      "validate-restored-caddy", "verify-old-public", "cleanup-plaintext",
-    ]) assert.equal(cutover.events.includes(expected), true, expected);
+    await assert.rejects(cutover.orchestrator.abort({ revision: REVISION, manifestHash: MANIFEST_HASH }), /restore-relay-data/i);
+    for (const expected of ["quiesce-services", "restore-relay-data", "cleanup-plaintext"]) {
+      assert.equal(cutover.events.includes(expected), true, expected);
+    }
+    for (const unsafe of [
+      "restore-environment", "remove-readiness", "remove-privacy-key", "restore-caddy",
+      "restore-services", "validate-restored-caddy", "verify-old-public",
+    ]) {
+      assert.equal(cutover.events.includes(unsafe), false, unsafe);
+    }
     const state = JSON.parse(readFileSync(path.join(cutover.directory, "state.json"), "utf8"));
     assert.equal(state.status, "abort-failed");
+    assert.match(state.abortFailures.join("\n"), /restoreEnvironment: skipped.*coherent/i);
     assert.equal(existsSync(path.join(cutover.directory, "state.json")), true);
   } finally {
     rmSync(cutover.directory, { recursive: true, force: true });
   }
+});
+
+test("every post-migration pre-admission boundary aborts through target data restoration before config or service restore", async (context) => {
+  for (const failure of [
+    "apply-migration",
+    "verify-migrated-data",
+    "seed-release-marker",
+    "capture-outbox",
+    "start-relay",
+    "verify-local",
+    "verify-canary",
+    "validate-final-caddy",
+  ]) await context.test(failure, async () => {
+    const cutover = fixture({ failAt: failure });
+    try {
+      await cutover.orchestrator.prepare({ revision: REVISION, confirmation: CANONICAL_CONFIRMATION });
+      await assert.rejects(cutover.orchestrator.apply({ revision: REVISION, manifestHash: MANIFEST_HASH }), new RegExp(failure));
+      assert.equal(existsSync(path.join(cutover.directory, "admission.json")), false);
+      cutover.failures.delete(failure);
+      cutover.events.length = 0;
+      assert.equal((await cutover.orchestrator.abort({ revision: REVISION, manifestHash: MANIFEST_HASH })).status, "aborted");
+      const quiesce = cutover.events.indexOf("quiesce-services");
+      const restoreData = cutover.events.indexOf("restore-relay-data");
+      const restoreEnvironment = cutover.events.indexOf("restore-environment");
+      const removeKey = cutover.events.indexOf("remove-privacy-key");
+      const restoreServices = cutover.events.indexOf("restore-services");
+      assert.ok(quiesce >= 0 && quiesce < restoreData, "writers must stop before data restore");
+      assert.ok(restoreData < restoreEnvironment, "data must be coherent before environment restore");
+      assert.ok(restoreData < removeKey, "ledger must be restored before the migrated key is removed");
+      assert.ok(removeKey < restoreServices, "all recovery inputs must be restored before services restart");
+    } finally {
+      rmSync(cutover.directory, { recursive: true, force: true });
+    }
+  });
 });
 
 test("every post-admission failure is resumable only through fix-forward apply", async (context) => {

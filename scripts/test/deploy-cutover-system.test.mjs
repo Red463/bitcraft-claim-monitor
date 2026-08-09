@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -27,6 +28,7 @@ import {
 } from "../../apps/bitcraft-local/src/server/canonicalCutoverPrivacy.mjs";
 import {
   deletionLedgerSubject,
+  parseDeletionLedgerContent,
   signDeletionLedgerRecord,
 } from "../../apps/bitcraft-local/src/server/privacyDeletionLedger.mjs";
 
@@ -170,6 +172,7 @@ function privacyFixture() {
     "BITCRAFT_DEPLOYMENT_MODE=preview",
     "DISCORD_DELIVERY_MODE=record",
     "ENABLE_DISCORD_STARTUP=false",
+    "LEGAL_CONFIGURATION_CONFIRMED=false",
     "DISCORD_BOT_TOKEN=secret-value",
     "",
   ].join("\n"), { mode: 0o600 });
@@ -207,6 +210,7 @@ test("system privacy handshake copies with current-key metadata, edits atomicall
     assert.match(edited, /^BITCRAFT_DEPLOYMENT_MODE=canonical$/m);
     assert.match(edited, /^DISCORD_DELIVERY_MODE=live$/m);
     assert.match(edited, /^ENABLE_DISCORD_STARTUP=true$/m);
+    assert.match(edited, /^LEGAL_CONFIGURATION_CONFIRMED=true$/m);
     assert.match(edited, /^PRIVACY_LEDGER_PREVIOUS_KEY_FILES=.*privacy\.previous\.key$/m);
     assert.match(edited, /DISCORD_BOT_TOKEN=secret-value/);
 
@@ -484,6 +488,8 @@ function systemFixture() {
     "ENABLE_DISCORD_STARTUP=false",
     "LEGAL_CONFIGURATION_CONFIRMED=true",
     "DISCORD_BOT_TOKEN=fixture-secret-never-returned",
+    "DISCORD_OAUTH_CLIENT_ID=123456789",
+    "DISCORD_OAUTH_CLIENT_SECRET=fixture-oauth-secret-never-returned",
     "DISCORD_APPLICATION_ID=123456789",
     "DISCORD_GUILD_ID=987654321",
     "DISCORD_CHANNEL_ID=555555555",
@@ -666,6 +672,7 @@ test("system preflight enforces exact main/current/version and discovers validat
     assert.equal(preflight.operationalTotals.contributions.aggregates.contributed_progress, "9007199254740993");
     assert.equal(preflight.operationalTotals.contributions.aggregates.contributed_xp, "0.3");
     assert.doesNotMatch(JSON.stringify(preflight), /fixture-secret-never-returned/);
+    assert.doesNotMatch(JSON.stringify(preflight), /fixture-oauth-secret-never-returned/);
     assert.ok(fixture.calls.some((call) => call[0] === "sudo" && call.includes("fetch") && call.at(-1) === "main"));
     assert.ok(fixture.calls.some((call) => call[0] === "sudo" && call.includes("rev-parse") && call.at(-1) === "origin/main"));
 
@@ -707,7 +714,7 @@ test("system preflight requires the installed backup helper", async () => {
   }
 });
 
-test("system preflight resolves the migrated source token and configured announcements channel", async () => {
+test("system preflight uses exact Relay environment credentials and the configured announcements channel", async () => {
   const fixture = systemFixture();
   try {
     const source = new DatabaseSync(fixture.paths.sourceDatabasePath);
@@ -720,11 +727,6 @@ test("system preflight resolves the migrated source token and configured announc
     } finally {
       source.close();
     }
-    writeFileSync(
-      fixture.paths.relayEnvironmentFile,
-      readFileSync(fixture.paths.relayEnvironmentFile, "utf8").replace(/^DISCORD_BOT_TOKEN=.*\n/m, ""),
-      { mode: 0o600 },
-    );
     const requests = [];
     const request = async (url, options) => {
       requests.push({ url, authorization: options?.headers?.Authorization });
@@ -743,10 +745,39 @@ test("system preflight resolves the migrated source token and configured announc
     const preflight = await operations.validatePrepare({ revision: REVISION });
     assert.equal(preflight.discord.announcementsChannelId, "666666666");
     assert.ok(requests.some((entry) => entry.url.endsWith("/channels/666666666")));
-    assert.equal(requests.every((entry) => entry.authorization === "Bot source-migrated-secret"), true);
+    assert.equal(requests.every((entry) => entry.authorization === "Bot fixture-secret-never-returned"), true);
     assert.doesNotMatch(JSON.stringify(preflight), /source-migrated-secret/);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("system preflight fails before Discord requests when any canonical runtime credential is absent", async (context) => {
+  for (const key of ["DISCORD_BOT_TOKEN", "DISCORD_OAUTH_CLIENT_ID", "DISCORD_OAUTH_CLIENT_SECRET"]) {
+    await context.test(key, async () => {
+      const fixture = systemFixture();
+      try {
+        writeFileSync(
+          fixture.paths.relayEnvironmentFile,
+          readFileSync(fixture.paths.relayEnvironmentFile, "utf8").replace(new RegExp(`^${key}=.*\\n`, "m"), ""),
+          { mode: 0o600 },
+        );
+        let requestCount = 0;
+        const operations = createSystemCutoverOperations({
+          paths: fixture.paths,
+          run: fixture.run,
+          request: async (...args) => {
+            requestCount += 1;
+            return fixture.request(...args);
+          },
+          statFilesystem: () => ({ bavail: 4n * 1024n * 1024n, bsize: 1024n }),
+        });
+        await assert.rejects(operations.validatePrepare({ revision: REVISION }), new RegExp(key, "i"));
+        assert.equal(requestCount, 0);
+      } finally {
+        rmSync(fixture.root, { recursive: true, force: true });
+      }
+    });
   }
 });
 
@@ -919,7 +950,8 @@ test("system admission starts only Relay, verifies generation/gateway/outbox/can
     }
     for (const unit of fixture.unitState.keys()) {
       if (!unit.startsWith("bitcraft-claim-monitor-relay")) {
-        assert.ok(fixture.calls.some((call) => call[0] === "systemctl" && call[1] === "mask" && call[2] === "--runtime" && call[3] === unit));
+        assert.ok(fixture.calls.some((call) => call[0] === "systemctl" && call[1] === "mask" && call[2] === unit));
+        assert.equal(fixture.calls.some((call) => call[0] === "systemctl" && call[1] === "mask" && call.includes("--runtime")), false);
       }
     }
   } finally {
@@ -968,6 +1000,16 @@ function backupFixture() {
     extra.targetKeyPath,
     ...extra.targetPreviousKeyPaths,
   ]) writeFileSync(file, file.endsWith(".key") ? `${Buffer.alloc(32, file.includes("old") ? 2 : 4).toString("base64url")}\n` : "", { mode: 0o600 });
+  const targetKey = Buffer.alloc(32, 4).toString("base64url");
+  const targetRecord = signDeletionLedgerRecord({
+    version: 1,
+    operationId: "pre-cutover-target-operation",
+    state: "committed",
+    subject: deletionLedgerSubject("222222222222222222", targetKey),
+    occurredAt: "2026-08-08T12:00:00.000Z",
+    expiresAt: "2026-11-06T12:00:00.000Z",
+  }, targetKey);
+  writeFileSync(extra.targetLedgerPath, `${JSON.stringify(targetRecord)}\n`, { mode: 0o600 });
   return { root, paths, extra };
 }
 
@@ -1000,6 +1042,229 @@ test("system backup integration checkpoints, encrypts, decrypt-verifies, and rem
     assert.equal(readdirSync(path.join(fixture.paths.stateDirectory, "backup-stage")).length, 0);
     assert.equal(commands.filter(([command, , sql]) => command === "sqlite3" && sql?.startsWith("PRAGMA wal_checkpoint")).length, 2);
     assert.equal(commands.filter(([command]) => command === process.execPath).length >= backups.length * 2, true);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("pre-admission restore reinstalls the verified target database and readable ledger, removes WAL state, and is idempotent", async () => {
+  const fixture = backupFixture();
+  const commands = [];
+  const run = (command, args) => {
+    commands.push([command, ...args]);
+    if (command === "sqlite3") {
+      const sql = args[1];
+      if (sql.startsWith(".backup ")) {
+        const destination = sql.slice(".backup ".length).replace(/^'|'$/g, "").replaceAll("''", "'");
+        copyFileSync(args[0], destination);
+      }
+      return { status: 0, stdout: sql === "PRAGMA integrity_check;" ? "ok\n" : "0|0|0\n", stderr: "" };
+    }
+    const result = spawnSync(command, args, { encoding: "utf8" });
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  };
+  try {
+    const state = {
+      revision: REVISION,
+      manifestHash: MANIFEST_HASH,
+      status: "applying",
+      preflight: { discoveredPaths: fixture.extra },
+    };
+    const operations = createSystemCutoverOperations({ paths: fixture.paths, run, now: () => new Date("2026-08-09T12:00:00.000Z") });
+    state.backups = await operations.createAndVerifyEncryptedBackups(state);
+    const databaseBackup = state.backups.find((entry) => entry.sourceLabel === "relay-db");
+    const originalLedger = readFileSync(fixture.extra.targetLedgerPath);
+
+    const database = new DatabaseSync(fixture.paths.targetDatabasePath);
+    try {
+      database.prepare("INSERT INTO app_settings (key, value) VALUES ('post_cutover', 'mutated')").run();
+    } finally {
+      database.close();
+    }
+    const targetKey = Buffer.alloc(32, 4).toString("base64url");
+    const migratedRecord = signDeletionLedgerRecord({
+      version: 1,
+      operationId: "post-cutover-target-operation",
+      state: "committed",
+      subject: deletionLedgerSubject("333333333333333333", targetKey),
+      occurredAt: "2026-08-09T12:01:00.000Z",
+      expiresAt: "2026-11-07T12:01:00.000Z",
+    }, targetKey);
+    writeFileSync(fixture.extra.targetLedgerPath, `${JSON.stringify(migratedRecord)}\n`, { mode: 0o600 });
+    writeFileSync(`${fixture.paths.targetDatabasePath}-wal`, "paired-wal", { mode: 0o600 });
+    writeFileSync(`${fixture.paths.targetDatabasePath}-shm`, "paired-shm", { mode: 0o600 });
+
+    await operations.restorePreCutoverRelayData(state);
+    const restoredHash = createHash("sha256").update(readFileSync(fixture.paths.targetDatabasePath)).digest("hex");
+    assert.equal(restoredHash, databaseBackup.originalSha256);
+    assert.equal(existsSync(`${fixture.paths.targetDatabasePath}-wal`), false);
+    assert.equal(existsSync(`${fixture.paths.targetDatabasePath}-shm`), false);
+    const restoredDatabase = new DatabaseSync(fixture.paths.targetDatabasePath, { readOnly: true });
+    try {
+      assert.equal(restoredDatabase.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+      assert.equal(restoredDatabase.prepare("SELECT COUNT(*) AS count FROM app_settings WHERE key = 'post_cutover'").get().count, 0);
+    } finally {
+      restoredDatabase.close();
+    }
+    assert.deepEqual(readFileSync(fixture.extra.targetLedgerPath), originalLedger);
+    assert.equal(parseDeletionLedgerContent(originalLedger.toString("utf8"), [targetKey], "Restored target ledger").length, 1);
+
+    const decryptsBeforeRetry = commands.filter(([command, , mode]) => command === process.execPath && mode === "decrypt").length;
+    await operations.restorePreCutoverRelayData(state);
+    const decryptsAfterRetry = commands.filter(([command, , mode]) => command === process.execPath && mode === "decrypt").length;
+    assert.equal(decryptsAfterRetry, decryptsBeforeRetry, "an already-restored target must not be decrypted or replaced again");
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("pre-admission restore converges from either partially published database/ledger crash boundary", async (context) => {
+  for (const restoredBeforeRetry of ["database", "ledger"]) await context.test(restoredBeforeRetry, async () => {
+    const fixture = backupFixture();
+    const run = (command, args) => {
+      if (command === "sqlite3") {
+        const sql = args[1];
+        if (sql.startsWith(".backup ")) {
+          const destination = sql.slice(".backup ".length).replace(/^'|'$/g, "").replaceAll("''", "'");
+          copyFileSync(args[0], destination);
+        }
+        return { status: 0, stdout: sql === "PRAGMA integrity_check;" ? "ok\n" : "0|0|0\n", stderr: "" };
+      }
+      const result = spawnSync(command, args, { encoding: "utf8" });
+      return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+    };
+    try {
+      const state = {
+        revision: REVISION,
+        manifestHash: MANIFEST_HASH,
+        status: "abort-failed",
+        applyStartedAt: "2026-08-09T12:00:00.000Z",
+        preflight: { discoveredPaths: fixture.extra },
+      };
+      const operations = createSystemCutoverOperations({ paths: fixture.paths, run, now: () => new Date("2026-08-09T12:00:00.000Z") });
+      state.backups = await operations.createAndVerifyEncryptedBackups(state);
+      const databaseBackup = state.backups.find((entry) => entry.sourceLabel === "relay-db");
+      const ledgerBackup = state.backups.find((entry) => entry.sourceLabel === "relay-ledger");
+
+      const database = new DatabaseSync(fixture.paths.targetDatabasePath);
+      try {
+        database.prepare("INSERT INTO app_settings (key, value) VALUES ('post_cutover', 'mutated')").run();
+      } finally {
+        database.close();
+      }
+      writeFileSync(fixture.extra.targetLedgerPath, "partially-published-cutover-ledger\n", { mode: 0o600 });
+
+      const backup = restoredBeforeRetry === "database" ? databaseBackup : ledgerBackup;
+      const destination = restoredBeforeRetry === "database" ? fixture.paths.targetDatabasePath : fixture.extra.targetLedgerPath;
+      const recovered = `${destination}.recovered-before-retry`;
+      const decrypted = spawnSync(process.execPath, [
+        fixture.paths.backupCryptoHelper,
+        "decrypt",
+        backup.path,
+        recovered,
+        fixture.paths.backupEncryptionKeyFile,
+      ], { encoding: "utf8" });
+      assert.equal(decrypted.status, 0, decrypted.stderr);
+      copyFileSync(recovered, destination);
+      rmSync(recovered);
+
+      await operations.restorePreCutoverRelayData(state);
+      assert.equal(createHash("sha256").update(readFileSync(fixture.paths.targetDatabasePath)).digest("hex"), databaseBackup.originalSha256);
+      assert.equal(createHash("sha256").update(readFileSync(fixture.extra.targetLedgerPath)).digest("hex"), ledgerBackup.originalSha256);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+});
+
+test("pre-admission restore removes a ledger created when no target ledger existed before cutover", async () => {
+  const fixture = backupFixture();
+  rmSync(fixture.extra.targetLedgerPath);
+  const run = (command, args) => {
+    if (command === "sqlite3") {
+      const sql = args[1];
+      if (sql.startsWith(".backup ")) {
+        const destination = sql.slice(".backup ".length).replace(/^'|'$/g, "").replaceAll("''", "'");
+        copyFileSync(args[0], destination);
+      }
+      return { status: 0, stdout: sql === "PRAGMA integrity_check;" ? "ok\n" : "0|0|0\n", stderr: "" };
+    }
+    const result = spawnSync(command, args, { encoding: "utf8" });
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  };
+  try {
+    const state = {
+      revision: REVISION,
+      manifestHash: MANIFEST_HASH,
+      status: "applying",
+      preflight: { discoveredPaths: fixture.extra },
+    };
+    const operations = createSystemCutoverOperations({ paths: fixture.paths, run, now: () => new Date("2026-08-09T12:00:00.000Z") });
+    state.backups = await operations.createAndVerifyEncryptedBackups(state);
+    const databaseBackup = state.backups.find((entry) => entry.sourceLabel === "relay-db");
+    assert.equal(state.preCutoverRelayData.ledgerExisted, false);
+    assert.equal(state.backups.some((entry) => entry.sourceLabel === "relay-ledger"), false);
+
+    const database = new DatabaseSync(fixture.paths.targetDatabasePath);
+    try {
+      database.prepare("INSERT INTO app_settings (key, value) VALUES ('post_cutover', 'mutated')").run();
+    } finally {
+      database.close();
+    }
+    writeFileSync(fixture.extra.targetLedgerPath, "partial-new-ledger\n", { mode: 0o600 });
+
+    await operations.restorePreCutoverRelayData(state);
+    assert.equal(createHash("sha256").update(readFileSync(fixture.paths.targetDatabasePath)).digest("hex"), databaseBackup.originalSha256);
+    assert.equal(existsSync(fixture.extra.targetLedgerPath), false);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("pre-admission restore validates both recovery artifacts before replacing either live target", async () => {
+  const fixture = backupFixture();
+  let rejectedLedgerBackup = null;
+  const run = (command, args) => {
+    if (command === "sqlite3") {
+      const sql = args[1];
+      if (sql.startsWith(".backup ")) {
+        const destination = sql.slice(".backup ".length).replace(/^'|'$/g, "").replaceAll("''", "'");
+        copyFileSync(args[0], destination);
+      }
+      return { status: 0, stdout: sql === "PRAGMA integrity_check;" ? "ok\n" : "0|0|0\n", stderr: "" };
+    }
+    if (command === process.execPath && args[1] === "decrypt" && args[2] === rejectedLedgerBackup) {
+      return { status: 1, stdout: "", stderr: "fixture ledger recovery failure" };
+    }
+    const result = spawnSync(command, args, { encoding: "utf8" });
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  };
+  try {
+    const state = {
+      revision: REVISION,
+      manifestHash: MANIFEST_HASH,
+      status: "applying",
+      preflight: { discoveredPaths: fixture.extra },
+    };
+    const operations = createSystemCutoverOperations({ paths: fixture.paths, run, now: () => new Date("2026-08-09T12:00:00.000Z") });
+    state.backups = await operations.createAndVerifyEncryptedBackups(state);
+    rejectedLedgerBackup = state.backups.find((entry) => entry.sourceLabel === "relay-ledger").path;
+
+    const database = new DatabaseSync(fixture.paths.targetDatabasePath);
+    try {
+      database.prepare("INSERT INTO app_settings (key, value) VALUES ('post_cutover', 'mutated')").run();
+    } finally {
+      database.close();
+    }
+    writeFileSync(fixture.extra.targetLedgerPath, "mutated-ledger\n", { mode: 0o600 });
+    writeFileSync(`${fixture.paths.targetDatabasePath}-wal`, "mutated-wal", { mode: 0o600 });
+    const mutatedDatabaseHash = createHash("sha256").update(readFileSync(fixture.paths.targetDatabasePath)).digest("hex");
+    const mutatedLedger = readFileSync(fixture.extra.targetLedgerPath);
+
+    await assert.rejects(operations.restorePreCutoverRelayData(state), /decrypt relay-ledger recovery backup failed/i);
+    assert.equal(createHash("sha256").update(readFileSync(fixture.paths.targetDatabasePath)).digest("hex"), mutatedDatabaseHash);
+    assert.deepEqual(readFileSync(fixture.extra.targetLedgerPath), mutatedLedger);
+    assert.equal(existsSync(`${fixture.paths.targetDatabasePath}-wal`), true);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

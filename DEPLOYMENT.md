@@ -486,8 +486,8 @@ waits for any in-flight apply to release the same ordered locks before deciding
 whether abort is still permitted. If apply fails after recording admission,
 rerun the exact same revision/hash-bound apply command: it resumes only the
 unfinished fix-forward phases and never re-runs a completed migration.
-After successful admission the old units are persistently disabled and
-runtime-masked. Their unit files and durable data remain stopped and masked for
+After successful admission the old units are persistently disabled and masked.
+Their unit files and durable data remain stopped and persistently masked for
 the full 14-day forensic window for supervised fix-forward or forensic work.
 
 ### Post-admission announcement and soak monitoring
