@@ -20,6 +20,11 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
+import {
+  createCanonicalCutoverPrivacyPlan,
+  prepareCanonicalCutoverPrivacyApply,
+} from "./canonicalCutoverPrivacy.mjs";
+
 export const CANONICAL_CLAIM_ID = "1369094286777412590";
 export const CANONICAL_CUTOVER_MANIFEST_VERSION = 1;
 export const DEFAULT_CANONICAL_CUTOVER_PATHS = Object.freeze({
@@ -76,6 +81,8 @@ const MUTATED_TABLES = new Set([
   "admin_audit_log",
   ...REPLACED_DISCORD_TABLES,
 ]);
+
+const PRIVACY_REPLAY_TABLES = new Set(["market_deal_alerts", "discord_delivery_log"]);
 
 const REQUIRED_COLUMNS = Object.freeze({
   user_accounts: ["id", "discord_id", "discord_username", "discord_global_name", "discord_avatar", "character_player_id", "character_name", "character_status", "settings_json", "created_at", "last_login_at", "inactivity_warning_sent_at"],
@@ -499,7 +506,7 @@ function databaseDescription(db, databasePath, { includeProtectedContent }) {
 }
 
 function databaseRecoveryFingerprint(db) {
-  const tables = [...MUTATED_TABLES].sort();
+  const tables = [...new Set([...MUTATED_TABLES, ...PRIVACY_REPLAY_TABLES])].sort();
   return sha256(canonicalJson({
     schema: schemaDescription(db),
     tables: Object.fromEntries(tables.map((table) => [table, {
@@ -1049,8 +1056,14 @@ function manifestWithoutHash(options, source, target) {
       target: brandingDescription(target, options.targetBrandingDirectory, "Target"),
     },
     secret: secretDescription(source),
-    privacyLedgerKeyIds: { source: null, target: null },
+    privacyLedgerKeyIds: options.privacyDeletionLedger
+      ? {
+          source: options.privacyDeletionLedger.source.key.keyId,
+          target: options.privacyDeletionLedger.target.key.keyId,
+        }
+      : { source: null, target: null },
   };
+  if (options.privacyDeletionLedger) manifest.privacyDeletionLedger = options.privacyDeletionLedger;
   return manifest;
 }
 
@@ -1074,6 +1087,7 @@ export function createCanonicalCutoverManifest(input, { allowExistingManifest = 
     targetDatabasePath: guardedExistingPath(input.targetDatabasePath, "file", "Target database"),
     sourceBrandingDirectory: guardedExistingPath(input.sourceBrandingDirectory, "directory", "Source branding directory"),
     targetBrandingDirectory: guardedExistingPath(input.targetBrandingDirectory, "directory", "Target branding directory"),
+    privacyDeletionLedger: input.privacyPlan ?? (input.privacy ? createCanonicalCutoverPrivacyPlan(input.privacy) : null),
   };
   const backupBrandingDirectory = guardedExistingOrPlannedDirectory(`${options.targetBrandingDirectory}.canonical-cutover-backup`, "Target branding backup directory");
   if (existsSync(backupBrandingDirectory)) throw new Error("Target branding backup directory must not exist before dry-run");
@@ -1299,9 +1313,10 @@ function assertCleanIntegrity(db) {
   }
 }
 
-function assertProtectedTablesUnchanged(db, manifest) {
+function assertProtectedTablesUnchanged(db, manifest, { allowPrivacyReplay = false } = {}) {
   for (const [table, counts] of Object.entries(manifest.tableCounts)) {
     if (!counts.excluded || !manifest.target.database.tables[table]) continue;
+    if (allowPrivacyReplay && manifest.privacyDeletionLedger && PRIVACY_REPLAY_TABLES.has(table)) continue;
     const expected = manifest.target.database.tables[table];
     const actualCount = tableCount(db, table);
     const actualHash = tableContentFingerprint(db, table);
@@ -1381,7 +1396,7 @@ function applyResult(manifest, recovered = false) {
   };
 }
 
-function recoverAppliedFinalization(manifest, paths, durability) {
+function recoverAppliedFinalization(manifest, paths, durability, beforeFinalize = () => {}) {
   const applied = readAppliedMarker(paths.markerPath, manifest);
   if (existsSync(paths.pendingMarkerPath)) {
     const pending = readRecoveryMarker(paths.pendingMarkerPath, manifest);
@@ -1393,7 +1408,7 @@ function recoverAppliedFinalization(manifest, paths, durability) {
   const db = openReadOnly(paths.targetPath);
   try {
     assertSupportedSchema(db, "Target");
-    assertProtectedTablesUnchanged(db, manifest);
+    assertProtectedTablesUnchanged(db, manifest, { allowPrivacyReplay: true });
     assertCleanIntegrity(db);
     if (databaseRecoveryFingerprint(db) !== applied.postDatabaseStateFingerprint) {
       throw new Error("Applied canonical cutover marker does not match the target database state");
@@ -1407,6 +1422,7 @@ function recoverAppliedFinalization(manifest, paths, durability) {
   } finally {
     db.close();
   }
+  beforeFinalize();
   if (manifest.branding.source.settingPresent && !brandingFilesMatchManifest(manifest)) {
     throw new Error("Applied canonical cutover marker exists but target branding is incomplete");
   }
@@ -1461,7 +1477,7 @@ function completePostCommit(
   }
 }
 
-function recoverPendingApply(manifest, paths, durability) {
+function recoverPendingApply(manifest, paths, durability, beforeFinalize = () => {}) {
   const recovery = readRecoveryMarker(paths.pendingMarkerPath, manifest);
   if (sha256(readFileSync(paths.sourcePath)) !== manifest.source.database.fileSha256) {
     throw new Error("Canonical cutover source changed during pending recovery");
@@ -1470,7 +1486,6 @@ function recoverPendingApply(manifest, paths, durability) {
   let currentFingerprint;
   try {
     assertSupportedSchema(db, "Target");
-    assertProtectedTablesUnchanged(db, manifest);
     assertCleanIntegrity(db);
     if (!manifest.branding.source.settingPresent) {
       const retainedBranding = brandingDescription(db, manifest.branding.target.path, "Recovery target");
@@ -1479,6 +1494,11 @@ function recoverPendingApply(manifest, paths, durability) {
       }
     }
     currentFingerprint = databaseRecoveryFingerprint(db);
+    if (currentFingerprint === recovery.preDatabaseStateFingerprint) {
+      assertProtectedTablesUnchanged(db, manifest);
+    } else if (currentFingerprint === recovery.postDatabaseStateFingerprint) {
+      assertProtectedTablesUnchanged(db, manifest, { allowPrivacyReplay: true });
+    }
   } finally {
     db.close();
   }
@@ -1489,6 +1509,7 @@ function recoverPendingApply(manifest, paths, durability) {
   if (currentFingerprint !== recovery.postDatabaseStateFingerprint) {
     throw new Error("Pending canonical cutover database state matches neither the pre-apply nor committed fingerprint");
   }
+  beforeFinalize();
   return completePostCommit(manifest, paths.markerPath, paths.pendingMarkerPath, recovery, durability);
 }
 
@@ -1497,9 +1518,17 @@ export function applyCanonicalCutoverManifest(
   {
     durability = DEFAULT_CUTOVER_DURABILITY,
     openTargetDatabase = openWritableTarget,
+    privacyApplyContext = null,
   } = {},
 ) {
   assertManifestIntegrity(manifest);
+  const activePrivacyApplyContext = manifest.privacyDeletionLedger
+    ? (privacyApplyContext ?? prepareCanonicalCutoverPrivacyApply(manifest.privacyDeletionLedger))
+    : null;
+  if (manifest.privacyDeletionLedger
+    && canonicalJson(activePrivacyApplyContext.plan) !== canonicalJson(manifest.privacyDeletionLedger)) {
+    throw new Error("Canonical cutover privacy apply context is missing or does not match the manifest");
+  }
   const resolvedManifestPath = guardedExistingPath(manifestPath, "file", "Manifest");
   const markerPath = guardedPlannedFilePath(`${resolvedManifestPath}.applied`, "Applied marker", { allowExisting: true });
   const pendingMarkerPath = guardedPlannedFilePath(`${resolvedManifestPath}.applying`, "Pending marker", { allowExisting: true });
@@ -1526,7 +1555,7 @@ export function applyCanonicalCutoverManifest(
         markerPath,
         pendingMarkerPath,
         targetPath,
-      }, durability);
+      }, durability, () => activePrivacyApplyContext?.assertLedgerInstalled());
     }
     throw new Error("Canonical cutover manifest was already applied");
   }
@@ -1534,7 +1563,12 @@ export function applyCanonicalCutoverManifest(
     throw new Error("Target branding backup directory exists without a pending recovery marker");
   }
   if (existsSync(pendingMarkerPath)) {
-    const recovered = recoverPendingApply(manifest, { markerPath, pendingMarkerPath, sourcePath, targetPath }, durability);
+    const recovered = recoverPendingApply(
+      manifest,
+      { markerPath, pendingMarkerPath, sourcePath, targetPath },
+      durability,
+      () => activePrivacyApplyContext?.assertLedgerInstalled(),
+    );
     if (recovered) return recovered;
   }
   let stagedBranding = null;
@@ -1555,10 +1589,12 @@ export function applyCanonicalCutoverManifest(
       sourceBrandingDirectory: manifest.branding?.source?.path,
       targetBrandingDirectory: manifest.branding?.target?.path,
       manifestPath: resolvedManifestPath,
+      privacyPlan: manifest.privacyDeletionLedger ?? undefined,
     }, { allowExistingManifest: true });
     if (canonicalJson(recomputed) !== canonicalJson(manifest)) {
       throw new Error("Canonical cutover inputs changed since dry-run; refusing apply");
     }
+    activePrivacyApplyContext?.installLedger();
     const preDatabaseStateFingerprint = databaseRecoveryFingerprint(db);
     stagedBranding = stageBranding(manifest, durability);
     db.exec("DELETE FROM user_sessions; DELETE FROM admin_sessions;");
@@ -1571,6 +1607,7 @@ export function applyCanonicalCutoverManifest(
     replaceDiscordState(db);
     applyAdminAudit(db, manifest);
     assertProtectedTablesUnchanged(db, manifest);
+    activePrivacyApplyContext?.replay(db);
     assertCleanIntegrity(db);
     recovery = {
       preDatabaseStateFingerprint,

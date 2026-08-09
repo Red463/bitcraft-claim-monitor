@@ -9,9 +9,16 @@ import {
   DEFAULT_CANONICAL_CUTOVER_PATHS,
   readCanonicalCutoverManifest,
 } from "../apps/bitcraft-local/src/server/canonicalCutoverMigration.mjs";
+import { prepareCanonicalCutoverPrivacyApply } from "../apps/bitcraft-local/src/server/canonicalCutoverPrivacy.mjs";
 
 function parseArguments(argv) {
-  const options = { ...DEFAULT_CANONICAL_CUTOVER_PATHS, mode: null, claimId: null, manifestPath: null };
+  const options = {
+    ...DEFAULT_CANONICAL_CUTOVER_PATHS,
+    mode: null,
+    claimId: null,
+    manifestPath: null,
+    targetPreviousKeyFilePaths: [],
+  };
   const values = new Map([
     ["--source-db", "sourceDatabasePath"],
     ["--target-db", "targetDatabasePath"],
@@ -19,12 +26,27 @@ function parseArguments(argv) {
     ["--target-branding", "targetBrandingDirectory"],
     ["--claim-id", "claimId"],
     ["--manifest", "manifestPath"],
+    ["--source-privacy-ledger", "sourceLedgerPath"],
+    ["--target-privacy-ledger", "targetLedgerPath"],
+    ["--source-privacy-key", "sourceKeyFilePath"],
+    ["--target-privacy-key", "targetKeyFilePath"],
+    ["--source-config-root", "sourceConfigRoot"],
+    ["--target-config-root", "targetConfigRoot"],
+    ["--source-backup-root", "sourceBackupRoot"],
+    ["--target-backup-root", "targetBackupRoot"],
+    ["--privacy-manifest-created-at", "manifestCreatedAt"],
   ]);
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--dry-run" || argument === "--apply") {
       if (options.mode) throw new TypeError("Choose exactly one of --dry-run or --apply");
       options.mode = argument.slice(2);
+      continue;
+    }
+    if (argument === "--target-previous-privacy-key") {
+      const value = argv[++index];
+      if (!value || value.startsWith("--")) throw new TypeError(`${argument} requires a value`);
+      options.targetPreviousKeyFilePaths.push(value);
       continue;
     }
     const key = values.get(argument);
@@ -36,9 +58,27 @@ function parseArguments(argv) {
   if (!options.mode) throw new TypeError("Choose exactly one of --dry-run or --apply");
   if (!options.manifestPath) throw new TypeError("--manifest <path> is required");
   if (options.mode === "dry-run" && !options.claimId) throw new TypeError("--dry-run requires --claim-id <decimal>");
+  const privacyKeys = [
+    "sourceLedgerPath",
+    "targetLedgerPath",
+    "sourceKeyFilePath",
+    "targetKeyFilePath",
+    "sourceConfigRoot",
+    "targetConfigRoot",
+    "sourceBackupRoot",
+    "targetBackupRoot",
+    "manifestCreatedAt",
+  ];
+  if (options.mode === "dry-run") {
+    const missing = privacyKeys.find((key) => options[key] == null);
+    if (missing) throw new TypeError("Privacy cutover requires explicit ledger paths, key paths, approved roots, and manifest creation time");
+    options.privacy = Object.fromEntries(privacyKeys.map((key) => [key, options[key]]));
+    options.privacy.targetPreviousKeyFilePaths = options.targetPreviousKeyFilePaths;
+  }
   if (options.mode === "apply") {
-    const forbidden = ["claimId", "sourceDatabasePath", "targetDatabasePath", "sourceBrandingDirectory", "targetBrandingDirectory"];
+    const forbidden = ["claimId", "sourceDatabasePath", "targetDatabasePath", "sourceBrandingDirectory", "targetBrandingDirectory", ...privacyKeys, "targetPreviousKeyFilePaths"];
     const explicitlySet = new Set(argv.filter((argument) => values.has(argument)).map((argument) => values.get(argument)));
+    if (argv.includes("--target-previous-privacy-key")) explicitlySet.add("targetPreviousKeyFilePaths");
     if (forbidden.some((key) => explicitlySet.has(key))) throw new TypeError("--apply accepts only --manifest <path>");
   }
   return options;
@@ -52,7 +92,10 @@ try {
     process.stdout.write(`${JSON.stringify({ claimId: manifest.claimId, selectionHash: manifest.selectionHash })}\n`);
   } else {
     const loaded = readCanonicalCutoverManifest(options.manifestPath);
-    const result = applyCanonicalCutoverManifest(loaded);
+    const privacyApplyContext = loaded.manifest.privacyDeletionLedger
+      ? prepareCanonicalCutoverPrivacyApply(loaded.manifest.privacyDeletionLedger)
+      : null;
+    const result = applyCanonicalCutoverManifest(loaded, { privacyApplyContext });
     process.stdout.write(`${JSON.stringify(result)}\n`);
   }
 } catch (error) {
