@@ -167,7 +167,7 @@ import {
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
 import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyProductionContributionExactAmountMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
-import { resolveDeploymentRuntime } from "./src/server/deploymentRuntime.mjs";
+import { assertCanonicalDiscordGatewayReady, resolveDeploymentRuntime } from "./src/server/deploymentRuntime.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
 import { runSettlementStateTransaction, settlementStateActivityChanges } from "./src/server/settlementState.mjs";
@@ -9613,6 +9613,10 @@ function replayCurrentPrivacyDeletionLedger() {
   });
 }
 
+assertCanonicalDiscordGatewayReady(deploymentRuntime, {
+  settings: getDiscordSettingsRaw(),
+  webSocketAvailable: typeof WebSocket === "function",
+});
 replayCurrentPrivacyDeletionLedger();
 
 if (processRoleConfig.serveHttp) {

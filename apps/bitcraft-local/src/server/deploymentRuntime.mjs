@@ -24,7 +24,7 @@ export function resolveDeploymentRuntime(env = process.env) {
 
   const role = setting(env, "BITCRAFT_PROCESS_ROLE", setting(env, "BITCRAFT_SERVER_ROLE", "web")).toLowerCase();
   const deliveryMode = setting(env, "DISCORD_DELIVERY_MODE", "record").toLowerCase();
-  const gatewayEnabled = enabled(env, "ENABLE_DISCORD_STARTUP", false);
+  const gatewayRequested = enabled(env, "ENABLE_DISCORD_STARTUP", false);
   const oauthRedirectUri = setting(env, "DISCORD_OAUTH_REDIRECT_URI");
   const discordReady = Boolean(
     setting(env, "DISCORD_OAUTH_CLIENT_ID")
@@ -34,7 +34,7 @@ export function resolveDeploymentRuntime(env = process.env) {
 
   if (mode === "preview") {
     if (deliveryMode !== "record") throw deploymentError("preview requires DISCORD_DELIVERY_MODE=record");
-    if (gatewayEnabled) throw deploymentError("preview requires ENABLE_DISCORD_STARTUP=false");
+    if (gatewayRequested) throw deploymentError("preview requires ENABLE_DISCORD_STARTUP=false");
     return {
       mode,
       canonicalOrigin: CANONICAL_ORIGIN,
@@ -61,19 +61,16 @@ export function resolveDeploymentRuntime(env = process.env) {
   if (oauthRedirectUri && oauthRedirectUri !== CANONICAL_OAUTH_CALLBACK_URL) {
     throw deploymentError(`canonical requires DISCORD_OAUTH_REDIRECT_URI=${CANONICAL_OAUTH_CALLBACK_URL}`);
   }
-  if (role === "all" && setting(env, "NODE_ENV").toLowerCase() === "production" && setting(env, "BITCRAFT_TEST").toLowerCase() !== "true") {
-    throw deploymentError("canonical production requires separate web and worker process roles");
-  }
-  if (role === "worker" && !gatewayEnabled) throw deploymentError("canonical worker requires ENABLE_DISCORD_STARTUP=true");
-  if (role === "web" && gatewayEnabled) throw deploymentError("canonical web gateway belongs to the worker");
-  if (role !== "web" && role !== "worker" && role !== "all") throw deploymentError("canonical requires a web or worker process role");
+  if (role === "all") throw deploymentError("canonical requires separate web and worker process roles");
+  if (role !== "web" && role !== "worker") throw deploymentError("canonical requires a web or worker process role");
+  if (!gatewayRequested) throw deploymentError("canonical requires ENABLE_DISCORD_STARTUP=true for the worker gateway");
 
   return {
     mode,
     canonicalOrigin: CANONICAL_ORIGIN,
     oauthCallbackUrl: CANONICAL_OAUTH_CALLBACK_URL,
     discordDeliveryMode: "live",
-    discordGatewayEnabled: gatewayEnabled,
+    discordGatewayEnabled: role === "worker",
     discordReady: true,
     health({ version, buildSha }) {
       return {
@@ -86,4 +83,12 @@ export function resolveDeploymentRuntime(env = process.env) {
       };
     },
   };
+}
+
+export function assertCanonicalDiscordGatewayReady(runtime, { settings = {}, webSocketAvailable = false } = {}) {
+  if (runtime?.mode !== "canonical" || runtime.discordGatewayEnabled !== true) return;
+  if (settings.enabled !== true) throw deploymentError("Discord integration must be enabled");
+  if (!String(settings.botToken ?? "").trim()) throw deploymentError("Discord bot token must be available to the worker");
+  if (settings.presence?.enabled !== true) throw deploymentError("Discord presence must be enabled");
+  if (!webSocketAvailable) throw deploymentError("WebSocket must be available to the Discord worker");
 }

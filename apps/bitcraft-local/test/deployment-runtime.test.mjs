@@ -1,5 +1,25 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdir, rm } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const appDir = path.dirname(fileURLToPath(new URL("../server.mjs", import.meta.url)));
+
+function waitForExit(child, timeoutMs) {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(null);
+    }, timeoutMs);
+    const onExit = (code) => {
+      clearTimeout(timeout);
+      resolve(code);
+    };
+    child.once("exit", onExit);
+  });
+}
 
 let deploymentRuntime = null;
 try {
@@ -67,17 +87,87 @@ test("canonical web remains HTTP-only and production rejects a combined process 
   const web = deploymentRuntime.resolveDeploymentRuntime({
     ...canonicalWorker,
     BITCRAFT_PROCESS_ROLE: "web",
-    ENABLE_DISCORD_STARTUP: "false",
   });
   assert.equal(web.discordGatewayEnabled, false);
   assert.throws(() => deploymentRuntime.resolveDeploymentRuntime({
     ...canonicalWorker,
-    BITCRAFT_PROCESS_ROLE: "web",
-  }), /worker/i);
+    BITCRAFT_PROCESS_ROLE: "all",
+  }), /separate web and worker/i);
+});
+
+test("canonical production rejects a combined role even in a test runtime", () => {
+  assert.ok(deploymentRuntime, "deployment runtime module must exist");
   assert.throws(() => deploymentRuntime.resolveDeploymentRuntime({
     ...canonicalWorker,
     BITCRAFT_PROCESS_ROLE: "all",
+    BITCRAFT_TEST: "true",
   }), /separate web and worker/i);
+});
+
+test("canonical worker fails closed when effective Discord settings cannot start the gateway", () => {
+  assert.equal(
+    typeof deploymentRuntime?.assertCanonicalDiscordGatewayReady,
+    "function",
+    "canonical Discord readiness validator must exist",
+  );
+  const worker = deploymentRuntime.resolveDeploymentRuntime(canonicalWorker);
+  const ready = {
+    settings: { enabled: true, botToken: "bot-secret", presence: { enabled: true } },
+    webSocketAvailable: true,
+  };
+  assert.doesNotThrow(() => deploymentRuntime.assertCanonicalDiscordGatewayReady(worker, ready));
+  assert.throws(() => deploymentRuntime.assertCanonicalDiscordGatewayReady(worker, {
+    ...ready,
+    settings: { ...ready.settings, enabled: false },
+  }), /Discord integration must be enabled/);
+  assert.throws(() => deploymentRuntime.assertCanonicalDiscordGatewayReady(worker, {
+    ...ready,
+    settings: { ...ready.settings, presence: { enabled: false } },
+  }), /Discord presence must be enabled/);
+  assert.throws(() => deploymentRuntime.assertCanonicalDiscordGatewayReady(worker, {
+    ...ready,
+    webSocketAvailable: false,
+  }), /WebSocket/);
+
+  const web = deploymentRuntime.resolveDeploymentRuntime({ ...canonicalWorker, BITCRAFT_PROCESS_ROLE: "web" });
+  assert.doesNotThrow(() => deploymentRuntime.assertCanonicalDiscordGatewayReady(web, {
+    settings: { enabled: false, botToken: "", presence: { enabled: false } },
+    webSocketAvailable: false,
+  }));
+});
+
+test("canonical worker exits when persisted Discord settings disable the gateway", async (t) => {
+  const dataDir = path.join(appDir, `.test-deployment-runtime-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  await mkdir(dataDir, { recursive: true });
+  const child = spawn(process.execPath, ["server.mjs"], {
+    cwd: appDir,
+    env: {
+      ...process.env,
+      ...canonicalWorker,
+      BITCRAFT_TEST: "true",
+      BITCRAFT_LOCAL_DATA_DIR: dataDir,
+      ENABLE_SERVER_POLLING: "false",
+      ENABLE_SCHEDULED_JOBS: "false",
+    },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  t.after(async () => {
+    if (child.exitCode === null) {
+      await new Promise((resolve) => {
+        child.once("exit", resolve);
+        child.kill();
+      });
+    }
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const exitCode = await waitForExit(child, 10_000);
+  assert.notEqual(exitCode, null, "canonical worker must exit instead of silently skipping its gateway");
+  assert.notEqual(exitCode, 0);
+  assert.match(stderr, /Discord integration must be enabled/);
 });
 
 test("health exposes only safe deployment readiness metadata", () => {
