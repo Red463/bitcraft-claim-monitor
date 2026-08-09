@@ -127,3 +127,46 @@ all exited 0
 ```
 
 The one skip remains the Windows-host symlink regression (`EPERM` while creating the test symlink); all real hard-link and descriptor-identity tests executed. No key was installed, no VPS/live path was accessed, and no production configuration was changed.
+
+## Second review remediation (2026-08-09)
+
+The three follow-up Important findings were addressed with focused RED/GREEN regressions.
+
+### Cutover-wide namespace safety
+
+- The migration-level disjointness guard now includes every privacy source/current/previous/installed key, source/target/staged ledger, and readiness-artifact path.
+- Those privacy files must be pairwise disjoint from the source and target databases, manifest, `.applying` and `.applied` markers, source/target branding roots, the branding backup root, and every path inside a generated `.canonical-cutover-branding-stage-*` destructive namespace.
+- Direct regressions cover a target ledger equal to either marker. A matrix covers eight privacy path roles against ten migration/destructive path classes (80 combinations), including a file nested inside a branding-stage namespace.
+- The same complete invariant executes at dry-run and apply/recovery entry, before mutation.
+
+### Reusable-stage permissions
+
+- An exact valid deterministic stage is no longer returned through the read-only fast path. It is opened read/write, descriptor-versus-path device/inode/link identity is checked, its contents and signatures are verified, and descriptor-level `fchmod(0600)` plus file fsync are performed.
+- Device/inode/link identity is revalidated after the permission change and immediately before return. The regression begins with valid mode-0644 content and observes descriptor-level repair before installation.
+
+### Task 4 handoff ordering
+
+The ignored authoritative `task-4-brief.md` scratch brief was updated but deliberately not added to this Task 3 commit. Its Apply order now requires Task 4 to:
+
+1. install the old ledger key only at the manifest-approved destination using the current key's ownership/service-readable mode;
+2. atomically edit and reread the exact canonical Relay environment values, including `PRIVACY_LEDGER_PREVIOUS_KEY_FILES` from the frozen plan;
+3. create the manifest-bound readiness artifact only after both the key and environment edit verify;
+4. revalidate that complete handshake immediately before invoking Task 2/3 apply.
+
+Before admission, abort must restore the exact saved environment bytes and metadata and remove only the installed key/readiness artifact whose recorded identities prove this cutover created them. It must attempt those restorations even if another abort action fails. Prepare records the approved destinations and exact value in the frozen manifest but does not install or configure keys.
+
+### Second remediation verification
+
+```text
+node --test apps/bitcraft-local/test/canonical-cutover-privacy.test.mjs apps/bitcraft-local/test/canonical-cutover-migration.test.mjs apps/bitcraft-local/test/server-privacy-deletion-ledger.test.mjs
+55 tests: 54 passed, 0 failed, 1 skipped
+
+corepack pnpm --filter @workspace/bitcraft-local test
+1802 tests: 1801 passed, 0 failed, 1 skipped
+
+corepack pnpm --filter @workspace/bitcraft-local run build
+exit 0; server/provider bindings, 1191 asset checks, TypeScript/Vite production build,
+and Relay runtime-boundary verification passed
+```
+
+The full suite and build were run outside the file sandbox after investigation showed the sandbox denied reads of the pinned `exceljs` package files. The isolated affected server integration tests then passed 5/5, and the full rerun passed. The sole skip remains Windows symlink creation denied with `EPERM`; hard-link, descriptor-identity, permission-repair, and namespace tests all executed. No key was installed, no live/VPS path was accessed, and the Task 2 selected-data mutation boundary remains unchanged.

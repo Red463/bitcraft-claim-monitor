@@ -595,3 +595,36 @@ test("a deterministic ledger stage is reused after interruption and replaces val
   privacyLedger.discardStagedDeletionLedger(repaired);
   assert.equal(existsSync(stagePath), false);
 });
+
+test("an exact reusable ledger stage is secured to mode 0600 before it is returned or installed", () => {
+  const paths = privacyPaths();
+  const stagePath = path.join(paths.targetBackupRoot, ".privacy.jsonl.canonical-cutover-stage");
+  const merged = privacyLedger.mergeDeletionLedgerRecords({
+    sourceRecords: [signedRecord(OLD_KEY, { operationId: "old-record" })],
+    targetRecords: [signedRecord(CURRENT_KEY, { operationId: "current-record" })],
+    sourceKey: OLD_KEY,
+    targetKey: CURRENT_KEY,
+    manifestCreatedAt: CREATED_AT,
+  });
+  writeFileSync(stagePath, merged.content, { mode: 0o644 });
+  const events = [];
+  const trackedFilesystem = {
+    ...filesystem,
+    fchmodSync(descriptor, mode) {
+      events.push(["fchmod", mode]);
+      return filesystem.fchmodSync(descriptor, mode);
+    },
+  };
+
+  const staged = privacyLedger.stageDeletionLedgerReplacement({
+    ledgerPath: paths.targetLedgerPath,
+    temporaryPath: stagePath,
+    content: merged.content,
+    verificationKeys: [CURRENT_KEY, OLD_KEY],
+  }, { filesystem: trackedFilesystem });
+
+  assert.deepEqual(events, [["fchmod", 0o600]]);
+  if (process.platform !== "win32") assert.equal(filesystem.statSync(stagePath).mode & 0o777, 0o600);
+  privacyLedger.installStagedDeletionLedger(staged);
+  if (process.platform !== "win32") assert.equal(filesystem.statSync(paths.targetLedgerPath).mode & 0o777, 0o600);
+});

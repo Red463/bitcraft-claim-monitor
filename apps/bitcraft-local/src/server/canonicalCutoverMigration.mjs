@@ -320,6 +320,7 @@ function assertCutoverPathsAreDisjoint({
   manifestPath,
   markerPath,
   pendingMarkerPath,
+  privacyDeletionLedger = null,
 }) {
   const files = [
     ["source database", sourceDatabasePath],
@@ -327,6 +328,19 @@ function assertCutoverPathsAreDisjoint({
     ["manifest", manifestPath],
     ["applied marker", markerPath],
     ["pending marker", pendingMarkerPath],
+    ...(privacyDeletionLedger ? [
+      ["source privacy key", privacyDeletionLedger.source?.key?.path],
+      ["source privacy ledger", privacyDeletionLedger.source?.ledger?.path],
+      ["current privacy key", privacyDeletionLedger.target?.key?.path],
+      ...(privacyDeletionLedger.target?.previousKeys ?? []).map((entry, index) => [
+        `previous privacy key ${index + 1}`,
+        entry.path,
+      ]),
+      ["installed previous privacy key", privacyDeletionLedger.previousKeyConfiguration?.installedOldKeyPath],
+      ["target privacy ledger", privacyDeletionLedger.target?.ledger?.path],
+      ["staged privacy ledger", privacyDeletionLedger.target?.stagedLedgerPath],
+      ["privacy readiness artifact", privacyDeletionLedger.readinessArtifact?.path],
+    ] : []),
   ];
   const roots = [
     ["source branding root", sourceBrandingDirectory],
@@ -352,6 +366,17 @@ function assertCutoverPathsAreDisjoint({
       if (pathContains(rootPath, filePath)) {
         throw new Error(`Canonical cutover paths must be disjoint: ${fileLabel} is inside ${rootLabel}`);
       }
+    }
+    const brandingStageParent = path.dirname(targetBrandingDirectory);
+    const brandingStagePrefix = ".canonical-cutover-branding-stage-";
+    const brandingStageRelativePath = path.relative(brandingStageParent, filePath);
+    const brandingStageNamespace = brandingStageRelativePath.split(path.sep)[0];
+    if (brandingStageRelativePath !== ""
+      && !brandingStageRelativePath.startsWith(`..${path.sep}`)
+      && brandingStageRelativePath !== ".."
+      && !path.isAbsolute(brandingStageRelativePath)
+      && brandingStageNamespace.startsWith(brandingStagePrefix)) {
+      throw new Error(`Canonical cutover paths must be disjoint: ${fileLabel} overlaps the branding stage destructive namespace`);
     }
   }
 }
@@ -1094,7 +1119,14 @@ export function createCanonicalCutoverManifest(input, { allowExistingManifest = 
   };
   const backupBrandingDirectory = guardedExistingOrPlannedDirectory(`${options.targetBrandingDirectory}.canonical-cutover-backup`, "Target branding backup directory");
   if (existsSync(backupBrandingDirectory)) throw new Error("Target branding backup directory must not exist before dry-run");
-  assertCutoverPathsAreDisjoint({ ...options, backupBrandingDirectory, manifestPath, markerPath, pendingMarkerPath });
+  assertCutoverPathsAreDisjoint({
+    ...options,
+    backupBrandingDirectory,
+    manifestPath,
+    markerPath,
+    pendingMarkerPath,
+    privacyDeletionLedger: options.privacyDeletionLedger,
+  });
   assertDatabaseFilesystemIdentity(options.sourceDatabasePath, options.targetDatabasePath);
   assertCleanCheckpoint(options.sourceDatabasePath, "Source database");
   assertCleanCheckpoint(options.targetDatabasePath, "Target database");
@@ -1555,6 +1587,7 @@ export function applyCanonicalCutoverManifest(
     manifestPath: resolvedManifestPath,
     markerPath,
     pendingMarkerPath,
+    privacyDeletionLedger: manifest.privacyDeletionLedger,
   });
   assertDatabaseFilesystemIdentity(sourcePath, targetPath);
   if (existsSync(markerPath)) {

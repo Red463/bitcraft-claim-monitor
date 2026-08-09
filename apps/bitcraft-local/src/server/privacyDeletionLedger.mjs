@@ -3,6 +3,7 @@ import {
   chmodSync,
   closeSync,
   existsSync,
+  fchmodSync,
   fstatSync,
   fsyncSync,
   lstatSync,
@@ -24,6 +25,7 @@ const DEFAULT_ATOMIC_FILESYSTEM = Object.freeze({
   chmodSync,
   closeSync,
   existsSync,
+  fchmodSync,
   fstatSync,
   fsyncSync,
   lstatSync,
@@ -306,11 +308,22 @@ export function stageDeletionLedgerReplacement(
     verificationKeys,
   });
   if (filesystem.existsSync(temporaryPath)) {
-    const stale = readSingleLinkedFile(filesystem, temporaryPath, "Stale staged privacy deletion ledger");
+    let descriptor;
     try {
+      descriptor = filesystem.openSync(temporaryPath, "r+");
+      assertSingleLinkedFileDescriptor(filesystem, descriptor, temporaryPath, "Stale staged privacy deletion ledger");
+      const stale = filesystem.readFileSync(descriptor, "utf8");
       parseDeletionLedgerContent(stale, verificationKeys, "Stale staged privacy deletion");
-      if (stale === content) return stagedDescription();
+      if (stale === content) {
+        filesystem.fchmodSync(descriptor, 0o600);
+        filesystem.fsyncSync(descriptor);
+        assertSingleLinkedFileDescriptor(filesystem, descriptor, temporaryPath, "Stale staged privacy deletion ledger");
+        return stagedDescription();
+      }
     } catch {}
+    finally {
+      if (descriptor !== undefined) filesystem.closeSync(descriptor);
+    }
     filesystem.rmSync(temporaryPath, { force: true });
     syncAtomicParent(filesystem, temporaryPath, platform);
   }

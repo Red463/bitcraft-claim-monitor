@@ -10,10 +10,12 @@ import test from "node:test";
 
 import {
   applyCanonicalCutoverManifest,
+  createCanonicalCutoverManifest,
   createCanonicalCutoverDurability,
   readCanonicalCutoverManifest,
 } from "../src/server/canonicalCutoverMigration.mjs";
 import {
+  createCanonicalCutoverPrivacyPlan,
   createCanonicalCutoverPrivacyReadinessArtifact,
   prepareCanonicalCutoverPrivacyApply,
 } from "../src/server/canonicalCutoverPrivacy.mjs";
@@ -917,6 +919,87 @@ test("dry-run requires branding roots, databases, manifest, and markers to be mu
   ));
   assert.notEqual(nestedRoots.status, 0);
   assert.match(nestedRoots.stderr, /disjoint|overlap|branding root/i);
+});
+
+test("dry-run rejects a target privacy ledger that aliases either manifest marker", () => {
+  for (const suffix of [".applied", ".applying"]) {
+    const fixture = createFixture();
+    const manifestPath = path.join(fixture.targetBackupRoot, "manifest.json");
+    const result = runScript(dryRunArguments({
+      ...fixture,
+      targetLedgerPath: `${manifestPath}${suffix}`,
+    }, manifestPath));
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /disjoint|overlap/i);
+    assert.equal(existsSync(manifestPath), false);
+  }
+});
+
+test("every privacy file is disjoint from every cutover file, destructive root, and branding stage namespace", () => {
+  const fixture = createFixture();
+  const privacyPlan = createCanonicalCutoverPrivacyPlan({
+    manifestCreatedAt: PRIVACY_MANIFEST_CREATED_AT,
+    sourceConfigRoot: fixture.sourceConfigRoot,
+    sourceBackupRoot: fixture.sourceBackupRoot,
+    sourceKeyFilePath: fixture.sourceKeyFilePath,
+    sourceLedgerPath: fixture.sourceLedgerPath,
+    targetConfigRoot: fixture.targetConfigRoot,
+    targetBackupRoot: fixture.targetBackupRoot,
+    targetKeyFilePath: fixture.targetKeyFilePath,
+    targetPreviousKeyFilePaths: [],
+    installedPreviousKeyFilePath: fixture.installedPreviousKeyFilePath,
+    readinessArtifactPath: fixture.privacyReadinessArtifactPath,
+    targetLedgerPath: fixture.targetLedgerPath,
+  });
+  privacyPlan.target.previousKeys.push({
+    path: path.join(fixture.targetConfigRoot, "existing-previous.key"),
+    keyId: "previous-key-id",
+    fileSha256: "a".repeat(64),
+  });
+  const privacyPaths = [
+    ["source key", (plan, value) => { plan.source.key.path = value; }],
+    ["source ledger", (plan, value) => { plan.source.ledger.path = value; }],
+    ["current key", (plan, value) => { plan.target.key.path = value; }],
+    ["previous key", (plan, value) => { plan.target.previousKeys[0].path = value; }],
+    ["installed key", (plan, value) => { plan.previousKeyConfiguration.installedOldKeyPath = value; }],
+    ["target ledger", (plan, value) => { plan.target.ledger.path = value; }],
+    ["staged ledger", (plan, value) => { plan.target.stagedLedgerPath = value; }],
+    ["readiness artifact", (plan, value) => { plan.readinessArtifact.path = value; }],
+  ];
+  const baseManifestPath = path.join(fixture.directory, "matrix-manifest.json");
+  const destructivePaths = [
+    ["source database", fixture.sourceDatabasePath],
+    ["target database", fixture.targetDatabasePath],
+    ["manifest", baseManifestPath],
+    ["applied marker", `${baseManifestPath}.applied`],
+    ["pending marker", `${baseManifestPath}.applying`],
+    ["source branding root", fixture.sourceBrandingDirectory],
+    ["target branding root", fixture.targetBrandingDirectory],
+    ["branding backup root", `${fixture.targetBrandingDirectory}.canonical-cutover-backup`],
+    ["branding stage namespace", path.join(fixture.directory, ".canonical-cutover-branding-stage-attacker")],
+    ["nested branding stage namespace", path.join(fixture.directory, ".canonical-cutover-branding-stage-attacker", "privacy-file")],
+  ];
+
+  for (const [privacyLabel, setPrivacyPath] of privacyPaths) {
+    for (const [cutoverLabel, destructivePath] of destructivePaths) {
+      const conflictingPlan = structuredClone(privacyPlan);
+      setPrivacyPath(conflictingPlan, destructivePath);
+      assert.throws(
+        () => createCanonicalCutoverManifest({
+          claimId: CLAIM_ID,
+          sourceDatabasePath: fixture.sourceDatabasePath,
+          targetDatabasePath: fixture.targetDatabasePath,
+          sourceBrandingDirectory: fixture.sourceBrandingDirectory,
+          targetBrandingDirectory: fixture.targetBrandingDirectory,
+          manifestPath: baseManifestPath,
+          privacyPlan: conflictingPlan,
+        }),
+        /disjoint|overlap|destructive namespace/i,
+        `${privacyLabel} must not overlap ${cutoverLabel}`,
+      );
+    }
+  }
 });
 
 test("dry-run rejects database hard links before creating a manifest", () => {
