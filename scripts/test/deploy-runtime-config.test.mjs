@@ -20,30 +20,36 @@ test("Relay services execute through the isolated active release symlink", () =>
   }
 });
 
-test("web and worker force shadow Discord at execution time", () => {
+test("systemd leaves Discord activation to the validated environment", () => {
   for (const unit of [web, worker]) {
     assert.match(unit, /EnvironmentFile=-\/etc\/bitcraft-claim-monitor-relay\.env/);
-    assert.match(
-      unit,
-      /ExecStart=\/usr\/bin\/env DISCORD_DELIVERY_MODE=record ENABLE_DISCORD_STARTUP=false \/usr\/bin\/node /,
-    );
+    assert.doesNotMatch(unit, /(?:Environment=|ExecStart=.*)(?:DISCORD_DELIVERY_MODE|ENABLE_DISCORD_STARTUP)/);
   }
 });
 
-test("Caddy keeps both maintained production and isolated Relay preview routes", () => {
-  assert.match(caddy, /app\.timbersteeltrade\.com\s*\{[\s\S]*reverse_proxy 127\.0\.0\.1:18430/);
-  assert.match(caddy, /relay\.timbersteeltrade\.com\s*\{[\s\S]*reverse_proxy 127\.0\.0\.1:19430/);
+test("Caddy serves canonical traffic from the app and permanently redirects Relay paths", () => {
+  assert.match(caddy, /app\.timbersteeltrade\.com\s*\{[\s\S]*reverse_proxy 127\.0\.0\.1:19430/);
+  assert.match(caddy, /relay\.timbersteeltrade\.com\s*\{\s*redir https:\/\/app\.timbersteeltrade\.com\{uri\} permanent\s*\}/);
+  assert.doesNotMatch(caddy, /18430/);
   assert.match(caddy, /lb_try_duration 5s/);
   assert.match(caddy, /lb_retry_match[\s\S]*method GET HEAD/);
   assert.doesNotMatch(caddy, /lb_retry_match[\s\S]*(POST|PUT|PATCH|DELETE)/);
 });
 
-test("Caddy returns explicit browser and API maintenance responses", () => {
+test("canonical Caddy app route returns explicit browser and API maintenance responses", () => {
   assert.match(caddy, /handle_errors/);
   assert.match(caddy, /@api path \/api\/\*/);
   assert.match(caddy, /application\/json/);
-  assert.match(caddy, /Relay Claim Monitor is updating/);
+  assert.match(caddy, /Claim Monitor is updating/);
   assert.match(caddy, /503/);
+});
+
+test("environment template is preview-safe by default", () => {
+  const environment = readDeployment("bitcraft-claim-monitor-relay.env.example");
+  assert.match(environment, /BITCRAFT_DEPLOYMENT_MODE=preview/);
+  assert.match(environment, /DISCORD_DELIVERY_MODE=record/);
+  assert.match(environment, /ENABLE_DISCORD_STARTUP=false/);
+  assert.match(environment, /LEGAL_CONFIGURATION_CONFIRMED=false/);
 });
 
 test("Relay database backup schedule is persistent and runs daily in London time", () => {

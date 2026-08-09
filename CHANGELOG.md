@@ -9,6 +9,18 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.52.0-beta.1] - 2026-08-09
+
+### Changed
+
+- Activated the canonical app route with guarded live Discord delivery and worker-only gateway ownership.
+- Redirected the Relay host to the canonical application while preserving path and query details.
+
+### Security
+
+- Added fail-closed deployment validation for preview and canonical runtime settings, including the approved OAuth callback and legal confirmation.
+- Reduced public health output to safe deployment readiness and release metadata.
+
 ## [0.51.0-beta.9] - 2026-08-09
 
 ### Added

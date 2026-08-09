@@ -155,7 +155,6 @@ import {
   runtimeHealthWithPersistedSnapshot,
 } from "./dist-server/game-data/index.js";
 import {
-  discordDeliveryMode,
   recordedDiscordResponse,
   requireLiveDiscord,
   sendDiscordManualSandboxMessage,
@@ -168,6 +167,7 @@ import {
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
 import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyProductionContributionExactAmountMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
+import { resolveDeploymentRuntime } from "./src/server/deploymentRuntime.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
 import { runSettlementStateTransaction, settlementStateActivityChanges } from "./src/server/settlementState.mjs";
@@ -337,7 +337,8 @@ const isTestRuntime = process.env.BITCRAFT_TEST === "true" || process.env.NODE_E
 const discordApiOrigin = isTestRuntime && process.env.DISCORD_API_ORIGIN
   ? String(process.env.DISCORD_API_ORIGIN).replace(/\/+$/, "")
   : "https://discord.com/api/v10";
-const configuredDiscordDeliveryMode = discordDeliveryMode(process.env);
+const deploymentRuntime = resolveDeploymentRuntime(process.env);
+const configuredDiscordDeliveryMode = deploymentRuntime.discordDeliveryMode;
 const configuredDiscordSandboxChannelId = String(process.env.DISCORD_SANDBOX_CHANNEL_ID ?? "").trim();
 const legalPolicy = legalPolicyForEnvironment(process.env);
 const legalDigests = legalPolicyDigests(legalPolicy);
@@ -348,7 +349,7 @@ const legacyAdminPasswordAuth = process.env.ENABLE_LEGACY_ADMIN_PASSWORD_AUTH ==
 const processRole = resolveProcessRole(process.env, { isProduction });
 const processRoleConfig = processRoleCapabilities(processRole);
 const serverPollingEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SERVER_POLLING !== "false";
-const discordStartupEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_DISCORD_STARTUP !== "false";
+const discordStartupEnabled = deploymentRuntime.discordGatewayEnabled;
 const scheduledJobsEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SCHEDULED_JOBS !== "false";
 const discordNotificationOutboxIntervalMs = Math.max(Number(process.env.DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS ?? 5000), 1000);
 const discordNotificationMaxAttempts = Math.max(Number(process.env.DISCORD_NOTIFICATION_MAX_ATTEMPTS ?? 8), 1);
@@ -2808,7 +2809,9 @@ function originFromRequest(req) {
 
 function discordOAuthConfig(req) {
   return resolveDiscordOAuthConfig({
-    env: process.env,
+    env: deploymentRuntime.mode === "canonical"
+      ? { ...process.env, DISCORD_OAUTH_REDIRECT_URI: deploymentRuntime.oauthCallbackUrl }
+      : process.env,
     discordSettings: getDiscordSettingsRaw(),
     storedClientSecret: statements.getSecret.get("discord_oauth_client_secret")?.value,
     origin: originFromRequest(req),
@@ -7204,13 +7207,10 @@ const server = createServer(async (req, res) => {
       if (!rateLimit(req, res, "game-icon", RATE_LIMITS.proxy)) return;
       if (await serveGameIconRequest(url.pathname, res, gameIconFallbackService)) return;
     }
-    if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, {
-      ok: true,
+    if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, deploymentRuntime.health({
       version: appVersion,
-      buildId: currentAppBuildId(),
-      polling: collectorStatusPayload(),
-      gameDataProvider: gameDataProviderHealth(),
-    });
+      buildSha: currentAppBuildId(),
+    }));
     if (req.method === "GET" && url.pathname === "/api/local/collector-status") return send(res, 200, collectorStatusPayload());
     if (req.method === "GET" && url.pathname === "/api/local/game-data/generation") {
       const claimId = String(url.searchParams.get("claimId") ?? "").trim();

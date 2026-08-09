@@ -455,6 +455,7 @@ test("server collection paginates listings and protects production mutations", a
     env: {
       ...process.env,
       NODE_ENV: "production",
+      BITCRAFT_DEPLOYMENT_MODE: "canonical",
       LEGAL_CONFIGURATION_CONFIRMED: "true",
       BITCRAFT_TEST: "true",
       ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
@@ -467,9 +468,11 @@ test("server collection paginates listings and protects production mutations", a
       IPAPI_BASE_URL: `http://127.0.0.1:${upstreamPort}/ipapi`,
       DISCORD_API_ORIGIN: `http://127.0.0.1:${upstreamPort}/discord/api/v10`,
       DISCORD_DELIVERY_MODE: "live",
+      ENABLE_DISCORD_STARTUP: "false",
       DISCORD_SANDBOX_CHANNEL_ID: "666666666666666666",
       DISCORD_OAUTH_CLIENT_ID: "1511277824525471826",
       DISCORD_OAUTH_CLIENT_SECRET: "test-discord-oauth-secret",
+      DISCORD_BOT_TOKEN: "test-discord-bot-token",
       BITJITA_ICON_API_ORIGIN: "https://unapproved.example",
     },
     stdio: "ignore",
@@ -2628,9 +2631,9 @@ test("background polling failures keep the server online", async (t) => {
   assert.equal(fallbackDashboardResponse.status, 404);
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal(child.exitCode, null);
-  const health = await fetch(`${origin}/api/local/health`).then((response) => response.json());
-  assert.equal(health.ok, true);
-  assert.match(String(health.polling.lastError ?? ""), /Relay (claim|crafts|members) input is unavailable/);
+  const health = await fetch(`${origin}/api/local/collector-status`).then((response) => response.json());
+  assert.equal(health.enabled, true);
+  assert.match(String(health.lastError ?? ""), /Relay (claim|crafts|members) input is unavailable/);
 });
 
 
