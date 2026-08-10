@@ -68,6 +68,40 @@ test("attribution repair preserves historical events with unknown contributors",
   const manifest = createContributionAttributionManifest(db, "10");
   assert.equal(manifest.counts.eventsPreserved, 3);
   applyContributionAttributionRepair(db, manifest);
+  assert.deepEqual(
+    { ...db.prepare("SELECT contribution_key, attribution_confidence, contributed_progress FROM production_contributions WHERE contribution_key = 'unknown'").get() },
+    { contribution_key: "unknown", attribution_confidence: "unknown", contributed_progress: "7" },
+  );
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM production_contribution_events").get().count, 3);
+  db.close();
+});
+
+test("attribution repair updates aggregate metadata from the latest durable exact event", () => {
+  const db = database();
+  db.prepare("INSERT INTO production_contribution_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run("exact-later", "10", "100", "2", "authoritative", "3", "4.5", "2026-08-10T12:00:00.000Z", "2026-08-10T12:00:01.000Z", JSON.stringify({
+      contributorName: "Latest Grace",
+      profession: "Masonry",
+      craftLabel: "Stone blocks",
+      structureName: "Mason",
+      itemTier: "4",
+    }));
+
+  applyContributionAttributionRepair(db, createContributionAttributionManifest(db, "10"));
+  assert.deepEqual(
+    { ...db.prepare(`SELECT contributor_name, profession, craft_label, structure_name, item_tier,
+      contributed_progress, contributed_xp, contribution_count FROM production_contributions
+      WHERE contribution_key = '10:100:2'`).get() },
+    {
+      contributor_name: "Latest Grace",
+      profession: "Masonry",
+      craft_label: "Stone blocks",
+      structure_name: "Mason",
+      item_tier: "4",
+      contributed_progress: "5",
+      contributed_xp: "8",
+      contribution_count: "2",
+    },
+  );
   db.close();
 });

@@ -53,3 +53,11 @@ test("matches exact action targets only and preserves two-player ambiguity", () 
   assert.deepEqual(cache.matches(target, 1_050).map((row) => row.playerEntityId), ["101", "202"]);
   assert.deepEqual(cache.matches({ ...target, buildingEntityId: "7002" }, 1_050).map((row) => row.autoId), ["93"]);
 });
+
+test("invalid action updates invalidate prior evidence by Relay auto id", () => {
+  const cache = new CraftActionEvidenceCache();
+  cache.upsert(action(), 1_001);
+  cache.upsert(action({ wasConsumed: true }), 1_002);
+
+  assert.deepEqual(cache.matches(target, 1_050), []);
+});

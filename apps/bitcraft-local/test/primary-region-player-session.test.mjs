@@ -627,7 +627,8 @@ test("primary-region session attributes authoritative and matched-action updates
 
 test("primary-region session replaces contribution queries without replacing base data", async () => {
   assert.ok(sessionModule, "primary-region player session module must exist");
-  const fake = fakeBindings();
+  const playerActionRows = [];
+  const fake = fakeBindings({ playerActionRows });
   const snapshots = [];
   const contributions = [];
   const session = new sessionModule.RelayPrimaryRegionPlayerSession({
@@ -660,6 +661,18 @@ test("primary-region session replaces contribution queries without replacing bas
     contributionTargets: [first],
   });
   fake.state.onConnect(fake.connection);
+  playerActionRows.push({
+    autoId: 1n,
+    entityId: 101n,
+    startTime: 1785664800000n,
+    duration: 100n,
+    target: 7001n,
+    recipeId: 3001n,
+    actionType: { tag: "Craft" },
+    lastActionResult: { tag: "Success" },
+    clientCancel: false,
+    wasConsumed: false,
+  });
 
   const base = fake.state.subscriptions[0];
   const initialContribution = fake.state.subscriptions[1];
@@ -681,18 +694,6 @@ test("primary-region session replaces contribution queries without replacing bas
   assert.equal(fake.state.disconnected, false);
 
   const update = fake.state.callbacks.get("progressive-action:update");
-  fake.state.callbacks.get("player-action:insert")({}, {
-    autoId: 1n,
-    entityId: 101n,
-    startTime: 1785664800000n,
-    duration: 100n,
-    target: 7001n,
-    recipeId: 3001n,
-    actionType: { tag: "Craft" },
-    lastActionResult: { tag: "Success" },
-    clientCancel: false,
-    wasConsumed: false,
-  });
   update(
     { event: { tag: "Transaction", id: "transaction-overlap" } },
     { entityId: 9002n, ownerEntityId: 101n, progress: 10 },

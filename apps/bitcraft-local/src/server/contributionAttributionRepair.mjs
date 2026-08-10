@@ -86,23 +86,54 @@ function select(db, claimId) {
       current.lastContributedAt = String(event.occurred_at);
       current.updatedAt = String(event.received_at);
       current.rawJson = String(event.raw_json);
+      current.contributorName = String(raw.contributorName ?? `Player ${contributorEntityId}`).trim() || `Player ${contributorEntityId}`;
+      current.profession = String(raw.profession ?? "").trim() || null;
+      current.craftLabel = String(raw.craftLabel ?? "Craft contribution").trim() || "Craft contribution";
+      current.structureName = String(raw.structureName ?? "Unknown structure").trim() || "Unknown structure";
+      current.itemTier = String(raw.itemTier ?? "").trim() || null;
     }
     if (String(event.received_at) < current.firstSeen) current.firstSeen = String(event.received_at);
     durable.set(key, current);
   }
   const before = (row) => row ? {
     contributionKey: String(row.contribution_key),
+    claimId: String(row.claim_id),
+    craftEntityId: String(row.craft_entity_id),
+    contributorEntityId: row.contributor_entity_id == null ? null : String(row.contributor_entity_id),
+    contributorName: String(row.contributor_name),
     attributionConfidence: String(row.attribution_confidence),
+    profession: row.profession == null ? null : String(row.profession),
+    craftLabel: row.craft_label == null ? null : String(row.craft_label),
+    structureName: row.structure_name == null ? null : String(row.structure_name),
+    itemTier: row.item_tier == null ? null : String(row.item_tier),
     contributedProgress: String(row.contributed_progress),
     contributedXp: String(row.contributed_xp),
     contributionCount: String(row.contribution_count),
+    firstContributedAt: row.first_contributed_at == null ? null : String(row.first_contributed_at),
+    lastContributedAt: row.last_contributed_at == null ? null : String(row.last_contributed_at),
+    firstSeen: row.first_seen == null ? null : String(row.first_seen),
+    updatedAt: row.updated_at == null ? null : String(row.updated_at),
+    rawJson: String(row.raw_json),
   } : null;
   const after = (row) => ({
     contributionKey: row.contributionKey,
+    claimId: row.claimId,
+    craftEntityId: row.craftEntityId,
+    contributorEntityId: row.contributorEntityId,
+    contributorName: row.contributorName,
     attributionConfidence: row.attributionConfidence,
+    profession: row.profession,
+    craftLabel: row.craftLabel,
+    structureName: row.structureName,
+    itemTier: row.itemTier,
     contributedProgress: row.contributedProgress,
     contributedXp: row.contributedXp,
     contributionCount: row.contributionCount,
+    firstContributedAt: row.firstContributedAt,
+    lastContributedAt: row.lastContributedAt,
+    firstSeen: row.firstSeen,
+    updatedAt: row.updatedAt,
+    rawJson: row.rawJson,
   });
   const rebuild = [...durable.values()].map((row) => ({ before: before(byIdentity.get(row.contributionKey)), after: after(row) }));
   const remove = stored
@@ -145,14 +176,15 @@ export function createContributionAttributionManifest(db, claimIdValue) {
 
 export function applyContributionAttributionRepair(db, manifest) {
   assertManifest(manifest);
-  const current = createContributionAttributionManifest(db, manifest.claimId);
-  if (current.selectionHash !== manifest.selectionHash || JSON.stringify(current.counts) !== JSON.stringify(manifest.counts)) {
-    throw new Error("Contribution attribution repair selection changed since dry-run; refusing apply");
-  }
-  const selected = select(db, manifest.claimId);
   db.exec("BEGIN IMMEDIATE");
   try {
-    db.prepare("DELETE FROM production_contributions WHERE claim_id = ?").run(manifest.claimId);
+    const current = createContributionAttributionManifest(db, manifest.claimId);
+    if (current.selectionHash !== manifest.selectionHash || JSON.stringify(current.counts) !== JSON.stringify(manifest.counts)) {
+      throw new Error("Contribution attribution repair selection changed since dry-run; refusing apply");
+    }
+    const selected = select(db, manifest.claimId);
+    const remove = db.prepare("DELETE FROM production_contributions WHERE contribution_key = ? AND claim_id = ?");
+    for (const row of current.selection.remove) remove.run(row.before.contributionKey, manifest.claimId);
     const insert = db.prepare(`
       INSERT INTO production_contributions (
         contribution_key, claim_id, craft_entity_id, contributor_entity_id,
@@ -161,6 +193,21 @@ export function applyContributionAttributionRepair(db, manifest) {
         contribution_count, first_contributed_at, last_contributed_at,
         first_seen, updated_at, raw_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(contribution_key) DO UPDATE SET
+        contributor_name = excluded.contributor_name,
+        attribution_confidence = excluded.attribution_confidence,
+        profession = excluded.profession,
+        craft_label = excluded.craft_label,
+        structure_name = excluded.structure_name,
+        item_tier = excluded.item_tier,
+        contributed_progress = excluded.contributed_progress,
+        contributed_xp = excluded.contributed_xp,
+        contribution_count = excluded.contribution_count,
+        first_contributed_at = excluded.first_contributed_at,
+        last_contributed_at = excluded.last_contributed_at,
+        first_seen = excluded.first_seen,
+        updated_at = excluded.updated_at,
+        raw_json = excluded.raw_json
     `);
     for (const row of selected.durable) {
       insert.run(

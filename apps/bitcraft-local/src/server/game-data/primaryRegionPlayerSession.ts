@@ -363,12 +363,9 @@ export class RelayPrimaryRegionPlayerSession {
         this.#health.connected = true;
         this.#health.lastError = null;
         this.#craftActionEvidence = new CraftActionEvidenceCache();
-        const observedAtMs = this.#now().getTime();
-        for (const row of connection.db.playerActionState.iter()) {
-          this.#craftActionEvidence.upsert(row, observedAtMs);
-        }
         this.#baseSubscription = connection.subscriptionBuilder()
           .onApplied(() => {
+            this.#hydrateCraftActionEvidence(connection);
             this.#attachTableListeners(connection);
             this.#beginBankInventoryRefresh(connection);
           })
@@ -698,6 +695,14 @@ export class RelayPrimaryRegionPlayerSession {
     const observedAtMs = this.#now().getTime();
     if (deleted) this.#craftActionEvidence.retainDeleted(row, observedAtMs);
     else this.#craftActionEvidence.upsert(row, observedAtMs);
+  }
+
+  #hydrateCraftActionEvidence(connection: BindingConnection): void {
+    this.#craftActionEvidence = new CraftActionEvidenceCache();
+    const observedAtMs = this.#now().getTime();
+    for (const row of connection.db.playerActionState.iter()) {
+      this.#craftActionEvidence.upsert(row, observedAtMs);
+    }
   }
 
   #tables(connection: BindingConnection): CachedTable[] {

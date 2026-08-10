@@ -63,10 +63,6 @@ function canonicalAction(value: unknown): RetainedCraftAction | null {
   };
 }
 
-function keyFor(action: RetainedCraftAction): string {
-  return [action.playerEntityId, action.buildingEntityId, action.recipeId, action.autoId, action.startTimeMs].join(":");
-}
-
 export class CraftActionEvidenceCache {
   #actions = new Map<string, RetainedCraftAction>();
 
@@ -92,18 +88,21 @@ export class CraftActionEvidenceCache {
     if (!Number.isSafeInteger(observedAtMs) || observedAtMs < 0) {
       throw new TypeError("Observed time must be a non-negative safe integer");
     }
-    for (const [key, action] of this.#actions) {
-      if (action.expiresAtMs < observedAtMs) this.#actions.delete(key);
+    for (const [autoId, action] of this.#actions) {
+      if (action.expiresAtMs < observedAtMs) this.#actions.delete(autoId);
     }
   }
 
   #store(row: unknown, observedAtMs: number): void {
     this.prune(observedAtMs);
+    const autoId = decimal(record(row)?.autoId);
     const action = canonicalAction(row);
-    if (!action) return;
-    const key = keyFor(action);
-    this.#actions.delete(key);
-    this.#actions.set(key, action);
+    if (!action) {
+      if (autoId) this.#actions.delete(autoId);
+      return;
+    }
+    this.#actions.delete(action.autoId);
+    this.#actions.set(action.autoId, action);
     while (this.#actions.size > MAX_RETAINED_ACTIONS) {
       const oldest = this.#actions.keys().next().value;
       if (oldest === undefined) return;
