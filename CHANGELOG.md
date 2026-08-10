@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.53.1-beta.1] - 2026-08-10
+
+### Fixed
+
+- Restored Craft Monitor contribution recording for current Relay craft reducer events.
+
 ## [0.53.0-beta.1] - 2026-08-10
 
 ### Added

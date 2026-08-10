@@ -89,6 +89,37 @@ test("attributes CraftContinueStart through the canonical identity field", () =>
   });
 });
 
+test("attributes the current Relay craft continue reducer payload authoritatively", () => {
+  const attribution = resolveCraftContributionAttribution({
+    event: {
+      tag: "Reducer",
+      value: {
+        callerIdentity: { toHexString: () => "0xabc" },
+        reducer: {
+          name: "craft_continue",
+          args: {
+            request: {
+              progressiveActionEntityId: 1369094287471625781n,
+              timestamp: 1785675248960n,
+            },
+          },
+        },
+      },
+    },
+    target,
+    members,
+    actionRows: [],
+    observedAtMs: 1785675249000,
+  });
+
+  assert.deepEqual(attribution, {
+    confidence: "authoritative",
+    contributorEntityId: "576460752388321942",
+    contributorName: "Ada",
+    evidenceKey: "reducer:0xabc",
+  });
+});
+
 test("falls back to canonical identity when toHexString throws", () => {
   const event = craftContinueEvent();
   event.value.callerIdentity = {

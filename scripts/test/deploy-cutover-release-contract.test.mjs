@@ -8,14 +8,12 @@ const read = (relativePath) => readFileSync(new URL(`../../${relativePath}`, imp
 const changelog = read("CHANGELOG.md");
 const deployment = read("DEPLOYMENT.md");
 const envExample = read("deploy/bitcraft-claim-monitor-relay.env.example");
-const packageJson = JSON.parse(read("apps/bitcraft-local/package.json"));
 const privacy = read("docs/privacy-operations-runbook.md");
 const readme = read("README.md");
 const updater = read("deploy/update-bitcraft-claim-monitor-relay");
 const workflow = read(".github/workflows/cutover-relay-production.yml");
 
-test("canonical cutover is exactly the new-minor 0.53.0-beta.1 release dated 2026-08-10", () => {
-  assert.equal(packageJson.version, "0.53.0-beta.1");
+test("canonical cutover evidence remains pinned to the 0.53.0-beta.1 release dated 2026-08-10", () => {
   assert.match(changelog, /^## \[0\.53\.0-beta\.1\] - 2026-08-10$/m);
   for (const requirement of [
     /canonical cutover preparation/i,
