@@ -1884,6 +1884,7 @@ export function applyCanonicalCutoverManifest(
 export {
   IMAGE_TYPES as CANONICAL_CUTOVER_IMAGE_TYPES,
   assertCleanIntegrity as assertCanonicalCutoverSqliteIntegrity,
+  databaseLogicalFingerprint as canonicalCutoverDatabaseLogicalFingerprint,
   comparePaths as canonicalCutoverComparePaths,
   guardedExistingOrPlannedDirectory as canonicalCutoverGuardedExistingOrPlannedDirectory,
   guardedExistingPath as canonicalCutoverGuardedExistingPath,

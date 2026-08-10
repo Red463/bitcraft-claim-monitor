@@ -17,6 +17,7 @@ import {
   CANONICAL_CUTOVER_IMAGE_TYPES,
   assertCanonicalCutoverSqliteIntegrity,
   canonicalJson,
+  canonicalCutoverDatabaseLogicalFingerprint,
   canonicalCutoverComparePaths,
   canonicalCutoverGuardedExistingOrPlannedDirectory,
   canonicalCutoverGuardedExistingPath,
@@ -27,7 +28,7 @@ import {
   createCanonicalCutoverDurability,
 } from "../apps/bitcraft-local/src/server/canonicalCutoverMigration.mjs";
 
-const MANIFEST_VERSION = 2;
+const MANIFEST_VERSION = 3;
 const MAX_ASSET_BYTES = 1024 * 1024;
 const ASSET_TYPES = Object.freeze(["favicon", "logo"]);
 const IMAGE_TYPES = CANONICAL_CUTOVER_IMAGE_TYPES;
@@ -55,14 +56,6 @@ function guardedPlannedFilePath(inputPath, label) {
 
 function guardedExistingOrPlannedDirectory(inputPath, label) {
   return canonicalCutoverGuardedExistingOrPlannedDirectory(inputPath, label);
-}
-
-function assertDatabaseHasNoSidecars(databasePath) {
-  for (const suffix of ["-journal", "-shm", "-wal"]) {
-    if (existsSync(`${databasePath}${suffix}`)) {
-      throw new Error(`Database must be offline and checkpointed; found ${path.basename(databasePath)}${suffix}`);
-    }
-  }
 }
 
 function assertPathsAreDisjoint({ archiveRoot, brandingRoot, databasePath, manifestPath }) {
@@ -232,13 +225,20 @@ function repairedTargetFiles(assets) {
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
+function projectedPostDatabaseFingerprint(db, brandingRow, assets) {
+  if (brandingRow.rowCount !== 1) return canonicalCutoverDatabaseLogicalFingerprint(db);
+  const repairedValue = canonicalJson(repairedBranding({ assets }));
+  const projectedSettings = db.prepare("SELECT * FROM app_settings ORDER BY rowid").all()
+    .map((row) => String(row.key) === "branding_json" ? { ...row, value: repairedValue } : row);
+  return canonicalCutoverDatabaseLogicalFingerprint(db, { app_settings: projectedSettings });
+}
+
 function manifestSelection(unsigned) {
   return sha256(canonicalJson(unsigned));
 }
 
 function inspectRepair({ archivePath, databasePath, manifestPath }) {
   const resolvedDatabasePath = guardedExistingPath(databasePath, "file", "Database", { uniqueFile: true });
-  assertDatabaseHasNoSidecars(resolvedDatabasePath);
   const resolvedArchiveRoot = guardedExistingPath(archivePath, "directory", "Approved archive root");
   const resolvedManifestPath = path.resolve(manifestPath);
   const brandingRoot = guardedExistingOrPlannedDirectory(
@@ -252,21 +252,27 @@ function inspectRepair({ archivePath, databasePath, manifestPath }) {
     manifestPath: resolvedManifestPath,
   });
 
-  const beforeHash = sha256File(resolvedDatabasePath);
   const db = new DatabaseSync(resolvedDatabasePath, { readOnly: true });
   let brandingRow;
+  let databaseFingerprint;
+  let postDatabaseFingerprint;
+  let journalMode;
+  let assets;
   try {
+    db.exec("BEGIN");
     assertCleanIntegrity(db);
     brandingRow = readBrandingRow(db);
+    databaseFingerprint = canonicalCutoverDatabaseLogicalFingerprint(db);
+    journalMode = String(db.prepare("PRAGMA journal_mode").get().journal_mode).toLowerCase();
+    const unsupportedTypes = Object.keys(brandingRow.branding)
+      .filter((type) => !ASSET_TYPES.includes(type));
+    if (unsupportedTypes.length) throw new Error("branding_json contains unsupported asset types");
+    assets = ASSET_TYPES.map((type) => inspectArchiveAsset(type, brandingRow.branding[type], resolvedArchiveRoot));
+    postDatabaseFingerprint = projectedPostDatabaseFingerprint(db, brandingRow, assets);
+    db.exec("ROLLBACK");
   } finally {
     db.close();
   }
-  const databaseHash = sha256File(resolvedDatabasePath);
-  if (databaseHash !== beforeHash) throw new Error("Database changed during dry-run inspection");
-  const unsupportedTypes = Object.keys(brandingRow.branding)
-    .filter((type) => !ASSET_TYPES.includes(type));
-  if (unsupportedTypes.length) throw new Error("branding_json contains unsupported asset types");
-  const assets = ASSET_TYPES.map((type) => inspectArchiveAsset(type, brandingRow.branding[type], resolvedArchiveRoot));
   const rowCounts = {
     brandingSettingRows: brandingRow.rowCount,
     configuredAssets: assets.filter((entry) => entry.configuredFilename != null).length,
@@ -274,7 +280,6 @@ function inspectRepair({ archivePath, databasePath, manifestPath }) {
     restoreActions: assets.filter((entry) => entry.action === "restore").length,
   };
   const postBrandingRaw = brandingRow.rowCount === 1 ? canonicalJson(repairedBranding({ assets })) : null;
-  const stats = statSync(resolvedDatabasePath);
   const unsigned = {
     archiveRoot: resolvedArchiveRoot,
     assets,
@@ -282,10 +287,11 @@ function inspectRepair({ archivePath, databasePath, manifestPath }) {
     database: {
       brandingUpdatedAt: brandingRow.updatedAt,
       brandingValueSha256: brandingRow.raw == null ? null : sha256(brandingRow.raw),
+      journalMode,
       path: resolvedDatabasePath,
       postBrandingValueSha256: postBrandingRaw == null ? null : sha256(postBrandingRaw),
-      sha256: databaseHash,
-      size: stats.size,
+      postStateFingerprint: postDatabaseFingerprint,
+      preStateFingerprint: databaseFingerprint,
     },
     formatVersion: MANIFEST_VERSION,
     rowCounts,
@@ -315,7 +321,7 @@ function readManifest(manifestPath) {
 }
 
 function assertSameManifest(expected, current) {
-  if (expected.database.sha256 !== current.database.sha256) {
+  if (expected.database.preStateFingerprint !== current.database.preStateFingerprint) {
     throw new Error("Database changed since dry-run; refusing apply");
   }
   for (const asset of expected.assets.filter((entry) => entry.action === "restore")) {
@@ -410,11 +416,11 @@ function pendingMarkerPayload(manifest, manifestPath, recovery, phase) {
   });
 }
 
-function appliedMarkerPayload(manifest, manifestPath, databaseSha256) {
+function appliedMarkerPayload(manifest, manifestPath) {
   return markerWithHash({
     brandingRoot: manifest.brandingRoot,
     databasePath: manifest.database.path,
-    databaseSha256,
+    databaseStateFingerprint: manifest.database.postStateFingerprint,
     formatVersion: MANIFEST_VERSION,
     manifestPath,
     selectionHash: manifest.selectionHash,
@@ -480,20 +486,39 @@ function assertStagePath(stageDirectory, brandingRoot) {
 function verifyAppliedRepair(manifest, manifestPath, paths, activeDurability, openDatabase) {
   const marker = readRepairMarker(paths.appliedMarkerPath, "Applied marker");
   assertMarkerBinding(marker, manifest, manifestPath, "Applied marker");
-  assertDatabaseHasNoSidecars(manifest.database.path);
-  if (sha256File(manifest.database.path) !== marker.databaseSha256) {
-    throw new Error("Applied branding repair database changed after finalization");
+  if (marker.databaseStateFingerprint !== manifest.database.postStateFingerprint) {
+    throw new Error("Applied branding repair marker database fingerprint does not match the manifest");
   }
-  const db = openDatabase(manifest.database.path, { readOnly: true });
+  const db = openDatabase(manifest.database.path);
+  let transactionOpen = false;
+  const databaseFailures = [];
   try {
+    db.exec("BEGIN IMMEDIATE");
+    transactionOpen = true;
     const state = readBrandingState(db);
     if (state.row.rowCount !== manifest.rowCounts.brandingSettingRows
       || state.valueSha256 !== manifest.database.postBrandingValueSha256) {
       throw new Error("Applied branding repair database metadata does not match the manifest");
     }
     assertCleanIntegrity(db);
-  } finally {
-    db.close();
+    if (canonicalCutoverDatabaseLogicalFingerprint(db) !== manifest.database.postStateFingerprint) {
+      throw new Error("Applied branding repair database changed after finalization");
+    }
+    db.exec("ROLLBACK");
+    transactionOpen = false;
+  } catch (error) {
+    databaseFailures.push(errorMessage(error));
+    if (transactionOpen) {
+      try { db.exec("ROLLBACK"); } catch (rollbackError) {
+        databaseFailures.push(`applied recovery rollback failed: ${errorMessage(rollbackError)}`);
+      }
+    }
+  }
+  try { db.close(); } catch (closeError) {
+    databaseFailures.push(`applied recovery database close failed: ${errorMessage(closeError)}`);
+  }
+  if (databaseFailures.length) {
+    throw new Error(`Applied branding recovery verification failed: ${databaseFailures.join("; ")}`);
   }
   if (!existsSync(manifest.brandingRoot) || !targetMatches(manifest.brandingRoot, manifest.targetFilesAfter)) {
     throw new Error("Applied branding repair assets do not match the manifest");
@@ -514,33 +539,39 @@ function recoverPendingRepair(manifest, manifestPath, paths, activeDurability, o
     throw new Error("Pending marker backup path does not match the manifest");
   }
   assertStagePath(marker.stageDirectory, manifest.brandingRoot);
-  assertDatabaseHasNoSidecars(manifest.database.path);
   const db = openDatabase(manifest.database.path);
   let transactionOpen = false;
   let state;
+  let currentFingerprint;
+  const databaseFailures = [];
   try {
     db.exec("PRAGMA foreign_keys = ON");
     db.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
     state = readBrandingState(db);
     assertCleanIntegrity(db);
+    currentFingerprint = canonicalCutoverDatabaseLogicalFingerprint(db);
     db.exec("ROLLBACK");
     transactionOpen = false;
   } catch (error) {
+    databaseFailures.push(errorMessage(error));
     if (transactionOpen) {
       try { db.exec("ROLLBACK"); } catch (rollbackError) {
-        throw new Error(`${errorMessage(error)}; recovery rollback failed: ${errorMessage(rollbackError)}`);
+        databaseFailures.push(`recovery rollback failed: ${errorMessage(rollbackError)}`);
       }
     }
-    throw error;
-  } finally {
-    db.close();
   }
+  try { db.close(); } catch (closeError) {
+    databaseFailures.push(`recovery database close failed: ${errorMessage(closeError)}`);
+  }
+  if (databaseFailures.length) throw new Error(databaseFailures.join("; "));
 
   const preDatabase = state.row.rowCount === manifest.rowCounts.brandingSettingRows
-    && state.valueSha256 === manifest.database.brandingValueSha256;
+    && state.valueSha256 === manifest.database.brandingValueSha256
+    && currentFingerprint === manifest.database.preStateFingerprint;
   const postDatabase = state.row.rowCount === manifest.rowCounts.brandingSettingRows
-    && state.valueSha256 === manifest.database.postBrandingValueSha256;
+    && state.valueSha256 === manifest.database.postBrandingValueSha256
+    && currentFingerprint === manifest.database.postStateFingerprint;
   const targetIsAfter = existsSync(manifest.brandingRoot)
     && targetMatches(manifest.brandingRoot, manifest.targetFilesAfter);
   const recoverAsPost = postDatabase && (!preDatabase || targetIsAfter);
@@ -553,10 +584,9 @@ function recoverPendingRepair(manifest, manifestPath, paths, activeDurability, o
       if (existsSync(marker.stageDirectory)) {
         activeDurability.removePath(marker.stageDirectory, { recursive: true, force: true });
       }
-      assertDatabaseHasNoSidecars(manifest.database.path);
       activeDurability.writeMarker(
         paths.appliedMarkerPath,
-        appliedMarkerPayload(manifest, manifestPath, sha256File(manifest.database.path)),
+        appliedMarkerPayload(manifest, manifestPath),
       );
       activeDurability.removePath(paths.pendingMarkerPath, { force: true });
       return { applied: true, recovered: true, rowCounts: manifest.rowCounts, selectionHash: manifest.selectionHash };
@@ -604,10 +634,9 @@ function finalizeCommittedRepair(manifest, manifestPath, paths, recovery, active
   if (existsSync(recovery.stageDirectory)) {
     activeDurability.removePath(recovery.stageDirectory, { recursive: true, force: true });
   }
-  assertDatabaseHasNoSidecars(manifest.database.path);
   activeDurability.writeMarker(
     paths.appliedMarkerPath,
-    appliedMarkerPayload(manifest, manifestPath, sha256File(manifest.database.path)),
+    appliedMarkerPayload(manifest, manifestPath),
   );
   activeDurability.removePath(paths.pendingMarkerPath, { force: true });
   return { applied: true, rowCounts: manifest.rowCounts, selectionHash: manifest.selectionHash };
@@ -657,8 +686,7 @@ export function applyBrandingRepairManifest(
     }
     db.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
-    assertDatabaseHasNoSidecars(resolvedDatabasePath);
-    if (sha256File(resolvedDatabasePath) !== manifest.database.sha256) {
+    if (canonicalCutoverDatabaseLogicalFingerprint(db) !== manifest.database.preStateFingerprint) {
       throw new Error("Database changed since dry-run; refusing apply");
     }
     const brandingRow = readBrandingRow(db);
@@ -694,6 +722,9 @@ export function applyBrandingRepairManifest(
       throw new Error("Installed branding assets do not match the manifest");
     }
     assertCleanIntegrity(db);
+    if (canonicalCutoverDatabaseLogicalFingerprint(db) !== manifest.database.postStateFingerprint) {
+      throw new Error("Branding repair produced an unexpected full database state");
+    }
     db.exec("COMMIT");
     transactionOpen = false;
   } catch (error) {

@@ -158,6 +158,19 @@ function crashAfterRename(renameBoundary) {
   };
 }
 
+function crashAfterDatabaseCommit() {
+  const real = createCanonicalCutoverDurability();
+  return {
+    ...real,
+    writeMarker(markerPath, payload) {
+      if (payload.phase === "database-committed") {
+        throw new Error("injected crash after database commit");
+      }
+      return real.writeMarker(markerPath, payload);
+    },
+  };
+}
+
 function databaseWithRollbackFailure() {
   let rollbackFailureInjected = false;
   return (databasePath, options = {}) => {
@@ -546,6 +559,122 @@ test("retry finalizes a committed database after interruption before its phase m
   assertFullyRepaired(fixture);
 });
 
+test("unrelated offline database mutation is rejected in every pending recovery phase", async (context) => {
+  const phases = [
+    ["backup renamed", () => crashAfterRename(1)],
+    ["assets installed", () => crashAfterRename(2)],
+    ["database committed", () => crashAfterDatabaseCommit()],
+  ];
+  for (const [label, interruptedDurability] of phases) {
+    await context.test(label, (subContext) => {
+      const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+      subContext.after(() => fixture.cleanup());
+      writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+      writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
+      assert.equal(dryRun(fixture).status, 0);
+      assert.throws(() => directApply(fixture, { durability: interruptedDurability() }));
+      assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+
+      const changed = new DatabaseSync(fixture.databasePath);
+      changed.prepare("UPDATE app_settings SET value = 'offline-drift' WHERE key = 'sentinel'").run();
+      changed.close();
+
+      const retried = apply(fixture);
+      assert.notEqual(retried.status, 0);
+      assert.match(retried.stderr, /database.*(?:pre-state|post-state|fingerprint)|neither.*state/i);
+      assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+      assert.equal(existsSync(`${fixture.manifestPath}.applied`), false);
+    });
+  }
+});
+
+test("recovery compounds inspection, rollback, and close failures while retaining its marker", (context) => {
+  const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+  context.after(() => fixture.cleanup());
+  writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+  writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
+  assert.equal(dryRun(fixture).status, 0);
+  assert.throws(() => directApply(fixture, { durability: crashAfterRename(1) }));
+  assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+
+  const openDatabase = (databasePath) => {
+    const db = new DatabaseSync(databasePath);
+    let rollbackFailed = false;
+    return {
+      close() {
+        db.close();
+        throw new Error("injected recovery close failure");
+      },
+      exec(sql) {
+        if (String(sql).trim().toUpperCase() === "ROLLBACK" && !rollbackFailed) {
+          rollbackFailed = true;
+          db.exec(sql);
+          throw new Error("injected recovery rollback failure");
+        }
+        return db.exec(sql);
+      },
+      prepare(sql) {
+        if (/FROM\s+app_settings/i.test(String(sql)) && /branding_json/i.test(String(sql))) {
+          throw new Error("injected recovery inspection failure");
+        }
+        return db.prepare(sql);
+      },
+    };
+  };
+
+  assert.throws(
+    () => directApply(fixture, { openDatabase }),
+    /inspection failure.*rollback failure.*close failure/i,
+  );
+  assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+  assert.equal(existsSync(`${fixture.manifestPath}.applied`), false);
+});
+
+test("applied-marker recovery compounds verification and close failures without deleting pending state", (context) => {
+  const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+  context.after(() => fixture.cleanup());
+  writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+  writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
+  assert.equal(dryRun(fixture).status, 0);
+  const real = createCanonicalCutoverDurability();
+  const interrupted = {
+    ...real,
+    removePath(entryPath, options) {
+      if (entryPath === `${fixture.manifestPath}.applying`) {
+        throw new Error("injected pending cleanup failure");
+      }
+      return real.removePath(entryPath, options);
+    },
+  };
+  assert.throws(() => directApply(fixture, { durability: interrupted }), /pending cleanup failure/i);
+  assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+  assert.equal(existsSync(`${fixture.manifestPath}.applied`), true);
+
+  const openDatabase = (databasePath) => {
+    const db = new DatabaseSync(databasePath);
+    return {
+      close() {
+        db.close();
+        throw new Error("injected applied recovery close failure");
+      },
+      exec: db.exec.bind(db),
+      prepare(sql) {
+        if (/FROM\s+app_settings/i.test(String(sql)) && /branding_json/i.test(String(sql))) {
+          throw new Error("injected applied recovery verification failure");
+        }
+        return db.prepare(sql);
+      },
+    };
+  };
+
+  assert.throws(
+    () => directApply(fixture, { openDatabase }),
+    /verification failure.*close failure/i,
+  );
+  assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+  assert.equal(existsSync(`${fixture.manifestPath}.applied`), true);
+});
+
 test("retry completes final marker cleanup without replaying a committed repair", (context) => {
   const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
   context.after(() => fixture.cleanup());
@@ -643,34 +772,42 @@ test("a post-commit backup removal failure retains recovery state for retry", (c
   assertFullyRepaired(fixture);
 });
 
-test("apply fails closed on SQLite journal, WAL, and SHM files observed under lock", async (context) => {
-  for (const suffix of ["-journal", "-wal", "-shm"]) {
-    await context.test(suffix, (subContext) => {
-      const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
-      subContext.after(() => fixture.cleanup());
-      writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
-      assert.equal(dryRun(fixture).status, 0);
-      const openDatabase = (databasePath) => {
-        const db = new DatabaseSync(databasePath);
-        return {
-          close: db.close.bind(db),
-          exec(sql) {
-            const result = db.exec(sql);
-            if (String(sql).trim().toUpperCase() === "BEGIN IMMEDIATE") {
-              writeFileSync(`${databasePath}${suffix}`, "injected sidecar");
-            }
-            return result;
-          },
-          prepare: db.prepare.bind(db),
-        };
-      };
+test("a healthy closed WAL-mode production database can be repaired", (context) => {
+  const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+  context.after(() => fixture.cleanup());
+  writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+  const setup = new DatabaseSync(fixture.databasePath);
+  assert.equal(String(setup.prepare("PRAGMA journal_mode = WAL").get().journal_mode).toLowerCase(), "wal");
+  setup.close();
 
-      assert.throws(() => directApply(fixture, { openDatabase }), /offline and checkpointed/i);
-      rmSync(`${fixture.databasePath}${suffix}`, { force: true });
-      assert.deepEqual(readBranding(fixture.databasePath), { logo: asset("logo", "png", "image/png") });
-      assert.equal(existsSync(`${fixture.manifestPath}.applying`), false);
-    });
+  assert.equal(dryRun(fixture).status, 0);
+  const result = apply(fixture);
+  assert.equal(result.status, 0, result.stderr);
+  assertFullyRepaired(fixture);
+  const verified = new DatabaseSync(fixture.databasePath, { readOnly: true });
+  assert.equal(String(verified.prepare("PRAGMA journal_mode").get().journal_mode).toLowerCase(), "wal");
+  verified.close();
+});
+
+test("an active foreign WAL writer is refused before publication", (context) => {
+  const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+  context.after(() => fixture.cleanup());
+  writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+  const setup = new DatabaseSync(fixture.databasePath);
+  setup.exec("PRAGMA journal_mode = WAL");
+  setup.close();
+  assert.equal(dryRun(fixture).status, 0);
+  const foreign = new DatabaseSync(fixture.databasePath, { timeout: 0 });
+  foreign.exec("BEGIN IMMEDIATE");
+  foreign.prepare("UPDATE app_settings SET value = 'foreign' WHERE key = 'sentinel'").run();
+  try {
+    assert.throws(() => directApply(fixture), /busy|locked/i);
+  } finally {
+    foreign.exec("ROLLBACK");
+    foreign.close();
   }
+  assert.deepEqual(readBranding(fixture.databasePath), { logo: asset("logo", "png", "image/png") });
+  assert.equal(existsSync(`${fixture.manifestPath}.applying`), false);
 });
 
 test("unrelated database drift immediately before BEGIN IMMEDIATE is refused under lock", (context) => {
