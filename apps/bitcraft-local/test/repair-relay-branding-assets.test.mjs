@@ -219,6 +219,39 @@ function readBranding(databasePath) {
   }
 }
 
+function readSentinel(databasePath) {
+  const db = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    return db.prepare("SELECT value FROM app_settings WHERE key = 'sentinel'").get().value;
+  } finally {
+    db.close();
+  }
+}
+
+function createForeignSentinelWriteProbe(databasePath) {
+  const db = new DatabaseSync(databasePath, { timeout: 0 });
+  let attempted = false;
+  let blocked = false;
+  return {
+    attempt(value) {
+      attempted = true;
+      try {
+        db.prepare("UPDATE app_settings SET value = ? WHERE key = 'sentinel'").run(value);
+      } catch (error) {
+        if (!/busy|locked/i.test(String(error?.message))) throw error;
+        blocked = true;
+      }
+    },
+    close: db.close.bind(db),
+    get attempted() {
+      return attempted;
+    },
+    get blocked() {
+      return blocked;
+    },
+  };
+}
+
 test("branding repair safety uses the canonical cutover path, media, hash, and integrity seam", (context) => {
   const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
   context.after(() => fixture.cleanup());
@@ -894,6 +927,92 @@ test("a foreign idle WAL connection writing after COMMIT is detected before mark
   assert.equal(driftInjected, true);
   assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
   assert.equal(existsSync(`${fixture.manifestPath}.applied`), false);
+});
+
+test("pending post-commit recovery holds its WAL write lock through marker publication and cleanup", (context) => {
+  const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+  context.after(() => fixture.cleanup());
+  writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+  writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
+  const setup = new DatabaseSync(fixture.databasePath);
+  assert.equal(String(setup.prepare("PRAGMA journal_mode = WAL").get().journal_mode).toLowerCase(), "wal");
+  setup.close();
+  assert.equal(dryRun(fixture).status, 0);
+  assert.throws(
+    () => directApply(fixture, { durability: crashAfterDatabaseCommit() }),
+    /injected crash after database commit/i,
+  );
+  assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+  assert.equal(existsSync(`${fixture.manifestPath}.applied`), false);
+
+  const foreign = createForeignSentinelWriteProbe(fixture.databasePath);
+  const real = createCanonicalCutoverDurability();
+  const durability = {
+    ...real,
+    removePath(entryPath, options) {
+      if (!foreign.attempted && path.basename(entryPath).includes(".relay-branding-repair-backup-")) {
+        foreign.attempt("pending-recovery-drift");
+      }
+      return real.removePath(entryPath, options);
+    },
+  };
+
+  try {
+    const recovered = directApply(fixture, { durability });
+    assert.equal(recovered.recovered, true);
+  } finally {
+    foreign.close();
+  }
+  assert.equal(foreign.attempted, true);
+  assert.equal(foreign.blocked, true);
+  assert.equal(readSentinel(fixture.databasePath), "original");
+  assertFullyRepaired(fixture);
+});
+
+test("applied-marker recovery holds its WAL write lock through pending-marker cleanup", (context) => {
+  const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+  context.after(() => fixture.cleanup());
+  writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+  writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
+  const setup = new DatabaseSync(fixture.databasePath);
+  assert.equal(String(setup.prepare("PRAGMA journal_mode = WAL").get().journal_mode).toLowerCase(), "wal");
+  setup.close();
+  assert.equal(dryRun(fixture).status, 0);
+  const real = createCanonicalCutoverDurability();
+  const interrupted = {
+    ...real,
+    removePath(entryPath, options) {
+      if (entryPath === `${fixture.manifestPath}.applying`) {
+        throw new Error("injected pending cleanup failure");
+      }
+      return real.removePath(entryPath, options);
+    },
+  };
+  assert.throws(() => directApply(fixture, { durability: interrupted }), /pending cleanup failure/i);
+  assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+  assert.equal(existsSync(`${fixture.manifestPath}.applied`), true);
+
+  const foreign = createForeignSentinelWriteProbe(fixture.databasePath);
+  const durability = {
+    ...real,
+    removePath(entryPath, options) {
+      if (!foreign.attempted && entryPath === `${fixture.manifestPath}.applying`) {
+        foreign.attempt("applied-recovery-drift");
+      }
+      return real.removePath(entryPath, options);
+    },
+  };
+
+  try {
+    const recovered = directApply(fixture, { durability });
+    assert.equal(recovered.recovered, true);
+  } finally {
+    foreign.close();
+  }
+  assert.equal(foreign.attempted, true);
+  assert.equal(foreign.blocked, true);
+  assert.equal(readSentinel(fixture.databasePath), "original");
+  assertFullyRepaired(fixture);
 });
 
 test("unrelated database drift immediately before BEGIN IMMEDIATE is refused under lock", (context) => {

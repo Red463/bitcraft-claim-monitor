@@ -524,6 +524,12 @@ function verifyAppliedRepair(manifest, manifestPath, paths, activeDurability, op
     if (repairDatabaseFingerprint(db) !== manifest.database.postStateFingerprint) {
       throw new Error("Applied branding repair database changed after finalization");
     }
+    if (!existsSync(manifest.brandingRoot) || !targetMatches(manifest.brandingRoot, manifest.targetFilesAfter)) {
+      throw new Error("Applied branding repair assets do not match the manifest");
+    }
+    if (existsSync(paths.pendingMarkerPath)) {
+      activeDurability.removePath(paths.pendingMarkerPath, { force: true });
+    }
     db.exec("ROLLBACK");
     transactionOpen = false;
   } catch (error) {
@@ -539,12 +545,6 @@ function verifyAppliedRepair(manifest, manifestPath, paths, activeDurability, op
   }
   if (databaseFailures.length) {
     throw new Error(`Applied branding recovery verification failed: ${databaseFailures.join("; ")}`);
-  }
-  if (!existsSync(manifest.brandingRoot) || !targetMatches(manifest.brandingRoot, manifest.targetFilesAfter)) {
-    throw new Error("Applied branding repair assets do not match the manifest");
-  }
-  if (existsSync(paths.pendingMarkerPath)) {
-    activeDurability.removePath(paths.pendingMarkerPath, { force: true });
   }
   return { applied: true, recovered: true, rowCounts: manifest.rowCounts, selectionHash: manifest.selectionHash };
 }
@@ -571,8 +571,6 @@ function recoverPendingRepair(manifest, manifestPath, paths, activeDurability, o
     state = readBrandingState(db);
     assertCleanIntegrity(db);
     currentFingerprint = repairDatabaseFingerprint(db);
-    db.exec("ROLLBACK");
-    transactionOpen = false;
   } catch (error) {
     databaseFailures.push(errorMessage(error));
     if (transactionOpen) {
@@ -581,10 +579,12 @@ function recoverPendingRepair(manifest, manifestPath, paths, activeDurability, o
       }
     }
   }
-  try { db.close(); } catch (closeError) {
-    databaseFailures.push(`recovery database close failed: ${errorMessage(closeError)}`);
+  if (databaseFailures.length) {
+    try { db.close(); } catch (closeError) {
+      databaseFailures.push(`recovery database close failed: ${errorMessage(closeError)}`);
+    }
+    throw new Error(databaseFailures.join("; "));
   }
-  if (databaseFailures.length) throw new Error(databaseFailures.join("; "));
 
   const preDatabase = state.row.rowCount === manifest.rowCounts.brandingSettingRows
     && state.valueSha256 === manifest.database.brandingValueSha256
@@ -595,6 +595,8 @@ function recoverPendingRepair(manifest, manifestPath, paths, activeDurability, o
   const targetIsAfter = existsSync(manifest.brandingRoot)
     && targetMatches(manifest.brandingRoot, manifest.targetFilesAfter);
   const recoverAsPost = postDatabase && (!preDatabase || targetIsAfter);
+  let result;
+  const recoveryFailures = [];
   try {
     if (recoverAsPost) {
       if (!targetIsAfter) throw new Error("Committed branding database has mismatched live assets");
@@ -609,38 +611,55 @@ function recoverPendingRepair(manifest, manifestPath, paths, activeDurability, o
         appliedMarkerPayload(manifest, manifestPath),
       );
       activeDurability.removePath(paths.pendingMarkerPath, { force: true });
-      return { applied: true, recovered: true, rowCounts: manifest.rowCounts, selectionHash: manifest.selectionHash };
-    }
-    if (!preDatabase) throw new Error("Database is neither the manifest pre-state nor repaired post-state");
-    if (marker.targetExisted) {
-      if (existsSync(paths.backupDirectory)) {
-        if (!targetMatches(paths.backupDirectory, manifest.targetFilesBefore, { includeFilesystemIdentity: true })) {
-          throw new Error("Branding backup no longer matches the manifest pre-state");
+      result = { applied: true, recovered: true, rowCounts: manifest.rowCounts, selectionHash: manifest.selectionHash };
+    } else {
+      if (!preDatabase) throw new Error("Database is neither the manifest pre-state nor repaired post-state");
+      if (marker.targetExisted) {
+        if (existsSync(paths.backupDirectory)) {
+          if (!targetMatches(paths.backupDirectory, manifest.targetFilesBefore, { includeFilesystemIdentity: true })) {
+            throw new Error("Branding backup no longer matches the manifest pre-state");
+          }
+          if (existsSync(manifest.brandingRoot)) {
+            activeDurability.removePath(manifest.brandingRoot, { recursive: true, force: true });
+          }
+          activeDurability.renamePath(paths.backupDirectory, manifest.brandingRoot);
+        } else if (!existsSync(manifest.brandingRoot)
+          || !targetMatches(manifest.brandingRoot, manifest.targetFilesBefore, { includeFilesystemIdentity: true })) {
+          throw new Error("Original branding assets cannot be recovered from the pending state");
         }
-        if (existsSync(manifest.brandingRoot)) {
-          activeDurability.removePath(manifest.brandingRoot, { recursive: true, force: true });
-        }
-        activeDurability.renamePath(paths.backupDirectory, manifest.brandingRoot);
-      } else if (!existsSync(manifest.brandingRoot)
-        || !targetMatches(manifest.brandingRoot, manifest.targetFilesBefore, { includeFilesystemIdentity: true })) {
-        throw new Error("Original branding assets cannot be recovered from the pending state");
+      } else if (existsSync(manifest.brandingRoot)) {
+        activeDurability.removePath(manifest.brandingRoot, { recursive: true, force: true });
       }
-    } else if (existsSync(manifest.brandingRoot)) {
-      activeDurability.removePath(manifest.brandingRoot, { recursive: true, force: true });
+      if (existsSync(marker.stageDirectory)) {
+        activeDurability.removePath(marker.stageDirectory, { recursive: true, force: true });
+      }
+      const restored = marker.targetExisted
+        ? existsSync(manifest.brandingRoot)
+          && targetMatches(manifest.brandingRoot, manifest.targetFilesBefore, { includeFilesystemIdentity: true })
+        : !existsSync(manifest.brandingRoot);
+      if (!restored) throw new Error("Branding pre-state recovery verification failed");
+      activeDurability.removePath(paths.pendingMarkerPath, { force: true });
+      result = null;
     }
-    if (existsSync(marker.stageDirectory)) {
-      activeDurability.removePath(marker.stageDirectory, { recursive: true, force: true });
-    }
-    const restored = marker.targetExisted
-      ? existsSync(manifest.brandingRoot)
-        && targetMatches(manifest.brandingRoot, manifest.targetFilesBefore, { includeFilesystemIdentity: true })
-      : !existsSync(manifest.brandingRoot);
-    if (!restored) throw new Error("Branding pre-state recovery verification failed");
-    activeDurability.removePath(paths.pendingMarkerPath, { force: true });
-    return null;
   } catch (error) {
-    throw new Error(`Branding recovery failed; pending marker retained for exact retry: ${errorMessage(error)}`);
+    recoveryFailures.push(errorMessage(error));
   }
+  if (transactionOpen) {
+    try {
+      db.exec("ROLLBACK");
+      transactionOpen = false;
+    } catch (rollbackError) {
+      recoveryFailures.push(`recovery rollback failed: ${errorMessage(rollbackError)}`);
+    }
+  }
+  try { db.close(); } catch (closeError) {
+    recoveryFailures.push(`recovery database close failed: ${errorMessage(closeError)}`);
+  }
+  if (recoveryFailures.length) {
+    const retained = existsSync(paths.pendingMarkerPath) ? "pending marker retained for exact retry: " : "";
+    throw new Error(`Branding recovery failed; ${retained}${recoveryFailures.join("; ")}`);
+  }
+  return result;
 }
 
 function finalizeCommittedRepair(manifest, manifestPath, paths, recovery, activeDurability) {
