@@ -33,8 +33,8 @@ test("Craft Monitor uses operational contributor copy while retaining attributio
   const presentationCopy = jsxPresentationCopy(productionPage);
 
   assert.match(presentationCopy, /No contribution activity recorded\./);
-  assert.match(presentationCopy, /Matched action/);
-  assert.match(presentationCopy, /Craft owner/);
+  assert.doesNotMatch(presentationCopy, /Matched action/);
+  assert.doesNotMatch(presentationCopy, /Craft owner/);
 
   for (const [concept, pattern, example] of technicalConcepts) {
     assert.match(example, pattern, `${concept} boundary must detect representative technical copy`);

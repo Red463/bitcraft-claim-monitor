@@ -339,7 +339,7 @@ export function Production({ data, refreshToken, selectedMemberId, onSelectMembe
                       const contributorName = unknownContributor
                         ? "Unknown contributor"
                         : person.contributorUsername;
-                      return <span key={person.contributorEntityId ?? `unknown:${job.entityId}`}><strong><TrackedOwnerName name={contributorName} claim={data.claim} members={data.members} /></strong> {formatDecimalQuantity(person.totalProgressContributed)} progress - {formatDecimalQuantity(person.totalXpContributed)} XP {person.attributionConfidence === "matched_action" ? <small>Matched action</small> : person.attributionConfidence === "owner_fallback" ? <small>Craft owner</small> : null}</span>;
+                      return <span key={person.contributorEntityId ?? `unknown:${job.entityId}`}><strong><TrackedOwnerName name={contributorName} claim={data.claim} members={data.members} /></strong> {formatDecimalQuantity(person.totalProgressContributed)} progress - {formatDecimalQuantity(person.totalXpContributed)} XP</span>;
                     })}
                   </div>
                 ) : <small>No contribution activity recorded.</small>}
