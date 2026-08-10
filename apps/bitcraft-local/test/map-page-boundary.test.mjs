@@ -61,3 +61,14 @@ test("Map player tracking controls wrap within phone-width panels", () => {
   );
 });
 
+test("Map Resource Finder uses the shared icon fallback for compound item identities", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+
+  assert.match(mapPage, /import \{ ItemIcon \} from "\.\.\/components\/main\/ItemDisplay"/);
+  assert.match(mapPage, /itemType:\s*resource\.itemType/);
+  assert.match(mapPage, /itemId:\s*resource\.itemId/);
+  assert.match(mapPage, /iconAssetName:\s*resource\.iconAssetName/);
+  assert.match(mapPage, /<ItemIcon item=\{resourceIcon\} \/>/);
+  assert.doesNotMatch(mapPage, /const iconUrl = gameIconUrl\(resource\)/);
+});
+

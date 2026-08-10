@@ -4,6 +4,7 @@ import { ExternalLink, MapPin, PanelLeftClose, PanelLeftOpen, Search, Users, X }
 
 import { TierBadge } from "../components/main/Badges";
 import { Dialog } from "../components/main/Dialog";
+import { ItemIcon } from "../components/main/ItemDisplay";
 import { SearchBox } from "../components/main/SearchBox";
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
 import { formatCurrentSession, formatNumber } from "../utils/format";
@@ -12,7 +13,6 @@ import { useGameDataGeneration } from "../hooks/useGameDataGeneration";
 import { usePageRefresh } from "../refresh/ManualRefreshContext";
 import { pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
 import { usePersistedState } from "../hooks/usePersistedState";
-import { gameIconUrl } from "../utils/items";
 import { memberDisplayName, memberTrackingId } from "../utils/memberIdentity";
 import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
@@ -378,9 +378,14 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
             {visibleResources.map((resource) => {
               const id = mapResourceToken(resource);
               const active = normalizedSelectedResources.includes(id);
-              const iconUrl = gameIconUrl(resource);
+              const resourceIcon = {
+                itemType: resource.itemType,
+                itemId: resource.itemId,
+                iconAssetName: resource.iconAssetName,
+                name: resource.name,
+              };
               return <button key={id} className={active ? "active" : ""} onClick={() => toggleResource(id)}>
-                <span className="map-resource-icon">{iconUrl ? <img src={iconUrl} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <MapPin size={15} />}</span>
+                <span className="map-resource-icon"><ItemIcon item={resourceIcon} /></span>
                 <strong>{resource.name}</strong>
                 {resource.tier != null ? <TierBadge tier={resource.tier} /> : null}
                 <small>{resource.mapKind === "enemy" ? "Animal" : mapResourceCategory(resource) || resource.tag || "Resource"}</small>

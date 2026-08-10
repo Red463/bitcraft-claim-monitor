@@ -788,8 +788,30 @@ function DashboardApp() {
     const link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
     if (!link) return;
     const favicon = appSettings.branding.favicon;
-    link.href = favicon ? `${favicon.url}?v=${encodeURIComponent(favicon.updatedAt)}` : DEFAULT_FAVICON_URL;
-    link.type = favicon?.contentType ?? "image/x-icon";
+    if (!favicon) {
+      link.href = DEFAULT_FAVICON_URL;
+      link.type = "image/x-icon";
+      return;
+    }
+    const faviconUrl = `${favicon.url}?v=${encodeURIComponent(favicon.updatedAt)}`;
+    let disposed = false;
+    const probe = new Image();
+    probe.onload = () => {
+      if (disposed) return;
+      link.href = faviconUrl;
+      link.type = favicon.contentType;
+    };
+    probe.onerror = () => {
+      if (disposed) return;
+      link.href = DEFAULT_FAVICON_URL;
+      link.type = "image/x-icon";
+    };
+    probe.src = faviconUrl;
+    return () => {
+      disposed = true;
+      probe.onload = null;
+      probe.onerror = null;
+    };
   }, [appSettings.branding.favicon]);
   React.useEffect(() => {
     if (selectedMemberId !== "All" && state.data && !selectedProductionMember) setSelectedMemberId("All");
@@ -930,7 +952,10 @@ function DashboardApp() {
         <button type="button" className="mobile-navigation-close" aria-label="Close navigation" onClick={() => setMobileNavigationOpen(false)}><X size={18} /></button>
         <div className="brand">
           {appSettings.branding.logo
-            ? <img src={`${appSettings.branding.logo.url}?v=${encodeURIComponent(appSettings.branding.logo.updatedAt)}`} alt="" />
+            ? <img src={`${appSettings.branding.logo.url}?v=${encodeURIComponent(appSettings.branding.logo.updatedAt)}`} alt="" onError={(event) => {
+              event.currentTarget.onerror = null;
+              event.currentTarget.src = DEFAULT_APP_LOGO_URL;
+            }} />
             : <img src={DEFAULT_APP_LOGO_URL} alt="" />}
           <div title={data.claim.name ?? "Settlement"}><h1>{data.claim.name ?? "Settlement"}</h1><span>Claim Monitor</span></div>
           <button className="sidebar-toggle" type="button" onClick={() => setSidebarCollapsed((current) => !current)} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
