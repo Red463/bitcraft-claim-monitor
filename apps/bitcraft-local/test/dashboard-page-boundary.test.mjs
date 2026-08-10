@@ -51,11 +51,12 @@ test("Dashboard market trend exposes pointer detail without false button semanti
   assert.doesNotMatch(widgets, /className="dashboard-chart-hit"[^>]*tabIndex/);
 });
 
-test("Dashboard online members do not fall back to the settlement region as player location", () => {
+test("Dashboard online members resolve exact presence regions from the region catalog", () => {
   const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
 
   assert.doesNotMatch(dashboard, /regionName:\s*player\.regionName\s*\?\?\s*claim\.regionName/);
   assert.match(dashboard, /regionNameById/);
+  assert.match(dashboard, /player\.presenceRegionId\s*==\s*null\s*\?\s*""\s*:\s*String\(player\.presenceRegionId\)\.trim\(\)/);
   assert.match(dashboard, /regionNameById\.get\(regionId\)\s*\?\?\s*`R\$\{regionId\}`/);
-  assert.match(dashboard, /player\.regionName\s*\?\?\s*"Location unknown"/);
+  assert.match(dashboard, /regionName = regionId \? regionNameById\.get\(regionId\) \?\? `R\$\{regionId\}` : "Location unavailable"/);
 });
