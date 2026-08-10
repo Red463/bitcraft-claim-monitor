@@ -57,6 +57,7 @@ export const CANONICAL_CLAIM_ID = "1369094286777412590";
 export const CANONICAL_VERSION = "0.52.0-beta.1";
 export const CANONICAL_REVISION_PATTERN = /^[a-f0-9]{40}$/;
 export const CANONICAL_MANIFEST_HASH_PATTERN = /^[a-f0-9]{64}$/;
+export const LOCAL_CANONICAL_RETRY_ATTEMPTS = 40;
 export const CUTOVER_LOCK_ORDER = Object.freeze([
   "/run/lock/bitcraft-claim-monitor-relay-cutover.lock",
   "/run/lock/bitcraft-claim-monitor-relay-deploy.lock",
@@ -2502,7 +2503,7 @@ export function createSystemCutoverOperations({
         throw new Error("Discord outbox pending/sent state changed during canonical startup");
       }
       return { health, subscriptions, gatewayPid: relayPid, outbox: currentOutbox };
-    });
+    }, { attempts: LOCAL_CANONICAL_RETRY_ATTEMPTS });
   }
 
   async function verifyMaintenanceCanary(state) {
