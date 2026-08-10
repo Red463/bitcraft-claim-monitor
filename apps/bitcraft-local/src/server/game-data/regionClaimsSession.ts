@@ -25,6 +25,8 @@ type BindingConnection = {
     claimState: CachedTable;
     claimLocalState: CachedTable;
     buildingClaimDesc: CachedTable;
+    claimTechState: CachedTable;
+    claimTechDesc: CachedTable;
     playerUsernameState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
@@ -163,6 +165,8 @@ export class RelayRegionClaimsSession {
             "SELECT * FROM claim_state",
             "SELECT * FROM claim_local_state",
             "SELECT * FROM building_claim_desc",
+            "SELECT * FROM claim_tech_state",
+            "SELECT * FROM claim_tech_desc",
             "SELECT * FROM player_username_state",
           ]);
       })
@@ -195,8 +199,11 @@ export class RelayRegionClaimsSession {
       const claimRows = rows(connection.db.claimState);
       const localRows = rows(connection.db.claimLocalState);
       const claimTypeRows = rows(connection.db.buildingClaimDesc);
+      const claimTechRows = rows(connection.db.claimTechState);
+      const claimTechDescriptionRows = rows(connection.db.claimTechDesc);
       const usernameRows = rows(connection.db.playerUsernameState);
-      const rowCount = claimRows.length + localRows.length + claimTypeRows.length + usernameRows.length;
+      const rowCount = claimRows.length + localRows.length + claimTypeRows.length
+        + claimTechRows.length + claimTechDescriptionRows.length + usernameRows.length;
       this.#health.claimRowCount = claimRows.length;
       if (claimRows.length > config.maxClaims) {
         throw new Error(
@@ -220,6 +227,8 @@ export class RelayRegionClaimsSession {
         claimRows,
         localRows,
         claimTypeRows,
+        claimTechRows,
+        claimTechDescriptionRows,
         usernameRows,
       });
       const receivedAt = this.#now().toISOString();
@@ -274,6 +283,8 @@ export class RelayRegionClaimsSession {
       connection.db.claimState,
       connection.db.claimLocalState,
       connection.db.buildingClaimDesc,
+      connection.db.claimTechState,
+      connection.db.claimTechDesc,
       connection.db.playerUsernameState,
     ]) {
       table.onInsert?.(this.#snapshotChanged);
@@ -289,6 +300,8 @@ export class RelayRegionClaimsSession {
       this.#connection.db.claimState,
       this.#connection.db.claimLocalState,
       this.#connection.db.buildingClaimDesc,
+      this.#connection.db.claimTechState,
+      this.#connection.db.claimTechDesc,
       this.#connection.db.playerUsernameState,
     ]) {
       table.removeOnInsert?.(this.#snapshotChanged);

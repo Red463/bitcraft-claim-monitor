@@ -9,10 +9,18 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.53.0-beta.1] - 2026-08-10
+
 ### Added
 
 - Added the Featurebase in-app messenger with a dark, right-aligned English launcher.
 - Added signed Featurebase identity for Discord users while preserving anonymous visitor support.
+- Added a guarded dry-run and manifest workflow for repairing broken production branding assets without accepting unsafe paths or stale database state.
+
+### Changed
+
+- Made Recent Siege Outcomes collapsed by default and retained each user's preferred expanded state.
+- **Operator action required:** after deploying this release, run the guarded contribution-attribution and branding-asset repair procedure in `DEPLOYMENT.md`; keep all writers and real Discord delivery stopped, retain the exact dry-run manifests beside a decrypt-verified encrypted backup, verify SQLite integrity and service-owned branding metadata, then restart in the persistent no-send maintenance mode and confirm Relay generation advancement. Leave both maintenance drop-ins installed until a separately approved live Discord restart.
 
 ### Security
 
@@ -22,6 +30,11 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 - Fixed a blank page caused by a circular production bundle dependency after the Featurebase integration.
 - Allowed the Featurebase Messenger resources required by the production Content Security Policy.
+- Fixed craft contributions being credited to the craft owner when Relay did not provide exact contributor evidence.
+- Corrected regional settlement rankings by excluding neutral starter towns and deriving tiers from learned claim technology.
+- Restored Dashboard online-member locations from confirmed presence regions.
+- Restored Resource Finder item images and bundled logo and favicon fallbacks when configured assets are unavailable.
+- Ensured root-run branding repair preserves safe service-account ownership and modes across staging, recovery, and final publication.
 
 ## [0.52.0-beta.1] - 2026-08-09
 

@@ -502,7 +502,7 @@ revision-derived nonce as defense in depth. Delivery is claimed once before
 the network request; an interrupted or ambiguous attempt becomes terminal
 `skipped` and is never resent automatically. Verify Discord manually before
 any separately approved operator follow-up. The ordinary
-`0.52.0-beta.1` update notice is pre-seeded as already announced before Relay
+`0.53.0-beta.1` update notice is pre-seeded as already announced before Relay
 services start.
 
 Apply runs the intensive profile automatically. A supervised operator can run
@@ -536,6 +536,324 @@ exact preflight subscription set from the protected cutover state without
 printing that state or requiring application secrets. Intensive requires a
 frozen outbox before announcement; follow-up permits monotonic healthy live
 notification delivery but fails on retry/error state.
+
+## Required 0.53.0-beta.1 contribution and branding repairs
+
+Run this supervised VPS procedure only after the `0.53.0-beta.1` release is
+installed and the production repair is separately approved. It runs both
+`scripts/repair-relay-contribution-attribution.mjs` and
+`scripts/repair-relay-branding-assets.mjs`. It does not send a test message,
+drain the Discord outbox, or make any other real Discord send.
+
+Use `root` for systemd, encrypted-backup, and branding-repair commands. Run the
+contribution repair as the existing `bitcraft` service account. Branding
+manifest format 4 binds the numeric uid, gid, and safe mode of the service-owned
+data/branding directory and every source and target asset. A root-run apply
+chowns and chmods its private stage to that exact contract before publication,
+then verifies it again. Do not pre-create a root-owned branding directory and
+do not change ownership between dry-run and apply.
+
+The approved branding source is the stopped, retained local production
+branding directory below. Do not download branding or game data from BitJita or
+any other network source. If that retained directory is unavailable, stop: a
+separately approved operator must first decrypt-verify the matching cutover
+recovery artifacts into one mode-0700 local directory and set
+`BRANDING_ARCHIVE` to that directory.
+
+### 1. Bind the release and capture the live pre-state
+
+Start one root shell and keep it for the complete procedure:
+
+```sh
+set -euo pipefail
+
+EXPECTED_VERSION="0.53.0-beta.1"
+RELEASE="$(readlink -f /opt/bitcraft-claim-monitor-relay/current)"
+REVISION="$(basename "$RELEASE")"
+DATA_DIR="/var/lib/bitcraft-claim-monitor-relay"
+DATABASE="$DATA_DIR/bitcraft-local.sqlite"
+BACKUP_ROOT="/var/backups/bitcraft-claim-monitor-relay"
+BACKUP_KEY="/etc/bitcraft-claim-monitor-relay/backup-encryption.key"
+BACKUP_CRYPTO="/usr/local/lib/bitcraft-claim-monitor-relay/backup-crypto.mjs"
+CLAIM_ID="1369094286777412590"
+BRANDING_ARCHIVE="/var/lib/bitcraft-claim-monitor/branding"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+REPAIR_ROOT="$BACKUP_ROOT/repair-${EXPECTED_VERSION}-${REVISION:0:12}-$STAMP"
+
+test "$(node -p "require('$RELEASE/apps/bitcraft-local/package.json').version")" = "$EXPECTED_VERSION"
+printf '%s' "$REVISION" | grep -Eq '^[0-9a-f]{40}$'
+test -f "$DATABASE"
+test -d "$BRANDING_ARCHIVE"
+install -d -o bitcraft -g bitcraft -m 0700 "$REPAIR_ROOT"
+
+{
+  date -u --iso-8601=seconds
+  systemctl status bitcraft-claim-monitor-relay.service --no-pager -l || true
+  systemctl status bitcraft-claim-monitor-relay-worker.service --no-pager -l || true
+  systemctl status bitcraft-claim-monitor-relay-collector.timer --no-pager -l || true
+  curl --fail --silent --show-error http://127.0.0.1:19430/api/local/health
+  curl --fail --silent --show-error https://app.timbersteeltrade.com/api/local/health
+} > "$REPAIR_ROOT/health-before.txt"
+chmod 0600 "$REPAIR_ROOT/health-before.txt"
+
+sqlite3 -noheader -separator '|' "$DATABASE" \
+  "SELECT provider || ':' || source_key || ':' || domain, generation
+     FROM provider_subscription_health
+    ORDER BY provider, source_key, domain;" \
+  > "$REPAIR_ROOT/relay-generations-before.txt"
+test -s "$REPAIR_ROOT/relay-generations-before.txt"
+test "$(sqlite3 "$DATABASE" \
+  "SELECT COUNT(*) FROM provider_subscription_health
+    WHERE connected != 1 OR generation <= 0 OR last_error IS NOT NULL;")" = "0"
+chmod 0600 "$REPAIR_ROOT/relay-generations-before.txt"
+```
+
+### 2. Stop every writer and install a persistent no-send runtime
+
+Stop the worker first. The two persistent `/etc/systemd/system` drop-ins replace
+`ExecStart`, so their maintenance settings take precedence after the production
+environment file. Both processes run in supported preview/record mode, the
+worker gateway stays off, all Discord bot-network paths and the manual sandbox
+are disabled, and outbox processing is held while Relay collection continues.
+Keep these drop-ins installed until a separately approved live
+restart; `/run` overrides are forbidden because a reboot would silently remove
+the safety boundary.
+
+```sh
+systemctl stop bitcraft-claim-monitor-relay-worker.service
+systemctl stop \
+  bitcraft-claim-monitor-relay-backup.timer \
+  bitcraft-claim-monitor-relay-collector.timer \
+  bitcraft-claim-monitor-relay-collector.service \
+  bitcraft-claim-monitor-relay.service
+systemctl is-active --quiet bitcraft-claim-monitor-relay-worker.service && exit 1 || true
+
+WEB_DROPIN="/etc/systemd/system/bitcraft-claim-monitor-relay.service.d/repair-no-discord.conf"
+WORKER_DROPIN="/etc/systemd/system/bitcraft-claim-monitor-relay-worker.service.d/repair-no-discord.conf"
+install -d -o root -g root -m 0755 "$(dirname "$WEB_DROPIN")" "$(dirname "$WORKER_DROPIN")"
+printf '%s\n' \
+  '[Service]' \
+  'ExecStart=' \
+  "ExecStart=/usr/bin/env BITCRAFT_PROCESS_ROLE=web BITCRAFT_DEPLOYMENT_MODE=preview DISCORD_DELIVERY_MODE=record ENABLE_DISCORD_STARTUP=false ENABLE_DISCORD_OUTBOX_PROCESSING=false ENABLE_DISCORD_NETWORK=false DISCORD_SANDBOX_CHANNEL_ID= ENABLE_SERVER_POLLING=false ENABLE_SCHEDULED_JOBS=false /usr/bin/node $RELEASE/apps/bitcraft-local/server.mjs" \
+  > "$WEB_DROPIN"
+printf '%s\n' \
+  '[Service]' \
+  'ExecStart=' \
+  "ExecStart=/usr/bin/env BITCRAFT_PROCESS_ROLE=worker BITCRAFT_DEPLOYMENT_MODE=preview DISCORD_DELIVERY_MODE=record ENABLE_DISCORD_STARTUP=false ENABLE_DISCORD_OUTBOX_PROCESSING=false ENABLE_DISCORD_NETWORK=false DISCORD_SANDBOX_CHANNEL_ID= ENABLE_SERVER_POLLING=true ENABLE_SCHEDULED_JOBS=false /usr/bin/node $RELEASE/apps/bitcraft-local/worker.mjs" \
+  > "$WORKER_DROPIN"
+chmod 0644 "$WEB_DROPIN" "$WORKER_DROPIN"
+systemctl daemon-reload
+systemctl cat bitcraft-claim-monitor-relay.service \
+  bitcraft-claim-monitor-relay-worker.service \
+  > "$REPAIR_ROOT/repair-units.txt"
+chmod 0600 "$REPAIR_ROOT/repair-units.txt"
+
+outbox_fingerprint() {
+  /usr/bin/node --input-type=module -e '
+    import { createHash } from "node:crypto";
+    import { DatabaseSync } from "node:sqlite";
+    const db = new DatabaseSync(process.argv[1], { readOnly: true });
+    const rows = db.prepare(
+      "SELECT * FROM discord_notification_outbox WHERE id <= ? ORDER BY id"
+    ).all(BigInt(process.argv[2]));
+    db.close();
+    const payload = JSON.stringify(rows, (_key, value) =>
+      typeof value === "bigint" ? value.toString() : value);
+    process.stdout.write(createHash("sha256").update(payload).digest("hex") + "\\n");
+  ' "$DATABASE" "$1"
+}
+OUTBOX_BASELINE_MAX="$(sqlite3 -noheader "$DATABASE" \
+  "SELECT COALESCE(MAX(id), 0) FROM discord_notification_outbox;")"
+printf '%s\n' "$OUTBOX_BASELINE_MAX" > "$REPAIR_ROOT/outbox-baseline-max.txt"
+outbox_fingerprint "$OUTBOX_BASELINE_MAX" > "$REPAIR_ROOT/outbox-before.sha256"
+chmod 0600 "$REPAIR_ROOT/outbox-baseline-max.txt" "$REPAIR_ROOT/outbox-before.sha256"
+```
+
+### 3. Create and independently verify encrypted recovery artifacts
+
+The backup helper creates, encrypts, decrypt-verifies, and SQLite-validates the
+database backup. The second decrypt and checks below independently verify the
+artifact beside which both exact manifests will be retained. The branding tar
+preserves numeric ownership, modes, ACLs, and xattrs and is also encrypt/decrypt
+verified before its plaintext is removed.
+
+```sh
+BACKUP_DIR="$REPAIR_ROOT" \
+  /usr/local/bin/backup-bitcraft-claim-monitor-relay manual --revision "$REVISION" \
+  > "$REPAIR_ROOT/database-backup.log"
+chmod 0600 "$REPAIR_ROOT/database-backup.log"
+
+set -- "$REPAIR_ROOT"/bitcraft-local-manual-"${REVISION:0:12}"-*.sqlite.enc
+test "$#" -eq 1
+DATABASE_BACKUP="$1"
+DATABASE_VERIFY="$REPAIR_ROOT/database-verify.sqlite"
+node "$BACKUP_CRYPTO" decrypt "$DATABASE_BACKUP" "$DATABASE_VERIFY" "$BACKUP_KEY"
+test -z "$(sqlite3 "$DATABASE_VERIFY" 'PRAGMA foreign_key_check;')"
+test "$(sqlite3 "$DATABASE_VERIFY" 'PRAGMA integrity_check;')" = "ok"
+rm -f "$DATABASE_VERIFY"
+
+BRANDING_PLAIN="$REPAIR_ROOT/branding-backup.tar"
+BRANDING_ENCRYPTED="$REPAIR_ROOT/branding-backup.tar.enc"
+BRANDING_VERIFY="$REPAIR_ROOT/branding-verify.tar"
+tar --acls --xattrs --numeric-owner -C "$DATA_DIR" -cf "$BRANDING_PLAIN" branding
+chmod 0600 "$BRANDING_PLAIN"
+node "$BACKUP_CRYPTO" encrypt "$BRANDING_PLAIN" "$BRANDING_ENCRYPTED" "$BACKUP_KEY"
+node "$BACKUP_CRYPTO" decrypt "$BRANDING_ENCRYPTED" "$BRANDING_VERIFY" "$BACKUP_KEY"
+cmp --silent "$BRANDING_PLAIN" "$BRANDING_VERIFY"
+tar -tf "$BRANDING_VERIFY" > "$REPAIR_ROOT/branding-backup-files.txt"
+chmod 0600 "$REPAIR_ROOT/branding-backup-files.txt"
+rm -f "$BRANDING_PLAIN" "$BRANDING_VERIFY"
+sha256sum "$DATABASE_BACKUP" "$BRANDING_ENCRYPTED" \
+  > "$REPAIR_ROOT/encrypted-backups.sha256"
+chmod 0600 "$REPAIR_ROOT/encrypted-backups.sha256"
+```
+
+### 4. Freeze both exact manifests, then apply them unchanged
+
+Both dry-runs occur against the same stopped database. Apply branding first
+because its manifest binds the complete SQLite state. The contribution repair
+then revalidates only its exact selected contribution rows/events under
+`BEGIN IMMEDIATE`, so the preceding branding setting change does not weaken or
+invalidate its selection. Retain both original JSON files and their hashes
+beside the encrypted backups.
+
+```sh
+CONTRIBUTION_MANIFEST="$REPAIR_ROOT/contribution-attribution-manifest.json"
+BRANDING_MANIFEST="$REPAIR_ROOT/branding-assets-manifest.json"
+
+sudo -u bitcraft env BITCRAFT_LOCAL_DB_PATH="$DATABASE" \
+  /usr/bin/node "$RELEASE/scripts/repair-relay-contribution-attribution.mjs" \
+  --dry-run --claim-id "$CLAIM_ID" --manifest "$CONTRIBUTION_MANIFEST" \
+  > "$REPAIR_ROOT/contribution-dry-run.json"
+/usr/bin/node "$RELEASE/scripts/repair-relay-branding-assets.mjs" \
+  --dry-run --database "$DATABASE" --archive "$BRANDING_ARCHIVE" \
+  --manifest "$BRANDING_MANIFEST" \
+  > "$REPAIR_ROOT/branding-dry-run.json"
+chmod 0600 \
+  "$CONTRIBUTION_MANIFEST" "$BRANDING_MANIFEST" \
+  "$REPAIR_ROOT/contribution-dry-run.json" "$REPAIR_ROOT/branding-dry-run.json"
+sha256sum "$CONTRIBUTION_MANIFEST" "$BRANDING_MANIFEST" \
+  > "$REPAIR_ROOT/repair-manifests.sha256"
+chmod 0600 "$REPAIR_ROOT/repair-manifests.sha256"
+
+sha256sum --check "$REPAIR_ROOT/repair-manifests.sha256"
+/usr/bin/node "$RELEASE/scripts/repair-relay-branding-assets.mjs" \
+  --apply --database "$DATABASE" --archive "$BRANDING_ARCHIVE" \
+  --manifest "$BRANDING_MANIFEST" \
+  > "$REPAIR_ROOT/branding-apply.json"
+sudo -u bitcraft env BITCRAFT_LOCAL_DB_PATH="$DATABASE" \
+  /usr/bin/node "$RELEASE/scripts/repair-relay-contribution-attribution.mjs" \
+  --apply --manifest "$CONTRIBUTION_MANIFEST" \
+  > "$REPAIR_ROOT/contribution-apply.json"
+chmod 0600 "$REPAIR_ROOT/branding-apply.json" "$REPAIR_ROOT/contribution-apply.json"
+```
+
+Both tools refuse a changed manifest or changed input. If either apply reports
+`selection changed`, `selection hash is invalid`, `changed since dry-run`,
+`does not match the exact branding repair manifest`, or retained recovery
+state, do not edit, re-hash, or replace either JSON file. Keep the stopped
+services and all evidence. Resume only the same branding manifest when its
+message explicitly requires exact-manifest recovery; otherwise start a new
+repair directory with a new encrypted backup and new dry-runs after review.
+
+### 5. Verify SQLite and ownership, then restart no-send Relay
+
+```sh
+test -z "$(sqlite3 "$DATABASE" 'PRAGMA foreign_key_check;')"
+test "$(sqlite3 "$DATABASE" 'PRAGMA integrity_check;')" = "ok"
+test "$(stat -c '%U:%G' "$DATA_DIR/branding")" = "bitcraft:bitcraft"
+test -z "$(find "$DATA_DIR/branding" -mindepth 1 -maxdepth 1 -type f \
+  \( ! -user bitcraft -o ! -group bitcraft \) -print -quit)"
+
+systemctl start \
+  bitcraft-claim-monitor-relay.service \
+  bitcraft-claim-monitor-relay-worker.service \
+  bitcraft-claim-monitor-relay-collector.timer \
+  bitcraft-claim-monitor-relay-backup.timer
+
+WEB_PID="$(systemctl show bitcraft-claim-monitor-relay.service \
+  --property MainPID --value)"
+WORKER_PID="$(systemctl show bitcraft-claim-monitor-relay-worker.service \
+  --property MainPID --value)"
+printf '%s' "$WEB_PID" | grep -Eq '^[1-9][0-9]*$'
+printf '%s' "$WORKER_PID" | grep -Eq '^[1-9][0-9]*$'
+for PID in "$WEB_PID" "$WORKER_PID"; do
+  tr '\0' '\n' < "/proc/$PID/environ" | grep -Fx 'BITCRAFT_DEPLOYMENT_MODE=preview'
+  tr '\0' '\n' < "/proc/$PID/environ" | grep -Fx 'DISCORD_DELIVERY_MODE=record'
+  tr '\0' '\n' < "/proc/$PID/environ" | grep -Fx 'ENABLE_DISCORD_STARTUP=false'
+  tr '\0' '\n' < "/proc/$PID/environ" | grep -Fx 'ENABLE_DISCORD_OUTBOX_PROCESSING=false'
+  tr '\0' '\n' < "/proc/$PID/environ" | grep -Fx 'ENABLE_DISCORD_NETWORK=false'
+  tr '\0' '\n' < "/proc/$PID/environ" | grep -Fx 'DISCORD_SANDBOX_CHANNEL_ID='
+done
+tr '\0' '\n' < "/proc/$WEB_PID/environ" | grep -Fx 'BITCRAFT_PROCESS_ROLE=web'
+tr '\0' '\n' < "/proc/$WORKER_PID/environ" | grep -Fx 'BITCRAFT_PROCESS_ROLE=worker'
+
+for attempt in $(seq 1 60); do
+  if curl --fail --silent --show-error \
+      http://127.0.0.1:19430/api/local/health \
+      > "$REPAIR_ROOT/health-after.json"; then
+    break
+  fi
+  sleep 5
+done
+verify_repair_health() {
+  /usr/bin/node -e '
+  const fs = require("node:fs");
+  const health = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  if (health.ok !== true || health.version !== process.argv[2]
+      || health.deploymentMode !== process.argv[3]
+      || health.buildSha !== process.argv[4]) process.exit(1);
+  ' "$1" "$EXPECTED_VERSION" preview "${REVISION:0:12}"
+}
+verify_repair_health "$REPAIR_ROOT/health-after.json"
+
+for attempt in $(seq 1 60); do
+  sqlite3 -noheader -separator '|' "$DATABASE" \
+    "SELECT provider || ':' || source_key || ':' || domain, generation
+       FROM provider_subscription_health
+      WHERE connected = 1 AND generation > 0 AND last_error IS NULL
+      ORDER BY provider, source_key, domain;" \
+    > "$REPAIR_ROOT/relay-generations-after.txt"
+  if awk -F'|' '
+      NR == FNR { before[$1] = $2 + 0; expected += 1; next }
+      { seen += 1; if (!($1 in before) || $2 + 0 < before[$1]) bad = 1;
+        if ($2 + 0 > before[$1]) advanced = 1 }
+      END { exit (bad || seen != expected || !advanced) ? 1 : 0 }
+    ' "$REPAIR_ROOT/relay-generations-before.txt" \
+      "$REPAIR_ROOT/relay-generations-after.txt"; then
+    break
+  fi
+  test "$attempt" -lt 60
+  sleep 5
+done
+
+outbox_fingerprint "$OUTBOX_BASELINE_MAX" > "$REPAIR_ROOT/outbox-after.sha256"
+cmp --silent "$REPAIR_ROOT/outbox-before.sha256" "$REPAIR_ROOT/outbox-after.sha256"
+test "$(sqlite3 "$DATABASE" \
+  "SELECT COUNT(*) FROM discord_notification_outbox
+    WHERE id > $OUTBOX_BASELINE_MAX AND (status != 'pending' OR attempts != 0);")" = "0"
+test "$(sqlite3 "$DATABASE" \
+  "SELECT COUNT(*) FROM discord_notification_outbox WHERE status = 'sending';")" = "0"
+curl --fail --silent --show-error https://app.timbersteeltrade.com/api/local/health \
+  > "$REPAIR_ROOT/public-health-after.json"
+verify_repair_health "$REPAIR_ROOT/public-health-after.json"
+find "$REPAIR_ROOT" -maxdepth 1 -type f -exec chmod 0600 {} +
+```
+
+Success requires exact-version preview/record health from both endpoints, the
+exact connected subscription set, at least one monotonic Relay generation
+advance, byte-equivalent state for every pre-existing outbox row, only
+zero-attempt pending rows added during verification, no `sending` row, clean
+SQLite checks, and `bitcraft:bitcraft` branding ownership. The persistent
+drop-ins intentionally remain active across reboot, so this procedure performs
+no real Discord send, exposes no manual sandbox exception, and cannot drain or
+recover-mutate the pre-existing outbox.
+
+Removing both `$WEB_DROPIN` and `$WORKER_DROPIN`, running `systemctl
+daemon-reload`, and restarting the web and worker services re-enables canonical
+live Discord behavior. Those commands are deliberately not part of this
+runbook; they require separate explicit operator approval after the repair
+evidence has been reviewed.
 
 ## Diagnostics
 

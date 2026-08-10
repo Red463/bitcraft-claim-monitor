@@ -95,6 +95,16 @@ test("app chrome uses the approved Claim Monitor logo and favicon as defaults", 
   assert.equal(existsSync(new URL("claim-monitor-logo.png", publicDirectory)), true);
   assert.equal(existsSync(new URL("favicon.ico", publicDirectory)), true);
 });
+
+test("configured branding falls back to bundled logo and favicon after load errors", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.match(appShell, /onError=\{\(event\) => \{\s*event\.currentTarget\.onerror = null;\s*event\.currentTarget\.src = DEFAULT_APP_LOGO_URL;/s);
+  assert.match(appShell, /const probe = new Image\(\)/);
+  assert.match(appShell, /probe\.onerror = \(\) => \{[\s\S]*link\.href = DEFAULT_FAVICON_URL;[\s\S]*link\.type = "image\/x-icon";/);
+  assert.match(appShell, /let disposed = false;/);
+  assert.match(appShell, /return \(\) => \{\s*disposed = true;/s);
+});
 test("sidebar exposes a persistent app account sign-in affordance", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");

@@ -64,10 +64,20 @@ test("regional claims session applies claims and usernames through one authorita
     entityId: 1224979098736429552n,
     username: "SecondOwner",
   }];
+  const claimTechRows = [{
+    entityId: 1369094286777412590n,
+    learned: [101n, 102n],
+  }];
+  const claimTechDescriptionRows = [
+    { id: 101n, tier: 2 },
+    { id: 102n, tier: 4 },
+  ];
   const db = {
     claimState: table(claimRows),
     claimLocalState: table(localRows),
     buildingClaimDesc: table([{ buildingId: 6020, tier: 6 }]),
+    claimTechState: table(claimTechRows),
+    claimTechDesc: table(claimTechDescriptionRows),
     playerUsernameState: table(usernameRows),
   };
   const connection = {
@@ -129,6 +139,7 @@ test("regional claims session applies claims and usernames through one authorita
     generation: 1,
     regionId: "19",
     maxClaims: 2,
+    maxApplyRows: 10,
   });
   const snapshot = await snapshotPromise;
 
@@ -136,12 +147,26 @@ test("regional claims session applies claims and usernames through one authorita
     "SELECT * FROM claim_state",
     "SELECT * FROM claim_local_state",
     "SELECT * FROM building_claim_desc",
+    "SELECT * FROM claim_tech_state",
+    "SELECT * FROM claim_tech_desc",
     "SELECT * FROM player_username_state",
   ]);
   assert.equal(subscriptions.length, 1);
   assert.equal(snapshot.data.claims[0].ownerPlayerUsername, "Red463");
-  assert.equal(snapshot.data.claims[0].tier, 6);
+  assert.equal(snapshot.data.claims[0].tier, 4);
   assert.equal(snapshot.regionId, "19");
+
+  const techStateSnapshotPromise = waitForSnapshot();
+  claimTechRows[0].learned = [101n];
+  db.claimTechState.emit("update");
+  const techStateSnapshot = await techStateSnapshotPromise;
+  assert.equal(techStateSnapshot.data.claims[0].tier, 2);
+
+  const techDescriptionSnapshotPromise = waitForSnapshot();
+  claimTechDescriptionRows[0].tier = 3;
+  db.claimTechDesc.emit("update");
+  const techDescriptionSnapshot = await techDescriptionSnapshotPromise;
+  assert.equal(techDescriptionSnapshot.data.claims[0].tier, 3);
 
   const usernameSnapshotPromise = waitForSnapshot();
   usernameRows[0].username = "Modular";
@@ -156,6 +181,13 @@ test("regional claims session applies claims and usernames through one authorita
   const updatedSnapshot = await updatedSnapshotPromise;
   assert.equal(updatedSnapshot.data.claims[0].supplies, 101);
   assert.ok(updatedSnapshot.generation > snapshot.generation);
+
+  claimTechDescriptionRows.push({ id: 103n, tier: 6 });
+  db.claimTechDesc.emit("insert");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(String(failures.at(-1) ?? ""), /apply budget 10 exceeded by 11 rows/);
+  failures.length = 0;
+  claimTechDescriptionRows.pop();
 
   const deletedSnapshotPromise = waitForSnapshot();
   const removedClaims = claimRows.splice(0);

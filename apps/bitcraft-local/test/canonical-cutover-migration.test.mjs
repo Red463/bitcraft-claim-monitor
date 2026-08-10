@@ -440,7 +440,7 @@ function seedProtectedState(db) {
   db.prepare("INSERT INTO production_jobs (job_key, claim_id, label, first_seen, last_seen, status, raw_json) VALUES ('relay-production', ?, 'Relay Production', 'relay-time', 'relay-time', 'active', '{}')").run(CLAIM_ID);
   db.prepare("INSERT INTO production_contributions (contribution_key, claim_id, craft_entity_id, contributor_name, first_seen, updated_at, raw_json) VALUES ('relay-contribution', ?, 'craft-1', 'Relay User', 'relay-time', 'relay-time', '{}')").run(CLAIM_ID);
   db.prepare("INSERT INTO production_contribution_events (source_key, claim_id, region_id, craft_entity_id, contributed_progress, contributed_xp, occurred_at, received_at, raw_json) VALUES ('relay-event', ?, '777', 'craft-1', '1', '2', 'relay-time', 'relay-time', '{}')").run(CLAIM_ID);
-  db.prepare("INSERT INTO craft_plan_progress_audit_snapshots (id, claim_id, captured_at, baseline_revision, fingerprint, payload_gzip, app_version, build_id) VALUES (1, ?, 'relay-time', 'rev', 'fp', X'00', '0.52.0-beta.1', 'sha')").run(CLAIM_ID);
+  db.prepare("INSERT INTO craft_plan_progress_audit_snapshots (id, claim_id, captured_at, baseline_revision, fingerprint, payload_gzip, app_version, build_id) VALUES (1, ?, 'relay-time', 'rev', 'fp', X'00', '0.53.0-beta.1', 'sha')").run(CLAIM_ID);
   db.prepare("INSERT INTO craft_plan_progress_audit_events (id, claim_id, captured_at, event_type, summary, payload_json) VALUES (1, ?, 'relay-time', 'relay', 'Relay audit', '{}')").run(CLAIM_ID);
   db.prepare("INSERT INTO craft_plan_progress_audit_state (claim_id, updated_at) VALUES (?, 'relay-time')").run(CLAIM_ID);
   db.prepare("INSERT INTO admin_login_events (id, username, successful, occurred_at) VALUES (1, 'relay-admin', 1, 'relay-time')").run();

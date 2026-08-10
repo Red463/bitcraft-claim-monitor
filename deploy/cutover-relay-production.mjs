@@ -54,7 +54,7 @@ import { createSystemOperationalSampler, runCanonicalSoak } from "./verify-canon
 
 export const CANONICAL_CONFIRMATION = "app.timbersteeltrade.com";
 export const CANONICAL_CLAIM_ID = "1369094286777412590";
-export const CANONICAL_VERSION = "0.52.0-beta.1";
+export const CANONICAL_VERSION = "0.53.0-beta.1";
 export const CANONICAL_REVISION_PATTERN = /^[a-f0-9]{40}$/;
 export const CANONICAL_MANIFEST_HASH_PATTERN = /^[a-f0-9]{64}$/;
 export const LOCAL_CANONICAL_RETRY_ATTEMPTS = 40;

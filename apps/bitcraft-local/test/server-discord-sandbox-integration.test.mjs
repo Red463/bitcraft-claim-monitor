@@ -256,3 +256,157 @@ test("record-mode Admin manual tests post only to the local fake sandbox channel
   assert.equal(recordedAnnouncement.channel_id, sandboxChannelId);
   assert.equal(JSON.parse(recordedAnnouncement.response_json).recorded, true);
 });
+
+test("maintenance hold blocks Discord network and leaves pre-start outbox rows untouched", async (t) => {
+  const discordRequests = [];
+  const fakeDiscord = createServer(async (req, res) => {
+    for await (const chunk of req) void chunk;
+    discordRequests.push({ method: req.method, path: req.url });
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ id: "must-not-send", channel_id: sandboxChannelId }));
+  });
+  const discordPort = await listen(fakeDiscord);
+  t.after(() => new Promise((resolve) => fakeDiscord.close(resolve)));
+
+  const dataDir = path.join(appDir, `.test-discord-outbox-hold-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  await mkdir(dataDir, { recursive: true });
+  const children = [];
+  t.after(async () => {
+    for (const child of children) await stop(child);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  async function startServer(role) {
+    const appPort = await availablePort();
+    const child = spawn(process.execPath, ["server.mjs"], {
+      cwd: appDir,
+      env: {
+        ...process.env,
+        NODE_ENV: "production",
+        BITCRAFT_TEST: "true",
+        LEGAL_CONFIGURATION_CONFIRMED: "true",
+        ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
+        ENABLE_SERVER_POLLING: "false",
+        ENABLE_SCHEDULED_JOBS: "false",
+        ENABLE_RELAY_PROVIDER: "false",
+        ENABLE_RELAY_GLOBAL_CATALOG: "false",
+        ENABLE_DISCORD_OUTBOX_PROCESSING: "false",
+        ENABLE_DISCORD_NETWORK: "false",
+        BITCRAFT_DEPLOYMENT_MODE: "preview",
+        BITCRAFT_PROCESS_ROLE: role,
+        DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS: "1000",
+        ADMIN_SETUP_KEY: "maintenance-setup-key",
+        APP_HOST: "127.0.0.1",
+        APP_PORT: String(appPort),
+        BITCRAFT_LOCAL_DATA_DIR: dataDir,
+        DISCORD_API_ORIGIN: `http://127.0.0.1:${discordPort}`,
+        DISCORD_BOT_TOKEN: "must-not-send-token",
+        DISCORD_DELIVERY_MODE: "record",
+        DISCORD_SANDBOX_CHANNEL_ID: sandboxChannelId,
+        ENABLE_DISCORD_STARTUP: "false",
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    children.push(child);
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const origin = `http://127.0.0.1:${appPort}`;
+    try {
+      await waitForHealth(origin, child);
+    } catch (error) {
+      throw new Error(`${error.message}: ${stderr}`);
+    }
+    return { child, origin };
+  }
+
+  const bootstrap = await startServer("web");
+  await stop(bootstrap.child);
+  const dbPath = path.join(dataDir, "bitcraft-local.sqlite");
+  const queuedAt = new Date().toISOString();
+  const seedDb = new DatabaseSync(dbPath, { timeout: 5000 });
+  seedDb.prepare(`
+    INSERT INTO discord_notification_outbox (
+      source_key, event_type, summary, occurred_at, metadata_json, status,
+      attempts, next_attempt_at, created_at, updated_at
+    ) VALUES (?, 'app_update', 'Held repair outbox test', ?, '{}', 'pending', 0, ?, ?, ?)
+  `).run("repair:held-outbox", queuedAt, queuedAt, queuedAt, queuedAt);
+  seedDb.prepare(`
+    INSERT INTO discord_notification_outbox (
+      source_key, event_type, summary, occurred_at, metadata_json, status,
+      attempts, next_attempt_at, locked_at, created_at, updated_at
+    ) VALUES (?, 'canonical_cutover', 'Interrupted canonical delivery', ?, '{}', 'sending', 1, ?, ?, ?, ?)
+  `).run("repair:held-canonical", queuedAt, queuedAt, queuedAt, queuedAt, queuedAt);
+  seedDb.close();
+
+  const maintenance = await startServer("all");
+  const setup = await fetch(`${maintenance.origin}/api/local/admin/setup`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: maintenance.origin },
+    body: JSON.stringify({
+      username: "admin",
+      password: "correct horse battery",
+      setupKey: "maintenance-setup-key",
+    }),
+  });
+  assert.equal(setup.status, 200);
+  const auth = await setup.json();
+  const cookie = setup.headers.get("set-cookie").split(";")[0];
+  const settingsDb = new DatabaseSync(dbPath, { timeout: 5000 });
+  settingsDb.prepare(`
+    INSERT INTO app_settings (key, value, updated_at)
+    VALUES ('discord_json', ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(JSON.stringify({
+    enabled: true,
+    applicationId: "1511277824525471826",
+    publicKey: "a".repeat(64),
+    channelId: sandboxChannelId,
+  }), new Date().toISOString());
+  settingsDb.close();
+  const manual = await fetch(`${maintenance.origin}/api/local/admin/discord/test`, {
+    method: "POST",
+    headers: {
+      cookie,
+      origin: maintenance.origin,
+      "content-type": "application/json",
+      "x-csrf-token": auth.csrfToken,
+    },
+    body: JSON.stringify({ kind: "basic" }),
+  });
+  assert.notEqual(manual.status, 200);
+  assert.equal(discordRequests.length, 0);
+  const interaction = await fetch(`${maintenance.origin}/api/discord/interactions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(interaction.status, 503);
+  assert.match((await interaction.json()).error, /disabled during maintenance/i);
+
+  await new Promise((resolve) => setTimeout(resolve, 1600));
+  const checkDb = new DatabaseSync(dbPath, { readOnly: true });
+  const held = checkDb.prepare(`
+    SELECT source_key, status, attempts, response_json, last_error
+    FROM discord_notification_outbox
+    WHERE source_key IN ('repair:held-outbox', 'repair:held-canonical')
+    ORDER BY source_key
+  `).all().map((row) => ({ ...row }));
+  checkDb.close();
+  assert.deepEqual(held, [
+    {
+      source_key: "repair:held-canonical",
+      status: "sending",
+      attempts: 1,
+      response_json: null,
+      last_error: null,
+    },
+    {
+      source_key: "repair:held-outbox",
+      status: "pending",
+      attempts: 0,
+      response_json: null,
+      last_error: null,
+    },
+  ]);
+});

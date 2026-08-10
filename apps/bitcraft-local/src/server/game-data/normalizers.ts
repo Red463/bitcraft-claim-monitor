@@ -431,12 +431,15 @@ export function normalizeRegionalClaims(options: {
   claimRows: unknown[];
   localRows: unknown[];
   claimTypeRows: unknown[];
+  claimTechRows: unknown[];
+  claimTechDescriptionRows: unknown[];
   usernameRows: unknown[];
 }) {
   const regionId = decimalString(options.regionId, "regional claims region id");
   const warnings: string[] = [];
   const localById = new Map<string, WireRecord>();
-  const tierByBuildingId = new Map<string, number>();
+  const learnedTechIdsByClaimId = new Map<string, string[]>();
+  const tierByTechId = new Map<string, number>();
   const usernameById = new Map<string, string>();
 
   for (const [index, value] of options.localRows.entries()) {
@@ -450,14 +453,29 @@ export function normalizeRegionalClaims(options: {
       throw error;
     }
   }
-  for (const [index, value] of options.claimTypeRows.entries()) {
+  for (const [index, value] of options.claimTechRows.entries()) {
     try {
-      const row = record(value, `Regional building_claim_desc row ${index}`);
-      const buildingId = decimalString(
-        row.buildingId ?? row.building_id,
-        `Regional building_claim_desc row ${index} building id`,
+      const row = record(value, `Regional claim_tech_state row ${index}`);
+      const claimId = decimalString(
+        row.entityId ?? row.entity_id,
+        `Regional claim_tech_state row ${index} entity id`,
       );
-      tierByBuildingId.set(buildingId, integer(row.tier, `Regional building_claim_desc ${buildingId} tier`));
+      learnedTechIdsByClaimId.set(
+        claimId,
+        (Array.isArray(row.learned) ? row.learned : []).map((techId) => decimalString(
+          techId,
+          `Regional claim_tech_state ${claimId} learned technology id`,
+        )),
+      );
+    } catch (error) {
+      throw error;
+    }
+  }
+  for (const [index, value] of options.claimTechDescriptionRows.entries()) {
+    try {
+      const row = record(value, `Regional claim_tech_desc row ${index}`);
+      const techId = decimalString(row.id, `Regional claim_tech_desc row ${index} technology id`);
+      tierByTechId.set(techId, integer(row.tier, `Regional claim_tech_desc ${techId} tier`));
     } catch (error) {
       throw error;
     }
@@ -491,17 +509,17 @@ export function normalizeRegionalClaims(options: {
         row.ownerBuildingEntityId ?? row.owner_building_entity_id,
         `Regional claim ${entityId} owner building id`,
       );
+      if (ownerPlayerEntityId === "0" || row.neutral === true) continue;
       const local = localById.get(entityId);
       if (!local) warnings.push(`Regional claim ${entityId} has no claim_local_state row.`);
       const ownerPlayerUsername = usernameById.get(ownerPlayerEntityId) || null;
       if (!ownerPlayerUsername) {
         missingOwnerUsernameCount += 1;
       }
-      const buildingDescriptionId = local
-        ? decimalString(
-            local.buildingDescriptionId ?? local.building_description_id,
-            `Regional claim ${entityId} building description id`,
-          )
+      const learnedTechIds = learnedTechIdsByClaimId.get(entityId);
+      const learnedTechTiers = learnedTechIds?.map((techId) => tierByTechId.get(techId));
+      const tier = learnedTechTiers && learnedTechTiers.length > 0 && learnedTechTiers.every((value) => value != null)
+        ? Math.max(...learnedTechTiers as number[])
         : null;
       const location = local?.location == null
         ? null
@@ -520,7 +538,7 @@ export function normalizeRegionalClaims(options: {
         numTiles: local
           ? integer(local.numTiles ?? local.num_tiles, `Regional claim ${entityId} tile count`)
           : null,
-        tier: buildingDescriptionId ? tierByBuildingId.get(buildingDescriptionId) ?? null : null,
+        tier,
         locationX: location ? integer(location.x, `Regional claim ${entityId} location x`) : null,
         locationZ: location ? integer(location.z, `Regional claim ${entityId} location z`) : null,
         locationDimension: location

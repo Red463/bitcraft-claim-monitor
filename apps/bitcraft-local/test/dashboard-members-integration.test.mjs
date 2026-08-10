@@ -63,6 +63,62 @@ test("Dashboard renders the monitored region name resolved from the global catal
   }
 });
 
+test("Dashboard renders member locations from exact presence regions", async () => {
+  const appRoot = fileURLToPath(new URL("..", import.meta.url));
+  const vite = await createViteServer({
+    root: appRoot,
+    appType: "custom",
+    logLevel: "silent",
+    server: { middlewareMode: true },
+  });
+  try {
+    const [{ Dashboard }, { normalizeData }] = await Promise.all([
+      vite.ssrLoadModule("/src/pages/DashboardPage.tsx"),
+      vite.ssrLoadModule("/src/utils/normalize.ts"),
+    ]);
+    const cases = [
+      {
+        name: "catalog name",
+        player: { entityId: "1", username: "Catalog Member", signedIn: true, presenceRegionId: "19" },
+        regionStatus: [{ regionId: 19, regionName: "Zephra" }],
+        expected: "Zephra",
+      },
+      {
+        name: "region fallback",
+        player: { entityId: "2", username: "Fallback Member", signedIn: true, presenceRegionId: "19" },
+        regionStatus: [],
+        expected: "R19",
+      },
+      {
+        name: "unavailable location",
+        player: { entityId: "3", username: "Unavailable Member", signedIn: true, presenceRegionId: null },
+        regionStatus: [{ regionId: 19, regionName: "Zephra" }],
+        expected: "Location unavailable",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const data = normalizeData({
+        claim: { entityId: "55", name: "Timbersteel", regionId: 19 },
+        members: { members: [{ playerEntityId: testCase.player.entityId, userName: testCase.player.username }] },
+        players: { players: [testCase.player] },
+        region: { regions: testCase.regionStatus },
+      });
+      const markup = renderToStaticMarkup(React.createElement(Dashboard, {
+        data,
+        activity: [],
+        marketHistory: null,
+        dashboardSummary: null,
+        lastUpdated: null,
+        onNavigate() {},
+      }));
+      assert.match(markup, new RegExp(`<small>${testCase.expected}<\\/small>`), testCase.name);
+    }
+  } finally {
+    await vite.close();
+  }
+});
+
 test("clicking a DataTable header overrides the Members default row order", async () => {
   const appRoot = fileURLToPath(new URL("..", import.meta.url));
   const vite = await createViteServer({

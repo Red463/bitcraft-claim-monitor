@@ -168,7 +168,7 @@ test("ignores action rows that are cancelled, not craft, unsuccessful, or outsid
   });
 });
 
-test("falls back to the exact progressive craft owner when action evidence is ambiguous", () => {
+test("does not credit the craft owner when action evidence is ambiguous", () => {
   const attribution = resolveCraftContributionAttribution({
     event: { tag: "Transaction" },
     target,
@@ -185,14 +185,14 @@ test("falls back to the exact progressive craft owner when action evidence is am
   });
 
   assert.deepEqual(attribution, {
-    confidence: "owner_fallback",
-    contributorEntityId: "576460752388321942",
-    contributorName: "Ada",
-    evidenceKey: "owner:576460752388321942",
+    confidence: "unknown",
+    contributorEntityId: null,
+    contributorName: "Unknown contributor",
+    evidenceKey: "unknown:ambiguous",
   });
 });
 
-test("falls back to an exact owner id and displays the id when no name is available", () => {
+test("does not credit a craft owner with no caller or action evidence", () => {
   const attribution = resolveCraftContributionAttribution({
     event: { tag: "Transaction" },
     target,
@@ -203,10 +203,10 @@ test("falls back to an exact owner id and displays the id when no name is availa
   });
 
   assert.deepEqual(attribution, {
-    confidence: "owner_fallback",
-    contributorEntityId: "576460752388321999",
-    contributorName: "Player 576460752388321999",
-    evidenceKey: "owner:576460752388321999",
+    confidence: "unknown",
+    contributorEntityId: null,
+    contributorName: "Unknown contributor",
+    evidenceKey: "unknown:no-match",
   });
 });
 

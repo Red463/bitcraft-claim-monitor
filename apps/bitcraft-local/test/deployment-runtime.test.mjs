@@ -173,12 +173,12 @@ test("canonical worker exits when persisted Discord settings disable the gateway
 test("health exposes only safe deployment readiness metadata", () => {
   assert.ok(deploymentRuntime, "deployment runtime module must exist");
   const runtime = deploymentRuntime.resolveDeploymentRuntime(canonicalWorker);
-  assert.deepEqual(runtime.health({ version: "0.52.0-beta.1", buildSha: "0123456789ab" }), {
+  assert.deepEqual(runtime.health({ version: "0.53.0-beta.1", buildSha: "0123456789ab" }), {
     ok: true,
     deploymentMode: "canonical",
     canonicalOrigin: "https://app.timbersteeltrade.com",
     discordReady: true,
-    version: "0.52.0-beta.1",
+    version: "0.53.0-beta.1",
     buildSha: "0123456789ab",
   });
 });

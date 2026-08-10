@@ -12,7 +12,7 @@ export type MemberIdentity = {
 
 export type ContributionAttribution =
   | {
-      confidence: "authoritative" | "matched_action" | "owner_fallback";
+      confidence: "authoritative" | "matched_action";
       contributorEntityId: string;
       contributorName: string;
       evidenceKey: string;
@@ -132,6 +132,19 @@ function eligibleActionMember(
   fallbackWindow: bigint,
 ): { member: MemberIdentity; autoId: string } | null {
   const row = asRecord(rowValue);
+  const retainedPlayerId = row && bindingDecimal(row.playerEntityId);
+  if (row && retainedPlayerId) {
+    const buildingId = bindingDecimal(row.buildingEntityId);
+    const recipeId = bindingDecimal(row.recipeId);
+    const autoId = bindingDecimal(row.autoId);
+    const startTime = bindingTimestamp(row.startTimeMs);
+    const expiresAt = bindingTimestamp(row.expiresAtMs);
+    if (!buildingId || buildingId !== target.buildingEntityId || recipeId !== target.recipeId
+      || !autoId || startTime === null || expiresAt === null
+      || observedAt < startTime || observedAt > expiresAt) return null;
+    const member = members.get(retainedPlayerId);
+    return member ? { member, autoId } : null;
+  }
   if (!row || row.clientCancel !== false || row.wasConsumed !== false) return null;
   if (!rowHasTag(row, "actionType", "craft") || !rowHasTag(row, "lastActionResult", "success")) {
     return null;
@@ -187,29 +200,11 @@ function matchedActionAttribution(
   };
 }
 
-function ownerAttribution(
-  ownerEntityId: unknown,
-  members: readonly MemberIdentity[],
-  missingEvidenceKey = "unknown:no-exact-owner",
-): ContributionAttribution {
-  const entityId = bindingDecimal(ownerEntityId);
-  if (!entityId) return unknown(missingEvidenceKey);
-  const member = knownMembers(members).get(entityId);
-  const memberName = String(member?.name ?? "").trim();
-  return {
-    confidence: "owner_fallback",
-    contributorEntityId: entityId,
-    contributorName: memberName || `Player ${entityId}`,
-    evidenceKey: `owner:${entityId}`,
-  };
-}
-
 export function resolveCraftContributionAttribution(input: {
   event: unknown;
   target: ContributionTarget;
   members: readonly MemberIdentity[];
   actionRows: readonly unknown[];
-  craftOwnerEntityId?: unknown;
   observedAtMs: number;
   fallbackWindowMs?: number;
 }): ContributionAttribution {
@@ -219,7 +214,7 @@ export function resolveCraftContributionAttribution(input: {
     recipeId: decimalString(input.target.recipeId, "Recipe id"),
   };
   const event = asRecord(input.event);
-  if (!event) return ownerAttribution(input.craftOwnerEntityId, input.members);
+  if (!event) return unknown("unknown:no-match");
   if (normalizedEnumTag(event.tag) === "reducer") {
     const reducer = reducerAttribution(event, target, input.members);
     if (reducer.confidence === "authoritative") return reducer;
@@ -230,12 +225,10 @@ export function resolveCraftContributionAttribution(input: {
       input.observedAtMs,
       input.fallbackWindowMs ?? DEFAULT_FALLBACK_WINDOW_MS,
     );
-    return action.confidence === "matched_action"
-      ? action
-      : ownerAttribution(input.craftOwnerEntityId, input.members, reducer.evidenceKey);
+    return action.confidence === "matched_action" ? action : reducer;
   }
   if (normalizedEnumTag(event.tag) !== "transaction") {
-    return ownerAttribution(input.craftOwnerEntityId, input.members);
+    return unknown("unknown:no-match");
   }
   const attribution = matchedActionAttribution(
     input.actionRows,
@@ -244,7 +237,5 @@ export function resolveCraftContributionAttribution(input: {
     input.observedAtMs,
     input.fallbackWindowMs ?? DEFAULT_FALLBACK_WINDOW_MS,
   );
-  return attribution.confidence === "matched_action"
-    ? attribution
-    : ownerAttribution(input.craftOwnerEntityId, input.members, attribution.evidenceKey);
+  return attribution;
 }

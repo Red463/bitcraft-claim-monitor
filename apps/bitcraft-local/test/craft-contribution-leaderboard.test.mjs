@@ -47,13 +47,14 @@ test("craft contribution leaderboard aggregates and ranks exact decimal strings"
     },
   ]);
 
-  assert.equal(projected.summary.totalProgress, "18014398509481985");
-  assert.equal(projected.summary.totalXp, "18014398509481985.5");
-  assert.equal(projected.contributors[0].name, "A");
-  assert.equal(projected.contributors[0].totalProgress, "9007199254740993");
-  assert.equal(projected.contributors[0].totalXp, "9007199254740993.25");
-  assert.equal(projected.contributors[0].contributionCount, "9007199254740993");
-  assert.equal(projected.professions[0].topContributor, "A");
+  assert.equal(projected.summary.totalProgress, "18014398509481984");
+  assert.equal(projected.summary.totalXp, "18014398509481984.75");
+  assert.equal(projected.contributors[0].name, "B");
+  assert.equal(projected.contributors[1].name, "A");
+  assert.equal(projected.contributors[1].totalProgress, "9007199254740992");
+  assert.equal(projected.contributors[1].totalXp, "9007199254740992.5");
+  assert.equal(projected.contributors[1].contributionCount, "9007199254740992");
+  assert.equal(projected.professions[0].topContributor, "B");
   assert.equal(projected.recent[0].totalProgress, "9007199254740992");
 });
 

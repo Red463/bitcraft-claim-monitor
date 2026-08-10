@@ -112,7 +112,7 @@ const REQUIRED_COLUMNS = Object.freeze({
 });
 
 // Generated from the selected-table shapes at live source build 15950d6f7f34 and
-// target schema 0.52.0-beta.1. Each description covers ordered columns (declared
+// target schema 0.53.0-beta.1. Each description covers ordered columns (declared
 // type, computed affinity, nullability, default, PK position), FKs, every index/unique constraint,
 // normalized CHECK-bearing table SQL, and triggers. The sole source compatibility
 // exception normalizes market_deal_watches.last_baseline_average REAL or TEXT.
@@ -1878,3 +1878,18 @@ export function applyCanonicalCutoverManifest(
   }
   return completePostCommit(manifest, markerPath, pendingMarkerPath, recovery, durability, stagedBranding, false);
 }
+
+// Narrowly exported for repair tools that must share the canonical cutover's
+// security-sensitive validation semantics instead of maintaining copies.
+export {
+  IMAGE_TYPES as CANONICAL_CUTOVER_IMAGE_TYPES,
+  assertCleanIntegrity as assertCanonicalCutoverSqliteIntegrity,
+  databaseLogicalFingerprint as canonicalCutoverDatabaseLogicalFingerprint,
+  comparePaths as canonicalCutoverComparePaths,
+  guardedExistingOrPlannedDirectory as canonicalCutoverGuardedExistingOrPlannedDirectory,
+  guardedExistingPath as canonicalCutoverGuardedExistingPath,
+  guardedPlannedFilePath as canonicalCutoverGuardedPlannedFilePath,
+  pathContains as canonicalCutoverPathContains,
+  sha256 as canonicalCutoverSha256,
+  sha256File as canonicalCutoverSha256File,
+};

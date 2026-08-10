@@ -270,6 +270,13 @@ export function Empires({
   const [inactiveDays, setInactiveDays] = usePersistedState("empires.inactiveDays", "14");
   const [selectedWatchtowerEmpire, setSelectedWatchtowerEmpire] = usePersistedState("empires.watchtowerEmpire", "all");
   const [watchtowerRiskOnly, setWatchtowerRiskOnly] = usePersistedState("empires.watchtowerRiskOnly", false);
+  const [recentSiegeOutcomesExpanded, setRecentSiegeOutcomesExpanded] = React.useState(() => {
+    try {
+      return window.localStorage.getItem("bitcraft:empires:recent-siege-outcomes-expanded") === "true";
+    } catch {
+      return false;
+    }
+  });
   const regions = useActiveRegions(monitoredRegionId, monitoredClaimId, activeRegionScopeKey);
   const [overview, setOverview] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: true, error: null });
   const [watchtowers, setWatchtowers] = React.useState<{ data: AnyRecord | null; loading: boolean; error: string | null }>({ data: null, loading: false, error: null });
@@ -281,6 +288,14 @@ export function Empires({
   React.useEffect(() => {
     if (regions.length && !regions.some((region) => region.regionId === regionId)) setRegionId(initialRegion);
   }, [initialRegion, regionId, regions, setRegionId]);
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem("bitcraft:empires:recent-siege-outcomes-expanded", String(recentSiegeOutcomesExpanded));
+    } catch {
+      // Storage can be blocked without affecting the dashboard.
+    }
+  }, [recentSiegeOutcomesExpanded]);
 
   React.useEffect(() => {
     if (currentTab !== "overview") return;
@@ -496,33 +511,39 @@ export function Empires({
           {watchtowers.error ? <AsyncState kind="error" title="Unable to refresh claimed watchtowers" detail={watchtowers.error} compact /> : null}
           {watchtowers.data?.stale ? <AsyncState kind="stale" title="Showing last-good watchtower data" detail={staleRelayDetail(watchtowers.data)} compact /> : null}
           {Array.isArray(watchtowers.data?.errors) && watchtowers.data.errors.length ? <div className="warning-card">Some empire tower scans failed: {watchtowers.data.errors.slice(0, 3).join("; ")}</div> : null}
-          <section className="dashboard-card siege-outcomes-panel" aria-labelledby="recent-siege-outcomes-title">
+          <section className={`dashboard-card siege-outcomes-panel${recentSiegeOutcomesExpanded ? "" : " collapsed"}`} aria-labelledby="recent-siege-outcomes-title">
             <div className="panel-head">
               <strong id="recent-siege-outcomes-title"><Shield size={15} /> Recent Siege Outcomes</strong>
-              <span>{formatNumber(recentSiegeOutcomes.length)} proven</span>
+              <button type="button" className="toolbar-button siege-outcomes-toggle" aria-expanded={recentSiegeOutcomesExpanded} aria-controls="recent-siege-outcomes-content" onClick={() => setRecentSiegeOutcomesExpanded((expanded) => !expanded)}>
+                {recentSiegeOutcomesExpanded ? "Hide" : "Show"} {formatNumber(recentSiegeOutcomes.length)} proven
+              </button>
             </div>
-            <p className="siege-availability-note">Successful and failed outcomes require exact paired Relay notifications. Cancellation is unavailable from Relay; unmatched terminal rows remain {unmatchedTerminalStatus}.</p>
-            {recentSiegeOutcomes.length ? (
-              <div className="siege-outcome-list">
-                {recentSiegeOutcomes.map((outcome) => {
-                  const attackerWon = outcome.outcome === "attacker_won";
-                  return (
-                    <article key={String(outcome.eventKey)}>
-                      <span className={`status-pill ${attackerWon ? "danger" : "good"}`}>
-                        {attackerWon ? "Attacker won" : "Defender won"}
-                      </span>
-                      <div>
-                        <strong>{outcome.watchtowerLabel ?? "Watchtower"}</strong>
-                        <small>{outcome.attackerEmpireName ?? "Unknown empire"} attacked {outcome.defenderEmpireName ?? "Unknown empire"}</small>
-                      </div>
-                      <time dateTime={String(outcome.occurredAt ?? "")}>{compactDate(outcome.occurredAt)}</time>
-                    </article>
-                  );
-                })}
+            {recentSiegeOutcomesExpanded ? (
+              <div id="recent-siege-outcomes-content">
+                <p className="siege-availability-note">Successful and failed outcomes require exact paired Relay notifications. Cancellation is unavailable from Relay; unmatched terminal rows remain {unmatchedTerminalStatus}.</p>
+                {recentSiegeOutcomes.length ? (
+                  <div className="siege-outcome-list">
+                    {recentSiegeOutcomes.map((outcome) => {
+                      const attackerWon = outcome.outcome === "attacker_won";
+                      return (
+                        <article key={String(outcome.eventKey)}>
+                          <span className={`status-pill ${attackerWon ? "danger" : "good"}`}>
+                            {attackerWon ? "Attacker won" : "Defender won"}
+                          </span>
+                          <div>
+                            <strong>{outcome.watchtowerLabel ?? "Watchtower"}</strong>
+                            <small>{outcome.attackerEmpireName ?? "Unknown empire"} attacked {outcome.defenderEmpireName ?? "Unknown empire"}</small>
+                          </div>
+                          <time dateTime={String(outcome.occurredAt ?? "")}>{compactDate(outcome.occurredAt)}</time>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="empty-state compact">No exact paired siege outcomes are available for this region yet.</div>
+                )}
               </div>
-            ) : (
-              <div className="empty-state compact">No exact paired siege outcomes are available for this region yet.</div>
-            )}
+            ) : null}
           </section>
           <section className="dashboard-card table-panel" data-tour="watchtower-card">
             <div className="panel-head watchtower-panel-head"><strong><RadioTower size={15} /> Claimed watchtowers</strong><span>{watchtowers.loading && showRefreshProgress ? "Refreshing..." : visibleTowerRows.length === towerRows.length ? `${formatNumber(towerRows.length)} shown` : `${formatNumber(visibleTowerRows.length)} of ${formatNumber(towerRows.length)} shown`}</span></div>

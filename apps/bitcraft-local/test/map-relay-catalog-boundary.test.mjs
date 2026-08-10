@@ -15,3 +15,12 @@ test("Map Resource Finder reads the continuously maintained Relay catalog", () =
   assert.doesNotMatch(server, /let mapCatalogCache|async function fetchMapCatalog/);
   assert.doesNotMatch(mapPage, /Loading resources from BitJita/);
 });
+
+test("Map Resource Finder preserves icon metadata and compound identity from the Relay catalog", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+
+  assert.match(mapPage, /itemType:\s*resource\.itemType/);
+  assert.match(mapPage, /itemId:\s*resource\.itemId/);
+  assert.match(mapPage, /iconAssetName:\s*resource\.iconAssetName/);
+  assert.match(mapPage, /<ItemIcon item=\{resourceIcon\} \/>/);
+});
