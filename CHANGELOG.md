@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.53.2-beta.2] - 2026-08-10
+
+### Changed
+
+- Simplified Craft Monitor contributor rows to show only who contributed, progress, and XP.
+
 ## [0.53.2-beta.1] - 2026-08-10
 
 ### Fixed
