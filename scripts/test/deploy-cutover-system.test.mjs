@@ -24,6 +24,7 @@ import test from "node:test";
 import {
   cutoverTableRowCount,
   createSystemCutoverOperations,
+  preparePrivacyLedgerForRuntime,
   validateCaddyTopology,
 } from "../../deploy/cutover-relay-production.mjs";
 import {
@@ -46,6 +47,25 @@ test("cutover verification treats an absent protected target table as its frozen
     assert.equal(cutoverTableRowCount(db, "source_only_rows"), 0);
   } finally {
     db.close();
+  }
+});
+
+test("cutover prepares the merged privacy ledger for the database service identity", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "cutover-ledger-runtime-"));
+  const databasePath = path.join(directory, "relay.sqlite");
+  const ledgerPath = path.join(directory, "privacy.jsonl");
+  try {
+    writeFileSync(databasePath, "database", { mode: 0o640 });
+    writeFileSync(ledgerPath, "ledger\n", { mode: 0o600 });
+    chmodSync(ledgerPath, 0o644);
+    const before = readFileSync(ledgerPath);
+    const result = preparePrivacyLedgerForRuntime({ databasePath, ledgerPath });
+    assert.deepEqual(readFileSync(ledgerPath), before);
+    const actualMode = statSync(ledgerPath).mode & 0o777;
+    if (process.platform !== "win32") assert.equal(actualMode, 0o600);
+    assert.equal(result.mode, actualMode);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

@@ -1148,6 +1148,15 @@ export function cutoverTableRowCount(db, table) {
   return Number(db.prepare(`SELECT COUNT(*) AS count FROM ${sqliteIdentifier(table)}`).get().count);
 }
 
+export function preparePrivacyLedgerForRuntime({ databasePath, ledgerPath }) {
+  const database = regularFile(databasePath, "Canonical Relay database");
+  regularFile(ledgerPath, "Canonical privacy ledger");
+  applyMetadata(ledgerPath, { mode: 0o600, uid: database.uid, gid: database.gid });
+  syncFile(ledgerPath);
+  syncDirectory(path.dirname(ledgerPath));
+  return fileIdentity(ledgerPath);
+}
+
 function databaseOperationalTotals(databasePath) {
   const db = new DatabaseSync(databasePath, { readOnly: true });
   const aggregate = (table, columns) => {
@@ -2416,7 +2425,11 @@ export function createSystemCutoverOperations({
     } finally {
       db.close();
     }
-    return { appliedVerification, integrity, operationalTotals, privacy, actualCounts, appliedMarker: fileIdentity(appliedMarker) };
+    const privacyLedgerRuntime = preparePrivacyLedgerForRuntime({
+      databasePath: paths.targetDatabasePath,
+      ledgerPath: paths.relayPrivacyLedger,
+    });
+    return { appliedVerification, integrity, operationalTotals, privacy, actualCounts, privacyLedgerRuntime, appliedMarker: fileIdentity(appliedMarker) };
   }
 
   async function seedReleaseAnnouncementMarker() {
