@@ -68,6 +68,11 @@ function createFixture(branding) {
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE repair_sequence_probe (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      value TEXT NOT NULL
+    );
+    INSERT INTO repair_sequence_probe (value) VALUES ('seed');
   `);
   if (branding !== undefined) {
     db.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES ('branding_json', ?, ?)")
@@ -160,10 +165,24 @@ function crashAfterRename(renameBoundary) {
 
 function crashAfterDatabaseCommit() {
   const real = createCanonicalCutoverDurability();
+  let crashed = false;
+  const unavailable = () => {
+    throw new Error("injected post-commit filesystem unavailable");
+  };
   return {
     ...real,
+    removePath(...args) {
+      if (crashed) return unavailable();
+      return real.removePath(...args);
+    },
+    renamePath(...args) {
+      if (crashed) return unavailable();
+      return real.renamePath(...args);
+    },
     writeMarker(markerPath, payload) {
+      if (crashed) return unavailable();
       if (payload.phase === "database-committed") {
+        crashed = true;
         throw new Error("injected crash after database commit");
       }
       return real.writeMarker(markerPath, payload);
@@ -541,18 +560,10 @@ test("retry finalizes a committed database after interruption before its phase m
   writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
   writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
   assert.equal(dryRun(fixture).status, 0);
-  const real = createCanonicalCutoverDurability();
-  const interrupted = {
-    ...real,
-    writeMarker(markerPath, payload) {
-      if (payload.phase === "database-committed") {
-        throw new Error("injected crash after database commit");
-      }
-      return real.writeMarker(markerPath, payload);
-    },
-  };
-
-  assert.throws(() => directApply(fixture, { durability: interrupted }), /injected crash after database commit/i);
+  assert.throws(
+    () => directApply(fixture, { durability: crashAfterDatabaseCommit() }),
+    /injected crash after database commit/i,
+  );
   assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
   const retried = apply(fixture);
   assert.equal(retried.status, 0, retried.stderr);
@@ -585,6 +596,45 @@ test("unrelated offline database mutation is rejected in every pending recovery 
       assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
       assert.equal(existsSync(`${fixture.manifestPath}.applied`), false);
     });
+  }
+});
+
+test("sqlite_sequence and journal mode drift are rejected in every pending recovery phase", async (context) => {
+  const phases = [
+    ["backup renamed", () => crashAfterRename(1)],
+    ["assets installed", () => crashAfterRename(2)],
+    ["database committed", () => crashAfterDatabaseCommit()],
+  ];
+  const mutations = [
+    ["sqlite_sequence", (db) => {
+      db.prepare("UPDATE sqlite_sequence SET seq = seq + 100 WHERE name = 'repair_sequence_probe'").run();
+    }],
+    ["journal mode", (db) => {
+      assert.equal(String(db.prepare("PRAGMA journal_mode = WAL").get().journal_mode).toLowerCase(), "wal");
+    }],
+  ];
+  for (const [mutationLabel, mutate] of mutations) {
+    for (const [phaseLabel, interruptedDurability] of phases) {
+      await context.test(`${mutationLabel} after ${phaseLabel}`, (subContext) => {
+        const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+        subContext.after(() => fixture.cleanup());
+        writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+        writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
+        assert.equal(dryRun(fixture).status, 0);
+        assert.throws(() => directApply(fixture, { durability: interruptedDurability() }));
+        assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+
+        const changed = new DatabaseSync(fixture.databasePath);
+        mutate(changed);
+        changed.close();
+
+        const retried = apply(fixture);
+        assert.notEqual(retried.status, 0);
+        assert.match(retried.stderr, /database.*(?:pre-state|post-state|fingerprint)|neither.*state/i);
+        assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+        assert.equal(existsSync(`${fixture.manifestPath}.applied`), false);
+      });
+    }
   }
 });
 
@@ -808,6 +858,42 @@ test("an active foreign WAL writer is refused before publication", (context) => 
   }
   assert.deepEqual(readBranding(fixture.databasePath), { logo: asset("logo", "png", "image/png") });
   assert.equal(existsSync(`${fixture.manifestPath}.applying`), false);
+});
+
+test("a foreign idle WAL connection writing after COMMIT is detected before marker publication", (context) => {
+  const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+  context.after(() => fixture.cleanup());
+  writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+  writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
+  const setup = new DatabaseSync(fixture.databasePath);
+  setup.exec("PRAGMA journal_mode = WAL");
+  setup.close();
+  assert.equal(dryRun(fixture).status, 0);
+  const foreign = new DatabaseSync(fixture.databasePath, { timeout: 0 });
+  let driftInjected = false;
+  const openDatabase = (databasePath) => {
+    const db = new DatabaseSync(databasePath, { timeout: 0 });
+    return {
+      close: db.close.bind(db),
+      exec(sql) {
+        const result = db.exec(sql);
+        if (String(sql).trim().toUpperCase() === "COMMIT" && !driftInjected) {
+          foreign.prepare("UPDATE app_settings SET value = 'post-commit-drift' WHERE key = 'sentinel'").run();
+          driftInjected = true;
+        }
+        return result;
+      },
+      prepare: db.prepare.bind(db),
+    };
+  };
+  try {
+    assert.throws(() => directApply(fixture, { openDatabase }), /post-state|fingerprint|database changed/i);
+  } finally {
+    foreign.close();
+  }
+  assert.equal(driftInjected, true);
+  assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+  assert.equal(existsSync(`${fixture.manifestPath}.applied`), false);
 });
 
 test("unrelated database drift immediately before BEGIN IMMEDIATE is refused under lock", (context) => {

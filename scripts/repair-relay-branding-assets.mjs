@@ -225,12 +225,32 @@ function repairedTargetFiles(assets) {
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
+function databaseInternalState(db) {
+  const sequenceTable = db.prepare(
+    "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'sqlite_sequence'",
+  ).get();
+  return {
+    journalMode: String(db.prepare("PRAGMA journal_mode").get().journal_mode).toLowerCase(),
+    sqliteSequence: sequenceTable
+      ? db.prepare("SELECT name, seq FROM sqlite_sequence ORDER BY name").all()
+        .map((row) => ({ name: String(row.name), sequence: String(row.seq) }))
+      : null,
+  };
+}
+
+function repairDatabaseFingerprint(db, projectedTables = {}) {
+  return sha256(canonicalJson({
+    internal: databaseInternalState(db),
+    logical: canonicalCutoverDatabaseLogicalFingerprint(db, projectedTables),
+  }));
+}
+
 function projectedPostDatabaseFingerprint(db, brandingRow, assets) {
-  if (brandingRow.rowCount !== 1) return canonicalCutoverDatabaseLogicalFingerprint(db);
+  if (brandingRow.rowCount !== 1) return repairDatabaseFingerprint(db);
   const repairedValue = canonicalJson(repairedBranding({ assets }));
   const projectedSettings = db.prepare("SELECT * FROM app_settings ORDER BY rowid").all()
     .map((row) => String(row.key) === "branding_json" ? { ...row, value: repairedValue } : row);
-  return canonicalCutoverDatabaseLogicalFingerprint(db, { app_settings: projectedSettings });
+  return repairDatabaseFingerprint(db, { app_settings: projectedSettings });
 }
 
 function manifestSelection(unsigned) {
@@ -262,7 +282,7 @@ function inspectRepair({ archivePath, databasePath, manifestPath }) {
     db.exec("BEGIN");
     assertCleanIntegrity(db);
     brandingRow = readBrandingRow(db);
-    databaseFingerprint = canonicalCutoverDatabaseLogicalFingerprint(db);
+    databaseFingerprint = repairDatabaseFingerprint(db);
     journalMode = String(db.prepare("PRAGMA journal_mode").get().journal_mode).toLowerCase();
     const unsupportedTypes = Object.keys(brandingRow.branding)
       .filter((type) => !ASSET_TYPES.includes(type));
@@ -501,7 +521,7 @@ function verifyAppliedRepair(manifest, manifestPath, paths, activeDurability, op
       throw new Error("Applied branding repair database metadata does not match the manifest");
     }
     assertCleanIntegrity(db);
-    if (canonicalCutoverDatabaseLogicalFingerprint(db) !== manifest.database.postStateFingerprint) {
+    if (repairDatabaseFingerprint(db) !== manifest.database.postStateFingerprint) {
       throw new Error("Applied branding repair database changed after finalization");
     }
     db.exec("ROLLBACK");
@@ -550,7 +570,7 @@ function recoverPendingRepair(manifest, manifestPath, paths, activeDurability, o
     transactionOpen = true;
     state = readBrandingState(db);
     assertCleanIntegrity(db);
-    currentFingerprint = canonicalCutoverDatabaseLogicalFingerprint(db);
+    currentFingerprint = repairDatabaseFingerprint(db);
     db.exec("ROLLBACK");
     transactionOpen = false;
   } catch (error) {
@@ -678,6 +698,7 @@ export function applyBrandingRepairManifest(
   const targetExisted = existsSync(manifest.brandingRoot);
   const recovery = { backupDirectory: paths.backupDirectory, stageDirectory, targetExisted };
   const db = openDatabase(resolvedDatabasePath);
+  let databaseCommitted = false;
   let transactionOpen = false;
   try {
     db.exec("PRAGMA foreign_keys = ON");
@@ -686,7 +707,7 @@ export function applyBrandingRepairManifest(
     }
     db.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
-    if (canonicalCutoverDatabaseLogicalFingerprint(db) !== manifest.database.preStateFingerprint) {
+    if (repairDatabaseFingerprint(db) !== manifest.database.preStateFingerprint) {
       throw new Error("Database changed since dry-run; refusing apply");
     }
     const brandingRow = readBrandingRow(db);
@@ -722,11 +743,28 @@ export function applyBrandingRepairManifest(
       throw new Error("Installed branding assets do not match the manifest");
     }
     assertCleanIntegrity(db);
-    if (canonicalCutoverDatabaseLogicalFingerprint(db) !== manifest.database.postStateFingerprint) {
+    if (repairDatabaseFingerprint(db) !== manifest.database.postStateFingerprint) {
       throw new Error("Branding repair produced an unexpected full database state");
     }
     db.exec("COMMIT");
     transactionOpen = false;
+    databaseCommitted = true;
+    db.exec("BEGIN IMMEDIATE");
+    transactionOpen = true;
+    if (repairDatabaseFingerprint(db) !== manifest.database.postStateFingerprint) {
+      throw new Error("Database changed after commit before final marker publication");
+    }
+    const result = finalizeCommittedRepair(
+      manifest,
+      resolvedManifestPath,
+      paths,
+      recovery,
+      activeDurability,
+    );
+    db.exec("ROLLBACK");
+    transactionOpen = false;
+    db.close();
+    return result;
   } catch (error) {
     const failures = [errorMessage(error)];
     if (transactionOpen) {
@@ -737,13 +775,13 @@ export function applyBrandingRepairManifest(
     try { db.close(); } catch (closeError) {
       failures.push(`database close failed: ${errorMessage(closeError)}`);
     }
-    if (existsSync(paths.pendingMarkerPath)) {
+    if (existsSync(paths.pendingMarkerPath) && !databaseCommitted) {
       try {
         recoverPendingRepair(manifest, resolvedManifestPath, paths, activeDurability, openDatabase);
       } catch (recoveryError) {
         failures.push(`recovery failed: ${errorMessage(recoveryError)}`);
       }
-    } else if (existsSync(stageDirectory)) {
+    } else if (!existsSync(paths.pendingMarkerPath) && existsSync(stageDirectory)) {
       try {
         activeDurability.removePath(stageDirectory, { recursive: true, force: true });
       } catch (cleanupError) {
@@ -751,12 +789,6 @@ export function applyBrandingRepairManifest(
       }
     }
     throw new Error(`Branding repair failed: ${failures.join("; ")}`);
-  }
-  db.close();
-  try {
-    return finalizeCommittedRepair(manifest, resolvedManifestPath, paths, recovery, activeDurability);
-  } catch (error) {
-    throw new Error(`Branding database commit completed; retry the exact manifest to finish recovery: ${errorMessage(error)}`);
   }
 }
 
