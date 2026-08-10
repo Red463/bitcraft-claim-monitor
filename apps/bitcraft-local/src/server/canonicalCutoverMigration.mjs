@@ -141,10 +141,20 @@ const SUPPORTED_SELECTED_SCHEMA_FINGERPRINTS = Object.freeze({
 });
 
 const SUPPORTED_SOURCE_MARKET_WATCH_SCHEMA_FINGERPRINT = "ce59495a91bf6c7079856af0693e36347c7fc22d43524f8439bb7c77779d6b3f";
-const SUPPORTED_SOURCE_USER_ACCOUNT_SCHEMA_FINGERPRINTS = new Set([
-  SUPPORTED_SELECTED_SCHEMA_FINGERPRINTS.user_accounts,
-  "cd591d6b3e2abe437a94bb467c8cb3ed5ac75346cbc0137e18c7b25ae39ecc7d",
-]);
+const SUPPORTED_SOURCE_SELECTED_SCHEMA_FINGERPRINTS = Object.freeze({
+  user_accounts: new Set([
+    SUPPORTED_SELECTED_SCHEMA_FINGERPRINTS.user_accounts,
+    "cd591d6b3e2abe437a94bb467c8cb3ed5ac75346cbc0137e18c7b25ae39ecc7d",
+  ]),
+  admin_users: new Set([
+    SUPPORTED_SELECTED_SCHEMA_FINGERPRINTS.admin_users,
+    "519dab3464692744db8f5a44f4f2e88bf0a57101eaa4dbb7117c4a1516dc44c7",
+  ]),
+  discord_youtube_channels: new Set([
+    SUPPORTED_SELECTED_SCHEMA_FINGERPRINTS.discord_youtube_channels,
+    "9bcf0d5a0908c9f18a0d7d14892ce8fb198d0321e1f35a0ee28030f9725c7511",
+  ]),
+});
 
 const ACCOUNT_FIELDS = REQUIRED_COLUMNS.user_accounts.filter((column) => column !== "id");
 const ADMIN_FIELDS = REQUIRED_COLUMNS.admin_users.filter((column) => column !== "id");
@@ -623,8 +633,9 @@ function assertSupportedSchema(db, label) {
     const expected = allowLegacyMarketAverage
       ? SUPPORTED_SOURCE_MARKET_WATCH_SCHEMA_FINGERPRINT
       : SUPPORTED_SELECTED_SCHEMA_FINGERPRINTS[table];
-    const supported = label === "Source" && table === "user_accounts"
-      ? SUPPORTED_SOURCE_USER_ACCOUNT_SCHEMA_FINGERPRINTS.has(actual)
+    const sourceFingerprints = label === "Source" ? SUPPORTED_SOURCE_SELECTED_SCHEMA_FINGERPRINTS[table] : null;
+    const supported = sourceFingerprints
+      ? sourceFingerprints.has(actual)
       : actual === expected;
     if (!supported) {
       throw new Error(`${label} database is unsupported: ${table} schema fingerprint does not match an explicitly supported shape`);

@@ -131,7 +131,7 @@ function insertSetting(db, key, value, updatedAt = "2026-08-01T00:00:00.000Z") {
   db.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)").run(key, value, updatedAt);
 }
 
-function createFixture({ liveSourceUserAccounts = false } = {}) {
+function createFixture({ liveSourceSchemas = false } = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), "canonical-cutover-"));
   const sourceDatabasePath = path.join(directory, "old.sqlite");
   const targetDatabasePath = path.join(directory, "relay.sqlite");
@@ -160,7 +160,7 @@ function createFixture({ liveSourceUserAccounts = false } = {}) {
   applySchemaBootstrap(target);
   addMigratedColumns(source);
   addMigratedColumns(target);
-  if (liveSourceUserAccounts) {
+  if (liveSourceSchemas) {
     source.exec(`
       PRAGMA foreign_keys = OFF;
       DROP TABLE user_accounts;
@@ -178,6 +178,30 @@ function createFixture({ liveSourceUserAccounts = false } = {}) {
         last_login_at TEXT
       , inactivity_warning_sent_at TEXT);
       CREATE INDEX idx_user_accounts_status ON user_accounts (character_status, last_login_at DESC);
+      DROP TABLE admin_users;
+      CREATE TABLE admin_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      , active INTEGER NOT NULL DEFAULT 1, last_login_at TEXT, role TEXT NOT NULL DEFAULT 'owner', discord_id TEXT, discord_username TEXT, discord_global_name TEXT, discord_avatar TEXT);
+      CREATE UNIQUE INDEX idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> '';
+      DROP TABLE discord_youtube_channels;
+      CREATE TABLE discord_youtube_channels (
+        channel_id TEXT PRIMARY KEY,
+        input TEXT NOT NULL,
+        title TEXT,
+        url TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_checked_at TEXT,
+        last_success_at TEXT,
+        last_error TEXT,
+        last_video_id TEXT,
+        last_video_title TEXT,
+        last_video_published_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      , discord_channel_id TEXT);
       PRAGMA foreign_keys = ON;
     `);
   }
@@ -597,8 +621,8 @@ test("dry-run writes a redacted manifest with an internally frozen privacy times
   }
 });
 
-test("dry-run accepts the exact live old-production user_accounts schema only as a source shape", () => {
-  const fixture = createFixture({ liveSourceUserAccounts: true });
+test("dry-run accepts the exact live old-production selected schemas only as source shapes", () => {
+  const fixture = createFixture({ liveSourceSchemas: true });
   try {
     const manifestPath = path.join(fixture.directory, "live-source-schema-manifest.json");
     const result = runScript(dryRunArguments(fixture, manifestPath));
