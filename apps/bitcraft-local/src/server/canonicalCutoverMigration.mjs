@@ -1878,3 +1878,17 @@ export function applyCanonicalCutoverManifest(
   }
   return completePostCommit(manifest, markerPath, pendingMarkerPath, recovery, durability, stagedBranding, false);
 }
+
+// Narrowly exported for repair tools that must share the canonical cutover's
+// security-sensitive validation semantics instead of maintaining copies.
+export {
+  IMAGE_TYPES as CANONICAL_CUTOVER_IMAGE_TYPES,
+  assertCleanIntegrity as assertCanonicalCutoverSqliteIntegrity,
+  comparePaths as canonicalCutoverComparePaths,
+  guardedExistingOrPlannedDirectory as canonicalCutoverGuardedExistingOrPlannedDirectory,
+  guardedExistingPath as canonicalCutoverGuardedExistingPath,
+  guardedPlannedFilePath as canonicalCutoverGuardedPlannedFilePath,
+  pathContains as canonicalCutoverPathContains,
+  sha256 as canonicalCutoverSha256,
+  sha256File as canonicalCutoverSha256File,
+};

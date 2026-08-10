@@ -1,19 +1,12 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
 import {
   chmodSync,
-  closeSync,
   copyFileSync,
   existsSync,
-  lstatSync,
   mkdtempSync,
-  openSync,
   readFileSync,
-  readSync,
   readdirSync,
-  realpathSync,
-  rmSync,
   statSync,
 } from "node:fs";
 import path from "node:path";
@@ -21,74 +14,35 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 import {
+  CANONICAL_CUTOVER_IMAGE_TYPES,
+  assertCanonicalCutoverSqliteIntegrity,
   canonicalJson,
+  canonicalCutoverComparePaths,
+  canonicalCutoverGuardedExistingOrPlannedDirectory,
+  canonicalCutoverGuardedExistingPath,
+  canonicalCutoverGuardedPlannedFilePath,
+  canonicalCutoverPathContains,
+  canonicalCutoverSha256,
+  canonicalCutoverSha256File,
   createCanonicalCutoverDurability,
 } from "../apps/bitcraft-local/src/server/canonicalCutoverMigration.mjs";
 
-const MANIFEST_VERSION = 1;
+const MANIFEST_VERSION = 2;
 const MAX_ASSET_BYTES = 1024 * 1024;
 const ASSET_TYPES = Object.freeze(["favicon", "logo"]);
-const IMAGE_TYPES = Object.freeze({
-  ".jpg": {
-    contentType: "image/jpeg",
-    magic: (bytes) => bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff,
-  },
-  ".png": {
-    contentType: "image/png",
-    magic: (bytes) => bytes.length >= 8
-      && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
-  },
-  ".webp": {
-    contentType: "image/webp",
-    magic: (bytes) => bytes.length >= 12
-      && bytes.subarray(0, 4).toString() === "RIFF"
-      && bytes.subarray(8, 12).toString() === "WEBP",
-  },
-});
+const IMAGE_TYPES = CANONICAL_CUTOVER_IMAGE_TYPES;
 const ALLOWED_BRANDING_FILE = /^(?:logo|favicon)\.(?:jpg|png|webp)$/;
 
 const durability = createCanonicalCutoverDurability();
 
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function sha256File(filePath) {
-  const descriptor = openSync(filePath, "r");
-  const hash = createHash("sha256");
-  const buffer = Buffer.allocUnsafe(1024 * 1024);
-  try {
-    let bytesRead;
-    while ((bytesRead = readSync(descriptor, buffer, 0, buffer.length, null)) > 0) {
-      hash.update(buffer.subarray(0, bytesRead));
-    }
-    return hash.digest("hex");
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
-function comparePaths(left, right) {
-  const normalize = (value) => process.platform === "win32" ? value.toLowerCase() : value;
-  return normalize(path.resolve(left)) === normalize(path.resolve(right));
-}
-
-function pathContains(root, candidate) {
-  const normalize = (value) => process.platform === "win32" ? value.toLowerCase() : value;
-  const relative = path.relative(normalize(path.resolve(root)), normalize(path.resolve(candidate)));
-  return relative === ""
-    || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
-}
+const sha256 = canonicalCutoverSha256;
+const sha256File = canonicalCutoverSha256File;
+const comparePaths = canonicalCutoverComparePaths;
+const pathContains = canonicalCutoverPathContains;
 
 function guardedExistingPath(inputPath, kind, label, { uniqueFile = false } = {}) {
-  const resolved = path.resolve(String(inputPath ?? ""));
-  if (!existsSync(resolved)) throw new Error(`${label} does not exist: ${resolved}`);
-  if (lstatSync(resolved).isSymbolicLink() || !comparePaths(realpathSync.native(resolved), resolved)) {
-    throw new Error(`${label} must not be or traverse a symlink`);
-  }
+  const resolved = canonicalCutoverGuardedExistingPath(inputPath, kind, label);
   const stats = statSync(resolved, { bigint: true });
-  if (kind === "file" && !stats.isFile()) throw new Error(`${label} must be a regular file`);
-  if (kind === "directory" && !stats.isDirectory()) throw new Error(`${label} must be a directory`);
   if (uniqueFile && stats.nlink !== 1n) {
     throw new Error(`${label} hard-link count must be exactly 1; found ${stats.nlink}`);
   }
@@ -96,21 +50,11 @@ function guardedExistingPath(inputPath, kind, label, { uniqueFile = false } = {}
 }
 
 function guardedPlannedFilePath(inputPath, label) {
-  const resolved = path.resolve(String(inputPath ?? ""));
-  const parent = guardedExistingPath(path.dirname(resolved), "directory", `${label} parent directory`);
-  const canonical = path.join(parent, path.basename(resolved));
-  if (!comparePaths(canonical, resolved)) throw new Error(`${label} must not traverse a symlink`);
-  if (existsSync(canonical)) throw new Error(`${label} must be a new file`);
-  return canonical;
+  return canonicalCutoverGuardedPlannedFilePath(inputPath, label);
 }
 
 function guardedExistingOrPlannedDirectory(inputPath, label) {
-  const resolved = path.resolve(String(inputPath ?? ""));
-  if (existsSync(resolved)) return guardedExistingPath(resolved, "directory", label);
-  const parent = guardedExistingPath(path.dirname(resolved), "directory", `${label} parent directory`);
-  const canonical = path.join(parent, path.basename(resolved));
-  if (!comparePaths(canonical, resolved)) throw new Error(`${label} must not traverse a symlink`);
-  return canonical;
+  return canonicalCutoverGuardedExistingOrPlannedDirectory(inputPath, label);
 }
 
 function assertDatabaseHasNoSidecars(databasePath) {
@@ -133,12 +77,7 @@ function assertPathsAreDisjoint({ archiveRoot, brandingRoot, databasePath, manif
 }
 
 function assertCleanIntegrity(db) {
-  const foreignKeys = db.prepare("PRAGMA foreign_key_check").all();
-  if (foreignKeys.length) throw new Error(`SQLite foreign_key_check failed with ${foreignKeys.length} row(s)`);
-  const integrity = db.prepare("PRAGMA integrity_check").all();
-  if (integrity.length !== 1 || integrity[0].integrity_check !== "ok") {
-    throw new Error(`SQLite integrity_check failed with ${integrity.length} result row(s)`);
-  }
+  return assertCanonicalCutoverSqliteIntegrity(db);
 }
 
 function parseJsonObject(value, label) {
@@ -172,6 +111,7 @@ function inspectArchiveAsset(type, configured, archiveRoot) {
       action: "clear",
       archiveRelativePath: null,
       configuredFilename: null,
+      filesystemIdentity: null,
       mediaType: null,
       sha256: null,
       size: 0,
@@ -210,6 +150,7 @@ function inspectArchiveAsset(type, configured, archiveRoot) {
     action: "clear",
     archiveRelativePath: configuredFilename,
     configuredFilename,
+    filesystemIdentity: null,
     mediaType: format?.contentType ?? (String(configured.contentType ?? "") || null),
     sha256: null,
     size: 0,
@@ -217,29 +158,39 @@ function inspectArchiveAsset(type, configured, archiveRoot) {
     updatedAt: timestampValid ? updatedAt : null,
     url: canonicalUrl,
   };
-  if (!metadataValid) return base;
   const candidate = path.resolve(archiveRoot, configuredFilename);
   if (!comparePaths(path.dirname(candidate), archiveRoot)) {
     throw new Error(`${type} branding archive path escapes the approved archive root`);
   }
   if (!existsSync(candidate)) return base;
   const archivePath = guardedExistingPath(candidate, "file", `Archived ${type} asset`, { uniqueFile: true });
-  const archiveSize = statSync(archivePath).size;
+  const archiveStats = statSync(archivePath, { bigint: true });
+  const filesystemIdentity = {
+    device: archiveStats.dev.toString(),
+    inode: archiveStats.ino.toString(),
+    linkCount: archiveStats.nlink.toString(),
+  };
+  const archiveSize = Number(archiveStats.size);
   const archiveHash = sha256File(archivePath);
-  if (!archiveSize || archiveSize > MAX_ASSET_BYTES) {
-    return { ...base, sha256: archiveHash, size: archiveSize };
-  }
-  const bytes = readFileSync(archivePath);
-  if (!format.magic(bytes)) return { ...base, sha256: archiveHash, size: archiveSize };
-  return {
+  const guardedBase = {
     ...base,
-    action: "restore",
+    filesystemIdentity,
     sha256: archiveHash,
     size: archiveSize,
   };
+  if (!metadataValid) return guardedBase;
+  if (!archiveSize || archiveSize > MAX_ASSET_BYTES) {
+    return guardedBase;
+  }
+  const bytes = readFileSync(archivePath);
+  if (!format.magic(bytes)) return guardedBase;
+  return {
+    ...guardedBase,
+    action: "restore",
+  };
 }
 
-function describeBrandingRoot(brandingRoot) {
+function describeBrandingRoot(brandingRoot, { includeFilesystemIdentity = false } = {}) {
   if (!existsSync(brandingRoot)) return [];
   guardedExistingPath(brandingRoot, "directory", "Live branding directory");
   return readdirSync(brandingRoot, { withFileTypes: true })
@@ -255,9 +206,30 @@ function describeBrandingRoot(brandingRoot) {
         `Live branding asset ${entry.name}`,
         { uniqueFile: true },
       );
-      const stats = statSync(filePath);
-      return { relativePath: entry.name, sha256: sha256File(filePath), size: stats.size };
+      const stats = statSync(filePath, { bigint: true });
+      return {
+        ...(includeFilesystemIdentity ? {
+          filesystemIdentity: {
+            device: stats.dev.toString(),
+            inode: stats.ino.toString(),
+            linkCount: stats.nlink.toString(),
+          },
+        } : {}),
+        relativePath: entry.name,
+        sha256: sha256File(filePath),
+        size: Number(stats.size),
+      };
     });
+}
+
+function repairedTargetFiles(assets) {
+  return assets.filter((entry) => entry.action === "restore")
+    .map((entry) => ({
+      relativePath: entry.configuredFilename,
+      sha256: entry.sha256,
+      size: entry.size,
+    }))
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
 function manifestSelection(unsigned) {
@@ -301,6 +273,7 @@ function inspectRepair({ archivePath, databasePath, manifestPath }) {
     clearActions: assets.filter((entry) => entry.action === "clear").length,
     restoreActions: assets.filter((entry) => entry.action === "restore").length,
   };
+  const postBrandingRaw = brandingRow.rowCount === 1 ? canonicalJson(repairedBranding({ assets })) : null;
   const stats = statSync(resolvedDatabasePath);
   const unsigned = {
     archiveRoot: resolvedArchiveRoot,
@@ -310,12 +283,14 @@ function inspectRepair({ archivePath, databasePath, manifestPath }) {
       brandingUpdatedAt: brandingRow.updatedAt,
       brandingValueSha256: brandingRow.raw == null ? null : sha256(brandingRow.raw),
       path: resolvedDatabasePath,
+      postBrandingValueSha256: postBrandingRaw == null ? null : sha256(postBrandingRaw),
       sha256: databaseHash,
       size: stats.size,
     },
     formatVersion: MANIFEST_VERSION,
     rowCounts,
-    targetFilesBefore: describeBrandingRoot(brandingRoot),
+    targetFilesAfter: repairedTargetFiles(assets),
+    targetFilesBefore: describeBrandingRoot(brandingRoot, { includeFilesystemIdentity: true }),
   };
   return { ...unsigned, selectionHash: manifestSelection(unsigned) };
 }
@@ -365,7 +340,7 @@ function repairedBranding(manifest) {
     }]));
 }
 
-function stageBranding(manifest) {
+function stageBranding(manifest, activeDurability) {
   const targetParent = guardedExistingPath(path.dirname(manifest.brandingRoot), "directory", "Branding parent directory");
   const stageDirectory = mkdtempSync(path.join(targetParent, ".relay-branding-repair-stage-"));
   if (existsSync(manifest.brandingRoot)) chmodSync(stageDirectory, statSync(manifest.brandingRoot).mode);
@@ -384,17 +359,265 @@ function stageBranding(manifest) {
       if (bytes.length !== asset.size || sha256(bytes) !== asset.sha256 || !format?.magic(bytes)) {
         throw new Error(`Archive ${asset.type} asset changed while staging`);
       }
-      durability.syncFile(stagePath);
+      activeDurability.syncFile(stagePath);
     }
-    durability.syncDirectory(stageDirectory);
+    activeDurability.syncDirectory(stageDirectory);
     return stageDirectory;
   } catch (error) {
-    rmSync(stageDirectory, { recursive: true, force: true });
+    try {
+      activeDurability.removePath(stageDirectory, { recursive: true, force: true });
+    } catch (cleanupError) {
+      throw new Error(`${error.message}; staging cleanup failed: ${cleanupError.message}`);
+    }
     throw error;
   }
 }
 
-function applyRepair({ archivePath, databasePath, manifestPath }) {
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function markerWithHash(payload) {
+  return { ...payload, markerHash: sha256(canonicalJson(payload)) };
+}
+
+function markerPath(manifestPath, suffix, label) {
+  const candidate = `${manifestPath}${suffix}`;
+  return existsSync(candidate)
+    ? guardedExistingPath(candidate, "file", label, { uniqueFile: true })
+    : canonicalCutoverGuardedPlannedFilePath(candidate, label, { allowExisting: true });
+}
+
+function recoveryPaths(manifestPath, manifest) {
+  return {
+    appliedMarkerPath: markerPath(manifestPath, ".applied", "Applied marker"),
+    backupDirectory: `${manifest.brandingRoot}.relay-branding-repair-backup-${manifest.selectionHash.slice(0, 16)}`,
+    pendingMarkerPath: markerPath(manifestPath, ".applying", "Pending marker"),
+  };
+}
+
+function pendingMarkerPayload(manifest, manifestPath, recovery, phase) {
+  return markerWithHash({
+    backupDirectory: recovery.backupDirectory,
+    brandingRoot: manifest.brandingRoot,
+    databasePath: manifest.database.path,
+    formatVersion: MANIFEST_VERSION,
+    manifestPath,
+    phase,
+    selectionHash: manifest.selectionHash,
+    stageDirectory: recovery.stageDirectory,
+    targetExisted: recovery.targetExisted,
+  });
+}
+
+function appliedMarkerPayload(manifest, manifestPath, databaseSha256) {
+  return markerWithHash({
+    brandingRoot: manifest.brandingRoot,
+    databasePath: manifest.database.path,
+    databaseSha256,
+    formatVersion: MANIFEST_VERSION,
+    manifestPath,
+    selectionHash: manifest.selectionHash,
+    state: "applied",
+  });
+}
+
+function readRepairMarker(markerPathValue, label) {
+  const marker = parseJsonObject(readFileSync(
+    guardedExistingPath(markerPathValue, "file", label, { uniqueFile: true }),
+    "utf8",
+  ), label);
+  const { markerHash, ...unsigned } = marker;
+  if (!/^[a-f0-9]{64}$/.test(String(markerHash ?? "")) || sha256(canonicalJson(unsigned)) !== markerHash) {
+    throw new Error(`${label} hash is invalid`);
+  }
+  return marker;
+}
+
+function assertMarkerBinding(marker, manifest, manifestPath, label) {
+  if (marker.formatVersion !== MANIFEST_VERSION
+    || marker.selectionHash !== manifest.selectionHash
+    || !comparePaths(marker.databasePath, manifest.database.path)
+    || !comparePaths(marker.brandingRoot, manifest.brandingRoot)
+    || !comparePaths(marker.manifestPath, manifestPath)) {
+    throw new Error(`${label} does not match the exact branding repair manifest`);
+  }
+}
+
+function readBrandingState(db) {
+  const row = readBrandingRow(db);
+  return {
+    row,
+    valueSha256: row.raw == null ? null : sha256(row.raw),
+  };
+}
+
+function targetMatches(brandingRoot, expected, { includeFilesystemIdentity = false } = {}) {
+  try {
+    return canonicalJson(describeBrandingRoot(brandingRoot, { includeFilesystemIdentity })) === canonicalJson(expected);
+  } catch {
+    return false;
+  }
+}
+
+function assertLiveBrandingPreState(manifest, targetExisted) {
+  const targetExistsNow = existsSync(manifest.brandingRoot);
+  const current = describeBrandingRoot(manifest.brandingRoot, { includeFilesystemIdentity: true });
+  if (targetExisted !== targetExistsNow
+    || canonicalJson(current) !== canonicalJson(manifest.targetFilesBefore)) {
+    throw new Error("Live branding directory changed since dry-run; refusing apply");
+  }
+}
+
+function assertStagePath(stageDirectory, brandingRoot) {
+  const parent = path.dirname(brandingRoot);
+  if (!comparePaths(path.dirname(stageDirectory), parent)
+    || !path.basename(stageDirectory).startsWith(".relay-branding-repair-stage-")) {
+    throw new Error("Pending marker stage path is outside the guarded branding staging namespace");
+  }
+}
+
+function verifyAppliedRepair(manifest, manifestPath, paths, activeDurability, openDatabase) {
+  const marker = readRepairMarker(paths.appliedMarkerPath, "Applied marker");
+  assertMarkerBinding(marker, manifest, manifestPath, "Applied marker");
+  assertDatabaseHasNoSidecars(manifest.database.path);
+  if (sha256File(manifest.database.path) !== marker.databaseSha256) {
+    throw new Error("Applied branding repair database changed after finalization");
+  }
+  const db = openDatabase(manifest.database.path, { readOnly: true });
+  try {
+    const state = readBrandingState(db);
+    if (state.row.rowCount !== manifest.rowCounts.brandingSettingRows
+      || state.valueSha256 !== manifest.database.postBrandingValueSha256) {
+      throw new Error("Applied branding repair database metadata does not match the manifest");
+    }
+    assertCleanIntegrity(db);
+  } finally {
+    db.close();
+  }
+  if (!existsSync(manifest.brandingRoot) || !targetMatches(manifest.brandingRoot, manifest.targetFilesAfter)) {
+    throw new Error("Applied branding repair assets do not match the manifest");
+  }
+  if (existsSync(paths.pendingMarkerPath)) {
+    activeDurability.removePath(paths.pendingMarkerPath, { force: true });
+  }
+  return { applied: true, recovered: true, rowCounts: manifest.rowCounts, selectionHash: manifest.selectionHash };
+}
+
+function recoverPendingRepair(manifest, manifestPath, paths, activeDurability, openDatabase) {
+  const marker = readRepairMarker(paths.pendingMarkerPath, "Pending marker");
+  assertMarkerBinding(marker, manifest, manifestPath, "Pending marker");
+  if (!["prepared", "backup-renamed", "assets-installed", "database-committed"].includes(marker.phase)) {
+    throw new Error("Pending marker phase is invalid");
+  }
+  if (!comparePaths(marker.backupDirectory, paths.backupDirectory)) {
+    throw new Error("Pending marker backup path does not match the manifest");
+  }
+  assertStagePath(marker.stageDirectory, manifest.brandingRoot);
+  assertDatabaseHasNoSidecars(manifest.database.path);
+  const db = openDatabase(manifest.database.path);
+  let transactionOpen = false;
+  let state;
+  try {
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec("BEGIN IMMEDIATE");
+    transactionOpen = true;
+    state = readBrandingState(db);
+    assertCleanIntegrity(db);
+    db.exec("ROLLBACK");
+    transactionOpen = false;
+  } catch (error) {
+    if (transactionOpen) {
+      try { db.exec("ROLLBACK"); } catch (rollbackError) {
+        throw new Error(`${errorMessage(error)}; recovery rollback failed: ${errorMessage(rollbackError)}`);
+      }
+    }
+    throw error;
+  } finally {
+    db.close();
+  }
+
+  const preDatabase = state.row.rowCount === manifest.rowCounts.brandingSettingRows
+    && state.valueSha256 === manifest.database.brandingValueSha256;
+  const postDatabase = state.row.rowCount === manifest.rowCounts.brandingSettingRows
+    && state.valueSha256 === manifest.database.postBrandingValueSha256;
+  const targetIsAfter = existsSync(manifest.brandingRoot)
+    && targetMatches(manifest.brandingRoot, manifest.targetFilesAfter);
+  const recoverAsPost = postDatabase && (!preDatabase || targetIsAfter);
+  try {
+    if (recoverAsPost) {
+      if (!targetIsAfter) throw new Error("Committed branding database has mismatched live assets");
+      if (existsSync(paths.backupDirectory)) {
+        activeDurability.removePath(paths.backupDirectory, { recursive: true, force: true });
+      }
+      if (existsSync(marker.stageDirectory)) {
+        activeDurability.removePath(marker.stageDirectory, { recursive: true, force: true });
+      }
+      assertDatabaseHasNoSidecars(manifest.database.path);
+      activeDurability.writeMarker(
+        paths.appliedMarkerPath,
+        appliedMarkerPayload(manifest, manifestPath, sha256File(manifest.database.path)),
+      );
+      activeDurability.removePath(paths.pendingMarkerPath, { force: true });
+      return { applied: true, recovered: true, rowCounts: manifest.rowCounts, selectionHash: manifest.selectionHash };
+    }
+    if (!preDatabase) throw new Error("Database is neither the manifest pre-state nor repaired post-state");
+    if (marker.targetExisted) {
+      if (existsSync(paths.backupDirectory)) {
+        if (!targetMatches(paths.backupDirectory, manifest.targetFilesBefore, { includeFilesystemIdentity: true })) {
+          throw new Error("Branding backup no longer matches the manifest pre-state");
+        }
+        if (existsSync(manifest.brandingRoot)) {
+          activeDurability.removePath(manifest.brandingRoot, { recursive: true, force: true });
+        }
+        activeDurability.renamePath(paths.backupDirectory, manifest.brandingRoot);
+      } else if (!existsSync(manifest.brandingRoot)
+        || !targetMatches(manifest.brandingRoot, manifest.targetFilesBefore, { includeFilesystemIdentity: true })) {
+        throw new Error("Original branding assets cannot be recovered from the pending state");
+      }
+    } else if (existsSync(manifest.brandingRoot)) {
+      activeDurability.removePath(manifest.brandingRoot, { recursive: true, force: true });
+    }
+    if (existsSync(marker.stageDirectory)) {
+      activeDurability.removePath(marker.stageDirectory, { recursive: true, force: true });
+    }
+    const restored = marker.targetExisted
+      ? existsSync(manifest.brandingRoot)
+        && targetMatches(manifest.brandingRoot, manifest.targetFilesBefore, { includeFilesystemIdentity: true })
+      : !existsSync(manifest.brandingRoot);
+    if (!restored) throw new Error("Branding pre-state recovery verification failed");
+    activeDurability.removePath(paths.pendingMarkerPath, { force: true });
+    return null;
+  } catch (error) {
+    throw new Error(`Branding recovery failed; pending marker retained for exact retry: ${errorMessage(error)}`);
+  }
+}
+
+function finalizeCommittedRepair(manifest, manifestPath, paths, recovery, activeDurability) {
+  activeDurability.writeMarker(
+    paths.pendingMarkerPath,
+    pendingMarkerPayload(manifest, manifestPath, recovery, "database-committed"),
+  );
+  if (existsSync(paths.backupDirectory)) {
+    activeDurability.removePath(paths.backupDirectory, { recursive: true, force: true });
+  }
+  if (existsSync(recovery.stageDirectory)) {
+    activeDurability.removePath(recovery.stageDirectory, { recursive: true, force: true });
+  }
+  assertDatabaseHasNoSidecars(manifest.database.path);
+  activeDurability.writeMarker(
+    paths.appliedMarkerPath,
+    appliedMarkerPayload(manifest, manifestPath, sha256File(manifest.database.path)),
+  );
+  activeDurability.removePath(paths.pendingMarkerPath, { force: true });
+  return { applied: true, rowCounts: manifest.rowCounts, selectionHash: manifest.selectionHash };
+}
+
+export function applyBrandingRepairManifest(
+  { archivePath, databasePath, manifestPath },
+  { activeDurability: suppliedDurability, durability: legacyDurability, openDatabase = (value, options = {}) => new DatabaseSync(value, options) } = {},
+) {
+  const activeDurability = suppliedDurability ?? legacyDurability ?? durability;
   const { manifest, resolved: resolvedManifestPath } = readManifest(manifestPath);
   const resolvedDatabasePath = guardedExistingPath(databasePath, "file", "Database", { uniqueFile: true });
   const resolvedArchiveRoot = guardedExistingPath(archivePath, "directory", "Approved archive root");
@@ -403,6 +626,14 @@ function applyRepair({ archivePath, databasePath, manifestPath }) {
     || !comparePaths(resolvedArchiveRoot, manifest.archiveRoot)) {
     throw new Error("Apply paths do not match the manifest");
   }
+  const paths = recoveryPaths(resolvedManifestPath, manifest);
+  if (existsSync(paths.appliedMarkerPath)) {
+    return verifyAppliedRepair(manifest, resolvedManifestPath, paths, activeDurability, openDatabase);
+  }
+  if (existsSync(paths.pendingMarkerPath)) {
+    const recovered = recoverPendingRepair(manifest, resolvedManifestPath, paths, activeDurability, openDatabase);
+    if (recovered) return recovered;
+  }
   const current = inspectRepair({
     archivePath: resolvedArchiveRoot,
     databasePath: resolvedDatabasePath,
@@ -410,23 +641,23 @@ function applyRepair({ archivePath, databasePath, manifestPath }) {
   });
   assertSameManifest(manifest, current);
 
-  const stageDirectory = stageBranding(manifest);
-  const backupDirectory = `${manifest.brandingRoot}.relay-branding-repair-backup-${manifest.selectionHash.slice(0, 16)}`;
-  if (existsSync(backupDirectory)) {
-    rmSync(stageDirectory, { recursive: true, force: true });
+  const stageDirectory = stageBranding(manifest, activeDurability);
+  if (existsSync(paths.backupDirectory)) {
+    activeDurability.removePath(stageDirectory, { recursive: true, force: true });
     throw new Error("Branding repair backup directory already exists");
   }
   const targetExisted = existsSync(manifest.brandingRoot);
-  const db = new DatabaseSync(resolvedDatabasePath);
+  const recovery = { backupDirectory: paths.backupDirectory, stageDirectory, targetExisted };
+  const db = openDatabase(resolvedDatabasePath);
   let transactionOpen = false;
-  let installed = false;
   try {
     db.exec("PRAGMA foreign_keys = ON");
     if (Number(db.prepare("PRAGMA foreign_keys").get().foreign_keys) !== 1) {
       throw new Error("SQLite foreign keys could not be enabled");
     }
-    db.exec("BEGIN EXCLUSIVE");
+    db.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
+    assertDatabaseHasNoSidecars(resolvedDatabasePath);
     if (sha256File(resolvedDatabasePath) !== manifest.database.sha256) {
       throw new Error("Database changed since dry-run; refusing apply");
     }
@@ -435,40 +666,67 @@ function applyRepair({ archivePath, databasePath, manifestPath }) {
       || (brandingRow.raw == null ? null : sha256(brandingRow.raw)) !== manifest.database.brandingValueSha256) {
       throw new Error("branding_json changed since dry-run; refusing apply");
     }
+    const finalAssets = ASSET_TYPES.map((type) => inspectArchiveAsset(type, brandingRow.branding[type], resolvedArchiveRoot));
+    if (canonicalJson(finalAssets) !== canonicalJson(manifest.assets)) {
+      throw new Error("Archive inputs changed since dry-run; refusing apply");
+    }
+    assertLiveBrandingPreState(manifest, targetExisted);
+    activeDurability.writeMarker(
+      paths.pendingMarkerPath,
+      pendingMarkerPayload(manifest, resolvedManifestPath, recovery, "prepared"),
+    );
     if (brandingRow.rowCount === 1) {
       db.prepare("UPDATE app_settings SET value = ? WHERE key = 'branding_json'")
         .run(canonicalJson(repairedBranding(manifest)));
     }
-    if (targetExisted) durability.renamePath(manifest.brandingRoot, backupDirectory);
-    durability.renamePath(stageDirectory, manifest.brandingRoot);
-    installed = true;
+    assertLiveBrandingPreState(manifest, targetExisted);
+    if (targetExisted) activeDurability.renamePath(manifest.brandingRoot, paths.backupDirectory);
+    activeDurability.writeMarker(
+      paths.pendingMarkerPath,
+      pendingMarkerPayload(manifest, resolvedManifestPath, recovery, "backup-renamed"),
+    );
+    activeDurability.renamePath(stageDirectory, manifest.brandingRoot);
+    activeDurability.writeMarker(
+      paths.pendingMarkerPath,
+      pendingMarkerPayload(manifest, resolvedManifestPath, recovery, "assets-installed"),
+    );
+    if (!targetMatches(manifest.brandingRoot, manifest.targetFilesAfter)) {
+      throw new Error("Installed branding assets do not match the manifest");
+    }
     assertCleanIntegrity(db);
     db.exec("COMMIT");
     transactionOpen = false;
   } catch (error) {
+    const failures = [errorMessage(error)];
     if (transactionOpen) {
-      try { db.exec("ROLLBACK"); } catch {}
+      try { db.exec("ROLLBACK"); } catch (rollbackError) {
+        failures.push(`rollback failed: ${errorMessage(rollbackError)}`);
+      }
     }
-    if (installed && existsSync(manifest.brandingRoot)) {
-      try { durability.removePath(manifest.brandingRoot, { recursive: true, force: true }); } catch {}
+    try { db.close(); } catch (closeError) {
+      failures.push(`database close failed: ${errorMessage(closeError)}`);
+    }
+    if (existsSync(paths.pendingMarkerPath)) {
+      try {
+        recoverPendingRepair(manifest, resolvedManifestPath, paths, activeDurability, openDatabase);
+      } catch (recoveryError) {
+        failures.push(`recovery failed: ${errorMessage(recoveryError)}`);
+      }
     } else if (existsSync(stageDirectory)) {
-      try { durability.removePath(stageDirectory, { recursive: true, force: true }); } catch {}
+      try {
+        activeDurability.removePath(stageDirectory, { recursive: true, force: true });
+      } catch (cleanupError) {
+        failures.push(`staging recovery failed: ${errorMessage(cleanupError)}`);
+      }
     }
-    if (targetExisted && existsSync(backupDirectory) && !existsSync(manifest.brandingRoot)) {
-      try { durability.renamePath(backupDirectory, manifest.brandingRoot); } catch {}
-    }
-    throw error;
-  } finally {
-    db.close();
+    throw new Error(`Branding repair failed: ${failures.join("; ")}`);
   }
-  if (targetExisted && existsSync(backupDirectory)) {
-    durability.removePath(backupDirectory, { recursive: true, force: true });
+  db.close();
+  try {
+    return finalizeCommittedRepair(manifest, resolvedManifestPath, paths, recovery, activeDurability);
+  } catch (error) {
+    throw new Error(`Branding database commit completed; retry the exact manifest to finish recovery: ${errorMessage(error)}`);
   }
-  return {
-    applied: true,
-    rowCounts: manifest.rowCounts,
-    selectionHash: manifest.selectionHash,
-  };
 }
 
 function parseArguments(argv) {
@@ -509,7 +767,7 @@ export function runBrandingRepairCli(argv) {
       selectionHash: manifest.selectionHash,
     };
   }
-  return applyRepair(options);
+  return applyBrandingRepairManifest(options);
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
