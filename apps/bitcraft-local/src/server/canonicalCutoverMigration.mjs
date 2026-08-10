@@ -784,7 +784,10 @@ function adminMappings(source, target) {
       const discordId = optionalDecimal(row.discord_id, `${label} administrator Discord ID`);
       if (discordId && discordIds.has(discordId)) throw new Error(`${label} administrators contain duplicate Discord IDs`);
       if (discordId) discordIds.add(discordId);
-      if (!/^scrypt:[0-9a-fA-F]+:[0-9a-fA-F]{128}$/.test(String(row.password_hash ?? ""))) {
+      const passwordHash = String(row.password_hash ?? "");
+      const supportedPasswordHash = /^scrypt:[0-9a-fA-F]+:[0-9a-fA-F]{128}$/.test(passwordHash)
+        || (passwordHash === "discord-oauth-admin" && Boolean(discordId));
+      if (!supportedPasswordHash) {
         throw new Error(`${label} administrator ${row.id} has an unsupported password hash`);
       }
       if (!ADMIN_ROLES.has(String(row.role))) throw new Error(`${label} administrator ${row.id} has an unsupported role`);

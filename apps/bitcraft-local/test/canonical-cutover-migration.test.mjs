@@ -624,10 +624,28 @@ test("dry-run writes a redacted manifest with an internally frozen privacy times
 test("dry-run accepts the exact live old-production selected schemas only as source shapes", () => {
   const fixture = createFixture({ liveSourceSchemas: true });
   try {
+    mutateDatabase(fixture.sourceDatabasePath, (db) => {
+      db.prepare("UPDATE admin_users SET password_hash = 'discord-oauth-admin'").run();
+    });
     const manifestPath = path.join(fixture.directory, "live-source-schema-manifest.json");
     const result = runScript(dryRunArguments(fixture, manifestPath));
     assert.equal(result.status, 0, result.stderr);
     assert.match(JSON.parse(readFileSync(manifestPath, "utf8")).selectionHash, /^[a-f0-9]{64}$/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("dry-run accepts the Discord OAuth administrator sentinel only for a linked Discord identity", () => {
+  const fixture = createFixture();
+  try {
+    mutateDatabase(fixture.sourceDatabasePath, (db) => {
+      db.prepare("UPDATE admin_users SET password_hash = 'discord-oauth-admin' WHERE id = 10").run();
+      db.prepare("UPDATE admin_users SET password_hash = 'discord-oauth-admin', discord_id = NULL WHERE id = 20").run();
+    });
+    const result = runScript(dryRunArguments(fixture, path.join(fixture.directory, "invalid-oauth-admin.json")));
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Source administrator 20 has an unsupported password hash/);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
