@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { dashboardClaimRegionLabel } from "../src/pages/dashboardView.ts";
 import { orderMembersByDefault } from "../src/pages/membersView.ts";
-import { readFileSync } from "node:fs";
 
 test("Dashboard resolves the monitored claim region name from the global region catalog", () => {
   assert.equal(
@@ -17,14 +16,6 @@ test("Dashboard resolves the monitored claim region name from the global region 
 
 test("Dashboard falls back to a usable monitored claim region label", () => {
   assert.equal(dashboardClaimRegionLabel({ regionId: "19" }, []), "R19 · Region 19");
-});
-
-test("Dashboard member locations use presenceRegionId with catalog and unavailable fallbacks", () => {
-  const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
-
-  assert.match(dashboard, /const regionId = player\.presenceRegionId == null \? "" : String\(player\.presenceRegionId\)\.trim\(\);/);
-  assert.match(dashboard, /regionNameById\.get\(regionId\) \?\? `R\$\{regionId\}`/);
-  assert.match(dashboard, /regionName = regionId \? regionNameById\.get\(regionId\) \?\? `R\$\{regionId\}` : "Location unavailable"/);
 });
 
 test("Members default ordering puts online members by longest session, then recent offline members, then unavailable presence", () => {

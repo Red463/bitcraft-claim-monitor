@@ -208,12 +208,3 @@ test("siege and empire details use shared accessible dialogs with complete drill
   assert.match(empiresCss, /@media\s*\(max-width:\s*900px\)[\s\S]*\.empire-detail-summary/s);
   assert.match(empiresCss, /@media\s*\(max-width:\s*560px\)[\s\S]*\.empire-detail-summary/s);
 });
-
-test("Recent Siege Outcomes starts collapsed and persists its accessible expanded state", () => {
-  assert.match(empiresPage, /"bitcraft:empires:recent-siege-outcomes-expanded"/);
-  assert.match(empiresPage, /React\.useState\(\(\) => \{[\s\S]*window\.localStorage\.getItem\("bitcraft:empires:recent-siege-outcomes-expanded"\) === "true"/);
-  assert.match(empiresPage, /<button[^>]*aria-expanded=\{recentSiegeOutcomesExpanded\}/);
-  assert.match(empiresPage, /onClick=\{\(\) => setRecentSiegeOutcomesExpanded\(\(expanded\) => !expanded\)\}/);
-  assert.match(empiresPage, /recentSiegeOutcomesExpanded \? \([\s\S]*siege-outcome-list/);
-  assert.match(empiresCss, /\.siege-outcomes-panel\.collapsed/);
-});

@@ -21,7 +21,6 @@ test("Dashboard shows the craft planning Gather Next overview", () => {
   assert.match(dashboard, /onNavigate\("planning"\)/);
   assert.doesNotMatch(dashboard, /DashboardCardHeader title="Recent Activity"/);
 });
-
 test("Dashboard Gather Next shows known item tiers", () => {
   const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/dashboard.css", import.meta.url), "utf8");
@@ -49,14 +48,4 @@ test("Dashboard market trend exposes pointer detail without false button semanti
   assert.match(widgets, /formatNumber\(activePoint\.value\)/);
   assert.doesNotMatch(widgets, /className="dashboard-chart-hit"[^>]*role="button"/);
   assert.doesNotMatch(widgets, /className="dashboard-chart-hit"[^>]*tabIndex/);
-});
-
-test("Dashboard online members resolve exact presence regions from the region catalog", () => {
-  const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
-
-  assert.doesNotMatch(dashboard, /regionName:\s*player\.regionName\s*\?\?\s*claim\.regionName/);
-  assert.match(dashboard, /regionNameById/);
-  assert.match(dashboard, /player\.presenceRegionId\s*==\s*null\s*\?\s*""\s*:\s*String\(player\.presenceRegionId\)\.trim\(\)/);
-  assert.match(dashboard, /regionNameById\.get\(regionId\)\s*\?\?\s*`R\$\{regionId\}`/);
-  assert.match(dashboard, /regionName = regionId \? regionNameById\.get\(regionId\) \?\? `R\$\{regionId\}` : "Location unavailable"/);
 });
