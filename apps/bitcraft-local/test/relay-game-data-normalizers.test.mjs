@@ -477,7 +477,7 @@ test("regional empires fail closed when a current siege node has no owner identi
   }), /Regional empire node 300 empire id must be a non-negative decimal integer string/);
 });
 
-test("regional claims join live claim state, local metrics, tier, owner, and coordinates exactly", () => {
+test("regional claims rank only player settlements by their exact learned Relay technology", () => {
   assert.deepEqual(normalizeRegionalClaims({
     regionId: "19",
     claimRows: [{
@@ -492,6 +492,18 @@ test("regional claims join live claim state, local metrics, tier, owner, and coo
       ownerBuildingEntityId: 1369094286778488968n,
       name: "Neighbour",
       neutral: false,
+    }, {
+      entityId: 1369094286777412592n,
+      ownerPlayerEntityId: 0n,
+      ownerBuildingEntityId: 1369094286778488969n,
+      name: "Fernwick",
+      neutral: false,
+    }, {
+      entityId: 1369094286777412593n,
+      ownerPlayerEntityId: 1224979098736429553n,
+      ownerBuildingEntityId: 1369094286778488970n,
+      name: "Amberfall",
+      neutral: true,
     }],
     localRows: [{
       entityId: 1369094286777412590n,
@@ -502,6 +514,11 @@ test("regional claims join live claim state, local metrics, tier, owner, and coo
       location: { x: -42, z: 77, dimension: 0n },
     }],
     claimTypeRows: [{ buildingId: 6020, tier: 6, radius: 7, claimType: { tag: "Settlement" } }],
+    claimTechRows: [{
+      entityId: 1369094286777412590n,
+      learned: [101n, 102n],
+    }],
+    claimTechDescriptionRows: [{ id: 101n, tier: 2 }, { id: 102n, tier: 4 }],
     usernameRows: [{
       entityId: 1224979098736429551n,
       username: "Red463",
@@ -522,7 +539,7 @@ test("regional claims join live claim state, local metrics, tier, owner, and coo
         supplies: 12345,
         treasury: "987654",
         numTiles: 49,
-        tier: 6,
+        tier: 4,
         locationX: -42,
         locationZ: 77,
         locationDimension: "0",
@@ -554,6 +571,8 @@ test("regional claims reject malformed required rows instead of replacing last-g
     claimRows: [{ entityId: "not-an-id" }],
     localRows: [],
     claimTypeRows: [],
+    claimTechRows: [],
+    claimTechDescriptionRows: [],
     usernameRows: [],
   }), /claim_state row 0 entity id must be a non-negative decimal integer string/);
 
@@ -562,6 +581,8 @@ test("regional claims reject malformed required rows instead of replacing last-g
     claimRows: [],
     localRows: [{ entityId: "not-an-id" }],
     claimTypeRows: [],
+    claimTechRows: [],
+    claimTechDescriptionRows: [],
     usernameRows: [],
   }), /claim_local_state row 0 entity id must be a non-negative decimal integer string/);
 });
