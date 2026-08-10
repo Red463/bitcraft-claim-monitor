@@ -33,6 +33,7 @@ import {
 
 const CLAIM_ID = "1369094286777412590";
 const SCRIPT_PATH = fileURLToPath(new URL("../../../scripts/repair-relay-canonical-cutover.mjs", import.meta.url));
+const MIGRATION_MODULE_PATH = fileURLToPath(new URL("../src/server/canonicalCutoverMigration.mjs", import.meta.url));
 
 const PNG_BYTES = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const WEBP_BYTES = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBP")]);
@@ -45,6 +46,13 @@ const PRIVACY_RECORD_OCCURRED_AT = new Date(PRIVACY_TEST_BASE_MS - 24 * 60 * 60 
 const PRIVACY_RECORD_EXPIRES_AT = new Date(PRIVACY_TEST_BASE_MS + 89 * 24 * 60 * 60 * 1000).toISOString();
 const PRIVACY_EXPIRED_AT = new Date(PRIVACY_TEST_BASE_MS - 60 * 1000).toISOString();
 const PRIVACY_EXPIRED_OCCURRED_AT = new Date(PRIVACY_TEST_BASE_MS - (89 * 24 * 60 * 60 * 1000) - 60 * 1000).toISOString();
+
+test("canonical database fingerprints stream files instead of buffering whole SQLite databases", () => {
+  const source = readFileSync(MIGRATION_MODULE_PATH, "utf8");
+  assert.match(source, /function sha256File\(/);
+  assert.match(source, /readSync\(/);
+  assert.doesNotMatch(source, /sha256\(readFileSync\((?:options\.(?:source|target)DatabasePath|paths\.sourcePath)\)\)/);
+});
 
 const SOURCE_SETTINGS = Object.freeze({
   claim_id: CLAIM_ID,
