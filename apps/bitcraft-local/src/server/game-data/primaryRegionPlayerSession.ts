@@ -16,6 +16,7 @@ import {
   resolveCraftContributionAttribution,
   type MemberIdentity,
 } from "./craftContributionAttribution.ts";
+import { CraftActionEvidenceCache } from "./craftActionEvidence.ts";
 import { multiplyDecimalByInteger } from "./exactDecimal.ts";
 import { equalitySubscriptionQueries } from "./publicCraftRegionSession.ts";
 
@@ -305,6 +306,10 @@ export class RelayPrimaryRegionPlayerSession {
   readonly #tableChanged = () => this.#queueSnapshot();
   readonly #bankChanged = () => this.#queueBankInventoryRefresh();
   readonly #contributionChanged = (...args: unknown[]) => { void this.#handleContributionUpdate(args); };
+  #craftActionEvidence = new CraftActionEvidenceCache();
+  readonly #playerActionInserted = (...args: unknown[]) => this.#recordCraftAction(args, false);
+  readonly #playerActionUpdated = (...args: unknown[]) => this.#recordCraftAction(args, false);
+  readonly #playerActionDeleted = (...args: unknown[]) => this.#recordCraftAction(args, true);
   #health = {
     connected: false,
     applied: false,
@@ -313,7 +318,6 @@ export class RelayPrimaryRegionPlayerSession {
     lastContributionAt: null as string | null,
     authoritativeContributions: 0,
     matchedActionContributions: 0,
-    ownerFallbackContributions: 0,
     unattributedContributions: 0,
     ambiguousContributionMatches: 0,
     deduplicatedContributions: 0,
@@ -358,6 +362,11 @@ export class RelayPrimaryRegionPlayerSession {
       .onConnect((connection) => {
         this.#health.connected = true;
         this.#health.lastError = null;
+        this.#craftActionEvidence = new CraftActionEvidenceCache();
+        const observedAtMs = this.#now().getTime();
+        for (const row of connection.db.playerActionState.iter()) {
+          this.#craftActionEvidence.upsert(row, observedAtMs);
+        }
         this.#baseSubscription = connection.subscriptionBuilder()
           .onApplied(() => {
             this.#attachTableListeners(connection);
@@ -548,6 +557,9 @@ export class RelayPrimaryRegionPlayerSession {
     connection.db.inventoryState.onUpdate?.(this.#tableChanged);
     connection.db.inventoryState.onDelete?.(this.#tableChanged);
     connection.db.progressiveActionState.onUpdate?.(this.#contributionChanged);
+    connection.db.playerActionState.onInsert?.(this.#playerActionInserted);
+    connection.db.playerActionState.onUpdate?.(this.#playerActionUpdated);
+    connection.db.playerActionState.onDelete?.(this.#playerActionDeleted);
     this.#listenersAttached = true;
   }
 
@@ -565,6 +577,9 @@ export class RelayPrimaryRegionPlayerSession {
     this.#connection.db.inventoryState.removeOnUpdate?.(this.#tableChanged);
     this.#connection.db.inventoryState.removeOnDelete?.(this.#tableChanged);
     this.#connection.db.progressiveActionState.removeOnUpdate?.(this.#contributionChanged);
+    this.#connection.db.playerActionState.removeOnInsert?.(this.#playerActionInserted);
+    this.#connection.db.playerActionState.removeOnUpdate?.(this.#playerActionUpdated);
+    this.#connection.db.playerActionState.removeOnDelete?.(this.#playerActionDeleted);
     this.#listenersAttached = false;
   }
 
@@ -598,7 +613,6 @@ export class RelayPrimaryRegionPlayerSession {
       if (progressDelta <= 0n) return;
       const observedAt = this.#now();
       const occurredAt = observedAt.toISOString();
-      const craftOwnerEntityId = current.ownerEntityId;
       const attribution = resolveCraftContributionAttribution({
         event,
         target,
@@ -606,8 +620,7 @@ export class RelayPrimaryRegionPlayerSession {
           this.#config.members,
           [...this.#connection!.db.userState.iter()],
         ),
-        actionRows: [...this.#connection!.db.playerActionState.iter()],
-        craftOwnerEntityId,
+        actionRows: this.#craftActionEvidence.matches(target, observedAt.getTime()),
         observedAtMs: observedAt.getTime(),
       });
       if (attribution.confidence === "unknown") {
@@ -637,21 +650,12 @@ export class RelayPrimaryRegionPlayerSession {
         const oldest = this.#contributionSourceKeys.values().next().value;
         if (oldest !== undefined) this.#contributionSourceKeys.delete(oldest);
       }
-      let contributorName = attribution.contributorName;
-      if (
-        attribution.confidence === "owner_fallback"
-        && contributorName === `Player ${attribution.contributorEntityId}`
-        && this.#resolvePlayerName
-      ) {
-        contributorName = await this.#resolvePlayerName(attribution.contributorEntityId);
-      }
+      const contributorName = attribution.contributorName;
       this.#health.lastContributionAt = occurredAt;
       if (attribution.confidence === "authoritative") {
         this.#health.authoritativeContributions += 1;
-      } else if (attribution.confidence === "matched_action") {
+      } else {
         this.#health.matchedActionContributions += 1;
-      } else if (attribution.confidence === "owner_fallback") {
-        this.#health.ownerFallbackContributions += 1;
       }
       const result = this.#onContribution({
         claimId: this.#config.claimId,
@@ -668,7 +672,6 @@ export class RelayPrimaryRegionPlayerSession {
           contributorName,
           attributionConfidence: attribution.confidence,
           evidenceKey: attribution.evidenceKey,
-          craftOwnerEntityId,
           observedSince: occurredAt,
           profession: target.profession,
           craftLabel: target.craftLabel,
@@ -688,6 +691,13 @@ export class RelayPrimaryRegionPlayerSession {
     } catch (error) {
       this.#recordError(error);
     }
+  }
+
+  #recordCraftAction(args: unknown[], deleted: boolean): void {
+    const row = args.at(-1);
+    const observedAtMs = this.#now().getTime();
+    if (deleted) this.#craftActionEvidence.retainDeleted(row, observedAtMs);
+    else this.#craftActionEvidence.upsert(row, observedAtMs);
   }
 
   #tables(connection: BindingConnection): CachedTable[] {

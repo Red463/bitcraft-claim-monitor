@@ -546,6 +546,10 @@ test("primary-region session attributes authoritative and matched-action updates
     autoId: 94296n,
     entityId: 504403158356601680n,
   });
+  fake.state.callbacks.get("player-action:insert")(
+    {},
+    playerActionRows[1],
+  );
   update(
     { event: { tag: "Transaction" } },
     { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16104 },
@@ -570,8 +574,8 @@ test("primary-region session attributes authoritative and matched-action updates
 
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(contributions.length, 4);
-  assert.deepEqual(resolvedPlayerIds, ["504403158356601680"]);
+  assert.equal(contributions.length, 2);
+  assert.deepEqual(resolvedPlayerIds, []);
   assert.deepEqual(
     contributions.map(({ sourceKey, data }) => ({
       sourceKey,
@@ -601,24 +605,6 @@ test("primary-region session attributes authoritative and matched-action updates
         contributedProgress: "24",
         contributedXp: "42.24",
       },
-      {
-        sourceKey: "relay-craft-contribution:19:owner_fallback:owner:576460752388321942:1369094287428103662:16104:16128",
-        contributorEntityId: "576460752388321942",
-        contributorName: "Mosswick",
-        attributionConfidence: "owner_fallback",
-        observedSince: "2026-08-02T12:54:09.000Z",
-        contributedProgress: "24",
-        contributedXp: "42.24",
-      },
-      {
-        sourceKey: "relay-craft-contribution:19:owner_fallback:owner:504403158356601680:1369094287428103662:16128:16152",
-        contributorEntityId: "504403158356601680",
-        contributorName: "Relay Grace",
-        attributionConfidence: "owner_fallback",
-        observedSince: "2026-08-02T12:54:09.000Z",
-        contributedProgress: "24",
-        contributedXp: "42.24",
-      },
     ],
   );
   assert.deepEqual(session.health(), {
@@ -629,9 +615,8 @@ test("primary-region session attributes authoritative and matched-action updates
     lastContributionAt: "2026-08-02T12:54:09.000Z",
     authoritativeContributions: 1,
     matchedActionContributions: 1,
-    ownerFallbackContributions: 2,
-    unattributedContributions: 0,
-    ambiguousContributionMatches: 0,
+    unattributedContributions: 2,
+    ambiguousContributionMatches: 2,
     deduplicatedContributions: 1,
   });
 
@@ -696,6 +681,18 @@ test("primary-region session replaces contribution queries without replacing bas
   assert.equal(fake.state.disconnected, false);
 
   const update = fake.state.callbacks.get("progressive-action:update");
+  fake.state.callbacks.get("player-action:insert")({}, {
+    autoId: 1n,
+    entityId: 101n,
+    startTime: 1785664800000n,
+    duration: 100n,
+    target: 7001n,
+    recipeId: 3001n,
+    actionType: { tag: "Craft" },
+    lastActionResult: { tag: "Success" },
+    clientCancel: false,
+    wasConsumed: false,
+  });
   update(
     { event: { tag: "Transaction", id: "transaction-overlap" } },
     { entityId: 9002n, ownerEntityId: 101n, progress: 10 },
