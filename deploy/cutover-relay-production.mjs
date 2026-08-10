@@ -1142,6 +1142,12 @@ function sqliteIdentifier(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
 
+export function cutoverTableRowCount(db, table) {
+  const present = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(String(table));
+  if (!present) return 0;
+  return Number(db.prepare(`SELECT COUNT(*) AS count FROM ${sqliteIdentifier(table)}`).get().count);
+}
+
 function databaseOperationalTotals(databasePath) {
   const db = new DatabaseSync(databasePath, { readOnly: true });
   const aggregate = (table, columns) => {
@@ -2400,7 +2406,7 @@ export function createSystemCutoverOperations({
     const db = new DatabaseSync(paths.targetDatabasePath, { readOnly: true });
     try {
       for (const [table, expected] of Object.entries(state.migration.manifest.tableCounts)) {
-        const count = Number(db.prepare(`SELECT COUNT(*) AS count FROM "${table.replaceAll('"', '""')}"`).get().count);
+        const count = cutoverTableRowCount(db, table);
         actualCounts[table] = count;
         if (expected.excluded && !["production_contributions", "production_contribution_events"].includes(table)
           && count !== Number(expected.target)) {

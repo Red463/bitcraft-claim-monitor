@@ -22,6 +22,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import {
+  cutoverTableRowCount,
   createSystemCutoverOperations,
   validateCaddyTopology,
 } from "../../deploy/cutover-relay-production.mjs";
@@ -36,6 +37,17 @@ import {
 
 const REVISION = "a".repeat(40);
 const MANIFEST_HASH = "b".repeat(64);
+
+test("cutover verification treats an absent protected target table as its frozen zero count", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec("CREATE TABLE present_rows (id INTEGER PRIMARY KEY); INSERT INTO present_rows VALUES (1), (2);");
+    assert.equal(cutoverTableRowCount(db, "present_rows"), 2);
+    assert.equal(cutoverTableRowCount(db, "source_only_rows"), 0);
+  } finally {
+    db.close();
+  }
+});
 
 function hostRoute(host, handles, match = {}) {
   return { match: [{ host: [host], ...match }], handle: [{ handler: "subroute", routes: handles.map((handle) => ({ handle: [handle] })) }] };
