@@ -67,6 +67,13 @@ export class CraftActionEvidenceCache {
   #actions = new Map<string, RetainedCraftAction>();
 
   upsert(row: unknown, observedAtMs: number): void {
+    const updated = record(row);
+    if (updated?.wasConsumed === true && updated.clientCancel === false
+      && tag(updated, "actionType") === "craft"
+      && tag(updated, "lastActionResult") === "success") {
+      this.prune(observedAtMs);
+      return;
+    }
     this.#store(row, observedAtMs);
   }
 

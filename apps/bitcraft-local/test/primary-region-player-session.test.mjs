@@ -424,7 +424,7 @@ test("primary-region session filters member, settlement, and Town Bank state bef
   assert.equal(fake.state.callbacks.size, 0);
 });
 
-test("primary-region session attributes authoritative and matched-action updates without owner rows and deduplicates evidence", async () => {
+test("primary-region session attributes reducer and consumed-action updates without owner rows and deduplicates evidence", async () => {
   assert.ok(sessionModule, "primary-region player session module must exist");
   const playerActionRows = [{
     autoId: 94295n,
@@ -536,11 +536,18 @@ test("primary-region session attributes authoritative and matched-action updates
     { entityId: 1369094287428103662n, progress: 16056 },
     { entityId: 1369094287428103662n, progress: 16080 },
   );
+  fake.state.callbacks.get("player-action:update")(
+    { event: { tag: "Transaction" } },
+    playerActionRows[0],
+    { ...playerActionRows[0], wasConsumed: true },
+  );
   update(
     { event: { tag: "Transaction" } },
     { entityId: 1369094287428103662n, progress: 16080 },
     { entityId: 1369094287428103662n, progress: 16104 },
   );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(contributions.length, 2, "consumed action evidence must remain available to the progress callback");
   playerActionRows.push({
     ...playerActionRows[0],
     autoId: 94296n,
