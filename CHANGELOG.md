@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.53.2-beta.1] - 2026-08-10
+
+### Fixed
+
+- Fixed Craft Monitor contribution attribution when Relay consumes a successful craft action in the same transaction as progress.
+
 ## [0.53.1-beta.1] - 2026-08-10
 
 ### Fixed
