@@ -61,3 +61,23 @@ test("invalid action updates invalidate prior evidence by Relay auto id", () => 
 
   assert.deepEqual(cache.matches(target, 1_050), []);
 });
+
+test("a consumed delete retains prior canonical action evidence through its expiry", () => {
+  const cache = new CraftActionEvidenceCache();
+  cache.upsert(action(), 1_001);
+  cache.retainDeleted(action({ wasConsumed: true }), 1_002);
+
+  assert.deepEqual(cache.matches(target, 1_050).map((row) => row.autoId), ["91"]);
+});
+
+test("cancelled and failed action rows invalidate evidence on updates and deletes", () => {
+  const cancelledUpdate = new CraftActionEvidenceCache();
+  cancelledUpdate.upsert(action(), 1_001);
+  cancelledUpdate.upsert(action({ clientCancel: true }), 1_002);
+  assert.deepEqual(cancelledUpdate.matches(target, 1_050), []);
+
+  const failedDelete = new CraftActionEvidenceCache();
+  failedDelete.upsert(action(), 1_001);
+  failedDelete.retainDeleted(action({ lastActionResult: { tag: "Failed" } }), 1_002);
+  assert.deepEqual(failedDelete.matches(target, 1_050), []);
+});

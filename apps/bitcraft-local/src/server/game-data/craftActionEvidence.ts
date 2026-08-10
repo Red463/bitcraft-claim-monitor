@@ -71,6 +71,15 @@ export class CraftActionEvidenceCache {
   }
 
   retainDeleted(row: unknown, observedAtMs: number): void {
+    this.prune(observedAtMs);
+    const deleted = record(row);
+    const autoId = decimal(deleted?.autoId);
+    if (!deleted || !autoId) return;
+    if (deleted.clientCancel === true || tag(deleted, "lastActionResult") !== "success") {
+      this.#actions.delete(autoId);
+      return;
+    }
+    if (deleted.wasConsumed === true) return;
     this.#store(row, observedAtMs);
   }
 
