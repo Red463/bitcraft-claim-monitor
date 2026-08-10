@@ -24,6 +24,7 @@ import test from "node:test";
 import {
   cutoverTableRowCount,
   createSystemCutoverOperations,
+  LOCAL_CANONICAL_RETRY_ATTEMPTS,
   preparePrivacyLedgerForRuntime,
   validateCaddyTopology,
 } from "../../deploy/cutover-relay-production.mjs";
@@ -38,6 +39,10 @@ import {
 
 const REVISION = "a".repeat(40);
 const MANIFEST_HASH = "b".repeat(64);
+
+test("canonical local readiness allows two minutes for authoritative Relay generations", () => {
+  assert.equal(LOCAL_CANONICAL_RETRY_ATTEMPTS, 40);
+});
 
 test("cutover verification treats an absent protected target table as its frozen zero count", () => {
   const db = new DatabaseSync(":memory:");
