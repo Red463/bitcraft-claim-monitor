@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -657,10 +658,11 @@ test("metadata-invalid clear candidates remain path, identity, and hash guarded"
     const fixture = createFixture({ logo: asset("logo", "png", "image/webp") });
     subContext.after(() => fixture.cleanup());
     const candidate = path.join(fixture.archiveRoot, "logo.png");
+    const replacement = path.join(fixture.archiveRoot, "logo-replacement.png");
     writeFileSync(candidate, PNG_BYTES);
     assert.equal(dryRun(fixture).status, 0);
-    rmSync(candidate);
-    writeFileSync(candidate, PNG_BYTES);
+    writeFileSync(replacement, PNG_BYTES);
+    renameSync(replacement, candidate);
 
     const result = apply(fixture);
     assert.notEqual(result.status, 0);
