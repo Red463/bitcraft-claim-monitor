@@ -98,9 +98,9 @@ function reducerAttribution(
 ): ContributionAttribution {
   const value = asRecord(event.value);
   const reducer = value && asRecord(value.reducer);
-  const reducerValue = reducer && asRecord(reducer.value);
+  const reducerValue = reducer && asRecord(reducer.args ?? reducer.value);
   const request = reducerValue && asRecord(reducerValue.request);
-  const reducerTag = normalizedEnumTag(reducer?.tag);
+  const reducerTag = normalizedEnumTag(reducer?.name ?? reducer?.tag);
   if (!request || (reducerTag !== "craftcontinue" && reducerTag !== "craftcontinuestart")) {
     return unknown("unknown:no-match");
   }
