@@ -9,10 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.52.1-beta.1] - 2026-08-10
+
 ### Added
 
 - Added the Featurebase in-app messenger with a dark, right-aligned English launcher.
 - Added signed Featurebase identity for Discord users while preserving anonymous visitor support.
+- Added a guarded dry-run and manifest workflow for repairing broken production branding assets without accepting unsafe paths or stale database state.
+
+### Changed
+
+- Made Recent Siege Outcomes collapsed by default and retained each user's preferred expanded state.
 
 ### Security
 
@@ -22,6 +29,10 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 - Fixed a blank page caused by a circular production bundle dependency after the Featurebase integration.
 - Allowed the Featurebase Messenger resources required by the production Content Security Policy.
+- Fixed craft contributions being credited to the craft owner when Relay did not provide exact contributor evidence.
+- Corrected regional settlement rankings by excluding neutral starter towns and deriving tiers from learned claim technology.
+- Restored Dashboard online-member locations from confirmed presence regions.
+- Restored Resource Finder item images and bundled logo and favicon fallbacks when configured assets are unavailable.
 
 ## [0.52.0-beta.1] - 2026-08-09
 
