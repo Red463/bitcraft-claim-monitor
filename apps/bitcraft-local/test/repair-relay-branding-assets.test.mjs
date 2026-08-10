@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -84,6 +86,7 @@ function createFixture(branding) {
   return {
     archiveRoot,
     brandingRoot,
+    dataRoot,
     databasePath,
     manifestPath,
     root,
@@ -126,6 +129,92 @@ function directApply(fixture, options = {}) {
   }, options);
 }
 
+function directDryRun(fixture, options = {}) {
+  return brandingRepair.runBrandingRepairCli([
+    "--dry-run",
+    "--database", fixture.databasePath,
+    "--archive", fixture.archiveRoot,
+    "--manifest", fixture.manifestPath,
+  ], options);
+}
+
+function nativeMode(entryPath) {
+  return Number(statSync(entryPath, { bigint: true }).mode & 0o7777n);
+}
+
+function createMetadataOverlay() {
+  const values = new Map();
+  const key = (entryPath) => path.resolve(entryPath);
+  const clone = (value) => ({ gid: value.gid, mode: value.mode, uid: value.uid });
+  const read = (entryPath) => {
+    const stored = values.get(key(entryPath));
+    return stored ? clone(stored) : { gid: 0, mode: nativeMode(entryPath), uid: 0 };
+  };
+  return {
+    operations: {
+      apply(entryPath, metadata) {
+        chmodSync(entryPath, metadata.mode);
+        values.set(key(entryPath), clone(metadata));
+      },
+      read,
+    },
+    get: read,
+    remove(entryPath) {
+      const resolved = key(entryPath);
+      for (const candidate of [...values.keys()]) {
+        if (candidate === resolved || candidate.startsWith(`${resolved}${path.sep}`)) values.delete(candidate);
+      }
+    },
+    rename(sourcePath, targetPath) {
+      const source = key(sourcePath);
+      const target = key(targetPath);
+      const moved = [...values.entries()]
+        .filter(([candidate]) => candidate === source || candidate.startsWith(`${source}${path.sep}`));
+      this.remove(target);
+      for (const [candidate, metadata] of moved) {
+        values.delete(candidate);
+        values.set(`${target}${candidate.slice(source.length)}`, metadata);
+      }
+    },
+    set(entryPath, metadata) {
+      values.set(key(entryPath), clone(metadata));
+    },
+  };
+}
+
+function metadataTrackingDurability(metadataOverlay, base = createCanonicalCutoverDurability()) {
+  return {
+    ...base,
+    removePath(entryPath, options) {
+      const result = base.removePath(entryPath, options);
+      metadataOverlay.remove(entryPath);
+      return result;
+    },
+    renamePath(sourcePath, targetPath) {
+      const result = base.renamePath(sourcePath, targetPath);
+      metadataOverlay.rename(sourcePath, targetPath);
+      return result;
+    },
+  };
+}
+
+function serviceMetadataFixture(fixture) {
+  const metadata = createMetadataOverlay();
+  const serviceDirectory = { gid: 2002, mode: 0o750, uid: 2001 };
+  const serviceFile = { gid: 2002, mode: 0o640, uid: 2001 };
+  metadata.set(fixture.dataRoot, serviceDirectory);
+  metadata.set(fixture.brandingRoot, serviceDirectory);
+  metadata.set(path.join(fixture.brandingRoot, "logo.png"), serviceFile);
+  metadata.set(path.join(fixture.archiveRoot, "logo.png"), { gid: 0, mode: 0o600, uid: 0 });
+  return { metadata, serviceDirectory, serviceFile };
+}
+
+function writableBy(metadata, uid, gid) {
+  if (metadata.uid === uid) return (metadata.mode & 0o200) !== 0;
+  if (metadata.gid === gid) return (metadata.mode & 0o020) !== 0;
+  return (metadata.mode & 0o002) !== 0;
+}
+
 function assertFullyRepaired(fixture) {
   assert.deepEqual(readFileSync(path.join(fixture.brandingRoot, "logo.png")), PNG_BYTES);
   assert.deepEqual(readBranding(fixture.databasePath), { logo: asset("logo", "png", "image/png") });
@@ -159,6 +248,36 @@ function crashAfterRename(renameBoundary) {
     writeMarker(...args) {
       if (crashed) return unavailable();
       return real.writeMarker(...args);
+    },
+  };
+}
+
+function crashAfterTrackedRename(renameBoundary, metadataOverlay) {
+  const tracked = metadataTrackingDurability(metadataOverlay);
+  let renameCount = 0;
+  let crashed = false;
+  const unavailable = () => {
+    throw new Error("injected recovery filesystem unavailable");
+  };
+  return {
+    ...tracked,
+    removePath(...args) {
+      if (crashed) return unavailable();
+      return tracked.removePath(...args);
+    },
+    renamePath(...args) {
+      if (crashed) return unavailable();
+      const result = tracked.renamePath(...args);
+      renameCount += 1;
+      if (renameCount === renameBoundary) {
+        crashed = true;
+        throw new Error(`injected crash after rename ${renameBoundary}`);
+      }
+      return result;
+    },
+    writeMarker(...args) {
+      if (crashed) return unavailable();
+      return tracked.writeMarker(...args);
     },
   };
 }
@@ -321,6 +440,140 @@ test("repair restores only verified PNG and WebP assets from the approved archiv
     favicon: asset("favicon", "webp", "image/webp"),
     logo: asset("logo", "png", "image/png"),
   });
+});
+
+test("root-like archive and staging ownership are rebound to the service-owned branding contract", (context) => {
+  const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+  context.after(() => fixture.cleanup());
+  writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+  writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
+  const { metadata, serviceDirectory, serviceFile } = serviceMetadataFixture(fixture);
+
+  directDryRun(fixture, { filesystemMetadata: metadata.operations });
+  const manifest = JSON.parse(readFileSync(fixture.manifestPath, "utf8"));
+  assert.equal(manifest.formatVersion, 4);
+  assert.deepEqual(manifest.assets.find((entry) => entry.type === "logo").filesystemMetadata, {
+    gid: 0,
+    mode: 0o600,
+    uid: 0,
+  });
+  assert.deepEqual(manifest.targetDirectory.after.filesystemMetadata, serviceDirectory);
+  assert.deepEqual(manifest.targetFilesAfter.find((entry) => entry.relativePath === "logo.png").filesystemMetadata, serviceFile);
+
+  const applied = directApply(fixture, {
+    activeDurability: metadataTrackingDurability(metadata),
+    filesystemMetadata: metadata.operations,
+  });
+  assert.equal(applied.applied, true);
+  assert.deepEqual(metadata.get(fixture.brandingRoot), serviceDirectory);
+  assert.deepEqual(metadata.get(path.join(fixture.brandingRoot, "logo.png")), serviceFile);
+  assert.equal(writableBy(metadata.get(path.join(fixture.brandingRoot, "logo.png")), 2001, 2002), true);
+  writeFileSync(path.join(fixture.brandingRoot, "logo.png"), PNG_BYTES);
+
+  metadata.set(path.join(fixture.brandingRoot, "logo.png"), { ...serviceFile, uid: 9999 });
+  assert.throws(() => directApply(fixture, {
+    activeDurability: metadataTrackingDurability(metadata),
+    filesystemMetadata: metadata.operations,
+  }), /applied branding repair assets do not match.*manifest|filesystem metadata/i);
+});
+
+test("dry-run and apply reject unsafe or drifted branding ownership and modes", async (context) => {
+  await context.test("unsafe live directory mode", (subContext) => {
+    const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+    subContext.after(() => fixture.cleanup());
+    writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+    writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
+    const { metadata } = serviceMetadataFixture(fixture);
+    metadata.set(fixture.brandingRoot, { gid: 2002, mode: 0o777, uid: 2001 });
+
+    assert.throws(
+      () => directDryRun(fixture, { filesystemMetadata: metadata.operations }),
+      /live branding directory.*unsafe mode/i,
+    );
+  });
+
+  for (const [name, drift, expected] of [
+    ["archive source mode", (fixture, metadata) => metadata.set(
+      path.join(fixture.archiveRoot, "logo.png"),
+      { gid: 0, mode: 0o640, uid: 0 },
+    ), /archive.*changed since dry-run|inputs changed since dry-run/i],
+    ["live directory ownership", (fixture, metadata) => metadata.set(
+      fixture.brandingRoot,
+      { gid: 2002, mode: 0o750, uid: 9999 },
+    ), /branding repair inputs changed since dry-run|live branding directory changed since dry-run|ownership does not match/i],
+    ["live asset mode", (fixture, metadata) => metadata.set(
+      path.join(fixture.brandingRoot, "logo.png"),
+      { gid: 2002, mode: 0o600, uid: 2001 },
+    ), /branding repair inputs changed since dry-run|live branding directory changed since dry-run/i],
+  ]) {
+    await context.test(name, (subContext) => {
+      const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+      subContext.after(() => fixture.cleanup());
+      writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+      writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
+      const { metadata } = serviceMetadataFixture(fixture);
+      directDryRun(fixture, { filesystemMetadata: metadata.operations });
+      drift(fixture, metadata);
+
+      assert.throws(() => directApply(fixture, {
+        activeDurability: metadataTrackingDurability(metadata),
+        filesystemMetadata: metadata.operations,
+      }), expected);
+    });
+  }
+});
+
+test("exact-manifest recovery republishes service-owned writable branding after a staged rename crash", (context) => {
+  const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+  context.after(() => fixture.cleanup());
+  writeFileSync(path.join(fixture.archiveRoot, "logo.png"), PNG_BYTES);
+  writeFileSync(path.join(fixture.brandingRoot, "logo.png"), OLD_PNG_BYTES);
+  const { metadata, serviceDirectory, serviceFile } = serviceMetadataFixture(fixture);
+  directDryRun(fixture, { filesystemMetadata: metadata.operations });
+
+  assert.throws(() => directApply(fixture, {
+    activeDurability: crashAfterTrackedRename(2, metadata),
+    filesystemMetadata: metadata.operations,
+  }), /injected crash.*recovery failed.*filesystem unavailable/i);
+  assert.equal(existsSync(`${fixture.manifestPath}.applying`), true);
+
+  const recovered = directApply(fixture, {
+    activeDurability: metadataTrackingDurability(metadata),
+    filesystemMetadata: metadata.operations,
+  });
+  assert.equal(recovered.applied, true);
+  assert.deepEqual(metadata.get(fixture.brandingRoot), serviceDirectory);
+  assert.deepEqual(metadata.get(path.join(fixture.brandingRoot, "logo.png")), serviceFile);
+  assert.equal(writableBy(metadata.get(path.join(fixture.brandingRoot, "logo.png")), 2001, 2002), true);
+});
+
+test("POSIX publication preserves writable target ownership and mode instead of archive metadata", {
+  skip: process.platform === "win32" ? "Windows does not expose POSIX chown semantics" : false,
+}, (context) => {
+  const fixture = createFixture({ logo: asset("logo", "png", "image/png") });
+  context.after(() => fixture.cleanup());
+  const archiveAsset = path.join(fixture.archiveRoot, "logo.png");
+  const liveAsset = path.join(fixture.brandingRoot, "logo.png");
+  writeFileSync(archiveAsset, PNG_BYTES);
+  writeFileSync(liveAsset, OLD_PNG_BYTES);
+  chmodSync(fixture.brandingRoot, 0o750);
+  chmodSync(liveAsset, 0o640);
+  chmodSync(archiveAsset, 0o600);
+  const expectedDirectory = statSync(fixture.brandingRoot);
+  const expectedFile = statSync(liveAsset);
+
+  assert.equal(dryRun(fixture).status, 0);
+  const repaired = apply(fixture);
+  assert.equal(repaired.status, 0, repaired.stderr);
+  const finalDirectory = statSync(fixture.brandingRoot);
+  const finalFile = statSync(liveAsset);
+  assert.equal(finalDirectory.uid, expectedDirectory.uid);
+  assert.equal(finalDirectory.gid, expectedDirectory.gid);
+  assert.equal(finalDirectory.mode & 0o7777, 0o750);
+  assert.equal(finalFile.uid, expectedFile.uid);
+  assert.equal(finalFile.gid, expectedFile.gid);
+  assert.equal(finalFile.mode & 0o7777, 0o640);
+  assert.doesNotThrow(() => writeFileSync(liveAsset, PNG_BYTES));
 });
 
 test("repair clears configured metadata when the archived file is missing", (context) => {

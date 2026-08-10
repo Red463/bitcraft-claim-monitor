@@ -29,7 +29,7 @@ function fixture({ repairCount = 1, failAt = null } = {}) {
   const operations = {
     validatePrepare: () => record("validate-prepare", {
       revision: REVISION,
-      version: "0.52.0-beta.1",
+      version: "0.53.0-beta.1",
       deploymentMode: "canonical",
       claimId: "1369094286777412590",
       caddy: { originalSha256: "c".repeat(64), savedPath: "/protected/original-caddy" },
@@ -87,7 +87,7 @@ function fixture({ repairCount = 1, failAt = null } = {}) {
       ok: true,
       profile: "intensive",
       revision: REVISION,
-      version: "0.52.0-beta.1",
+      version: "0.53.0-beta.1",
       durationMs: 30 * 60 * 1000,
       failedSamples: 0,
       generationAdvanced: true,

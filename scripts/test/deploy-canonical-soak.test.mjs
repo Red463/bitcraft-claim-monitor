@@ -16,7 +16,7 @@ import {
 import { applySchemaBootstrap } from "../../apps/bitcraft-local/src/server/schemaBootstrap.mjs";
 
 const REVISION = "a".repeat(40);
-const VERSION = "0.52.0-beta.1";
+const VERSION = "0.53.0-beta.1";
 const CANONICAL = "https://app.timbersteeltrade.com";
 const RELAY = "https://relay.timbersteeltrade.com";
 const EXPECTED_SUBSCRIPTIONS = ["relay:global:catalogs"];

@@ -9,7 +9,7 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
-## [0.52.1-beta.1] - 2026-08-10
+## [0.53.0-beta.1] - 2026-08-10
 
 ### Added
 
@@ -20,6 +20,7 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ### Changed
 
 - Made Recent Siege Outcomes collapsed by default and retained each user's preferred expanded state.
+- **Operator action required:** after deploying this release, run the guarded contribution-attribution and branding-asset repair procedure in `DEPLOYMENT.md`; keep all writers and real Discord delivery stopped, retain the exact dry-run manifests beside a decrypt-verified encrypted backup, verify SQLite integrity and service-owned branding metadata, then restart in the persistent no-send maintenance mode and confirm Relay generation advancement. Leave both maintenance drop-ins installed until a separately approved live Discord restart.
 
 ### Security
 
@@ -33,6 +34,7 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 - Corrected regional settlement rankings by excluding neutral starter towns and deriving tiers from learned claim technology.
 - Restored Dashboard online-member locations from confirmed presence regions.
 - Restored Resource Finder item images and bundled logo and favicon fallbacks when configured assets are unavailable.
+- Ensured root-run branding repair preserves safe service-account ownership and modes across staging, recovery, and final publication.
 
 ## [0.52.0-beta.1] - 2026-08-09
 

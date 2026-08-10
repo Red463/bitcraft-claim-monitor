@@ -59,7 +59,7 @@ function requireAnnouncementState(state, revision) {
     const local = state.localVerification;
     const publicVerification = state.publicVerification;
     if (local?.health?.deploymentMode !== "canonical"
-      || local.health.version !== "0.52.0-beta.1"
+      || local.health.version !== "0.53.0-beta.1"
       || !/^\d+$/.test(String(local.gatewayPid ?? ""))) {
       throw new Error("Cutover announcement soak override requires verified local canonical health and one gateway");
     }
@@ -82,7 +82,7 @@ function requireAnnouncementState(state, revision) {
   if (state.postAdmission?.intensiveSoakVerified !== true || soak?.ok !== true || soak.profile !== "intensive") {
     throw new Error("Cutover announcement requires a successful 30-minute intensive soak");
   }
-  if (soak.revision !== revision || soak.version !== "0.52.0-beta.1" || soak.durationMs < INTENSIVE_SOAK_MS) {
+  if (soak.revision !== revision || soak.version !== "0.53.0-beta.1" || soak.durationMs < INTENSIVE_SOAK_MS) {
     throw new Error("Cutover announcement requires matching 30-minute release evidence");
   }
   if (soak.deploymentMode !== "canonical") throw new Error("Cutover announcement must never run in preview mode");

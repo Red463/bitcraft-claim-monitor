@@ -14,9 +14,9 @@ const readme = read("README.md");
 const updater = read("deploy/update-bitcraft-claim-monitor-relay");
 const workflow = read(".github/workflows/cutover-relay-production.yml");
 
-test("canonical cutover is exactly the new-minor 0.52.0-beta.1 release dated 2026-08-09", () => {
-  assert.equal(packageJson.version, "0.52.0-beta.1");
-  assert.match(changelog, /^## \[0\.52\.0-beta\.1\] - 2026-08-09$/m);
+test("canonical cutover is exactly the new-minor 0.53.0-beta.1 release dated 2026-08-10", () => {
+  assert.equal(packageJson.version, "0.53.0-beta.1");
+  assert.match(changelog, /^## \[0\.53\.0-beta\.1\] - 2026-08-10$/m);
   for (const requirement of [
     /canonical cutover preparation/i,
     /account.*configuration.*migration/i,
@@ -30,7 +30,8 @@ test("canonical cutover is exactly the new-minor 0.52.0-beta.1 release dated 202
 });
 
 test("Task 4 marker suppresses the ordinary beta.1 update before Relay services start", () => {
-  assert.equal(releaseVersionAlreadyAnnounced({ lastAnnounced: "0.52.0-beta.1", appVersion: "0.52.0-beta.1" }), true);
+  assert.equal(releaseVersionAlreadyAnnounced({ lastAnnounced: "0.53.0-beta.1", appVersion: "0.53.0-beta.1" }), true);
+  assert.equal(releaseVersionAlreadyAnnounced({ lastAnnounced: "0.52.0-beta.1", appVersion: "0.53.0-beta.1" }), false);
   const cutover = read("deploy/cutover-relay-production.mjs");
   const applyFlow = cutover.slice(
     cutover.indexOf("async function apply("),
@@ -105,4 +106,17 @@ test("restore and privacy instructions bound previous-key retirement and forbid 
 
 test("ordinary deployments syntax-check the soak verifier shipped beside the cutover helper", () => {
   assert.match(updater, /node --check[\s\\\n]+"\$release_dir\/deploy\/verify-canonical-soak\.mjs"/);
+});
+
+test("production repair restart holds Discord while live Relay generations advance", () => {
+  assert.match(deployment, /\/etc\/systemd\/system\/bitcraft-claim-monitor-relay\.service\.d\/repair-no-discord\.conf/);
+  assert.match(deployment, /\/etc\/systemd\/system\/bitcraft-claim-monitor-relay-worker\.service\.d\/repair-no-discord\.conf/);
+  assert.match(deployment, /ExecStart=\/usr\/bin\/env BITCRAFT_PROCESS_ROLE=web BITCRAFT_DEPLOYMENT_MODE=preview DISCORD_DELIVERY_MODE=record ENABLE_DISCORD_STARTUP=false ENABLE_DISCORD_OUTBOX_PROCESSING=false ENABLE_DISCORD_NETWORK=false DISCORD_SANDBOX_CHANNEL_ID=/);
+  assert.match(deployment, /ExecStart=\/usr\/bin\/env BITCRAFT_PROCESS_ROLE=worker BITCRAFT_DEPLOYMENT_MODE=preview DISCORD_DELIVERY_MODE=record ENABLE_DISCORD_STARTUP=false ENABLE_DISCORD_OUTBOX_PROCESSING=false ENABLE_DISCORD_NETWORK=false DISCORD_SANDBOX_CHANNEL_ID=/);
+  assert.doesNotMatch(deployment, /^\s*'Environment=DISCORD_DELIVERY_MODE=record'/m);
+  assert.match(deployment, /SELECT \* FROM discord_notification_outbox WHERE id <= \?/);
+  assert.match(deployment, /status != 'pending' OR attempts != 0/);
+  assert.match(deployment, /health\.deploymentMode !== process\.argv\[3\]/);
+  assert.match(deployment, /health\.buildSha !== process\.argv\[4\]/);
+  assert.match(deployment, /https:\/\/app\.timbersteeltrade\.com\/api\/local\/health[\s\\]*> "\$REPAIR_ROOT\/public-health-after\.json"/);
 });

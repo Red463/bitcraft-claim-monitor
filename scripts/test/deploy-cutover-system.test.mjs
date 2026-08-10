@@ -510,7 +510,7 @@ function systemFixture() {
     path.join(release, "apps", "bitcraft-local"), path.join(release, "scripts"), path.join(release, "deploy"),
   ]) mkdirSync(directory, { recursive: true });
   symlinkSync(release, currentRelease, process.platform === "win32" ? "junction" : "dir");
-  writeFileSync(path.join(release, "apps", "bitcraft-local", "package.json"), JSON.stringify({ version: "0.52.0-beta.1" }));
+  writeFileSync(path.join(release, "apps", "bitcraft-local", "package.json"), JSON.stringify({ version: "0.53.0-beta.1" }));
   writeFileSync(path.join(release, "scripts", "repair-relay-canonical-cutover.mjs"), "// fixture\n");
   const sourceDatabasePath = path.join(root, "old.sqlite");
   const targetDatabasePath = path.join(root, "relay.sqlite");
@@ -668,7 +668,7 @@ function systemFixture() {
         deploymentMode: runtime.mode,
         canonicalOrigin: "https://app.timbersteeltrade.com",
         discordReady: runtime.mode === "canonical",
-        version: "0.52.0-beta.1",
+        version: "0.53.0-beta.1",
         buildSha: REVISION.slice(0, 12),
       }), stderr: "" };
       return { status: 0, stdout: "", stderr: "" };
@@ -711,7 +711,7 @@ test("system preflight enforces exact main/current/version and discovers validat
       now: () => new Date("2026-08-09T12:00:00.000Z"),
     });
     const preflight = await operations.validatePrepare({ revision: REVISION });
-    assert.equal(preflight.version, "0.52.0-beta.1");
+    assert.equal(preflight.version, "0.53.0-beta.1");
     assert.equal(preflight.claimId, "1369094286777412590");
     assert.equal(preflight.discoveredPaths.sourceKeyPath, fixture.paths.sourcePrivacyKey);
     assert.equal(preflight.subscriptions.count, 1);
@@ -934,7 +934,7 @@ test("system admission starts only Relay, verifies generation/gateway/outbox/can
           ok: true,
           profile: "intensive",
           revision: REVISION,
-          version: "0.52.0-beta.1",
+          version: "0.53.0-beta.1",
           deploymentMode: "canonical",
           durationMs: 30 * 60 * 1000,
           sampleCount: 31,
@@ -1064,7 +1064,7 @@ test("same-revision intensive-soak retry accepts a fresh validated outbox baseli
           ok: true,
           profile: "intensive",
           revision,
-          version: "0.52.0-beta.1",
+          version: "0.53.0-beta.1",
           deploymentMode: "canonical",
           durationMs: 30 * 60 * 1000,
           sampleCount: 31,

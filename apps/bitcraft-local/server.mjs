@@ -358,9 +358,16 @@ const processRoleConfig = processRoleCapabilities(processRole);
 const serverPollingEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SERVER_POLLING !== "false";
 const discordStartupEnabled = deploymentRuntime.discordGatewayEnabled;
 const scheduledJobsEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SCHEDULED_JOBS !== "false";
+const discordNotificationOutboxProcessingEnabled = process.env.ENABLE_DISCORD_OUTBOX_PROCESSING !== "false";
+const discordNetworkEnabled = process.env.ENABLE_DISCORD_NETWORK !== "false";
 const discordNotificationOutboxIntervalMs = Math.max(Number(process.env.DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS ?? 5000), 1000);
 const discordNotificationMaxAttempts = Math.max(Number(process.env.DISCORD_NOTIFICATION_MAX_ATTEMPTS ?? 8), 1);
 let discordNotificationOutboxRunning = false;
+
+function assertDiscordNetworkEnabled() {
+  if (!discordNetworkEnabled) throw new Error("Discord network access is disabled");
+}
+
 const MARKET_DAILY_HISTORY_LIMIT = 365;
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
 const relayHttpRefreshSetting = Number(process.env.RELAY_HTTP_REFRESH_MS ?? 15000);
@@ -442,7 +449,9 @@ cleanupRetiredRegionalMarketState();
 installRetiredTableAuthorizer(db);
 
 const statements = createPreparedStatements(db);
-if (processRoleConfig.runBackgroundJobs) recoverInterruptedCanonicalCutoverDeliveries(db, new Date().toISOString());
+if (processRoleConfig.runBackgroundJobs && discordNotificationOutboxProcessingEnabled) {
+  recoverInterruptedCanonicalCutoverDeliveries(db, new Date().toISOString());
+}
 const gameDataGenerationListeners = new Set();
 let productionRelayLifecycleCoordinator = null;
 let settlementRelayTransitionCoordinator = null;
@@ -2093,6 +2102,7 @@ async function craftPlanDiscordReport(profession = "") {
 }
 
 async function manualDiscordSandboxMessage(payload, settings, requestedChannelId = "") {
+  assertDiscordNetworkEnabled();
   return sendDiscordManualSandboxMessage({
     apiOrigin: discordApiOrigin,
     configuredChannelId: configuredDiscordSandboxChannelId,
@@ -3855,6 +3865,7 @@ async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata =
 }
 
 function kickDiscordNotificationOutbox() {
+  if (!discordNotificationOutboxProcessingEnabled) return;
   void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
 }
 
@@ -3864,6 +3875,9 @@ function discordNotificationRetryAt(attempts) {
 }
 
 async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
+  if (!discordNotificationOutboxProcessingEnabled) {
+    return { skipped: true, reason: "Discord notification outbox processing is held" };
+  }
   if (discordNotificationOutboxRunning) return { skipped: true, reason: "Discord notification outbox already running" };
   discordNotificationOutboxRunning = true;
   let sent = 0;
@@ -3931,6 +3945,7 @@ function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata 
 async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId) {
   if (!settings.enabled || !settings.botToken || !channelId) throw new Error("Discord integration is not fully configured");
   if (configuredDiscordDeliveryMode === "record") return recordedDiscordResponse(channelId, payload);
+  assertDiscordNetworkEnabled();
   const response = await fetch(`${discordApiOrigin}/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     headers: {
@@ -4034,6 +4049,7 @@ async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
 }
 
 async function discordApiRequest(pathname, options = {}, settings = getDiscordSettingsRaw()) {
+  assertDiscordNetworkEnabled();
   if (!settings.botToken) throw new Error("Discord bot token is not configured");
   const response = await fetch(`${discordApiOrigin}${pathname}`, {
     ...options,
@@ -6739,6 +6755,7 @@ async function discordCraftPlanCommand(interaction) {
 async function deliverDeferredCraftPlanInteraction(interaction, profession = "") {
   const startedAt = Date.now();
   try {
+    assertDiscordNetworkEnabled();
     const report = await craftPlanDiscordReport(profession);
     const payload = buildCraftPlanDiscordEmbed(report);
     const response = await editDiscordInteractionOriginal({
@@ -7145,6 +7162,7 @@ async function discordPriceCommand(itemName, regionOption) {
 
 async function registerDiscordCommands() {
   requireLiveDiscord(configuredDiscordDeliveryMode, "Discord command registration");
+  assertDiscordNetworkEnabled();
   const settings = getDiscordSettingsRaw();
   if (!settings.botToken || !settings.applicationId) throw new Error("Discord bot token and application ID are required");
   const route = settings.guildId
@@ -7843,6 +7861,9 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { user: publicAppUser(getAppUser(req)) });
     }
     if (req.method === "POST" && url.pathname === "/api/discord/interactions") {
+      if (!discordNetworkEnabled) {
+        return send(res, 503, { error: "Discord interactions are disabled during maintenance" });
+      }
       if (!rateLimit(req, res, "discord-interaction", RATE_LIMITS.discordInteraction)) return;
       const result = await handleDiscordInteraction(req);
       if (typeof result.afterResponse === "function") {

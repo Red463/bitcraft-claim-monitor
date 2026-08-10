@@ -39,7 +39,7 @@ function fixture() {
       ok: true,
       profile: "intensive",
       revision: REVISION,
-      version: "0.52.0-beta.1",
+      version: "0.53.0-beta.1",
       deploymentMode: "canonical",
       durationMs: 30 * 60 * 1000,
       sampleCount: 31,
@@ -135,7 +135,7 @@ test("explicit revision-bound operator override can enqueue after local and publ
       },
     };
     current.state.localVerification = {
-      health: { ok: true, deploymentMode: "canonical", version: "0.52.0-beta.1" },
+      health: { ok: true, deploymentMode: "canonical", version: "0.53.0-beta.1" },
       gatewayPid: "42",
       subscriptions: { subscriptions: { "relay:global:catalogs": 8 } },
       outbox: { counts: {}, latestId: 0 },

@@ -10,7 +10,7 @@ import { OLD_PRODUCTION_UNITS } from "./canonical-unit-inventory.mjs";
 
 const CANONICAL_ORIGIN = "https://app.timbersteeltrade.com";
 const RELAY_ORIGIN = "https://relay.timbersteeltrade.com";
-const CANONICAL_VERSION = "0.52.0-beta.1";
+const CANONICAL_VERSION = "0.53.0-beta.1";
 const REVISION_PATTERN = /^[a-f0-9]{40}$/;
 const REQUIRED_PUBLIC_ROUTES = ["/", "/terms", "/privacy", "/sounds/notifications/ui-pop.mp3"];
 const RELAY_UNITS = {
@@ -167,7 +167,7 @@ export async function runCanonicalSoak({
 }) {
   if (!Object.hasOwn(CANONICAL_SOAK_PROFILES, profile)) throw new Error("Canonical soak profile must be intensive or follow-up");
   if (!REVISION_PATTERN.test(String(revision ?? ""))) throw new Error("Canonical soak revision must be a full lowercase SHA");
-  if (version !== CANONICAL_VERSION) throw new Error("Canonical soak version must be 0.52.0-beta.1");
+  if (version !== CANONICAL_VERSION) throw new Error("Canonical soak version must be 0.53.0-beta.1");
   if (typeof fetchImpl !== "function" || typeof sampleOperations !== "function") throw new Error("Canonical soak samplers are unavailable");
   const expectedKeys = normalizeExpectedSubscriptionKeys(expectedSubscriptionKeys);
   const durationMs = Number(CANONICAL_SOAK_PROFILES[profile].durationMs);
