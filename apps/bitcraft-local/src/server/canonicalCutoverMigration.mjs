@@ -9,6 +9,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readSync,
   readdirSync,
   realpathSync,
   renameSync,
@@ -248,6 +249,21 @@ export function canonicalJson(value) {
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function sha256File(filePath) {
+  const descriptor = openSync(filePath, "r");
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    let bytesRead;
+    while ((bytesRead = readSync(descriptor, buffer, 0, buffer.length, null)) > 0) {
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+    return hash.digest("hex");
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function decimal(value, label) {
@@ -1220,8 +1236,8 @@ export function createCanonicalCutoverManifest(input, { allowExistingManifest = 
     const manifest = manifestWithoutHash(options, source, target);
     source.close();
     target.close();
-    manifest.source.database.fileSha256 = sha256(readFileSync(options.sourceDatabasePath));
-    manifest.target.database.fileSha256 = sha256(readFileSync(options.targetDatabasePath));
+    manifest.source.database.fileSha256 = sha256File(options.sourceDatabasePath);
+    manifest.target.database.fileSha256 = sha256File(options.targetDatabasePath);
     return { ...manifest, selectionHash: sha256(canonicalJson(manifest)) };
   } finally {
     try { source.close(); } catch {}
@@ -1688,7 +1704,7 @@ function completePostCommit(
 
 function recoverPendingApply(manifest, paths, durability, beforeFinalize = () => {}) {
   const recovery = readRecoveryMarker(paths.pendingMarkerPath, manifest);
-  if (sha256(readFileSync(paths.sourcePath)) !== manifest.source.database.fileSha256) {
+  if (sha256File(paths.sourcePath) !== manifest.source.database.fileSha256) {
     throw new Error("Canonical cutover source changed during pending recovery");
   }
   const db = openReadOnly(paths.targetPath);
