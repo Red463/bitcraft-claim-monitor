@@ -21,6 +21,7 @@ import { bitcraftMapUrl, mapEmbedSignature, mapResourceCategory, mapResourceToke
 import { currentMapPlayerSelection, defaultMapPlayerSelection, filterMapPlayerRows, mapPlayerTrackingId, mapPlayerTrackingSummary, sortedMapPlayerRows, type MapPlayerFilter } from "./map/playerTracking";
 import { NativeMap } from "./map/NativeMap";
 import { mapRendererPolicy } from "./map/mapRendererPolicy.mjs";
+import { boundedNativeMapRegions } from "./map/nativeMapRequest.mjs";
 
 const LOCAL_API = "/api/local";
 const FRAME_TIMEOUT_MS = 12000;
@@ -221,7 +222,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
     ...data.regionStatus.map((region) => String(region.regionId ?? "")),
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [activeRegions, data.claim.regionId, data.regionStatus]);
   const mapMarker = focus ?? defaultFocus;
-  const mapRegionIds = resourceRegions.length ? resourceRegions : regionOptions;
+  const mapRegionIds = React.useMemo(() => boundedNativeMapRegions(resourceRegions, regionOptions), [resourceRegions.join(","), regionOptions.join(",")]);
   const selectedResourceIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length)), [normalizedSelectedResources]);
   const selectedEnemyIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("enemy:")).map((token) => token.slice("enemy:".length)), [normalizedSelectedResources]);
   const currentPlayerIds = React.useMemo(() => [...current].sort(), [current]);
@@ -372,7 +373,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
             </button>
           </div>
           {!resourcePanelCollapsed ? <><div className="map-resource-controls">
-            <label className="field"><span>Region</span><select className="select-control map-region-select" value={resourceRegions.length === 1 ? resourceRegions[0] : "All"} onChange={(event) => setResourceRegion(event.target.value)}><option value="All">All regions</option>{regionOptions.map((id) => {
+            <label className="field"><span>Region</span><select className="select-control map-region-select" value={mapRegionIds.length === 1 ? mapRegionIds[0] : "All"} onChange={(event) => setResourceRegion(event.target.value)}><option value="All">All regions</option>{regionOptions.map((id) => {
               const region = activeRegions.find((entry) => String(entry.regionId) === String(id)) ?? data.regionStatus.find((entry) => String(entry.regionId) === String(id)) ?? { regionId: id };
               return <option key={id} value={id}>{activeRegionLabel({ ...region, regionId: String(region.regionId ?? id) }, String(data.claim.regionId ?? ""))}</option>;
             })}</select></label>

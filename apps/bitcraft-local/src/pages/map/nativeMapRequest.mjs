@@ -13,6 +13,13 @@ function decimalSort(values) {
     .sort((left, right) => left.length - right.length || left.localeCompare(right));
 }
 
+export function boundedNativeMapRegions(selectedRegionIds = [], availableRegionIds = [], limit = 4) {
+  const available = decimalSort(availableRegionIds);
+  const allowed = new Set(available);
+  const selected = decimalSort(selectedRegionIds).filter((regionId) => allowed.has(regionId));
+  return (selected.length ? selected : available).slice(0, limit);
+}
+
 export function nativeMapRequest({ regionIds = [], playerIds = [], resourceIds = [], enemyTypes = [] }) {
   const regions = decimalSort(regionIds);
   const players = decimalSort(playerIds);

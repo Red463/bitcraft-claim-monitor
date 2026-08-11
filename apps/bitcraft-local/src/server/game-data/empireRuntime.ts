@@ -88,6 +88,11 @@ type NodeRow = Record<string, unknown> & {
   empireEntityId: string;
   regionId: string;
 };
+type TerritoryRow = Record<string, unknown> & {
+  chunkIndex: string;
+  empireEntityId: string;
+  regionId: string;
+};
 type FoundryRow = Record<string, unknown> & {
   entityId: string;
   empireEntityId: string;
@@ -124,6 +129,7 @@ type RegionState = {
   settlements: SettlementRow[];
   claimMembers: ClaimMemberRow[];
   nodes: NodeRow[];
+  territory: TerritoryRow[];
   hexite: HexiteRegionData | null;
   warnings: string[];
   database: string;
@@ -139,6 +145,7 @@ export type EmpireCombinedData = {
   settlements: SettlementRow[];
   claimMembers: ClaimMemberRow[];
   nodes: NodeRow[];
+  territory: TerritoryRow[];
   foundries: FoundryRow[] | null;
   siegeOutcomes: SiegeOutcome[] | null;
   siegeOutcomeDiagnostics: SiegeNotificationDiagnostics | null;
@@ -228,7 +235,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 function scopedEntity(
   value: unknown,
   regionId: string,
-  key: "entityId" | "buildingEntityId",
+  key: "entityId" | "buildingEntityId" | "chunkIndex",
 ): (Record<string, unknown> & { regionId: string }) | null {
   const row = asRecord(value);
   const entityId = String(row[key] ?? "").trim();
@@ -772,6 +779,10 @@ export class RelayEmpireRuntime {
     const nodes = snapshot.data.nodes
       .map((value) => scopedEntity(value, snapshot.regionId, "entityId"))
       .filter((value): value is NodeRow => value != null);
+    const rawTerritory = snapshot.data.territory ?? [];
+    const territory = rawTerritory
+      .map((value) => scopedEntity(value, snapshot.regionId, "chunkIndex"))
+      .filter((value): value is TerritoryRow => value != null);
     const rawHexite = snapshot.data.hexite;
     const hexite = rawHexite == null ? null : {
       inventories: rawHexite.inventories.map((value, index) => {
@@ -851,6 +862,7 @@ export class RelayEmpireRuntime {
       || settlements.length !== snapshot.data.settlements.length
       || claimMembers.length !== snapshot.data.claimMembers.length
       || nodes.length !== snapshot.data.nodes.length
+      || territory.length !== rawTerritory.length
     ) {
       throw new Error(`Relay Empire region ${snapshot.regionId} contains malformed normalized identities`);
     }
@@ -860,6 +872,7 @@ export class RelayEmpireRuntime {
       settlements,
       claimMembers,
       nodes,
+      territory,
       hexite,
       warnings: [...snapshot.warnings],
       database: snapshot.database,
@@ -919,6 +932,9 @@ export class RelayEmpireRuntime {
     const nodes = this.#activeRegionIds.flatMap((regionId) => (
       nextRegions.get(regionId)?.nodes ?? []
     ));
+    const territory = this.#activeRegionIds.flatMap((regionId) => (
+      nextRegions.get(regionId)?.territory ?? []
+    ));
     const currentData: EmpireCombinedData = {
       primaryRegionId: this.#primaryRegionId ?? snapshot.regionId,
       activeRegionIds: [...this.#activeRegionIds],
@@ -927,6 +943,7 @@ export class RelayEmpireRuntime {
       settlements: sortEntities(settlements, (row) => row.buildingEntityId),
       claimMembers: sortEntities(claimMembers, (row) => row.entityId),
       nodes: sortEntities(nodes, (row) => row.entityId),
+      territory: sortEntities(territory, (row) => row.chunkIndex),
       foundries: this.#globalFoundries == null ? null : [...this.#globalFoundries],
       siegeOutcomes: this.#globalSiegeOutcomes == null ? null : [...this.#globalSiegeOutcomes],
       siegeOutcomeDiagnostics: this.#globalSiegeDiagnostics == null
@@ -1015,6 +1032,9 @@ export class RelayEmpireRuntime {
     const nodes = this.#activeRegionIds.flatMap(
       (regionId) => this.#regions.get(regionId)?.nodes ?? [],
     );
+    const territory = this.#activeRegionIds.flatMap(
+      (regionId) => this.#regions.get(regionId)?.territory ?? [],
+    );
     const currentData: EmpireCombinedData = {
       primaryRegionId,
       activeRegionIds: [...this.#activeRegionIds],
@@ -1023,6 +1043,7 @@ export class RelayEmpireRuntime {
       settlements,
       claimMembers,
       nodes,
+      territory,
       foundries: this.#globalFoundries == null ? null : [...this.#globalFoundries],
       siegeOutcomes: this.#globalSiegeOutcomes == null ? null : [...this.#globalSiegeOutcomes],
       siegeOutcomeDiagnostics: this.#globalSiegeDiagnostics == null
@@ -1220,8 +1241,8 @@ export class RelayEmpireRuntime {
       const regionId = String(row.regionId ?? "").trim();
       if (!this.#activeRegionIds.includes(regionId)) continue;
       const select = (
-        key: "empires" | "members" | "settlements" | "claimMembers" | "nodes",
-        idKey: "entityId" | "buildingEntityId",
+        key: "empires" | "members" | "settlements" | "claimMembers" | "nodes" | "territory",
+        idKey: "entityId" | "buildingEntityId" | "chunkIndex",
       ) => (
         (Array.isArray(data[key]) ? data[key] : [])
           .filter((entry) => String(asRecord(entry).regionId ?? "") === regionId)
@@ -1248,6 +1269,7 @@ export class RelayEmpireRuntime {
         settlements: select("settlements", "buildingEntityId") as SettlementRow[],
         claimMembers: select("claimMembers", "entityId") as ClaimMemberRow[],
         nodes: select("nodes", "entityId") as NodeRow[],
+        territory: select("territory", "chunkIndex") as TerritoryRow[],
         hexite,
         warnings: Array.isArray(row.warnings) ? row.warnings.map(String) : [],
         database: String(row.database ?? ""),

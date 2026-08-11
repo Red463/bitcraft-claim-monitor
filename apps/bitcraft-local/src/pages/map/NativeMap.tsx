@@ -24,8 +24,21 @@ type MapSnapshot = {
   layers: Record<string, MapFeature[]>;
 };
 
+const MAP_PROJECTION: L.Projection = {
+  project(latlng) {
+    return new L.Point(latlng.lng, -latlng.lat / MAP_HEX_APOTHEM);
+  },
+  unproject(point) {
+    const projected = L.point(point);
+    return new L.LatLng(-projected.y * MAP_HEX_APOTHEM, projected.x);
+  },
+  bounds: L.bounds([-Infinity, -Infinity], [Infinity, Infinity]),
+};
+
 const NATIVE_CRS = L.extend({}, L.CRS.Simple, {
-  transformation: new L.Transformation(1 / MAP_HEX_APOTHEM, 0, -1 / MAP_HEX_APOTHEM, 0),
+  projection: MAP_PROJECTION,
+  transformation: new L.Transformation(1, 0, 1, 0),
+  scale: (zoom: number) => 2 ** zoom,
 });
 
 class CoordinateGridLayer extends L.GridLayer {

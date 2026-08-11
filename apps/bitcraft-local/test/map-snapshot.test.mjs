@@ -55,17 +55,17 @@ test("map snapshot projects available operations and reports uncollected layers"
     now: new Date("2026-08-11T12:00:10.000Z"),
     excludedMemberIds: [],
     regionClaims: {
-      data: { regionId: "19", claims: [{ entityId: "1369094286777412590", name: "Timbersteel", tier: 6, locationX: 10, locationZ: 20, locationDimension: "0" }] },
+      data: { regionId: "19", claims: [{ entityId: "1369094286777412590", name: "Timbersteel", tier: 6, locationX: 10, locationZ: 20, locationDimension: "1" }] },
       generation: 7,
       provenance: { receivedAt: "2026-08-11T12:00:00.000Z" },
     },
     market: {
-      data: { regionId: "19", marketplaces: [{ buildingEntityId: "1369094286778488967", claimEntityId: "1369094286777412590", locationX: 30, locationZ: 40, dimension: "0" }] },
+      data: { regionId: "19", marketplaces: [{ buildingEntityId: "1369094286778488967", claimEntityId: "1369094286777412590", locationX: 30, locationZ: 40, dimension: "1" }] },
       generation: 8,
       provenance: { receivedAt: "2026-08-11T12:00:01.000Z" },
     },
     empires: {
-      data: { nodes: [{ entityId: "216172782113783810", empireEntityId: "1", regionId: "19", nickname: "North Tower", locationX: 50, locationZ: 60, locationDimension: "0" }] },
+      data: { nodes: [{ entityId: "216172782113783810", empireEntityId: "1", regionId: "19", nickname: "North Tower", locationX: 50, locationZ: 60, locationDimension: "1" }] },
       generation: 9,
       provenance: { receivedAt: "2026-08-11T12:00:02.000Z" },
     },
@@ -108,10 +108,10 @@ test("player positions require selected online monitored non-excluded members", 
     ],
     spatial: {
       data: { players: [
-        { playerEntityId: "101", regionId: "19", locationX: 12_000, locationZ: 24_000, dimension: "0", observedAt: "2026-08-11T11:59:59.000Z" },
-        { playerEntityId: "102", regionId: "19", locationX: 13_000, locationZ: 25_000, dimension: "0" },
-        { playerEntityId: "103", regionId: "19", locationX: 14_000, locationZ: 26_000, dimension: "0" },
-        { playerEntityId: "104", regionId: "19", locationX: 15_000, locationZ: 27_000, dimension: "0" },
+        { playerEntityId: "101", regionId: "19", locationX: 12_000, locationZ: 24_000, dimension: "1", observedAt: "2026-08-11T11:59:59.000Z" },
+        { playerEntityId: "102", regionId: "19", locationX: 13_000, locationZ: 25_000, dimension: "1" },
+        { playerEntityId: "103", regionId: "19", locationX: 14_000, locationZ: 26_000, dimension: "1" },
+        { playerEntityId: "104", regionId: "19", locationX: 15_000, locationZ: 27_000, dimension: "1" },
       ] },
       generation: 10,
       provenance: { receivedAt: "2026-08-11T11:59:59.000Z" },
@@ -122,7 +122,7 @@ test("player positions require selected online monitored non-excluded members", 
   assert.deepEqual(snapshot.layers.players[0].point, {
     x: 12,
     z: 24,
-    dimension: "0",
+    dimension: "1",
     coordinateSpace: "map-xz",
     sourceCoordinateSpace: "mobile-fixed-1000",
   });
@@ -158,8 +158,8 @@ test("map snapshot exposes verified bank and waystone coordinates from the scope
     scope,
     spatial: {
       data: {
-        banks: [{ entityId: "300", claimEntityId: "999", regionId: "19", locationX: 10, locationZ: 20, dimension: "0" }],
-        waystones: [{ entityId: "301", claimEntityId: "999", regionId: "19", locationX: 30, locationZ: 40, dimension: "0" }],
+        banks: [{ entityId: "300", claimEntityId: "999", regionId: "19", locationX: 10, locationZ: 20, dimension: "1" }],
+        waystones: [{ entityId: "301", claimEntityId: "999", regionId: "19", locationX: 30, locationZ: 40, dimension: "1" }],
       },
       generation: 11,
       provenance: { receivedAt: "2026-08-11T12:00:00.000Z" },

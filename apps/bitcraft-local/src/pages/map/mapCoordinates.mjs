@@ -1,4 +1,5 @@
 export const MAP_WORLD_BOUNDS = Object.freeze({ minX: 0, minZ: 0, maxX: 38_400, maxZ: 38_400 });
+export const MAP_OVERWORLD_DIMENSION = "1";
 export const MAP_MOBILE_SCALE = 1_000;
 export const MAP_DISPLAY_SCALE = 3;
 export const MAP_HEX_APOTHEM = 2 / Math.sqrt(3);
@@ -10,7 +11,7 @@ function finite(value, label) {
 }
 
 function dimension(value) {
-  const normalized = String(value ?? "0").trim();
+  const normalized = String(value ?? MAP_OVERWORLD_DIMENSION).trim();
   if (!/^\d+$/.test(normalized)) throw new TypeError("Map dimension must be a decimal integer");
   return normalized;
 }

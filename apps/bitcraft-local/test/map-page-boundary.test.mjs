@@ -72,3 +72,11 @@ test("Map Resource Finder uses the shared icon fallback for compound item identi
   assert.doesNotMatch(mapPage, /const iconUrl = gameIconUrl\(resource\)/);
 });
 
+test("Native map projection preserves X and squishes only Leaflet Y", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+
+  assert.match(nativeMap, /new L\.Point\(latlng\.lng, -latlng\.lat \/ MAP_HEX_APOTHEM\)/);
+  assert.match(nativeMap, /new L\.LatLng\(-projected\.y \* MAP_HEX_APOTHEM, projected\.x\)/);
+  assert.match(nativeMap, /new L\.Transformation\(1, 0, 1, 0\)/);
+});
+

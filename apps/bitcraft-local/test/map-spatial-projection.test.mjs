@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   mapSpatialBaseQueries,
   mapSpatialDetailQueries,
+  mapEnemyTypeId,
   normalizeMapSpatial,
 } from "../src/server/game-data/mapSpatialProjection.ts";
 
@@ -20,6 +21,7 @@ test("map spatial subscriptions are bounded by requested identities", () => {
     "SELECT * FROM bank_state WHERE claim_entity_id = 1369094286777412590",
     "SELECT * FROM waystone_state WHERE claim_entity_id = 1369094286777412590",
     "SELECT * FROM resource_state WHERE resource_id = 2 OR resource_id = 30",
+    "SELECT * FROM enemy_state",
   ]);
   assert.deepEqual(mapSpatialDetailQueries({
     playerIds: scope.playerIds,
@@ -31,13 +33,20 @@ test("map spatial subscriptions are bounded by requested identities", () => {
   ]);
 });
 
+test("generated EnemyType tags map to their matching catalog ids", () => {
+  assert.equal(mapEnemyTypeId({ tag: "PracticeDummy" }), "1");
+  assert.equal(mapEnemyTypeId({ tag: "DeerMale" }), "8");
+  assert.equal(mapEnemyTypeId({ tag: "CrystalizedHexiteCrab" }), "43");
+  assert.equal(mapEnemyTypeId(8), "8");
+});
+
 test("map spatial normalization joins resources and enemies without losing entity IDs", () => {
   const normalized = normalizeMapSpatial({
     scope,
     bankRows: [{ buildingEntityId: 300n, claimEntityId: 1369094286777412590n, coordinates: { x: 10, z: 20, dimension: 0n } }],
     waystoneRows: [{ buildingEntityId: 301n, claimEntityId: 1369094286777412590n, coordinates: { x: 30, z: 40, dimension: 0n } }],
     resourceRows: [{ entityId: 100n, resourceId: 2 }],
-    enemyRows: [{ entityId: 200n, enemyType: 8 }],
+    enemyRows: [{ entityId: 200n, enemyType: { tag: "DeerMale" } }],
     locationRows: [{ entityId: 100n, x: 50, z: 60, dimension: 0n }],
     mobileRows: [
       { entityId: 200n, locationX: 70_000, locationZ: 80_000, dimension: 0 },

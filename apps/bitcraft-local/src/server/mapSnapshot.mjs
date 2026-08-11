@@ -1,4 +1,4 @@
-import { MAP_WORLD_BOUNDS, mapPointFromMobile, normalizeStaticMapPoint } from "../pages/map/mapCoordinates.mjs";
+import { MAP_OVERWORLD_DIMENSION, MAP_WORLD_BOUNDS, mapPointFromMobile, normalizeStaticMapPoint } from "../pages/map/mapCoordinates.mjs";
 import { publicAccessDecision } from "../access/accessControl.mjs";
 
 export const MAP_LAYER_KEYS = [
@@ -62,12 +62,12 @@ export function parseMapScope(searchParams, { allowedRegionIds = [] } = {}) {
 function recordPoint(row, mobile = false) {
   const x = row.locationX ?? row.x;
   const z = row.locationZ ?? row.z;
-  const dimension = row.locationDimension ?? row.dimension ?? "0";
+  const dimension = row.locationDimension ?? row.dimension ?? MAP_OVERWORLD_DIMENSION;
   return mobile ? mapPointFromMobile({ x, z, dimension }) : normalizeStaticMapPoint({ x, z, dimension });
 }
 
 function inScope(row, scope) {
-  return scope.regionIds.includes(String(row.regionId ?? row.region_id ?? "")) && String(row.locationDimension ?? row.dimension ?? "0") === "0";
+  return scope.regionIds.includes(String(row.regionId ?? row.region_id ?? "")) && String(row.locationDimension ?? row.dimension ?? MAP_OVERWORLD_DIMENSION) === MAP_OVERWORLD_DIMENSION;
 }
 
 function feature(row, kind, entityId, point, extra = {}) {
@@ -115,6 +115,8 @@ export function buildMapSnapshot({
       .map(String),
   )];
   const regionClaimRows = snapshotRows(regionClaims, "claims").map((row) => ({ ...row, regionId: row.regionId ?? regionClaims?.data?.regionId }));
+  const regionalBankRows = snapshotRows(regionClaims, "banks").map((row) => ({ ...row, regionId: row.regionId ?? regionClaims?.data?.regionId }));
+  const regionalWaystoneRows = snapshotRows(regionClaims, "waystones").map((row) => ({ ...row, regionId: row.regionId ?? regionClaims?.data?.regionId }));
   const marketRows = snapshotRows(market, "marketplaces").map((row) => ({ ...row, regionId: row.regionId ?? market?.data?.regionId }));
   const settlementRows = snapshotRows(empires, "settlements");
   const nodeRows = snapshotRows(empires, "nodes");
@@ -130,8 +132,8 @@ export function buildMapSnapshot({
   if (layers.watchtowers) layers.watchtowers = nodeRows.filter((row) => inScope(row, scope)).map((row) => feature(row, "watchtower", row.entityId, recordPoint(row), { regionId: String(row.regionId), name: row.nickname ?? "Watchtower", empireEntityId: String(row.empireEntityId) }));
 
   const spatialRows = spatial?.data ?? {};
-  if (layers.banks) layers.banks = (Array.isArray(spatialRows.banks) ? spatialRows.banks : []).filter((row) => inScope(row, scope)).map((row) => feature(row, "bank", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
-  if (layers.waystones) layers.waystones = (Array.isArray(spatialRows.waystones) ? spatialRows.waystones : []).filter((row) => inScope(row, scope)).map((row) => feature(row, "waystone", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
+  if (layers.banks) layers.banks = [...regionalBankRows, ...(Array.isArray(spatialRows.banks) ? spatialRows.banks : [])].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId ?? candidate.buildingEntityId) === String(row.entityId ?? row.buildingEntityId)) === index && inScope(row, scope)).map((row) => feature(row, "bank", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
+  if (layers.waystones) layers.waystones = [...regionalWaystoneRows, ...(Array.isArray(spatialRows.waystones) ? spatialRows.waystones : [])].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId ?? candidate.buildingEntityId) === String(row.entityId ?? row.buildingEntityId)) === index && inScope(row, scope)).map((row) => feature(row, "waystone", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
   if (layers.players) {
     const allowedPlayers = new Set(authorizedMapPlayerIds({ selectedPlayerIds: scope.playerIds, excludedMemberIds, members, players, mobileIdentityVerified }));
     const monitored = new Map(members.map((row) => [String(row.playerEntityId ?? row.entityId), row]));
@@ -157,17 +159,18 @@ export function buildMapSnapshot({
     layers.enemies = (Array.isArray(spatialRows.enemies) ? spatialRows.enemies : []).filter((row) => selected.has(String(row.enemyType)) && inScope(row, scope)).map((row) => feature(row, "enemy", row.entityId, recordPoint(row, true), { regionId: String(row.regionId), enemyType: String(row.enemyType), identity: `enemy:${row.enemyType}` }));
     if (!spatial) warnings.push("Live enemy positions are unavailable.");
   }
-  for (const unavailable of ["banks", "waystones", "empire-territory"]) {
-    if (layers[unavailable] && !Array.isArray(spatialRows[unavailable])) warnings.push(`${unavailable} map data is unavailable.`);
+  for (const unavailable of ["banks", "waystones"]) {
+    if (layers[unavailable] && !Array.isArray(regionClaims?.data?.[unavailable]) && !Array.isArray(spatialRows[unavailable])) warnings.push(`${unavailable} map data is unavailable.`);
   }
+  if (layers["empire-territory"]) warnings.push("empire-territory map data is unavailable until the chunk-to-map polygon transform is live-verified.");
 
   const featureCount = Object.values(layers).reduce((total, rows) => total + rows.length, 0);
   if (featureCount > MAP_SCOPE_LIMITS.features) throw new MapSnapshotError(413, `Map snapshot exceeds the ${MAP_SCOPE_LIMITS.features} feature limit`);
   const snapshots = [
-    layers.claims ? regionClaims : null,
+    (layers.claims || layers.banks || layers.waystones) ? regionClaims : null,
     layers.markets ? market : null,
-    (layers["empire-settlements"] || layers.watchtowers) ? empires : null,
-    (layers.banks || layers.waystones || layers.players || layers.resources || layers.enemies) ? spatial : null,
+    (layers["empire-settlements"] || layers["empire-territory"] || layers.watchtowers) ? empires : null,
+    (layers.players || layers.resources || layers.enemies || ((layers.banks || layers.waystones) && spatial)) ? spatial : null,
   ].filter(Boolean);
   const generatedAt = oldestReceivedAt(snapshots) ?? now.toISOString();
   const ageMs = Math.max(0, now.getTime() - Date.parse(generatedAt));
@@ -182,7 +185,7 @@ export function buildMapSnapshot({
     confidence: warnings.length || degraded ? "partial" : "joined",
     ageMs,
     warnings,
-    coordinateSystem: { version: 1, staticSpace: "map-xz", mobileScale: 1_000, leafletOrder: "z-x", dimension: "0", bounds: MAP_WORLD_BOUNDS },
+    coordinateSystem: { version: 1, staticSpace: "map-xz", mobileScale: 1_000, leafletOrder: "z-x", dimension: MAP_OVERWORLD_DIMENSION, bounds: MAP_WORLD_BOUNDS },
     scope,
     layers,
   };

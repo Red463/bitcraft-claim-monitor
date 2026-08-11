@@ -320,6 +320,22 @@ test("regional empires retain exact identities and join proven attacker and defe
           startTimestamp: "2026-07-30T17:00:00.000Z",
         }],
       }],
+      territory: [
+        {
+          chunkIndex: "242242",
+          empireEntityId: "9007199254740993",
+          watchtowerEntityId: "1369094286736703520",
+          chunkX: 242,
+          chunkZ: 242,
+        },
+        {
+          chunkIndex: "243242",
+          empireEntityId: "9007199254740993",
+          watchtowerEntityId: "1369094286736703520",
+          chunkX: 242,
+          chunkZ: 243,
+        },
+      ],
     },
     warnings: [],
   });
@@ -558,6 +574,8 @@ test("regional claims rank only player settlements by their exact learned Relay 
         locationZ: null,
         locationDimension: null,
       }],
+      banks: [],
+      waystones: [],
     },
     warnings: [
       "Regional claim 1369094286777412591 has no claim_local_state row.",

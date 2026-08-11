@@ -59,15 +59,15 @@ test("map spatial session applies a bounded two-stage joined generation", async 
     "SELECT * FROM bank_state WHERE claim_entity_id = 99999999",
     "SELECT * FROM waystone_state WHERE claim_entity_id = 99999999",
     "SELECT * FROM resource_state WHERE resource_id = 2",
+    "SELECT * FROM enemy_state",
   ]);
   assert.deepEqual(subscriptions[1], [
     "SELECT * FROM location_state WHERE entity_id = 100",
-    "SELECT * FROM mobile_entity_state WHERE entity_id = 101",
+    "SELECT * FROM mobile_entity_state WHERE entity_id = 101 OR entity_id = 200",
   ]);
   assert.equal(snapshots[0].data.players[0].playerEntityId, "101");
   assert.equal(snapshots[0].data.resources[0].entityId, "100");
-  assert.deepEqual(snapshots[0].data.enemies, []);
-  assert.match(snapshots[0].warnings.join(" "), /EnemyType.*live-verified/i);
+  assert.equal(snapshots[0].data.enemies[0].entityId, "200");
 
   resourceRows.splice(0);
   db.resourceState.emit("delete");

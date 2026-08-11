@@ -1,4 +1,5 @@
 export const MAP_WORLD_BOUNDS: Readonly<{ minX: number; minZ: number; maxX: number; maxZ: number }>;
+export const MAP_OVERWORLD_DIMENSION: "1";
 export const MAP_MOBILE_SCALE: number;
 export const MAP_DISPLAY_SCALE: number;
 export const MAP_HEX_APOTHEM: number;

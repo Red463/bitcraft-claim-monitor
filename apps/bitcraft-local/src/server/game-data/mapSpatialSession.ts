@@ -1,4 +1,4 @@
-import { mapSpatialBaseQueries, mapSpatialDetailQueries, normalizeMapSpatial } from "./mapSpatialProjection.ts";
+import { mapSpatialBaseQueries, mapSpatialDetailQueries, normalizeMapSpatial, selectedMapEnemyRows } from "./mapSpatialProjection.ts";
 import { assertSchemaFingerprint, schemaBindingsReady } from "./schemaManifest.ts";
 
 type BindingManifest = Parameters<typeof assertSchemaFingerprint>[0];
@@ -106,7 +106,7 @@ export class RelayMapSpatialSession {
     if (!config) return;
     this.#detailSubscription?.unsubscribe();
     this.#detailSubscription = null;
-    const queries = mapSpatialDetailQueries({ playerIds: config.scope.playerIds, resourceRows: tableRows(connection.db.resourceState), enemyRows: [] });
+    const queries = mapSpatialDetailQueries({ playerIds: config.scope.playerIds, resourceRows: tableRows(connection.db.resourceState), enemyRows: selectedMapEnemyRows(tableRows(connection.db.enemyState), config.scope.enemyTypes) });
     if (!queries.length) {
       this.#apply(connection);
       return;
@@ -128,10 +128,7 @@ export class RelayMapSpatialSession {
       const bankRows = tableRows(connection.db.bankState);
       const waystoneRows = tableRows(connection.db.waystoneState);
       const resourceRows = tableRows(connection.db.resourceState);
-      // EnemyType is a tagged enum. Keep this layer unavailable until its live
-      // wire representation and catalog mapping have been verified; primitive
-      // numeric filtering would be an invalid Relay SQL assumption.
-      const enemyRows: unknown[] = [];
+      const enemyRows = selectedMapEnemyRows(tableRows(connection.db.enemyState), config.scope.enemyTypes);
       const locationRows = tableRows(connection.db.locationState);
       const mobileRows = tableRows(connection.db.mobileEntityState);
       const rowCount = bankRows.length + waystoneRows.length + resourceRows.length + enemyRows.length + locationRows.length + mobileRows.length;

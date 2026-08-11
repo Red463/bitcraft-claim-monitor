@@ -434,6 +434,8 @@ export function normalizeRegionalClaims(options: {
   claimTechRows: unknown[];
   claimTechDescriptionRows: unknown[];
   usernameRows: unknown[];
+  bankRows?: unknown[];
+  waystoneRows?: unknown[];
 }) {
   const regionId = decimalString(options.regionId, "regional claims region id");
   const warnings: string[] = [];
@@ -552,11 +554,31 @@ export function normalizeRegionalClaims(options: {
   claims.sort((left, right) => (
     BigInt(String(left.entityId)) < BigInt(String(right.entityId)) ? -1 : 1
   ));
+  const operationalFeatures = (values: unknown[], kind: "bank" | "waystone") => values.map((value, index) => {
+    const row = record(value, `Regional ${kind}_state row ${index}`);
+    const coordinates = record(row.coordinates, `Regional ${kind}_state row ${index} coordinates`);
+    return {
+      entityId: decimalString(
+        row.buildingEntityId ?? row.building_entity_id,
+        `Regional ${kind}_state row ${index} building id`,
+      ),
+      claimEntityId: decimalString(
+        row.claimEntityId ?? row.claim_entity_id,
+        `Regional ${kind}_state row ${index} claim id`,
+      ),
+      regionId,
+      locationX: integer(coordinates.x, `Regional ${kind}_state row ${index} x`),
+      locationZ: integer(coordinates.z, `Regional ${kind}_state row ${index} z`),
+      locationDimension: decimalString(coordinates.dimension, `Regional ${kind}_state row ${index} dimension`),
+    };
+  });
   return {
     data: {
       regionId,
       coverage: { missingOwnerUsernameCount },
       claims,
+      banks: operationalFeatures(options.bankRows ?? [], "bank"),
+      waystones: operationalFeatures(options.waystoneRows ?? [], "waystone"),
     },
     warnings,
   };
@@ -939,6 +961,28 @@ export function normalizeRegionalEmpires(options: {
     chunkCountByNode.set(watchtowerEntityId, (chunkCountByNode.get(watchtowerEntityId) ?? 0) + 1);
     chunkCountByEmpire.set(empireEntityId, (chunkCountByEmpire.get(empireEntityId) ?? 0) + 1);
   }
+  const territory = localChunkRows.map((value, index) => {
+    const row = record(value, `Regional empire_chunk_state row ${index}`);
+    const chunkIndex = decimalString(
+      row.chunkIndex ?? row.chunk_index,
+      `Regional empire chunk row ${index} chunk index`,
+    );
+    const encoded = BigInt(chunkIndex);
+    return {
+      chunkIndex,
+      empireEntityId: decimalString(
+        row.empireEntityId ?? row.empire_entity_id,
+        `Regional empire chunk row ${index} empire id`,
+      ),
+      watchtowerEntityId: decimalString(
+        row.watchtowerEntityId ?? row.watchtower_entity_id,
+        `Regional empire chunk row ${index} watchtower id`,
+      ),
+      chunkX: Number(encoded % 1_000n),
+      chunkZ: Number(encoded / 1_000n),
+    };
+  });
+  territory.sort((left, right) => BigInt(left.chunkIndex) < BigInt(right.chunkIndex) ? -1 : 1);
 
   const nodeOwnerByBuilding = new Map<string, string>();
   for (const [index, value] of localNodeRows.entries()) {
@@ -1083,7 +1127,7 @@ export function normalizeRegionalEmpires(options: {
     BigInt(left.entityId) < BigInt(right.entityId) ? -1 : 1
   ));
   return {
-    data: { regionId, empires, members, settlements, claimMembers, nodes },
+    data: { regionId, empires, members, settlements, claimMembers, nodes, territory },
     warnings,
   };
 }
