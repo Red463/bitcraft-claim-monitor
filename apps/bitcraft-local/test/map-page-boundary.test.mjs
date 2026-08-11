@@ -114,6 +114,9 @@ test("Native map reuses one canvas renderer and fixed marker presentations", () 
   assert.match(nativeMap, /mapMarkerPresentation\(feature\.kind\)/);
   assert.match(nativeMap, /L\.divIcon\(/);
   assert.match(nativeMap, /planDensePointDraw\(this\.#points,/);
+  assert.match(nativeMap, /const accessibleFeatures =/);
+  assert.match(nativeMap, /presentation\.mode === "canvas"/);
+  assert.match(nativeMap, /accessibleFeatures\.slice\(0, 250\)/);
 });
 
 test("Native map requests only same-origin locally provisioned terrain tiles", () => {
@@ -127,5 +130,17 @@ test("Native map requests only same-origin locally provisioned terrain tiles", (
   assert.doesNotMatch(nativeMap, /prism\.brico\.app|bitcraftmap\.com/);
   assert.match(nativeMap, /Terrain\/water tiles are not installed on this server/);
   assert.ok(nativeMap.indexOf("new CoordinateGridLayer") < nativeMap.indexOf("terrainTileUrl(terrainStatus.generation)"));
+});
+
+test("Native map browser source excludes bank tracking and remote map assets", () => {
+  const sources = [
+    readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8"),
+    readFileSync(new URL("../src/pages/map/nativeMapRequest.mjs", import.meta.url), "utf8"),
+    readFileSync(new URL("../src/pages/map/mapMarkerPresentation.mjs", import.meta.url), "utf8"),
+  ].join("\n");
+
+  assert.doesNotMatch(sources, /["']banks?["']/i);
+  assert.doesNotMatch(sources, /https?:\/\//i);
+  assert.doesNotMatch(sources, /renderer:\s*L\.canvas\(\)/);
 });
 

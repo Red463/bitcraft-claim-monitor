@@ -27,7 +27,7 @@ function terrainRenderHash(data: Pick<NormalizedTerrainGeneration, "biomes" | "c
   hash.update(JSON.stringify(data.biomes.map(({ biomeType, name }) => ({ biomeType, name }))));
   for (const chunk of data.chunks) {
     hash.update(`${chunk.chunkIndex}:${chunk.chunkX}:${chunk.chunkZ}:${chunk.side ?? ""}`);
-    for (const key of ["biomes", "elevations", "waterBodyTypes"] as const) {
+    for (const key of ["biomes", "biomeDensity", "elevations", "originalElevations", "waterLevels", "waterBodyTypes"] as const) {
       const values = chunk[key];
       if (ArrayBuffer.isView(values)) hash.update(Buffer.from(values.buffer, values.byteOffset, values.byteLength));
       else if (values != null) hash.update(JSON.stringify(values));

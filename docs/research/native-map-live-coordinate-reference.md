@@ -48,14 +48,32 @@ The live smoke acceptance on 2026-08-11 installed a complete region `19` bundle 
 
 - Bounds: map X/Z `23040..30720`, overworld dimension `1`.
 - Zooms: `-5..0`, including legitimate negative tile-Y filenames and requests.
-- Palette version: `1`.
-- Output: 1,157 WebP tiles and 2,115,562 encoded bytes.
-- Observed at `2026-08-11T16:29:00.509Z`; atomically installed at `2026-08-11T16:32:10.172Z` (189,663 ms).
+- Palette version: `2`.
+- Output: 1,157 WebP tiles and 2,515,828 encoded bytes.
+- Observed at `2026-08-11T19:44:38.895Z`; atomically installed at `2026-08-11T19:47:21.788Z` (162,893 ms).
 - A representative request, `/api/local/map/tiles/terrain/0/107/-86.webp`, returned `200 image/webp`; visual inspection showed semantic green land, lakes/rivers, and ocean water.
 - The initial encoder effort exceeded the measured 600-second safety deadline and correctly left no partial pointer. WebP effort `1` completed the same semantic render within the deadline. This is an encoding-speed tradeoff only; the palette, coordinates, source cells, and response contract are unchanged.
 - Identical render content is fingerprinted and skipped. If render-relevant terrain changes while a build is running, only the newest pending complete generation is retained for the next atomic build.
 
 Production collection remains worker-owned and HTTP/tile reads remain web-owned. The smoke launcher defaults to the combined preview role so it can create a first bundle locally; set `BITCRAFT_SMOKE_PROCESS_ROLE=web` after a bundle is installed to inspect the last-good map without local collection competing with browser requests.
+
+## Performance and visual acceptance
+
+The completed palette-v2 smoke acceptance used `http://127.0.0.1:18449/?page=map&label=Zephra&x=27361&z=23715&regionId=19` at a `1146 x 912` browser viewport. No player coordinates were recorded.
+
+- The resource finder rendered 80 of 658 initial matches. `Show more` rendered 160, searching for the beyond-first-batch `Key Pedestal` returned four matching catalog entries, and clearing the search reset the window to 80.
+- Leaflet owned two `.native-map-dense-canvas` elements and one shared ordinary overlay canvas. The page had 23 canvases total because coordinate/terrain grid tiles are canvases; it did not create one canvas per ordinary feature.
+- The accepted snapshot rendered 113 low-volume app-owned markers, including the same-origin Hexcoin purse market icon. Waystones were unavailable in this generation, so no coordinate-gated live marker was invented. The configured same-origin Waystone Crystal fallback returned `200 image/webp` (1,620 bytes) and was visually inspected in the smoke browser as a recognizable blue crystal; registry and presentation tests cover its marker wiring.
+- The native map rendered no `.map-frame` iframe and loaded no remote image inside `.native-map-shell`. The six unrelated `about:blank` frames belong to the existing Featurebase shell integration, not map rendering.
+- Browser console errors: 0. Page width was 1,146 CSS pixels with a matching 1,146-pixel scroll width, so the desktop page introduced no horizontal overflow. The shared ordinary canvas rendered 151 claims and the browser exposed all 151 through the bounded keyboard-readable canvas-point alternative.
+- Warm same-origin operational snapshot: 54,119 uncompressed bytes, HTTP `200`, 34.1 ms at the server boundary.
+- Stable web-role process measured between 96.8 and 131.7 MiB working set and 95.2 and 141.1 MiB private memory during browser acceptance. A combined smoke collector later exceeded 1.6 GiB while collecting/encoding; production and normal visual smoke keep collector and web roles separate.
+- Final production build: 95 seconds. Final full suite after the terrain-store concurrency and render-hash fixes: 1,984 tests, 1,982 passed, 2 skipped, 0 failed, 167.2 seconds at the command boundary.
+- Palette-v2 status after installation: live, generation `1`, 1,157 tiles, 2,515,828 bytes, no warnings. Visual inspection showed distinct land biomes/relief, water depth variation, shoreline contrast, and the focus/empire/watchtower glyph markers over the same categorical topology.
+
+The native map was also browser-smoked at an explicit `390 x 844` phone viewport. The controls stacked into the narrow layout, the map remained present below the finder, the document introduced no horizontal overflow, and no native map iframe appeared. The temporary viewport override was reset to the user's desktop size afterward.
+
+Real browser traffic also exposed and now regression-tests an atomic-store race: last-good tile reads used to prune the active `.staging-*` bundle. The store now protects only the current staging directory, allowing palette-v2 installation while readers continue receiving the previous complete bundle.
 
 ## Enemy identity mapping
 
@@ -73,7 +91,7 @@ The bounded resource verifier completed successfully against healthy Relay regio
 
 - Session completion: 468 ms on the captured run and 514 ms on an immediate repeat. This verifier starts timing after topology discovery and includes WebSocket startup, so it is not the server-boundary warm-snapshot benchmark; the configured-region API check remains pending.
 - Normalized JSON: 248,563 uncompressed bytes.
-- Features: 1,553 resources; zero requested players, enemies, banks, or waystones.
+- Features: 1,553 resources; zero requested players, enemies, or waystones.
 - Bounds: X `11371..15232`, Z `15631..19879`, dimension `1`.
 - Public fixtures: entity `864691128455284226` at `(13973,15784)`, entity `864691128455284353` at `(13978,15787)`, and entity `864691128455339589` at `(13898,15933)`.
 
@@ -102,20 +120,20 @@ Acceptance requires a complete generation proving:
 
 The provider implementation now avoids the dense per-entity resource fan-out: selected resources and `location_state` are materialized with an indexed two-table subscription join. Enemy mobile subscriptions are derived only from locally selected enemy identities and split into batches of at most 100 entity IDs; player queries use the same limit. Normalization rejects missing/non-overworld dimensions and coordinates outside the verified `0..38400` world bounds (mobile fixed-point `0..38400000`).
 
-Production deliberately keeps the combined `map-spatial` collector cold until the pending fixtures pass. Player, resource, enemy, bank, and waystone layers return explicit unavailable warnings rather than inferred coordinates. The two latest 120-second resource probes remained at `connected:false` / `stage:"idle"`, so they did not validate or reject the new indexed join. A schema mismatch or unverified source must remain unavailable and retain only independently verified last-good data.
+Production deliberately keeps the combined `map-spatial` collector cold until the pending fixtures pass. Player, resource, enemy, and waystone layers return explicit unavailable warnings rather than inferred coordinates. The two latest 120-second resource probes remained at `connected:false` / `stage:"idle"`, so they did not validate or reject the new indexed join. A schema mismatch or unverified source must remain unavailable and retain only independently verified last-good data.
 
 ## First-party renderer and BitCraftMap parity target
 
 In this project, **native** means an app-owned renderer and same-origin API. It does not require a platform-native UI toolkit, and it does not permit the browser to contact BitCraftMap, Prism, BitJita, or a third-party tile host.
 
-The current public BitCraftMap application was inspected on 2026-08-11. Its visible layer inventory is the parity target, not the older GitHub application's `23040 x 23040` image map:
+The current public BitCraftMap application was inspected on 2026-08-11. Its visible layer inventory is a reference for possible parity, not a requirement to track banks and not the older GitHub application's `23040 x 23040` image map:
 
 - Terrain and game basemaps, including visible land and water.
 - Events, wonders, hexite deposits, Maker's Trees, temples, ruined cities, traveler camps, volcanic geysers, hermit crab dens, shipwrecks, uncharted ruins, and silkmoth breeding grounds.
 - Banks, markets, waystones, grids, dungeons, territories, watchtowers, claims by tier, caves by tier, roads, and custom waypoints.
 - User-selected resources, enemies, and players.
 
-The maintained app currently implements claims, markets, banks, waystones, empire settlements, watchtowers, selected players/resources/enemies, and custom focus/waypoints. A zero count means Relay returned no usable feature for that requested region/generation; it must not be presented as proof that the feature does not exist globally. On the map, a bank is a `bank_state` world marker. Settlement/player bank inventories are a separate operational feature and are not map geometry.
+The maintained app currently implements claims, markets, waystones, empire settlements, watchtowers, selected players/resources/enemies, and custom focus/waypoints. Bank markers are deliberately outside the app-owned map scope. A zero count means Relay returned no usable feature for that requested region/generation; it must not be presented as proof that the feature does not exist globally.
 
 ### Basemap ownership boundary
 
@@ -132,7 +150,7 @@ The current BitCraftMap browser uses `38400 x 38400` raster tiles, but no redist
 | Parity group | Current source/status | Required work |
 | --- | --- | --- |
 | Terrain/game/water | Relay layout, renderer, atomic store, worker runtime, same-origin API, and Leaflet layer verified | Extend live bundle acceptance to each configured active region and benchmark multi-region update frequency |
-| Banks/waystones | Regional `bank_state` / `waystone_state` | Validate live counts and known locations in every enabled region |
+| Waystones | Regional `waystone_state` | Validate live counts and known locations in every enabled region |
 | Markets | Existing `marketplace_state` projection | Generalize beyond the monitored claim if parity requires all regional markets |
 | Claims/watchtowers/settlements | Existing Relay projections | Add tier/icon controls and verify every active region |
 | Resources/enemies/players | Bounded live sessions | Complete the pending live coordinate/deletion acceptance above |

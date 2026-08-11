@@ -350,7 +350,13 @@ export function NativeMap({
     enemiesRef.current?.setPoints(snapshot.layers.enemies ?? []);
   }, [snapshot, focus?.name, focus?.locationX, focus?.locationZ]);
 
-  const denseFeatures = [...(snapshot?.layers.resources ?? []), ...(snapshot?.layers.enemies ?? [])];
+  const accessibleFeatures = snapshot
+    ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {
+        if (layer === "empire-territory") return [];
+        if (layer === "resources" || layer === "enemies") return features;
+        return features.filter((feature) => mapMarkerPresentation(feature.kind).mode === "canvas");
+      })
+    : [];
   return (
     <section className="native-map-shell" aria-label="Native BitCraft map">
       <div ref={hostRef} className="native-map-canvas" role="application" aria-label="Interactive BitCraft coordinate map" tabIndex={0} />
@@ -367,7 +373,7 @@ export function NativeMap({
         {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{snapshot.freshness}</small></li>)}</ul> : null}
         {snapshot?.warnings?.length ? <details><summary>{snapshot.warnings.length} data warning{snapshot.warnings.length === 1 ? "" : "s"}</summary><ul>{snapshot.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
       </div>
-      {denseFeatures.length ? <details className="native-map-accessible-points"><summary>{denseFeatures.length} dense map points</summary><ul>{denseFeatures.slice(0, 250).map((feature) => <li key={`${feature.kind}:${feature.entityId}`}>{featureLabel(feature)} at {displayedPoint(feature)}</li>)}</ul></details> : null}
+      {accessibleFeatures.length ? <details className="native-map-accessible-points"><summary>{accessibleFeatures.length} canvas map points</summary><ul>{accessibleFeatures.slice(0, 250).map((feature) => <li key={`${feature.kind}:${feature.regionId}:${feature.entityId}`}>{featureLabel(feature)} at {displayedPoint(feature)}</li>)}</ul></details> : null}
     </section>
   );
 }

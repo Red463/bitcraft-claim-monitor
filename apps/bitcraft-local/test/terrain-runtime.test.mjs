@@ -14,7 +14,12 @@ function terrain(regionId, generation = 1) {
     data: {
       regionId, worldRegionStateId: regionId, dimension: "1", observedAt: "2026-08-11T16:00:00.000Z",
       regionBounds: { minChunkX: chunkX, minChunkZ: 0, maxChunkX: chunkX, maxChunkZ: 0 },
-      biomes: [], chunks: [{ chunkIndex: String(chunkX), chunkX, chunkZ: 0 }], cellCount: 1024, normalizedBytes: 16384,
+      biomes: [], chunks: [{
+        chunkIndex: String(chunkX), chunkX, chunkZ: 0,
+        biomes: Uint8Array.from([1]), biomeDensity: Uint32Array.from([100]),
+        elevations: Int16Array.from([1]), originalElevations: Int16Array.from([1]),
+        waterLevels: Int16Array.from([-1]), waterBodyTypes: Uint8Array.from([0]),
+      }], cellCount: 1024, normalizedBytes: 16384,
     },
     warnings: [], database: `bitcraft-live-${regionId}`, regionId, schemaFingerprint: `fp-${regionId}`, generation,
     receivedAt: "2026-08-11T16:00:00.000Z",
@@ -60,10 +65,16 @@ test("terrain runtime canonicalizes four regions, coalesces builds, and retains 
   await runtime.waitForIdle();
   assert.equal(builds.length, 2, "identical render content must not rebuild tiles");
 
+  const densityChanged = terrain("1", 4);
+  densityChanged.data.chunks[0].biomeDensity[0] = 101;
+  await sessions.get("1").emit(densityChanged);
+  await runtime.waitForIdle();
+  assert.equal(builds.length, 3, "palette inputs must invalidate rendered tiles");
+
   tileStore.buildAndInstall = async () => { throw new Error("forced build failure"); };
   await sessions.get("3").emit(terrain("3"));
   await runtime.waitForIdle();
-  assert.equal(runtime.health().lastGoodGeneration, "2");
+  assert.equal(runtime.health().lastGoodGeneration, "3");
   assert.match(runtime.health().lastError, /forced build failure/);
   assert.deepEqual(buildFailures, ["forced build failure"]);
   await runtime.stop();
