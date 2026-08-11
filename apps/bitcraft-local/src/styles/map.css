@@ -188,6 +188,8 @@
 .map-resource-list strong { min-width: 0; overflow: hidden; overflow-wrap: anywhere; white-space: normal; font-size: 13px; line-height: 1.18; font-weight: 800; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .map-resource-list small { color: #8f9aaa; font-size: 11px; }
 .map-resource-list .tier-badge { grid-column: 3; grid-row: 1 / 3; }
+.map-resource-list-footer { flex: 0 0 auto; min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 6px; border-top: 1px solid rgba(154,168,190,.14); color: #8f9aaa; font-size: 11px; }
+.map-resource-list-footer .toolbar-button { min-height: 30px; padding: 0 10px; }
 
 @media (max-width: 900px) {
   .map-panel.full-height { padding: 14px; }

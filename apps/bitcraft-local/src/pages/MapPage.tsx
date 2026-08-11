@@ -22,6 +22,7 @@ import { currentMapPlayerSelection, defaultMapPlayerSelection, filterMapPlayerRo
 import { NativeMap } from "./map/NativeMap";
 import { mapRendererPolicy } from "./map/mapRendererPolicy.mjs";
 import { boundedNativeMapRegions } from "./map/nativeMapRequest.mjs";
+import { RESOURCE_FINDER_BATCH_SIZE, nextResourceLimit, visibleResourceMatches } from "./map/resourceFinderWindow.mjs";
 
 const LOCAL_API = "/api/local";
 const FRAME_TIMEOUT_MS = 12000;
@@ -126,6 +127,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
   const [resourceSearch, setResourceSearch] = usePersistedState("map.resource-search", "");
   const [resourceTier, setResourceTier] = usePersistedState("map.resource-tier", "All");
   const [resourceCategory, setResourceCategory] = usePersistedState("map.resource-category", "All");
+  const [resourceVisibleLimit, setResourceVisibleLimit] = React.useState<number>(RESOURCE_FINDER_BATCH_SIZE);
   const [resourceRegions, setResourceRegions] = usePersistedState<string[]>("map.regions", data.claim.regionId != null ? [String(data.claim.regionId)] : []);
   const [resourcePanelCollapsed, setResourcePanelCollapsed] = usePersistedState("map.resource-finder-collapsed", false);
   const [resources, setResources] = React.useState<AnyRecord[]>([]);
@@ -288,6 +290,13 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
       return toNumber(a.mapSortOrder) - toNumber(b.mapSortOrder) || String(a.name).localeCompare(String(b.name));
     });
   }, [resources, resourceSearch, resourceTier, resourceCategory]);
+  React.useEffect(() => {
+    setResourceVisibleLimit(RESOURCE_FINDER_BATCH_SIZE);
+  }, [resourceSearch, resourceTier, resourceCategory]);
+  const renderedResources = React.useMemo(
+    () => visibleResourceMatches(visibleResources, resourceVisibleLimit),
+    [visibleResources, resourceVisibleLimit],
+  );
   function setResourceRegion(value: string) {
     setResourceRegions(value === "All" ? [] : [value]);
   }
@@ -393,7 +402,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
           {resourceError ? <div className="error">Resources unavailable: {resourceError}</div> : null}
           {resourceNotice ? <p className="legend">{resourceNotice}</p> : null}
           <div className="map-resource-list">
-            {visibleResources.map((resource) => {
+            {renderedResources.map((resource) => {
               const id = mapResourceToken(resource);
               const active = normalizedSelectedResources.includes(id);
               const resourceIcon = {
@@ -410,7 +419,13 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
               </button>;
             })}
             {!visibleResources.length ? <p className="legend">{resources.length ? "No resources match these filters." : resourceCatalogLoaded ? "No map resources are available from Relay." : "Loading live Relay resources..."}</p> : null}
-          </div></> : null}
+          </div>
+          {visibleResources.length ? <div className="map-resource-list-footer">
+            <span aria-live="polite">Showing {renderedResources.length} of {visibleResources.length}</span>
+            {renderedResources.length < visibleResources.length ? (
+              <button type="button" className="toolbar-button" onClick={() => setResourceVisibleLimit((current) => nextResourceLimit(current, visibleResources.length))}>Show more</button>
+            ) : null}
+          </div> : null}</> : null}
         </aside>
         <div className={`map-frame-host ${nativeRenderer ? "is-native" : `is-${frameState}`}`}>
           {nativeRenderer ? <NativeMap regionIds={mapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} enemyTypes={selectedEnemyIds} focus={mapMarker} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}

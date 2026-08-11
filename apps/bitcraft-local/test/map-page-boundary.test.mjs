@@ -72,6 +72,21 @@ test("Map Resource Finder uses the shared icon fallback for compound item identi
   assert.doesNotMatch(mapPage, /const iconUrl = gameIconUrl\(resource\)/);
 });
 
+test("Map Resource Finder bounds rendered rows and reveals deterministic batches", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+
+  assert.match(mapPage, /import \{ RESOURCE_FINDER_BATCH_SIZE, nextResourceLimit, visibleResourceMatches \} from "\.\/map\/resourceFinderWindow\.mjs"/);
+  assert.match(mapPage, /useState<number>\(RESOURCE_FINDER_BATCH_SIZE\)/);
+  assert.match(mapPage, /setResourceVisibleLimit\(RESOURCE_FINDER_BATCH_SIZE\)/);
+  assert.match(mapPage, /\[resourceSearch, resourceTier, resourceCategory\]/);
+  assert.match(mapPage, /const renderedResources = React\.useMemo/);
+  assert.match(mapPage, /visibleResourceMatches\(visibleResources, resourceVisibleLimit\)/);
+  assert.match(mapPage, /renderedResources\.map\(\(resource\) =>/);
+  assert.match(mapPage, /Showing \{renderedResources\.length\} of \{visibleResources\.length\}/);
+  assert.match(mapPage, /nextResourceLimit\(current, visibleResources\.length\)/);
+  assert.match(mapPage, />Show more</);
+});
+
 test("Native map projection preserves X and squishes only Leaflet Y", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
 
