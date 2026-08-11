@@ -187,7 +187,8 @@ test("native terrain browser code is same-origin and contains no third-party til
   const terrainStatus = await readFile(new URL("../src/pages/map/terrainTileStatus.mjs", import.meta.url), "utf8");
   const browserTerrain = `${nativeMap}\n${terrainStatus}`;
   assert.match(browserTerrain, /\/api\/local\/map\/tiles\/status/);
-  assert.match(browserTerrain, /\/api\/local\/map\/tiles\/terrain\/\{z\}\/\{x\}\/\{y\}\.webp/);
+  assert.match(browserTerrain, /mapTileUrl\("terrain"/);
+  assert.match(browserTerrain, /mapTileUrl\("water"/);
   assert.doesNotMatch(browserTerrain, /https?:\/\/|prism\.brico|bitcraftmap\.com|BitJita|SpacetimeDB|sharp/i);
 });
 

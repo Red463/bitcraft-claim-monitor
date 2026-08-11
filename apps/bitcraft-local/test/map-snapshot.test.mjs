@@ -102,6 +102,8 @@ test("map snapshot projects available operations and reports uncollected layers"
   assert.equal(snapshot.layers.watchtowers[0].point.z, 60);
   assert.deepEqual(snapshot.layers.players, []);
   assert.deepEqual(snapshot.layers.resources, []);
+  assert.equal(snapshot.layerAvailability.players.available, false);
+  assert.equal(snapshot.layerAvailability.resources.available, false);
   assert.equal(snapshot.freshness, "partial");
   assert.match(snapshot.warnings.join(" "), /player positions.*unavailable/i);
   assert.match(snapshot.warnings.join(" "), /resource positions.*unavailable/i);
@@ -204,6 +206,8 @@ test("map snapshot keeps waystone coordinates unavailable until live fixtures ar
     },
   });
   assert.deepEqual(snapshot.layers.waystones, []);
+  assert.equal(snapshot.layerAvailability.waystones.available, false);
+  assert.match(snapshot.layerAvailability.waystones.reason, /live-verified/i);
   assert.match(snapshot.warnings.join(" "), /waystone.*live-verified/i);
 });
 
@@ -239,6 +243,7 @@ test("map snapshot keeps enemy positions unavailable until type mapping is verif
     },
   });
   assert.deepEqual(snapshot.layers.enemies, []);
+  assert.equal(snapshot.layerAvailability.enemies.available, false);
   assert.match(snapshot.warnings.join(" "), /enemy positions.*catalog mapping.*live-verified/i);
 });
 
@@ -253,6 +258,7 @@ test("map snapshot keeps resources unavailable until the live location join is v
     },
   });
   assert.deepEqual(snapshot.layers.resources, []);
+  assert.equal(snapshot.layerAvailability.resources.available, false);
   assert.match(snapshot.warnings.join(" "), /resource positions.*location join.*live-verified/i);
 });
 

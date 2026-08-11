@@ -152,14 +152,18 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   const control = readFileSync(new URL("../src/pages/map/MapLayersControl.tsx", import.meta.url), "utf8");
 
-  assert.match(nativeMap, /MAP_LAYER_PREFERENCE_KEY/);
-  assert.match(nativeMap, /parseMapLayerVisibility/);
-  assert.match(nativeMap, /serializeMapLayerVisibility/);
+  assert.match(nativeMap, /loadMapLayerVisibility\(\(\) => window\.localStorage\)/);
+  assert.match(nativeMap, /saveMapLayerVisibility\(\(\) => window\.localStorage, layerVisibility\)/);
   assert.match(nativeMap, /setVisible\(layerVisibility\.resources\)/);
   assert.match(nativeMap, /setVisible\(layerVisibility\.enemies\)/);
   assert.match(nativeMap, /<MapLayersControl/);
   assert.doesNotMatch(control, /setResourceIds|setEnemyTypes|resourceIds\s*=|enemyTypes\s*=/);
   assert.match(control, /aria-describedby/);
   assert.match(control, />Layers</);
+  assert.match(nativeMap, /alt: accessibleLabel, title: accessibleLabel/);
+  assert.match(nativeMap, /setAttribute\("aria-label", accessibleLabel\)/);
+  assert.match(nativeMap, /zoomend/);
+  assert.match(nativeMap, /--native-map-claim-scale/);
+  assert.match(nativeMap, /selectionRequired.*resourceIds\.length.*enemyTypes\.length/s);
 });
 

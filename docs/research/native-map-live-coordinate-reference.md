@@ -48,10 +48,10 @@ The live smoke acceptance on 2026-08-11 installed a complete region `19` bundle 
 
 - Bounds: map X/Z `23040..30720`, overworld dimension `1`.
 - Zooms: `-5..0`, including legitimate negative tile-Y filenames and requests.
-- Palette version: `2`.
-- Output: 1,157 WebP tiles and 2,515,828 encoded bytes.
-- Observed at `2026-08-11T19:44:38.895Z`; atomically installed at `2026-08-11T19:47:21.788Z` (162,893 ms).
-- A representative request, `/api/local/map/tiles/terrain/0/107/-86.webp`, returned `200 image/webp`; visual inspection showed semantic green land, lakes/rivers, and ocean water.
+- Palette version: `3`.
+- Output: 2,314 WebP tiles and 4,674,916 encoded bytes: aligned, independently toggleable `terrain` and `water` channels at every tile coordinate.
+- Observed at `2026-08-11T21:45:44.893Z`; atomically installed at `2026-08-11T21:50:00.254Z` after approximately 269 seconds of live collection and encoding.
+- Representative negative-zoom and zoom-zero requests returned `200 image/webp`. Browser inspection showed olive land, deep navy ocean, inland water, stronger shorelines/relief, and deterministic fine cell texture.
 - The initial encoder effort exceeded the measured 600-second safety deadline and correctly left no partial pointer. WebP effort `1` completed the same semantic render within the deadline. This is an encoding-speed tradeoff only; the palette, coordinates, source cells, and response contract are unchanged.
 - Identical render content is fingerprinted and skipped. If render-relevant terrain changes while a build is running, only the newest pending complete generation is retained for the next atomic build.
 
@@ -67,11 +67,13 @@ The completed palette-v2 smoke acceptance used `http://127.0.0.1:18449/?page=map
 - The native map rendered no `.map-frame` iframe and loaded no remote image inside `.native-map-shell`. The six unrelated `about:blank` frames belong to the existing Featurebase shell integration, not map rendering.
 - Browser console errors: 0. Page width was 1,146 CSS pixels with a matching 1,146-pixel scroll width, so the desktop page introduced no horizontal overflow. The shared ordinary canvas rendered 151 claims and the browser exposed all 151 through the bounded keyboard-readable canvas-point alternative.
 - Warm same-origin operational snapshot: 54,119 uncompressed bytes, HTTP `200`, 34.1 ms at the server boundary.
-- Stable web-role process measured between 96.8 and 131.7 MiB working set and 95.2 and 141.1 MiB private memory during browser acceptance. A combined smoke collector later exceeded 1.6 GiB while collecting/encoding; production and normal visual smoke keep collector and web roles separate.
-- Final production build: 95 seconds. Final full suite after the terrain-store concurrency and render-hash fixes: 1,984 tests, 1,982 passed, 2 skipped, 0 failed, 167.2 seconds at the command boundary.
-- Palette-v2 status after installation: live, generation `1`, 1,157 tiles, 2,515,828 bytes, no warnings. Visual inspection showed distinct land biomes/relief, water depth variation, shoreline contrast, and the focus/empire/watchtower glyph markers over the same categorical topology.
+- Stable web-role process measured between 96.8 and 131.7 MiB working set in the original acceptance and 97.6 MiB after the palette-v3 bundle was installed. The palette-v3 combined collector peaked around 1.56 GiB while collecting and encoding. Production and normal visual smoke keep collector and web roles separate.
+- Final full suite after the layer-control acceptance fixes: 1,995 tests, 1,993 passed, 2 skipped, 0 failed, 163 seconds at the command boundary. The final production build is verified separately after commit.
+- Palette-v3 status after installation: generation `1`, 2,314 tiles, 4,674,916 bytes. The optimized renderer produces both channels from one pixel scan and uses a bounded eight-entry promise cache; focused renderer/store/runtime tests pass. A live browser regression found that Leaflet's tile layer defaulted to minimum zoom `0`; the layer now explicitly supports `-5..5`, and 24 same-origin tile images were observed after zooming below zero.
+- Claim tiers `1..10` use the supplied first-party badge assets with a hexagonal CSS crop that removes the source square background. The live viewport showed isolated Roman-numeral badges without square backplates.
+- The Layers control independently toggles terrain, water, claims, markets, waystones, empire settlements, watchtowers, players, resources, and enemies. Roads and claim areas are present but disabled with `Unavailable — awaiting verified Relay coordinates`; no coordinates are inferred.
 
-The native map was also browser-smoked at an explicit `390 x 844` phone viewport. The controls stacked into the narrow layout, the map remained present below the finder, the document introduced no horizontal overflow, and no native map iframe appeared. The temporary viewport override was reset to the user's desktop size afterward.
+The native map was also browser-smoked at an explicit `390 x 844` phone viewport. The controls stacked into the narrow layout, the map remained present below the finder, the layer panel remained usable at phone width, and no native map iframe appeared. The temporary viewport override was reset to the user's desktop size afterward. Final palette-v3 boundary inspection found 32 same-origin Leaflet tile images, zero remote images inside `.native-map-shell`, and zero map-owned iframes.
 
 Real browser traffic also exposed and now regression-tests an atomic-store race: last-good tile reads used to prune the active `.staging-*` bundle. The store now protects only the current staging directory, allowing palette-v2 installation while readers continue receiving the previous complete bundle.
 
@@ -139,7 +141,7 @@ The maintained app currently implements claims, markets, waystones, empire settl
 
 The current BitCraftMap browser uses `38400 x 38400` raster tiles, but no redistribution grant for those current tile assets was located. The old BSD-2-Clause GitHub repository contains a stale `23040 x 23040` map and is not projection-compatible with the current world. Consequently:
 
-- Browsers request terrain only from `/api/local/map/tiles/terrain/{z}/{x}/{y}.webp`.
+- Browsers request terrain and water only from `/api/local/map/tiles/{terrain|water}/{z}/{x}/{y}.webp`.
 - The Relay worker builds versioned bundles under `data/map-tiles/versions/` and atomically switches `data/map-tiles/current.json`; the web process reads only the selected last-good version. Negative Y names are valid.
 - Missing local tiles return `404` and leave the coordinate grid visible. The public status distinguishes `building`, unavailable, live, and stale last-good states without exposing filesystem paths or coordinates from private layers.
 - Do not copy, hotlink, or redistribute current Prism/BitCraftMap tiles until their owner grants documented permission.

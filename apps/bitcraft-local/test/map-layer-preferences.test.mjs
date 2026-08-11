@@ -18,11 +18,21 @@ test("native map layer preferences are complete, versioned, and defensive", () =
   assert.equal(preferences.MAP_LAYER_PREFERENCE_KEY, "bitcraft-map-layers:v1");
   assert.equal(preferences.defaultMapLayerVisibility().terrain, true);
   assert.equal(preferences.defaultMapLayerVisibility().roads, false);
+  assert.equal(preferences.MAP_LAYER_DEFINITIONS.find(({ key }) => key === "roads").available, false);
+  assert.match(preferences.MAP_LAYER_DEFINITIONS.find(({ key }) => key === "roads").unavailableReason, /verified Relay coordinates/);
+  assert.equal(preferences.MAP_LAYER_DEFINITIONS.find(({ key }) => key === "resources").selectionRequired, true);
   assert.deepEqual(preferences.parseMapLayerVisibility("not json"), preferences.defaultMapLayerVisibility());
   const parsed = preferences.parseMapLayerVisibility('{"claims":false,"roads":true,"unknown":true}');
   assert.equal(parsed.claims, false);
   assert.equal(parsed.roads, true);
   assert.equal(Object.hasOwn(parsed, "unknown"), false);
+});
+
+test("native map layer storage failures fall back without throwing", () => {
+  assert.ok(preferences, "map layer preferences module must exist");
+  const denied = () => { throw new DOMException("denied", "SecurityError"); };
+  assert.deepEqual(preferences.loadMapLayerVisibility(denied), preferences.defaultMapLayerVisibility());
+  assert.equal(preferences.saveMapLayerVisibility(denied, preferences.defaultMapLayerVisibility()), false);
 });
 
 test("native map layer persistence emits only allowlisted boolean choices", () => {

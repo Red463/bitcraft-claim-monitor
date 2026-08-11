@@ -138,7 +138,10 @@ export function buildMapSnapshot({
   const spatialRows = spatial?.data ?? {};
   const waystoneWarning = "Waystone positions are unavailable until known live fixtures are live-verified.";
   if (layers.waystones) {
-    if (!waystoneCoordinatesVerified && !warnings.includes(waystoneWarning)) warnings.push(waystoneWarning);
+    if (!waystoneCoordinatesVerified) {
+      if (!warnings.includes(waystoneWarning)) warnings.push(waystoneWarning);
+      layerAvailability.waystones = { available: false, reason: waystoneWarning };
+    }
     else if (waystoneCoordinatesVerified) layers.waystones = [...regionalWaystoneRows, ...(Array.isArray(spatialRows.waystones) ? spatialRows.waystones : [])].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId ?? candidate.buildingEntityId) === String(row.entityId ?? row.buildingEntityId)) === index && inScope(row, scope)).map((row) => feature(row, "waystone", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
   }
   if (layers.players) {
@@ -153,29 +156,58 @@ export function buildMapSnapshot({
         const playerEntityId = String(row.playerEntityId ?? row.entityId);
         return feature(row, "player", playerEntityId, recordPoint(row, true), { playerEntityId, regionId: String(row.regionId), name: monitored.get(playerEntityId)?.username ?? "Player" });
       });
-    if (!mobileIdentityVerified) warnings.push("Player positions are unavailable until player-to-mobile entity identity is live-verified.");
-    else if (!spatial) warnings.push("Live player positions are unavailable.");
+    if (!mobileIdentityVerified) {
+      const reason = "Player positions are unavailable until player-to-mobile entity identity is live-verified.";
+      warnings.push(reason);
+      layerAvailability.players = { available: false, reason };
+    } else if (!spatial) {
+      const reason = "Live player positions are unavailable.";
+      warnings.push(reason);
+      layerAvailability.players = { available: false, reason };
+    }
   }
   if (layers.resources) {
     const unavailableWarning = "Resource positions are unavailable until the Relay resource/location join is live-verified.";
-    if (!resourceCoordinatesVerified && !warnings.includes(unavailableWarning)) warnings.push(unavailableWarning);
+    if (!resourceCoordinatesVerified) {
+      if (!warnings.includes(unavailableWarning)) warnings.push(unavailableWarning);
+      layerAvailability.resources = { available: false, reason: unavailableWarning };
+    }
     else {
       const selected = new Set(scope.resourceIds);
       layers.resources = (Array.isArray(spatialRows.resources) ? spatialRows.resources : []).filter((row) => selected.has(String(row.resourceId)) && inScope(row, scope)).map((row) => feature(row, "resource", row.entityId, recordPoint(row), { regionId: String(row.regionId), resourceId: String(row.resourceId), identity: `resource:${row.resourceId}` }));
-      if (!spatial) warnings.push("Live resource positions are unavailable.");
+      if (!spatial) {
+        const reason = "Live resource positions are unavailable.";
+        warnings.push(reason);
+        layerAvailability.resources = { available: false, reason };
+      }
     }
   }
   if (layers.enemies) {
     const unavailableWarning = "Enemy positions are unavailable until the Relay EnemyType to catalog mapping is live-verified.";
-    if (!enemyIdentityVerified && !warnings.includes(unavailableWarning)) warnings.push(unavailableWarning);
+    if (!enemyIdentityVerified) {
+      if (!warnings.includes(unavailableWarning)) warnings.push(unavailableWarning);
+      layerAvailability.enemies = { available: false, reason: unavailableWarning };
+    }
     else {
       const selected = new Set(scope.enemyTypes);
       layers.enemies = (Array.isArray(spatialRows.enemies) ? spatialRows.enemies : []).filter((row) => selected.has(String(row.enemyType)) && inScope(row, scope)).map((row) => feature(row, "enemy", row.entityId, recordPoint(row, true), { regionId: String(row.regionId), enemyType: String(row.enemyType), identity: `enemy:${row.enemyType}` }));
-      if (!spatial) warnings.push("Live enemy positions are unavailable.");
+      if (!spatial) {
+        const reason = "Live enemy positions are unavailable.";
+        warnings.push(reason);
+        layerAvailability.enemies = { available: false, reason };
+      }
     }
   }
-  if (waystoneCoordinatesVerified && layers.waystones && !Array.isArray(regionClaims?.data?.waystones) && !Array.isArray(spatialRows.waystones)) warnings.push("waystones map data is unavailable.");
-  if (layers["empire-territory"]) warnings.push("empire-territory map data is unavailable until the chunk-to-map polygon transform is live-verified.");
+  if (waystoneCoordinatesVerified && layers.waystones && !Array.isArray(regionClaims?.data?.waystones) && !Array.isArray(spatialRows.waystones)) {
+    const reason = "Waystone map data is unavailable.";
+    warnings.push(reason);
+    layerAvailability.waystones = { available: false, reason };
+  }
+  if (layers["empire-territory"]) {
+    const reason = "Empire territory is unavailable until the chunk-to-map polygon transform is live-verified.";
+    warnings.push(reason);
+    layerAvailability["empire-territory"] = { available: false, reason };
+  }
   const unverifiedGeometryReason = "Unavailable — awaiting verified Relay coordinates";
   if (layers.roads) {
     layerAvailability.roads = { available: false, reason: unverifiedGeometryReason };

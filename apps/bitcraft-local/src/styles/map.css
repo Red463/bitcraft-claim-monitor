@@ -210,6 +210,8 @@
   clip-path: polygon(50% 0, 94% 25%, 94% 75%, 50% 100%, 6% 75%, 6% 25%);
   background: transparent;
   box-shadow: 0 2px 6px rgba(0,0,0,.78);
+  transform: scale(var(--native-map-claim-scale, .9));
+  transition: transform 120ms ease-out;
 }
 .native-map-marker--claim .native-map-marker-content--badge-crop img {
   position: absolute;
