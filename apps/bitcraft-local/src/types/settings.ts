@@ -90,6 +90,7 @@ export type AppSettings = {
   defaultPage: ActivePanel;
   defaultRegion: string;
   additionalActiveRegions: string;
+  mapRendererMode: "external" | "native-beta" | "native";
   toastSettings: { marketListings: boolean; marketSales: boolean; production: boolean };
   marketDealWatch: MarketDealWatchSettings;
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };

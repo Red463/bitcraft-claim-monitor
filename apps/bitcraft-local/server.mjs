@@ -35,6 +35,7 @@ import {
 import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
+import { MapSnapshotError, authorizedMapPlayerIds, buildMapSnapshot, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
 import { createRelayClaimScopeFence } from "./src/server/relayClaimScopeFence.mjs";
 import { createRelayProductionLifecycleCoordinator } from "./src/server/relayProductionLifecycleCoordinator.mjs";
 import { createRelaySettlementTransitionCoordinator } from "./src/server/relaySettlementTransitionCoordinator.mjs";
@@ -121,7 +122,7 @@ import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
 import { discordProfileDisplayName, validAdminUsername, validDiscordId } from "./src/server/authIdentity.mjs";
 import { createAdminLoginAttemptStore, loginAttemptKey } from "./src/server/adminLoginAttempts.mjs";
 import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/server/passwordAuth.mjs";
-import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
+import { DEFAULT_APP_PAGE, normalizeMapRendererMode, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
 import { installRetiredTableAuthorizer } from "./src/server/retiredTableAuthorizer.mjs";
@@ -159,6 +160,8 @@ import {
   RelayPublicCraftRuntime,
   RelayRegionalMarketRuntime,
   RelayRegionClaimsRuntime,
+  RelayMapSpatialScopeManager,
+  mapSpatialScopeKey,
   RelayStorageActivityService,
   runtimeHealthWithPersistedSnapshot,
 } from "./dist-server/game-data/index.js";
@@ -457,13 +460,14 @@ if (processRoleConfig.runBackgroundJobs && discordNotificationOutboxProcessingEn
 const gameDataGenerationListeners = new Set();
 let productionRelayLifecycleCoordinator = null;
 let settlementRelayTransitionCoordinator = null;
-function publishGameDataGeneration(event) {
-  productionRelayLifecycleCoordinator?.onCommit(event);
-  settlementRelayTransitionCoordinator?.onCommit(event);
+function notifyGameDataGenerationListeners(event) {
   const publicChangedDomains = browserVisibleChangedDomains(event.changedDomains);
   for (const listener of gameDataGenerationListeners) {
     if (listener.claimId !== event.claimId) continue;
-    const changedDomains = publicChangedDomains.filter((domain) => listener.domains.has(domain));
+    const changedDomains = publicChangedDomains.filter((domain) => (
+      listener.domains.has(domain)
+      && (domain !== "map-spatial" || !event.mapSpatialScopeKey || listener.mapSpatialScopeKeys?.has(event.mapSpatialScopeKey))
+    ));
     if (!changedDomains.length) continue;
     try {
       listener.response.write(`data: ${JSON.stringify({ ...event, changedDomains })}\n\n`);
@@ -471,6 +475,11 @@ function publishGameDataGeneration(event) {
       gameDataGenerationListeners.delete(listener);
     }
   }
+}
+function publishGameDataGeneration(event) {
+  productionRelayLifecycleCoordinator?.onCommit(event);
+  settlementRelayTransitionCoordinator?.onCommit(event);
+  notifyGameDataGenerationListeners(event);
 }
 const currentStateRepository = createCurrentStateRepository(db, {
   onCommit: publishGameDataGeneration,
@@ -558,6 +567,18 @@ const relayRegionClaimsRuntime = new RelayRegionClaimsRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
   reconnectDelayMs: relayReconnectDelayMs,
+});
+const relayMapSpatialScopeManager = new RelayMapSpatialScopeManager({
+  manifest: relayBindingManifest,
+  // Scoped map generations are live notifications, not repository commits;
+  // they must not trigger settlement/production commit side effects.
+  onGeneration: (snapshot, scope) => notifyGameDataGenerationListeners({
+    claimId: scope.claimId,
+    generation: snapshot.generation,
+    generatedAt: snapshot.receivedAt,
+    changedDomains: ["map-spatial"],
+    mapSpatialScopeKey: mapSpatialScopeKey(scope),
+  }),
 });
 const relayMarketTransitionWriter = createRelayMarketTransitionWriter(db, {
   addActivity,
@@ -686,6 +707,7 @@ const relayClaimScopeFence = createRelayClaimScopeFence([
       try { await relayRegionClaimsRuntime.stop(); } finally { relayRegionClaimsStarted = false; }
     },
   },
+  { stop: async () => relayMapSpatialScopeManager.stop() },
   {
     stop: async () => {
       try { await relayPrimaryRegionRuntime.stop(); } finally { relayPrimaryRegionStarted = false; }
@@ -1327,6 +1349,7 @@ function getSettings() {
     defaultPage: validAppPage(savedDefaultPage) ? savedDefaultPage : DEFAULT_APP_PAGE,
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     additionalActiveRegions: statements.getSetting.get("active_region_overrides")?.value ?? "",
+    mapRendererMode: normalizeMapRendererMode(statements.getSetting.get("map_renderer_mode")?.value),
     toastSettings: { marketListings: true, marketSales: true, production: true, ...toastSettings },
     marketDealWatch: marketDealWatchSettings(),
     branding,
@@ -5896,6 +5919,24 @@ function configuredRegionalMarketRegionIds(claimId) {
   );
 }
 
+function combineMapSpatialLeases(leases) {
+  const snapshots = leases.map((lease) => lease.snapshot()).filter(Boolean);
+  if (!snapshots.length) return null;
+  const receivedAt = snapshots.map((snapshot) => String(snapshot.receivedAt ?? "")).sort().at(-1) || null;
+  return {
+    data: {
+      players: snapshots.flatMap((snapshot) => snapshot.data?.players ?? []),
+      resources: snapshots.flatMap((snapshot) => snapshot.data?.resources ?? []),
+      enemies: snapshots.flatMap((snapshot) => snapshot.data?.enemies ?? []),
+      banks: snapshots.flatMap((snapshot) => snapshot.data?.banks ?? []),
+      waystones: snapshots.flatMap((snapshot) => snapshot.data?.waystones ?? []),
+    },
+    generation: Math.max(...snapshots.map((snapshot) => Number(snapshot.generation) || 0)),
+    provenance: { receivedAt },
+    warnings: snapshots.flatMap((snapshot) => snapshot.warnings ?? []),
+  };
+}
+
 function regionalMarketReadScope(claimId) {
   const current = currentStateRepository.read(claimId, "regional-market");
   const persistedActiveRegionIds = Array.isArray(current?.data?.activeRegionIds)
@@ -7948,6 +7989,106 @@ const server = createServer(async (req, res) => {
       };
       return send(res, status.freshness === "unavailable" ? 503 : 200, payload);
     }
+    if (req.method === "GET" && (url.pathname === "/api/local/map/snapshot" || url.pathname === "/api/local/map/events")) {
+      if (!rateLimit(req, res, "map-spatial", RATE_LIMITS.expensiveLocal)) return;
+      const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
+      if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
+      const claimId = currentClaimId();
+      let scope;
+      try {
+        scope = parseMapScope(url.searchParams, { allowedRegionIds: configuredRegionalMarketRegionIds(claimId) });
+      } catch (error) {
+        const statusCode = error instanceof MapSnapshotError ? error.statusCode : 422;
+        return send(res, statusCode, { error: error instanceof Error ? error.message : String(error) });
+      }
+      const memberSnapshot = currentStateRepository.read(claimId, "members");
+      const playerSnapshot = currentStateRepository.read(claimId, "players");
+      const memberRows = Array.isArray(memberSnapshot?.data) ? memberSnapshot.data : [];
+      const playerRows = Array.isArray(playerSnapshot?.data) ? playerSnapshot.data : [];
+      const permittedPlayerIds = authorizedMapPlayerIds({
+        selectedPlayerIds: scope.playerIds,
+        excludedMemberIds: getSettings().excludedMemberIds,
+        members: memberRows,
+        players: playerRows,
+      });
+      const spatialLeases = [];
+      let requestClosed = false;
+      const releaseSpatialLeases = () => Promise.allSettled(spatialLeases.map((lease) => lease.release()));
+      req.once("close", () => {
+        requestClosed = true;
+        void releaseSpatialLeases();
+      });
+      try {
+        for (const regionId of scope.regionIds) {
+          if (requestClosed) throw new Error("Map request closed during spatial scope acquisition.");
+          spatialLeases.push(await relayMapSpatialScopeManager.acquire({
+            relayBaseUrl,
+            claimId,
+            scope: { claimId, regionId, playerIds: permittedPlayerIds, resourceIds: scope.resourceIds, enemyTypes: scope.enemyTypes },
+          }));
+        }
+      } catch (error) {
+        await releaseSpatialLeases();
+        if (requestClosed) return;
+        return send(res, 503, { error: error instanceof Error ? error.message : String(error) });
+      }
+      if (url.pathname === "/api/local/map/events") {
+        const domains = ["region-claims", "market", "empires", "members", "players", "map-static", "map-spatial"];
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        res.flushHeaders?.();
+        const listener = {
+          claimId,
+          domains: new Set(domains),
+          mapSpatialScopeKeys: new Set(scope.regionIds.map((regionId) => mapSpatialScopeKey({
+            claimId,
+            regionId,
+            playerIds: permittedPlayerIds,
+            resourceIds: scope.resourceIds,
+            enemyTypes: scope.enemyTypes,
+          }))),
+          response: res,
+        };
+        gameDataGenerationListeners.add(listener);
+        res.write(`data: ${JSON.stringify({ ...currentGameDataGenerationEvent(claimId, domains), scope })}\n\n`);
+        const heartbeat = setInterval(() => {
+          if (!res.destroyed) res.write(": keep-alive\n\n");
+        }, 15_000);
+        req.once("close", () => {
+          clearInterval(heartbeat);
+          gameDataGenerationListeners.delete(listener);
+          void releaseSpatialLeases();
+        });
+        return;
+      }
+      try {
+        const regionClaims = currentStateRepository.read(claimId, "region-claims");
+        const market = currentStateRepository.read(claimId, "market");
+        const empires = currentStateRepository.read(claimId, "empires");
+        const spatial = combineMapSpatialLeases(spatialLeases);
+        const payload = buildMapSnapshot({
+          scope,
+          excludedMemberIds: getSettings().excludedMemberIds,
+          regionClaims,
+          market,
+          empires,
+          members: memberRows,
+          players: playerRows,
+          spatial,
+        });
+        const hasUsableSource = Boolean(regionClaims || market || empires || spatial);
+        return send(res, hasUsableSource ? 200 : 503, hasUsableSource ? payload : { ...payload, freshness: "unavailable" });
+      } catch (error) {
+        const statusCode = error instanceof MapSnapshotError ? error.statusCode : 500;
+        return send(res, statusCode, { error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        await releaseSpatialLeases();
+      }
+    }
     if (req.method === "GET" && url.pathname.startsWith("/api/local/branding/")) {
       const type = url.pathname.slice("/api/local/branding/".length);
       const asset = brandingAsset(type);
@@ -8304,6 +8445,7 @@ const server = createServer(async (req, res) => {
         const additionalActiveRegions = parseRegionIds(body.additionalActiveRegions).join(",");
         if (String(body.additionalActiveRegions ?? "").trim() && !additionalActiveRegions) return send(res, 400, { error: "Additional active regions must be numeric IDs separated by commas or spaces" });
         const excludedMemberIds = normalizeSubmittedExcludedMemberIds(body.excludedMemberIds);
+        const mapRendererMode = normalizeMapRendererMode(body.mapRendererMode);
         const previousVisitorSecurity = visitorSecuritySettings(true);
         const visitorSecurity = normalizeVisitorSecuritySettings(body.visitorSecurity ?? {}, {
           includeSecrets: true,
@@ -8336,6 +8478,7 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("default_page", defaultPage, updatedAt);
         statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
         statements.upsertSetting.run("active_region_overrides", additionalActiveRegions, updatedAt);
+        statements.upsertSetting.run("map_renderer_mode", mapRendererMode, updatedAt);
         statements.upsertSetting.run("excluded_member_ids_json", JSON.stringify(excludedMemberIds), updatedAt);
         statements.upsertSetting.run("visitor_security_json", JSON.stringify(visitorSecurity), updatedAt);
         statements.upsertSetting.run("toast_json", JSON.stringify(toastSettings), updatedAt);
@@ -8349,7 +8492,7 @@ const server = createServer(async (req, res) => {
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
         pollStatus.intervalMs = serverRefreshSeconds * 1000;
         scheduleServerPolling(serverRefreshSeconds * 1000);
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, defaultPage, defaultRegion, additionalActiveRegions, mapRendererMode, excludedMemberCount: excludedMemberIds.length, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
         startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
         requestRelayRuntimeRefresh?.("manual");

@@ -208,3 +208,109 @@
   .map-resource-panel.collapsed { max-height: 48px; }
   .map-frame { min-height: 420px; height: 58dvh; }
 }
+.native-map-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 32rem;
+  overflow: hidden;
+  background: #0e1517;
+}
+
+.native-map-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 32rem;
+  background: #0e1517;
+}
+
+.native-map-dense-canvas {
+  pointer-events: none;
+}
+
+.native-map-status {
+  position: absolute;
+  z-index: 500;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: grid;
+  gap: 0.2rem;
+  max-width: min(24rem, calc(100% - 1.5rem));
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--text);
+  font-size: 0.76rem;
+  box-shadow: 0 0.3rem 1rem rgb(0 0 0 / 28%);
+}
+
+.native-map-status span,
+.native-map-status summary,
+.native-map-status li {
+  color: var(--muted);
+}
+
+.native-map-status details ul,
+.native-map-accessible-points ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+.native-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+}
+.native-map-legend li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.native-map-legend small { color: var(--muted); }
+
+.native-map-accessible-points {
+  position: absolute;
+  z-index: 500;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  max-height: 12rem;
+  max-width: min(28rem, calc(100% - 1.5rem));
+  overflow: auto;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.map-frame-host.is-native {
+  background: #0e1517;
+}
+
+.native-map-shell .leaflet-control-zoom a {
+  border-color: var(--border);
+  background: var(--panel);
+  color: var(--text);
+}
+
+.native-map-shell .leaflet-tooltip {
+  border-color: var(--border);
+  background: var(--panel);
+  color: var(--text);
+}
+
+@media (max-width: 620px) {
+  .native-map-shell,
+  .native-map-canvas {
+    min-height: 26rem;
+  }
+
+  .native-map-status {
+    right: 0.5rem;
+    top: 0.5rem;
+  }
+}

@@ -26,6 +26,8 @@ export const DOMAIN_KEYS = [
   "empires",
   "deposits",
   "catalogs",
+  "map-static",
+  "map-spatial",
 ] as const;
 
 export type DomainKey = (typeof DOMAIN_KEYS)[number];
