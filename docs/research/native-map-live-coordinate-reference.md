@@ -8,6 +8,7 @@ Observed on 2026-08-11 against Relay region `19` (`bitcraft-live-19`) with regio
 - Static coordinates retain `{x,z}`. GeoJSON order is `[x,z]`; Leaflet order is `[z,x]`.
 - The Leaflet projection preserves X and projects Y as `-z / (2 / sqrt(3))`; its inverse is `z = -projectedY * (2 / sqrt(3))`. Do not scale X by the apothem.
 - The world coordinate bounds used by the renderer are `0..38400` on both axes.
+- A Relay route region ID is not the same identity as `world_region_state.id`; region `19` currently contains world-region row `12`. Route scope and world-row identity must remain separate fields.
 - Empire chunk indices encode `chunkX = chunkIndex % 1000` and `chunkZ = floor(chunkIndex / 1000)`.
 - The exact transform from chunk coordinates to map polygons is not verified. Multiplying decoded chunks by `96` does not contain all associated live watchtower points and must not be used for territory rendering.
 - UI north/east display coordinates divide map `z/x` by `3`; this conversion is intentionally lossy and must not be used for joins.
@@ -25,6 +26,21 @@ These fixtures are public game geometry and are intended for regression comparis
 | Watchtower | `1369094286736647280` / chunk `285301` | 19 | 28866 | 27390 | 1 |
 
 The captured regional generation contained 150 claim centres, 1 monitored marketplace, 53 empire settlements, and 58 watchtowers. A warm same-origin snapshot containing those layers was 54,067 uncompressed UTF-8 bytes and completed in 329 ms at the local server boundary.
+
+## Verified Relay terrain layout
+
+The accepted public fixture is `apps/bitcraft-local/test/fixtures/terrain-live-layout.json`. It contains no player identity or mobile coordinates.
+
+- Region `19`, overworld dimension `1`: 6,400 chunks and 6,553,600 cells in a complete generation.
+- Each chunk contains `32 x 32` cells. A cell spans 3 map units, so each chunk spans 96 map units.
+- Arrays are Z-major and increase with world Z (`index = localZ * 32 + localX`). Chunk origin is `(0,0)`.
+- Surface ordinals are `0 ground`, `1 lake`, `2 river`, `3 ocean`, `4 ocean-biome`, and `5 swamp`.
+- Normalized in-memory array size was 104,857,600 bytes; the accepted capture completed in 4,764 ms.
+- The accepted terrain SHA-256 is `0f74f5b02bde838ed59835ac14c207a8f4b47af9b714f1c522235971be045288`; the complete evidence-fixture hash is `14b800392b2f1386c6925cecb1407903ef76533446e1ad8fb469536b019b62e5`.
+- Evidence points: inland `(27361,23715)` was ground; open water `(28672,23200)` was ocean-biome; coastline `(27456,23316)` contained both ground and water in its bounded neighbourhood.
+- Orientation was independently resolved across 404,480 adjacent-cell pairs. The accepted Z-major/+Z layout had mean original-elevation discontinuity `1.6046` and water-edge mismatch `1.9509%`; the runner-up measured `11.7291` and `11.7615%` respectively.
+
+The land/water evidence was selected against the current public terrain rendering only as a visual reference. No third-party tile is committed, served, or required at runtime.
 
 ## Enemy identity mapping
 
@@ -76,13 +92,13 @@ The current BitCraftMap browser uses `38400 x 38400` raster tiles, but no redist
 - The server reads provisioned files from `data/map-tiles/terrain/<z>/<x>/<y>.webp`; negative Y names are valid.
 - Missing local tiles return `404` and leave the coordinate grid visible with an explicit installation warning.
 - Do not copy, hotlink, or redistribute current Prism/BitCraftMap tiles until their owner grants documented permission.
-- The durable first-party alternative is a bounded Relay `terrain_chunk_state` collector and an offline/self-hosted tile generator. Its biome, elevation, and water-array-to-pixel semantics still require live fixture verification before implementation.
+- The durable first-party alternative is now verified: a bounded Relay `terrain_chunk_state` collector can feed the app-owned tile generator using the accepted fixture above.
 
 ### Remaining parity data work
 
 | Parity group | Current source/status | Required work |
 | --- | --- | --- |
-| Terrain/game/water | Same-origin tile seam; no tile set provisioned | Obtain a redistribution grant and provision a versioned bundle, or verify and render `terrain_chunk_state` |
+| Terrain/game/water | Relay layout verified; tile renderer/runtime pending | Render bounded `terrain_chunk_state` generations into the same-origin tile seam |
 | Banks/waystones | Regional `bank_state` / `waystone_state` | Validate live counts and known locations in every enabled region |
 | Markets | Existing `marketplace_state` projection | Generalize beyond the monitored claim if parity requires all regional markets |
 | Claims/watchtowers/settlements | Existing Relay projections | Add tier/icon controls and verify every active region |

@@ -221,10 +221,10 @@ The script must:
 Run from `apps/bitcraft-local` after `corepack pnpm run build:server`:
 
 ```powershell
-node scripts/verify-relay-terrain-live.mjs --region=19 --point=inland:12358:19761:ground --point=open-water:500:12000:water --point=coastline:4000:16000:mixed-neighbourhood --write-fixture=test/fixtures/terrain-live-layout.json
+node scripts/verify-relay-terrain-live.mjs --region=19 --point=inland:27361:23715:ground --point=open-water:28672:23200:water --point=coastline:27456:23316:mixed-neighbourhood --write-fixture=test/fixtures/terrain-live-layout.json
 ```
 
-Expected: one complete generation, all budgets reported, and `verified: true`. If the coastline or water reference disagrees, do not alter expected classifications to make the test pass; inspect the public map/in-game coordinates, choose a genuinely known replacement point, rerun, and record the evidence source in the reference document.
+Expected: one complete generation, one cell-size candidate, one decisive edge-continuity orientation, all budgets reported, and `verified: true`. If the coastline or water reference disagrees, do not alter expected classifications to make the test pass; inspect the public map/in-game coordinates, choose a genuinely known replacement point, rerun, and record the evidence source in the reference document.
 
 - [ ] **Step 5: Run fixture and projection tests**
 

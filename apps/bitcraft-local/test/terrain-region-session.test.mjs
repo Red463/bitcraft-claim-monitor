@@ -36,7 +36,7 @@ function terrainRow(chunkIndex, chunkX) {
 function fakeRuntime() {
   const terrainRows = [terrainRow(1, 273), terrainRow(2, 274)];
   const db = {
-    worldRegionState: table([{ id: 19, regionMinChunkX: 250, regionMinChunkZ: 230, regionWidthChunks: 80, regionHeightChunks: 80 }]),
+    worldRegionState: table([{ id: 12, regionMinChunkX: 250, regionMinChunkZ: 230, regionWidthChunks: 80, regionHeightChunks: 80 }]),
     biomeDesc: table([{ biomeType: 7, name: "Grasslands", description: "", hazardLevel: "", iconAddress: "", disallowPlayerBuild: false }]),
     terrainChunkState: table(terrainRows),
   };
@@ -97,7 +97,7 @@ test("terrain session publishes complete generations and applies updates and del
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(runtime.queries[0], [
-    "SELECT * FROM world_region_state WHERE id = 19",
+    "SELECT * FROM world_region_state",
     "SELECT * FROM biome_desc",
     "SELECT * FROM terrain_chunk_state WHERE dimension = 1",
   ]);

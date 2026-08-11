@@ -30,7 +30,7 @@ function generation(overrides = {}) {
     regionId: "19",
     dimension: "1",
     worldRegionRows: [{
-      id: 19,
+      id: 12,
       regionMinChunkX: 250,
       regionMinChunkZ: 230,
       regionWidthChunks: 80,
@@ -52,6 +52,7 @@ test("terrain normalization derives a square side and preserves decimal chunk id
   assert.equal(result.chunks[0].chunkIndex, "9007199254740999");
   assert.equal(result.chunks[0].side, 4);
   assert.equal(result.dimension, "1");
+  assert.equal(result.worldRegionStateId, "12");
   assert.equal(result.normalizedBytes, 256);
   assert.deepEqual(result.regionBounds, { minChunkX: 250, minChunkZ: 230, maxChunkX: 329, maxChunkZ: 309 });
   assert.equal(result.biomes[0].name, "Grasslands");
@@ -102,4 +103,25 @@ test("terrain cell conversion refuses unverified evidence and uses explicit orde
   assert.throws(() => terrainModule.terrainCellPoint(chunk, 6, evidence), /not verified/);
   assert.deepEqual(terrainModule.terrainCellPoint(chunk, 6, { ...evidence, verified: true }), { x: 3282, z: 2847 });
   assert.throws(() => terrainModule.terrainCellPoint(chunk, 16, { ...evidence, verified: true }), /cell index/);
+});
+
+test("terrain orientation selection requires decisive elevation and water continuity", () => {
+  assert.ok(terrainModule, "terrain projection module must exist");
+  const layouts = [
+    { indexOrder: "z-major", zDirection: 1 },
+    { indexOrder: "z-major", zDirection: -1 },
+    { indexOrder: "x-major", zDirection: 1 },
+    { indexOrder: "x-major", zDirection: -1 },
+  ].map((layout) => ({ side: 32, cellSize: 3, ...layout }));
+  const decisive = [
+    { ...layouts[0], meanOriginalElevationDelta: 1.6, waterMismatchRate: 0.019 },
+    { ...layouts[1], meanOriginalElevationDelta: 11.7, waterMismatchRate: 0.117 },
+    { ...layouts[2], meanOriginalElevationDelta: 19.9, waterMismatchRate: 0.196 },
+    { ...layouts[3], meanOriginalElevationDelta: 20.1, waterMismatchRate: 0.194 },
+  ];
+  assert.deepEqual(terrainModule.selectTerrainOrientation(layouts, decisive), layouts[0]);
+  assert.throws(
+    () => terrainModule.selectTerrainOrientation(layouts, [{ ...decisive[0] }, { ...decisive[1], meanOriginalElevationDelta: 2.9 }, ...decisive.slice(2)]),
+    /not decisive/,
+  );
 });

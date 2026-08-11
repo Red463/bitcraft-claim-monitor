@@ -14,6 +14,13 @@ export type TerrainLayoutEvidence = {
   evidenceHash: string;
 };
 
+export type TerrainOrientationCandidate = Pick<TerrainLayoutEvidence, "side" | "cellSize" | "indexOrder" | "zDirection">;
+
+export type TerrainOrientationScore = TerrainOrientationCandidate & {
+  meanOriginalElevationDelta: number;
+  waterMismatchRate: number;
+};
+
 export type NormalizedTerrainChunk = {
   chunkIndex: string;
   chunkX: number;
@@ -31,6 +38,7 @@ export type NormalizedTerrainChunk = {
 
 export type NormalizedTerrainGeneration = {
   regionId: string;
+  worldRegionStateId: string;
   dimension: "1";
   observedAt: string;
   regionBounds: { minChunkX: number; minChunkZ: number; maxChunkX: number; maxChunkZ: number };
@@ -43,6 +51,41 @@ export type NormalizedTerrainGeneration = {
 const DEFAULT_MAX_CHUNKS = 20_000;
 const DEFAULT_MAX_BYTES = 128 * 1024 * 1024;
 const BYTES_PER_CELL = 16;
+const MIN_ORIENTATION_MARGIN = 2;
+
+function orientationKey(value: TerrainOrientationCandidate): string {
+  return `${value.side}:${value.cellSize}:${value.indexOrder}:${value.zDirection}`;
+}
+
+export function selectTerrainOrientation(
+  candidates: TerrainOrientationCandidate[],
+  scores: TerrainOrientationScore[],
+): TerrainOrientationCandidate {
+  if (!candidates.length) throw new TypeError("Terrain orientation has no evidence candidates");
+  const scales = new Set(candidates.map(({ side, cellSize }) => `${side}:${cellSize}`));
+  if (scales.size !== 1) throw new TypeError("Terrain orientation scale is not uniquely verified");
+  const candidateKeys = new Set(candidates.map(orientationKey));
+  const ranked = scores
+    .filter((score) => candidateKeys.has(orientationKey(score)))
+    .map((score) => {
+      if (!Number.isFinite(score.meanOriginalElevationDelta) || score.meanOriginalElevationDelta < 0 || !Number.isFinite(score.waterMismatchRate) || score.waterMismatchRate < 0) {
+        throw new TypeError("Terrain orientation continuity scores must be finite and non-negative");
+      }
+      return score;
+    })
+    .sort((left, right) => left.meanOriginalElevationDelta - right.meanOriginalElevationDelta);
+  if (ranked.length !== candidates.length || ranked.length < 2) throw new TypeError("Terrain orientation continuity evidence is incomplete");
+  const best = ranked[0];
+  const runnerUpElevation = ranked[1].meanOriginalElevationDelta;
+  const runnerUpWater = [...ranked].sort((left, right) => left.waterMismatchRate - right.waterMismatchRate)[1].waterMismatchRate;
+  const elevationMargin = best.meanOriginalElevationDelta === 0 ? Infinity : runnerUpElevation / best.meanOriginalElevationDelta;
+  const waterMargin = best.waterMismatchRate === 0 ? Infinity : runnerUpWater / best.waterMismatchRate;
+  const bestWater = Math.min(...ranked.map(({ waterMismatchRate }) => waterMismatchRate));
+  if (best.waterMismatchRate !== bestWater || elevationMargin < MIN_ORIENTATION_MARGIN || waterMargin < MIN_ORIENTATION_MARGIN) {
+    throw new TypeError("Terrain orientation continuity evidence is not decisive");
+  }
+  return candidates.find((candidate) => orientationKey(candidate) === orientationKey(best))!;
+}
 
 function record(value: unknown, label: string): WireRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${label} must be an object`);
@@ -95,7 +138,7 @@ export function normalizeTerrainGeneration(input: {
   if (dimension !== "1") throw new TypeError("Terrain requires overworld dimension 1");
   if (input.worldRegionRows.length !== 1) throw new TypeError(`Terrain region ${regionId} requires exactly one world_region_state row`);
   const world = record(input.worldRegionRows[0], "Terrain world region");
-  if (decimal(world.id, "Terrain world region id") !== regionId) throw new TypeError("Terrain world region id does not match scope");
+  const worldRegionStateId = decimal(world.id, "Terrain world region id");
   const minChunkX = aliasedInteger(world, ["regionMinChunkX", "region_min_chunk_x", "minX"], "Terrain minimum chunk X");
   const minChunkZ = aliasedInteger(world, ["regionMinChunkZ", "region_min_chunk_z", "minZ"], "Terrain minimum chunk Z");
   const width = positiveInteger(world.regionWidthChunks ?? world.region_width_chunks ?? world.width, "Terrain region width");
@@ -167,6 +210,7 @@ export function normalizeTerrainGeneration(input: {
 
   return {
     regionId,
+    worldRegionStateId,
     dimension: "1",
     observedAt: input.observedAt ?? new Date().toISOString(),
     regionBounds,

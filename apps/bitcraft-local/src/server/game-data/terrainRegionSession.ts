@@ -73,9 +73,9 @@ function positiveInteger(value: unknown, label: string): number {
 }
 
 export function terrainRegionQueries(regionId: string): string[] {
-  const region = decimal(regionId, "Terrain region id");
+  decimal(regionId, "Terrain region id");
   return [
-    `SELECT * FROM world_region_state WHERE id = ${region}`,
+    "SELECT * FROM world_region_state",
     "SELECT * FROM biome_desc",
     "SELECT * FROM terrain_chunk_state WHERE dimension = 1",
   ];

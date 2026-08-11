@@ -1,0 +1,55 @@
+{
+  "verified": true,
+  "regionId": "19",
+  "dimension": "1",
+  "schemaFingerprint": "762aeaa1449c53d5f400d72bb82f71a049997d34e28c6844ce8f3899d1cb6312",
+  "observedAt": "2026-08-11T15:38:41.745Z",
+  "side": 32,
+  "cellSize": 3,
+  "indexOrder": "z-major",
+  "zDirection": 1,
+  "chunkOriginX": 0,
+  "chunkOriginZ": 0,
+  "surfaceTypes": {
+    "0": "ground",
+    "1": "lake",
+    "2": "river",
+    "3": "ocean",
+    "4": "ocean-biome",
+    "5": "swamp"
+  },
+  "chunkCount": 6400,
+  "cellCount": 6553600,
+  "normalizedBytes": 104857600,
+  "terrainHash": "0f74f5b02bde838ed59835ac14c207a8f4b47af9b714f1c522235971be045288",
+  "points": [
+    {
+      "category": "inland",
+      "x": 27361,
+      "z": 23715,
+      "expected": "ground",
+      "chunkIndex": "247286",
+      "cellIndex": 32,
+      "surface": "ground"
+    },
+    {
+      "category": "open-water",
+      "x": 28672,
+      "z": 23200,
+      "expected": "water",
+      "chunkIndex": "241299",
+      "cellIndex": 693,
+      "surface": "ocean-biome"
+    },
+    {
+      "category": "coastline",
+      "x": 27456,
+      "z": 23316,
+      "expected": "mixed-neighbourhood",
+      "chunkIndex": "242287",
+      "cellIndex": 896,
+      "surface": "ocean"
+    }
+  ],
+  "evidenceHash": "14b800392b2f1386c6925cecb1407903ef76533446e1ad8fb469536b019b62e5"
+}
