@@ -90,10 +90,14 @@ test("Native map renders the current waypoint as a visible first-party marker", 
 
 test("Native map requests only same-origin locally provisioned terrain tiles", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
-  assert.match(nativeMap, /\/api\/local\/map\/tiles\/terrain\/\{z\}\/\{x\}\/\{y\}\.webp/);
+  assert.match(nativeMap, /terrainTileUrl\(terrainStatus\.generation\)/);
+  assert.match(nativeMap, /loadTerrainTileStatus/);
+  assert.match(nativeMap, /visibilitychange/);
+  assert.match(nativeMap, /60_000/);
   assert.match(nativeMap, /minNativeZoom: -5/);
   assert.match(nativeMap, /maxNativeZoom: 0/);
   assert.doesNotMatch(nativeMap, /prism\.brico\.app|bitcraftmap\.com/);
   assert.match(nativeMap, /Terrain\/water tiles are not installed on this server/);
+  assert.ok(nativeMap.indexOf("new CoordinateGridLayer") < nativeMap.indexOf("terrainTileUrl(terrainStatus.generation)"));
 });
 

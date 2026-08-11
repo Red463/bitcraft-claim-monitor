@@ -59,6 +59,33 @@ test("map tile route returns a cacheable 404 when a local tile is not installed"
   assert.equal(res.body, null);
 });
 
+test("map tile status returns unavailable or a public installed manifest", async () => {
+  assert.ok(tileModule, "map tile module must exist");
+  const unavailable = responseRecorder();
+  await tileModule.serveLocalMapTile("/api/local/map/tiles/status", unavailable, { readManifest: async () => null });
+  assert.equal(unavailable.status, 200);
+  assert.deepEqual(JSON.parse(unavailable.body), {
+    provider: "relay", available: false, generation: null, generatedAt: null, observedAt: null,
+    freshness: "unavailable", ageMs: null, regionIds: [], dimension: "1", bounds: null,
+    zoomRange: { min: -5, max: 0 }, paletteVersion: null, tileCount: 0, totalBytes: 0,
+    warnings: ["Relay terrain has not been installed yet."],
+  });
+
+  const available = responseRecorder();
+  const manifest = {
+    generation: "42", generatedAt: "2026-08-11T16:00:00.000Z", observedAt: "2026-08-11T15:59:59.000Z",
+    regionIds: ["19"], dimension: "1", bounds: { minX: 1, minZ: 2, maxX: 3, maxZ: 4 },
+    zoomRange: { min: -5, max: 0 }, paletteVersion: 1, tileCount: 12, totalBytes: 345,
+  };
+  await tileModule.serveLocalMapTile("/api/local/map/tiles/status", available, { readManifest: async () => manifest }, () => new Date("2026-08-11T16:00:00.000Z"));
+  const payload = JSON.parse(available.body);
+  assert.equal(payload.available, true);
+  assert.equal(payload.generation, "42");
+  assert.equal(payload.freshness, "live");
+  assert.equal(payload.ageMs, 1000);
+  assert.equal(payload.dataDir, undefined);
+});
+
 test("production server handles same-origin map tiles before map snapshot acquisition", async () => {
   const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(server, /import \{ serveLocalMapTile \} from "\.\/src\/server\/mapTiles\.mjs"/);

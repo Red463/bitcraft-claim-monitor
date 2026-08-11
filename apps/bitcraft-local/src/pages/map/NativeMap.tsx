@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 
 import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, leafletPoint } from "./mapCoordinates.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
+import { loadTerrainTileStatus, terrainTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
 import type { MapFocus } from "./mapUtils";
 
 type MapPoint = { x: number; z: number; dimension: string; coordinateSpace: string };
@@ -161,10 +162,12 @@ export function NativeMap({
   const markersRef = React.useRef<L.LayerGroup | null>(null);
   const resourcesRef = React.useRef<DensePointLayer | null>(null);
   const enemiesRef = React.useRef<DensePointLayer | null>(null);
+  const terrainTilesRef = React.useRef<L.TileLayer | null>(null);
   const [snapshot, setSnapshot] = React.useState<MapSnapshot | null>(null);
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
-  const [terrainStatus, setTerrainStatus] = React.useState<"unknown" | "available" | "missing">("unknown");
+  const [terrainStatus, setTerrainStatus] = React.useState<TerrainTileStatus | null>(null);
+  const [terrainTileError, setTerrainTileError] = React.useState("");
   const request = React.useMemo(() => nativeMapRequest({ regionIds, playerIds, resourceIds, enemyTypes }), [regionIds.join(","), playerIds.join(","), resourceIds.join(","), enemyTypes.join(",")]);
 
   React.useEffect(() => {
@@ -174,22 +177,6 @@ export function NativeMap({
     map.setView([19_200, 19_200], -4);
     map.setMaxBounds(bounds.pad(0.25));
     new CoordinateGridLayer({ tileSize: 256, noWrap: false }).addTo(map);
-    let terrainTileLoaded = false;
-    const terrainTiles = L.tileLayer("/api/local/map/tiles/terrain/{z}/{x}/{y}.webp", {
-      tileSize: 256,
-      minNativeZoom: -5,
-      maxNativeZoom: 0,
-      noWrap: false,
-      keepBuffer: 2,
-    });
-    terrainTiles.on("tileload", () => {
-      terrainTileLoaded = true;
-      setTerrainStatus("available");
-    });
-    terrainTiles.on("tileerror", () => {
-      if (!terrainTileLoaded) setTerrainStatus("missing");
-    });
-    terrainTiles.addTo(map);
     markersRef.current = L.layerGroup().addTo(map);
     resourcesRef.current = new DensePointLayer("rgba(87, 225, 151, 0.9)").addTo(map);
     enemiesRef.current = new DensePointLayer("rgba(255, 112, 112, 0.92)").addTo(map);
@@ -200,8 +187,59 @@ export function NativeMap({
       markersRef.current = null;
       resourcesRef.current = null;
       enemiesRef.current = null;
+      terrainTilesRef.current = null;
     };
   }, []);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    let disposed = false;
+    const load = async () => {
+      if (document.hidden) return;
+      try {
+        const status = await loadTerrainTileStatus(controller.signal);
+        if (!disposed) setTerrainStatus(status);
+      } catch (statusError) {
+        if (!disposed && !controller.signal.aborted) setTerrainTileError(statusError instanceof Error ? statusError.message : String(statusError));
+      }
+    };
+    const visibility = () => { if (!document.hidden) void load(); };
+    void load();
+    const timer = window.setInterval(() => { if (!document.hidden) void load(); }, 60_000);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      disposed = true;
+      controller.abort();
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!terrainStatus?.available || !terrainStatus.generation) {
+      terrainTilesRef.current?.removeFrom(map);
+      terrainTilesRef.current = null;
+      return;
+    }
+    const terrainTiles = L.tileLayer(terrainTileUrl(terrainStatus.generation), {
+      tileSize: 256,
+      minNativeZoom: -5,
+      maxNativeZoom: 0,
+      noWrap: false,
+      keepBuffer: 2,
+    });
+    terrainTiles.on("tileload", () => setTerrainTileError(""));
+    terrainTiles.on("tileerror", () => setTerrainTileError("Some terrain tiles could not be loaded; the coordinate grid remains available."));
+    terrainTilesRef.current?.removeFrom(map);
+    terrainTiles.addTo(map);
+    terrainTilesRef.current = terrainTiles;
+    return () => {
+      terrainTiles.removeFrom(map);
+      if (terrainTilesRef.current === terrainTiles) terrainTilesRef.current = null;
+    };
+  }, [terrainStatus?.available, terrainStatus?.generation]);
 
   React.useEffect(() => {
     if (!focus || !mapRef.current) return;
@@ -297,7 +335,10 @@ export function NativeMap({
         <strong>{loading && !snapshot ? "Loading native map…" : snapshot ? `${snapshot.freshness} · generation ${snapshot.generation}` : "Native map unavailable"}</strong>
         {snapshot?.ageMs != null ? <span>{Math.round(snapshot.ageMs / 1000)}s old</span> : null}
         {error ? <span className="error">{error}</span> : null}
-        {terrainStatus === "missing" ? <span>Terrain/water tiles are not installed on this server; showing the coordinate fallback.</span> : null}
+        {terrainStatus?.available ? <span>Terrain {terrainStatus.freshness} · generation {terrainStatus.generation}</span> : null}
+        {terrainStatus && !terrainStatus.available ? <span>Terrain/water tiles are not installed on this server; showing the coordinate fallback.</span> : null}
+        {terrainTileError ? <span className="error">{terrainTileError}</span> : null}
+        {terrainStatus?.warnings?.map((warning) => <span key={warning}>{warning}</span>)}
         {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{snapshot.freshness}</small></li>)}</ul> : null}
         {snapshot?.warnings?.length ? <details><summary>{snapshot.warnings.length} data warning{snapshot.warnings.length === 1 ? "" : "s"}</summary><ul>{snapshot.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
       </div>
