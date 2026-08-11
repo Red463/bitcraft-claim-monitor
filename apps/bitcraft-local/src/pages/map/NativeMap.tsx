@@ -2,8 +2,10 @@ import React from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
+import { MapLayersControl } from "./MapLayersControl";
 import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, leafletPoint } from "./mapCoordinates.mjs";
 import { planDensePointDraw } from "./mapDensePointPlan.mjs";
+import { MAP_LAYER_DEFINITIONS, MAP_LAYER_PREFERENCE_KEY, defaultMapLayerVisibility, parseMapLayerVisibility, serializeMapLayerVisibility, type MapLayerKey } from "./mapLayerPreferences.mjs";
 import { MAP_MARKER_PRESENTATIONS, claimMarkerPresentation, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { loadTerrainTileStatus, terrainTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
@@ -26,6 +28,7 @@ type MapSnapshot = {
   ageMs: number | null;
   warnings: string[];
   layers: Record<string, MapFeature[]>;
+  layerAvailability?: Record<string, { available: boolean; reason: string | null }>;
 };
 
 const MAP_PROJECTION: L.Projection = {
@@ -72,6 +75,7 @@ class DensePointLayer extends L.Layer {
   #points: MapFeature[] = [];
   #frame = 0;
   #color: string;
+  #visible = true;
 
   constructor(color: string) {
     super();
@@ -80,6 +84,12 @@ class DensePointLayer extends L.Layer {
 
   setPoints(points: MapFeature[]) {
     this.#points = points;
+    this.#scheduleDraw();
+  }
+
+  setVisible(visible: boolean) {
+    this.#visible = visible;
+    if (this.#canvas) this.#canvas.style.display = visible ? "" : "none";
     this.#scheduleDraw();
   }
 
@@ -107,7 +117,7 @@ class DensePointLayer extends L.Layer {
   };
 
   #draw() {
-    if (!this.#map || !this.#canvas) return;
+    if (!this.#map || !this.#canvas || !this.#visible) return;
     const size = this.#map.getSize();
     const topLeft = this.#map.containerPointToLayerPoint([0, 0]);
     L.DomUtil.setPosition(this.#canvas, topLeft);
@@ -130,6 +140,7 @@ class DensePointLayer extends L.Layer {
 const FEATURE_COLORS: Record<string, string> = {
   claim: "#f0c64f",
 };
+const MARKER_LAYER_KEYS = ["claims", "markets", "waystones", "empire-settlements", "watchtowers", "players", "roads", "claim-areas"] as const;
 
 function markerKindClass(kind: string) {
   return Object.hasOwn(MAP_MARKER_PRESENTATIONS, kind) ? kind : "fallback";
@@ -183,7 +194,8 @@ export function NativeMap({
 }) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<L.Map | null>(null);
-  const markersRef = React.useRef<L.LayerGroup | null>(null);
+  const markerGroupsRef = React.useRef<Record<string, L.LayerGroup> | null>(null);
+  const focusGroupRef = React.useRef<L.LayerGroup | null>(null);
   const ordinaryRendererRef = React.useRef<L.Canvas | null>(null);
   const resourcesRef = React.useRef<DensePointLayer | null>(null);
   const enemiesRef = React.useRef<DensePointLayer | null>(null);
@@ -193,6 +205,9 @@ export function NativeMap({
   const [loading, setLoading] = React.useState(true);
   const [terrainStatus, setTerrainStatus] = React.useState<TerrainTileStatus | null>(null);
   const [terrainTileError, setTerrainTileError] = React.useState("");
+  const [layerVisibility, setLayerVisibility] = React.useState(() => typeof window === "undefined"
+    ? defaultMapLayerVisibility()
+    : parseMapLayerVisibility(window.localStorage.getItem(MAP_LAYER_PREFERENCE_KEY)));
   const request = React.useMemo(() => nativeMapRequest({ regionIds, playerIds, resourceIds, enemyTypes }), [regionIds.join(","), playerIds.join(","), resourceIds.join(","), enemyTypes.join(",")]);
 
   React.useEffect(() => {
@@ -203,20 +218,37 @@ export function NativeMap({
     map.setMaxBounds(bounds.pad(0.25));
     new CoordinateGridLayer({ tileSize: 256, noWrap: false }).addTo(map);
     ordinaryRendererRef.current = L.canvas({ padding: 0.25 });
-    markersRef.current = L.layerGroup().addTo(map);
+    const markerGroups = Object.fromEntries(MARKER_LAYER_KEYS.map((key) => [key, L.layerGroup()]));
+    for (const [key, group] of Object.entries(markerGroups)) if (layerVisibility[key as MapLayerKey]) group.addTo(map);
+    markerGroupsRef.current = markerGroups;
+    focusGroupRef.current = L.layerGroup().addTo(map);
     resourcesRef.current = new DensePointLayer("rgba(87, 225, 151, 0.9)").addTo(map);
     enemiesRef.current = new DensePointLayer("rgba(255, 112, 112, 0.92)").addTo(map);
     mapRef.current = map;
     return () => {
       map.remove();
       mapRef.current = null;
-      markersRef.current = null;
+      markerGroupsRef.current = null;
+      focusGroupRef.current = null;
       ordinaryRendererRef.current = null;
       resourcesRef.current = null;
       enemiesRef.current = null;
       terrainTilesRef.current = null;
     };
   }, []);
+
+  React.useEffect(() => {
+    window.localStorage.setItem(MAP_LAYER_PREFERENCE_KEY, serializeMapLayerVisibility(layerVisibility));
+    const map = mapRef.current;
+    if (!map) return;
+    for (const [key, group] of Object.entries(markerGroupsRef.current ?? {})) {
+      const visible = layerVisibility[key as MapLayerKey];
+      if (visible && !map.hasLayer(group)) group.addTo(map);
+      else if (!visible && map.hasLayer(group)) group.removeFrom(map);
+    }
+    resourcesRef.current?.setVisible(layerVisibility.resources);
+    enemiesRef.current?.setVisible(layerVisibility.enemies);
+  }, [layerVisibility]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -245,7 +277,7 @@ export function NativeMap({
   React.useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (!terrainStatus?.available || !terrainStatus.generation) {
+    if (!terrainStatus?.available || !terrainStatus.generation || !layerVisibility.terrain) {
       terrainTilesRef.current?.removeFrom(map);
       terrainTilesRef.current = null;
       return;
@@ -266,7 +298,7 @@ export function NativeMap({
       terrainTiles.removeFrom(map);
       if (terrainTilesRef.current === terrainTiles) terrainTilesRef.current = null;
     };
-  }, [terrainStatus?.available, terrainStatus?.generation]);
+  }, [terrainStatus?.available, terrainStatus?.generation, layerVisibility.terrain]);
 
   React.useEffect(() => {
     if (!focus || !mapRef.current) return;
@@ -320,19 +352,23 @@ export function NativeMap({
   }, [request.snapshotUrl, request.eventsUrl]);
 
   React.useEffect(() => {
-    const markers = markersRef.current;
-    if (!markers || !ordinaryRendererRef.current) return;
-    markers.clearLayers();
+    const markerGroups = markerGroupsRef.current;
+    const focusGroup = focusGroupRef.current;
+    if (!markerGroups || !focusGroup || !ordinaryRendererRef.current) return;
+    for (const group of Object.values(markerGroups)) group.clearLayers();
+    focusGroup.clearLayers();
     if (focus) {
       const readable = displayHexPoint({ x: focus.locationX, z: focus.locationZ });
       const focusPresentation = mapMarkerPresentation("focus");
       const focusMarker = L.marker(leafletPoint({ x: focus.locationX, z: focus.locationZ }), { icon: markerIcon("focus", focusPresentation), keyboard: true });
       focusMarker.bindTooltip(`${focus.name} · N ${readable.north}, E ${readable.east}`, { permanent: true, direction: "top" });
-      focusMarker.addTo(markers);
+      focusMarker.addTo(focusGroup);
     }
     if (!snapshot) return;
     for (const [layer, features] of Object.entries(snapshot.layers)) {
       if (layer === "resources" || layer === "enemies" || layer === "empire-territory") continue;
+      const markerGroup = markerGroups[layer];
+      if (!markerGroup) continue;
       for (const feature of features) {
         const presentation = feature.kind === "claim"
           ? claimMarkerPresentation(feature.tier)
@@ -348,7 +384,7 @@ export function NativeMap({
           : L.marker(leafletPoint(feature.point), { icon: markerIcon(feature.kind, presentation), keyboard: true });
         const tierLabel = feature.kind === "claim" && Number.isInteger(feature.tier) ? ` · Tier ${feature.tier}` : "";
         marker.bindTooltip(`${featureLabel(feature)}${tierLabel} · ${displayedPoint(feature)}`);
-        marker.addTo(markers);
+        marker.addTo(markerGroup);
       }
     }
     resourcesRef.current?.setPoints(snapshot.layers.resources ?? []);
@@ -357,14 +393,25 @@ export function NativeMap({
 
   const accessibleFeatures = snapshot
     ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {
+        if (!layerVisibility[layer as MapLayerKey]) return [];
         if (layer === "empire-territory") return [];
         if (layer === "resources" || layer === "enemies") return features;
         return features.filter((feature) => (feature.kind === "claim" ? claimMarkerPresentation(feature.tier) : mapMarkerPresentation(feature.kind)).mode === "canvas");
       })
     : [];
+  const layerAvailability = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key }) => [key, { available: true, reason: null as string | null }]));
+  Object.assign(layerAvailability, snapshot?.layerAvailability ?? {});
+  if (terrainStatus && !terrainStatus.available) {
+    const reason = terrainStatus.buildStage === "building" ? "Terrain tiles are building" : "Terrain tiles are unavailable";
+    layerAvailability.terrain = { available: false, reason };
+    layerAvailability.water = { available: false, reason };
+  }
+  const layerCounts = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, dataLayer }) => [key, dataLayer ? snapshot?.layers[dataLayer]?.length ?? 0 : null]));
+  const toggleLayer = (key: MapLayerKey) => setLayerVisibility((current) => ({ ...current, [key]: !current[key] }));
   return (
     <section className="native-map-shell" aria-label="Native BitCraft map">
       <div ref={hostRef} className="native-map-canvas" role="application" aria-label="Interactive BitCraft coordinate map" tabIndex={0} />
+      <MapLayersControl visibility={layerVisibility} availability={layerAvailability} counts={layerCounts} onToggle={toggleLayer} />
       <div className="native-map-status" aria-live="polite">
         <strong>{loading && !snapshot ? "Loading native map…" : snapshot ? `${snapshot.freshness} · generation ${snapshot.generation}` : "Native map unavailable"}</strong>
         {snapshot?.ageMs != null ? <span>{Math.round(snapshot.ageMs / 1000)}s old</span> : null}
@@ -375,7 +422,7 @@ export function NativeMap({
           : "Terrain/water tiles are not installed on this server; showing the coordinate fallback."}</span> : null}
         {terrainTileError ? <span className="error">{terrainTileError}</span> : null}
         {terrainStatus?.warnings?.map((warning) => <span key={warning}>{warning}</span>)}
-        {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{snapshot.freshness}</small></li>)}</ul> : null}
+        {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{layerAvailability[layer]?.available === false ? "unavailable" : layerVisibility[layer as MapLayerKey] ? snapshot.freshness : "hidden"}</small></li>)}</ul> : null}
         {snapshot?.warnings?.length ? <details><summary>{snapshot.warnings.length} data warning{snapshot.warnings.length === 1 ? "" : "s"}</summary><ul>{snapshot.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
       </div>
       {accessibleFeatures.length ? <details className="native-map-accessible-points"><summary>{accessibleFeatures.length} canvas map points</summary><ul>{accessibleFeatures.slice(0, 250).map((feature) => <li key={`${feature.kind}:${feature.regionId}:${feature.entityId}`}>{featureLabel(feature)} at {displayedPoint(feature)}</li>)}</ul></details> : null}

@@ -146,3 +146,18 @@ test("Native map browser source excludes bank tracking and remote map assets", (
   assert.doesNotMatch(sources, /renderer:\s*L\.canvas\(\)/);
 });
 
+test("Native map exposes persisted layer controls without clearing dense selections", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  const control = readFileSync(new URL("../src/pages/map/MapLayersControl.tsx", import.meta.url), "utf8");
+
+  assert.match(nativeMap, /MAP_LAYER_PREFERENCE_KEY/);
+  assert.match(nativeMap, /parseMapLayerVisibility/);
+  assert.match(nativeMap, /serializeMapLayerVisibility/);
+  assert.match(nativeMap, /setVisible\(layerVisibility\.resources\)/);
+  assert.match(nativeMap, /setVisible\(layerVisibility\.enemies\)/);
+  assert.match(nativeMap, /<MapLayersControl/);
+  assert.doesNotMatch(control, /setResourceIds|setEnemyTypes|resourceIds\s*=|enemyTypes\s*=/);
+  assert.match(control, /aria-describedby/);
+  assert.match(control, />Layers</);
+});
+
