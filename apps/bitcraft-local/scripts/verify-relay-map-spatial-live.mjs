@@ -18,8 +18,16 @@ const topology = await discoverRelayTopology(relayBaseUrl);
 const source = topology.regions.get(regionId);
 if (!source?.ready || !source.schemaFingerprint) throw new Error(`Relay region ${regionId} source is not ready`);
 
+function coordinateBounds(rows, xKey = "locationX", zKey = "locationZ") {
+  if (!rows.length) return null;
+  const x = rows.map((row) => row[xKey]);
+  const z = rows.map((row) => row[zKey]);
+  return { minX: Math.min(...x), minZ: Math.min(...z), maxX: Math.max(...x), maxZ: Math.max(...z) };
+}
+
 let session;
 let timeout;
+const startedAt = Date.now();
 try {
   const snapshot = await new Promise((resolve, reject) => {
     timeout = setTimeout(() => reject(new Error(`Timed out waiting for map-spatial data: ${JSON.stringify(session?.health() ?? {})}`)), timeoutMs);
@@ -33,12 +41,21 @@ try {
       scope: { claimId, regionId, playerIds, resourceIds, enemyTypes },
     }).catch(reject);
   });
+  const normalizedBytes = Buffer.byteLength(JSON.stringify(snapshot.data));
+  const resourceFixtures = snapshot.data.resources
+    .toSorted((left, right) => left.entityId.length - right.entityId.length || left.entityId.localeCompare(right.entityId))
+    .slice(0, 3)
+    .map(({ entityId, resourceId, locationX, locationZ, dimension }) => ({ entityId, resourceId, locationX, locationZ, dimension }));
   console.log(JSON.stringify({
     ok: true,
     claimId,
     regionId,
     schemaFingerprint: source.schemaFingerprint,
+    elapsedMs: Date.now() - startedAt,
+    normalizedBytes,
     counts: Object.fromEntries(Object.entries(snapshot.data).filter(([, value]) => Array.isArray(value)).map(([key, value]) => [key, value.length])),
+    resourceBounds: coordinateBounds(snapshot.data.resources),
+    resourceFixtures,
     warnings: snapshot.warnings,
   }, null, 2));
 } finally {

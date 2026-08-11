@@ -63,7 +63,23 @@ Production collection remains worker-owned and HTTP/tile reads remain web-owned.
 
 ## Required live acceptance still pending
 
-At the end of this capture window, Relay accepted HTTP topology/catalog requests but new regional WebSocket sessions remained at `connected:false` without an application or schema error. The control claim-market verifier failed identically, so this was not isolated to map SQL.
+### Regional Relay health evidence
+
+At the end of this capture window, Relay region `19` advertised `ready:true` and the expected schema fingerprint, and its TLS/WebSocket handshake completed, but it delivered no identity or subscription messages within 120 seconds. A bounded HTTP SQL request to the same regional database also returned no bytes within 20 seconds. The existing claim-market control timed out identically, so this is an upstream region-19 availability fault rather than evidence against the map queries. In the same session, the global socket delivered identity in about 360 ms and region `12` delivered identity in about 332 ms. Treat topology readiness as advisory: an affected layer remains unavailable until its session produces a complete generation.
+
+### Region 12 resource fixture
+
+The bounded resource verifier completed successfully against healthy Relay region `12`, schema fingerprint `762aeaa1449c53d5f400d72bb82f71a049997d34e28c6844ce8f3899d1cb6312`, with selected resource type `54`:
+
+- Session completion: 468 ms on the captured run and 514 ms on an immediate repeat. This verifier starts timing after topology discovery and includes WebSocket startup, so it is not the server-boundary warm-snapshot benchmark; the configured-region API check remains pending.
+- Normalized JSON: 248,563 uncompressed bytes.
+- Features: 1,553 resources; zero requested players, enemies, banks, or waystones.
+- Bounds: X `11371..15232`, Z `15631..19879`, dimension `1`.
+- Public fixtures: entity `864691128455284226` at `(13973,15784)`, entity `864691128455284353` at `(13978,15787)`, and entity `864691128455339589` at `(13898,15933)`.
+
+The first two fixtures were independently compared with BitCraftMap's selected type-54 layer. At zoom `2`, the second marker appeared approximately 20 pixels east and 12 pixels north of a waypoint placed at the first coordinate, exactly matching the `(+5,+3)` map-coordinate delta at four pixels per map unit. This confirms static `{x,z}`, GeoJSON `[x,z]`, and Leaflet `[z,x]` for the resource/location join. The current BitCraftMap rejects the obsolete `roadsLayer` and `towersLayer` names in custom waypoint metadata. The legacy URL helper now omits those invalid names so `external` mode remains operable during rollback; this is an intentional compatibility exception to the otherwise unchanged external-renderer rollout contract and is not part of the coordinate evidence.
+
+Region `12` is not in this installation's configured active-region scope, while configured region `19` remained unhealthy during the capture. The production resource gate therefore remains off until the same bounded check completes for a configured region. The healthy fixture validates the join and projection but does not authorize cross-region exposure.
 
 Before changing the renderer default or enabling exact player positions, rerun:
 
@@ -79,7 +95,7 @@ Acceptance requires a complete generation proving:
 1. The selected player ID directly matches a `mobile_entity_state.entity_id` row.
 2. Dividing live mobile `location_x/location_z` by `1000` agrees with the player's independently known in-game or trusted map position.
 3. The mobile row uses dimension `1` and disappears from the public snapshot on logout, exclusion, disconnect, or deselection.
-4. Resource `54` joins `resource_state.entity_id` to `location_state.entity_id`, stays within region/world bounds, and remains under the configured row/response budgets.
+4. Resource `54` joins `resource_state.entity_id` to `location_state.entity_id`, stays within region/world bounds, and remains under the configured row/response budgets for a configured active region. Region `12` has passed the query/projection check; configured region `19` is still pending source recovery.
 5. Selected enemy types join the decoded tagged enum to `mobile_entity_state` and deletion removes their features.
 6. Empire chunk rows align with an independently verified polygon transform; until then, territory remains unavailable.
 7. Warm snapshots remain below 500 ms, 50,000 features, and 8 MiB uncompressed JSON.

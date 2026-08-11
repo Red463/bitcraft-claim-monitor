@@ -2,7 +2,7 @@ import { toNumber, type AnyRecord } from "../../main-app-data.ts";
 
 export type MapFocus = { name: string; locationX: number; locationZ: number; regionId?: string } | null;
 
-export const MAP_DEFAULT_LAYERS = ["roadsLayer", "towersLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
+export const MAP_DEFAULT_LAYERS = Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`);
 type MapEmbedSignatureInput = {
   playerIds: string[];
   mapMarker: MapFocus;
