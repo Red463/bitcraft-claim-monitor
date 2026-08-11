@@ -1,11 +1,6 @@
 const OPERATIONAL_LAYERS = [
   "claims",
-  "empire-settlements",
-  "empire-territory",
-  "markets",
   "watchtowers",
-  "waystones",
-  "roads",
   "claim-areas",
 ];
 

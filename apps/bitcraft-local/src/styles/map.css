@@ -200,14 +200,15 @@
 .native-map-marker--watchtower .native-map-marker-content { border-color: #ff6b6b; color: #ff8d8d; }
 .native-map-marker--player .native-map-marker-content { border-color: #fff; color: #fff; }
 .native-map-marker--focus .native-map-marker-content { width: 32px; height: 32px; border-color: #f0c64f; color: #f0c64f; }
-.native-map-marker--claim { width: 34px; height: 34px; }
+.native-map-marker--claim { width: 40px; height: 40px; }
 .native-map-marker--claim .native-map-marker-content--badge-crop {
-  width: 34px;
-  height: 34px;
-  overflow: hidden;
+  box-sizing: border-box;
+  width: 40px;
+  height: 40px;
+  padding: 3px;
+  overflow: visible;
   border: 0;
   border-radius: 0;
-  clip-path: polygon(50% 0, 94% 25%, 94% 75%, 50% 100%, 6% 75%, 6% 25%);
   background: transparent;
   box-shadow: 0 2px 6px rgba(0,0,0,.78);
   transform: scale(var(--native-map-claim-scale, .9));
@@ -216,11 +217,11 @@
 .native-map-marker--claim .native-map-marker-content--badge-crop img {
   position: absolute;
   z-index: 1;
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
   max-width: none;
   object-fit: fill;
-  transform: translate(-5px, -5px);
+  transform: none;
 }
 
 @media (max-width: 900px) {

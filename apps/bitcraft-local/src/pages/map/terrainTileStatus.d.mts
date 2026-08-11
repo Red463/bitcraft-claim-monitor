@@ -15,8 +15,9 @@ export type TerrainTileStatus = {
   totalBytes: number;
   buildStage: string;
   warnings: string[];
+  roads?: { available: boolean; generation: string | null; generatedAt: string | null; regionIds: string[]; tileCount: number; totalBytes: number; featureCount: number };
 };
 
 export function loadTerrainTileStatus(signal?: AbortSignal): Promise<TerrainTileStatus>;
-export function mapTileUrl(style: "terrain" | "water", generation: string): string;
+export function mapTileUrl(style: "terrain" | "water" | "roads", generation: string): string;
 export function terrainTileUrl(generation: string): string;

@@ -25,7 +25,7 @@ test("terrain tile client uses same-origin status and generation-busted tile URL
     assert.equal(requested.options.signal, controller.signal);
     assert.equal(statusModule.terrainTileUrl("42"), "/api/local/map/tiles/terrain/{z}/{x}/{y}.webp?generation=42");
     assert.equal(statusModule.mapTileUrl("water", "42"), "/api/local/map/tiles/water/{z}/{x}/{y}.webp?generation=42");
-    assert.throws(() => statusModule.mapTileUrl("roads", "42"), /style/i);
+    assert.equal(statusModule.mapTileUrl("roads", "42"), "/api/local/map/tiles/roads/{z}/{x}/{y}.webp?generation=42");
     assert.doesNotMatch(statusModule.terrainTileUrl("42"), /https?:|prism|bitcraftmap/i);
   } finally {
     globalThis.fetch = originalFetch;

@@ -125,12 +125,16 @@ test("Native map requests only same-origin locally provisioned terrain tiles", (
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   assert.match(nativeMap, /mapTileUrl\("terrain", terrainStatus\.generation\)/);
   assert.match(nativeMap, /mapTileUrl\("water", terrainStatus\.generation\)/);
+  assert.match(nativeMap, /mapTileUrl\("roads", roadStatus\.generation\)/);
+  assert.match(nativeMap, /roadTilesRef/);
   assert.match(nativeMap, /loadTerrainTileStatus/);
   assert.match(nativeMap, /visibilitychange/);
   assert.match(nativeMap, /60_000/);
   assert.match(nativeMap, /minNativeZoom: -5/);
   assert.match(nativeMap, /maxNativeZoom: 0/);
-  assert.match(nativeMap, /const tileOptions = \{\s*tileSize: 256,\s*minZoom: -5,\s*maxZoom: 5,\s*minNativeZoom: -5,/);
+  assert.doesNotMatch(nativeMap, /layerVisibility\.terrain|layerVisibility\.water/);
+  assert.match(nativeMap, /L\.map\(hostRef\.current, \{ crs: NATIVE_CRS, minZoom: -6, maxZoom: 5,/);
+  assert.match(nativeMap, /const tileOptions = \{\s*tileSize: 256,\s*minZoom: -6,\s*maxZoom: 5,\s*minNativeZoom: -5,/);
   assert.doesNotMatch(nativeMap, /prism\.brico\.app|bitcraftmap\.com/);
   assert.match(nativeMap, /Terrain\/water tiles are not installed on this server/);
   assert.ok(nativeMap.indexOf("new CoordinateGridLayer") < nativeMap.indexOf('mapTileUrl("terrain", terrainStatus.generation)'));
@@ -164,6 +168,28 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   assert.match(nativeMap, /setAttribute\("aria-label", accessibleLabel\)/);
   assert.match(nativeMap, /zoomend/);
   assert.match(nativeMap, /--native-map-claim-scale/);
+  const css = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+  assert.match(css, /native-map-marker--claim[^}]*width:\s*40px[^}]*height:\s*40px/s);
+  assert.match(css, /badge-crop[^}]*padding:\s*3px/s);
   assert.match(nativeMap, /selectionRequired.*resourceIds\.length.*enemyTypes\.length/s);
+});
+
+test("Native map separates event and snapshot limits and ignores the initial stream event", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(nativeMap, /mapEventNeedsSnapshot/);
+  assert.match(nativeMap, /createMapSnapshotLoader/);
+  assert.match(server, /"map-snapshot", RATE_LIMITS\.mapSnapshot/);
+  assert.match(server, /"map-events", RATE_LIMITS\.mapEvents/);
+  assert.match(server, /initial: true/);
+});
+
+test("configured-region resource tracking is enabled without enabling unverified mobile identities", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /const MAP_RESOURCE_COORDINATES_VERIFIED = true/);
+  assert.match(server, /const MAP_SPATIAL_COLLECTION_VERIFIED = true/);
+  assert.match(server, /const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = false/);
+  assert.match(server, /const MAP_ENEMY_IDENTITY_VERIFIED = false/);
+  assert.match(server, /const spatialCollectionRequested = .*scope\.resourceIds\.length/s);
 });
 

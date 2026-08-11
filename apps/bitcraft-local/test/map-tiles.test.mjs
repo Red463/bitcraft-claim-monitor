@@ -48,6 +48,16 @@ test("map tile route serves the aligned same-origin water channel", async () => 
   assert.deepEqual(res.body, expected);
 });
 
+test("map tile route serves installed roads from the independent durable store", async () => {
+  const expected = Buffer.from("roads");
+  const res = responseRecorder();
+  const terrainStore = { readTile: async () => null };
+  const roadStore = { readTile: async (request) => request.style === "roads" ? { bytes: expected, contentType: "image/webp", generation: "9" } : null };
+  await tileModule.serveLocalMapTile("/api/local/map/tiles/roads/-5/0/-1.webp", res, terrainStore, undefined, null, roadStore);
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, expected);
+});
+
 test("map tile route rejects unsupported styles and coordinates without filesystem traversal", async () => {
   assert.ok(tileModule, "map tile module must exist");
   const store = { readTile: async () => null };
@@ -112,11 +122,17 @@ test("map tile status returns unavailable or a public installed manifest", async
   assert.equal(payload.freshness, "live");
   assert.equal(payload.ageMs, 1000);
   assert.equal(payload.dataDir, undefined);
+
+  const withRoads = responseRecorder();
+  await tileModule.serveLocalMapTile("/api/local/map/tiles/status", withRoads, { readManifest: async () => manifest }, () => new Date("2026-08-11T16:00:00.000Z"), null, {
+    readManifest: async () => ({ generation: "9", generatedAt: "2026-08-11T15:00:00.000Z", regionIds: ["19"], tileCount: 20, totalBytes: 500, featureCount: 600 }),
+  });
+  assert.deepEqual(JSON.parse(withRoads.body).roads, { available: true, generation: "9", generatedAt: "2026-08-11T15:00:00.000Z", regionIds: ["19"], tileCount: 20, totalBytes: 500, featureCount: 600 });
 });
 
 test("production server handles same-origin map tiles before map snapshot acquisition", async () => {
   const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(server, /import \{ serveLocalMapTile \} from "\.\/src\/server\/mapTiles\.mjs"/);
-  assert.match(server, /await serveLocalMapTile\(url\.pathname, res, terrainTileStore, undefined, relayTerrainRuntime\.health\(\)\)/);
-  assert.ok(server.indexOf("await serveLocalMapTile(url.pathname, res, terrainTileStore, undefined, relayTerrainRuntime.health())") < server.indexOf('url.pathname === "/api/local/map/snapshot"'));
+  assert.match(server, /await serveLocalMapTile\(url\.pathname, res, layeredTerrainTileStore, undefined, relayTerrainRuntime\.health\(\), roadTileStore\)/);
+  assert.ok(server.indexOf("await serveLocalMapTile(url.pathname, res, layeredTerrainTileStore, undefined, relayTerrainRuntime.health(), roadTileStore)") < server.indexOf('url.pathname === "/api/local/map/snapshot"'));
 });

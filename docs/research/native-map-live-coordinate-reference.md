@@ -69,13 +69,21 @@ The completed palette-v2 smoke acceptance used `http://127.0.0.1:18449/?page=map
 - Warm same-origin operational snapshot: 54,119 uncompressed bytes, HTTP `200`, 34.1 ms at the server boundary.
 - Stable web-role process measured between 96.8 and 131.7 MiB working set in the original acceptance and 97.6 MiB after the palette-v3 bundle was installed. The palette-v3 combined collector peaked around 1.56 GiB while collecting and encoding. Production and normal visual smoke keep collector and web roles separate.
 - Final full suite after the layer-control acceptance fixes: 1,995 tests, 1,993 passed, 2 skipped, 0 failed, 163 seconds at the command boundary. The final production build is verified separately after commit.
-- Palette-v3 status after installation: generation `1`, 2,314 tiles, 4,674,916 bytes. The optimized renderer produces both channels from one pixel scan and uses a bounded eight-entry promise cache; focused renderer/store/runtime tests pass. A live browser regression found that Leaflet's tile layer defaulted to minimum zoom `0`; the layer now explicitly supports `-5..5`, and 24 same-origin tile images were observed after zooming below zero.
+- Palette-v3 status after installation: generation `1`, 2,314 tiles, 4,674,916 bytes. The optimized renderer produces both channels from one pixel scan and uses a bounded eight-entry promise cache; focused renderer/store/runtime tests pass. Leaflet supports viewer zoom `-6..5`; zoom `-6` scales the pre-generated `-5` overview down so the complete world fits beside the operational sidebar without another stored tile level.
 - Claim tiers `1..10` use the supplied first-party badge assets with a hexagonal CSS crop that removes the source square background. The live viewport showed isolated Roman-numeral badges without square backplates.
-- The Layers control independently toggles terrain, water, claims, markets, waystones, empire settlements, watchtowers, players, resources, and enemies. Roads and claim areas are present but disabled with `Unavailable — awaiting verified Relay coordinates`; no coordinates are inferred.
+- Terrain and water are permanent basemap channels rather than optional overlays. The Layers control now exposes claims, claim areas, roads, watchtowers, players, resources, and enemies. Markets, waystones, and empire settlements are not independently tracked on this map.
 
 The native map was also browser-smoked at an explicit `390 x 844` phone viewport. The controls stacked into the narrow layout, the map remained present below the finder, the layer panel remained usable at phone width, and no native map iframe appeared. The temporary viewport override was reset to the user's desktop size afterward. Final palette-v3 boundary inspection found 32 same-origin Leaflet tile images, zero remote images inside `.native-map-shell`, and zero map-owned iframes.
 
 Real browser traffic also exposed and now regression-tests an atomic-store race: last-good tile reads used to prune the active `.staging-*` bundle. The store now protects only the current staging directory, allowing palette-v2 installation while readers continue receiving the previous complete bundle.
+
+## Pre-generated world and road overlays
+
+The current app follows BitCraftMap's static-artifact model instead of collecting and rendering the basemap on browser demand. Terrain and water are built per ready region at overview zooms `-5..-2`, then served as one layered world bundle with detailed tiles taking precedence where available. The accepted 13-region artifact covers the verified `0..38400` world bounds, contains 4,758 tiles across the combined detail and overview stores, and occupies 10,914,120 bytes. Region batches are processed one at a time to bound collector memory; the completed run peaked at approximately 1.48 GiB while the web process remained near 100 MiB.
+
+Terrain has no automatic live rebuild by default. `build-relay-terrain-overview.mjs` uses a seven-day minimum-age gate, can be forced explicitly with `BITCRAFT_FORCE_TERRAIN_OVERVIEW=true`, and the continuous terrain collector remains disabled unless `ENABLE_RELAY_TERRAIN_LIVE_REBUILD=true` is deliberately set. This makes a scheduled weekly maintenance build—or an immediate build after a known world update—the intended production behavior.
+
+Road verification in configured region `19` proved the indexed join `paved_tile_state.entity_id = location_state.entity_id` in overworld dimension `1`. The captured complete generation contained 597,426 paving points with X `23390..30166` and Z `23375..30325`; its normalized raw representation was approximately 69.3 MB, which is unsuitable for a browser snapshot. The pre-generated raster road bundle reduces this to 549 WebP tiles and 382,698 bytes. Road generation is independent of terrain and has a 24-hour minimum-age gate by default, so an operator can schedule it daily or less often without refreshing the terrain artifact. `BITCRAFT_FORCE_ROAD_TILES=true` bypasses the gate for a deliberate rebuild.
 
 ## Enemy identity mapping
 
@@ -99,7 +107,15 @@ The bounded resource verifier completed successfully against healthy Relay regio
 
 The first two fixtures were independently compared with BitCraftMap's selected type-54 layer. At zoom `2`, the second marker appeared approximately 20 pixels east and 12 pixels north of a waypoint placed at the first coordinate, exactly matching the `(+5,+3)` map-coordinate delta at four pixels per map unit. This confirms static `{x,z}`, GeoJSON `[x,z]`, and Leaflet `[z,x]` for the resource/location join. The current BitCraftMap rejects the obsolete `roadsLayer` and `towersLayer` names in custom waypoint metadata. The legacy URL helper now omits those invalid names so `external` mode remains operable during rollback; this is an intentional compatibility exception to the otherwise unchanged external-renderer rollout contract and is not part of the coordinate evidence.
 
-Region `12` is not in this installation's configured active-region scope, while configured region `19` remained unhealthy during the capture. The production resource gate therefore remains off until the same bounded check completes for a configured region. The healthy fixture validates the join and projection but does not authorize cross-region exposure.
+Region `12` is not in this installation's configured active-region scope. A later bounded verification on 2026-08-11 completed successfully in configured region `19` with the same schema fingerprint and selected resource type `54`:
+
+- Session completion: 362 ms after topology discovery.
+- Normalized JSON: 147,728 uncompressed bytes.
+- Features: 916 resources; zero requested players, enemies, or waystones.
+- Bounds: X `23462..25507`, Z `23794..28081`, dimension `1`.
+- Public fixtures: entity `1369094286721380391` at `(24695,24067)`, entity `1369094286721433375` at `(24667,24077)`, and entity `1369094286721489149` at `(24638,24108)`.
+
+This configured-region generation authorizes the bounded resource/location collector. It does not authorize player, enemy, or waystone coordinates, which remain independently disabled.
 
 Before changing the renderer default or enabling exact player positions, rerun:
 
@@ -115,14 +131,14 @@ Acceptance requires a complete generation proving:
 1. The selected player ID directly matches a `mobile_entity_state.entity_id` row.
 2. Dividing live mobile `location_x/location_z` by `1000` agrees with the player's independently known in-game or trusted map position.
 3. The mobile row uses dimension `1` and disappears from the public snapshot on logout, exclusion, disconnect, or deselection.
-4. Resource `54` joins `resource_state.entity_id` to `location_state.entity_id`, stays within region/world bounds, and remains under the configured row/response budgets for a configured active region. Region `12` has passed the query/projection check; configured region `19` is still pending source recovery.
+4. Resource `54` joins `resource_state.entity_id` to `location_state.entity_id`, stays within region/world bounds, and remains under the configured row/response budgets for a configured active region. Regions `12` and configured region `19` have passed this query/projection check.
 5. Selected enemy types join the decoded tagged enum to `mobile_entity_state` and deletion removes their features.
 6. Empire chunk rows align with an independently verified polygon transform; until then, territory remains unavailable.
 7. Warm snapshots remain below 500 ms, 50,000 features, and 8 MiB uncompressed JSON.
 
 The provider implementation now avoids the dense per-entity resource fan-out: selected resources and `location_state` are materialized with an indexed two-table subscription join. Enemy mobile subscriptions are derived only from locally selected enemy identities and split into batches of at most 100 entity IDs; player queries use the same limit. Normalization rejects missing/non-overworld dimensions and coordinates outside the verified `0..38400` world bounds (mobile fixed-point `0..38400000`).
 
-Production deliberately keeps the combined `map-spatial` collector cold until the pending fixtures pass. Player, resource, enemy, and waystone layers return explicit unavailable warnings rather than inferred coordinates. The two latest 120-second resource probes remained at `connected:false` / `stage:"idle"`, so they did not validate or reject the new indexed join. A schema mismatch or unverified source must remain unavailable and retain only independently verified last-good data.
+Production starts a bounded `map-spatial` session only when a request contains selected resource IDs. Resources are enabled from the verified join; player, enemy, and waystone layers still return explicit unavailable warnings rather than inferred coordinates. A schema mismatch or unverified source must remain unavailable and retain only independently verified last-good data.
 
 ## First-party renderer and BitCraftMap parity target
 
@@ -151,11 +167,11 @@ The current BitCraftMap browser uses `38400 x 38400` raster tiles, but no redist
 
 | Parity group | Current source/status | Required work |
 | --- | --- | --- |
-| Terrain/game/water | Relay layout, renderer, atomic store, worker runtime, same-origin API, and Leaflet layer verified | Extend live bundle acceptance to each configured active region and benchmark multi-region update frequency |
+| Terrain/game/water | Relay layout, renderer, atomic store, whole-world overview, same-origin API, and Leaflet layer verified | Rebuild the static artifact on its long maintenance cadence or after a game-world update |
 | Waystones | Regional `waystone_state` | Validate live counts and known locations in every enabled region |
 | Markets | Existing `marketplace_state` projection | Generalize beyond the monitored claim if parity requires all regional markets |
 | Claims/watchtowers/settlements | Existing Relay projections | Add tier/icon controls and verify every active region |
 | Resources/enemies/players | Bounded live sessions | Complete the pending live coordinate/deletion acceptance above |
-| Roads | No active projection | Verify `paved_tile_state` coordinate decoding and build a bounded/vector or raster layer |
+| Roads | Verified `paved_tile_state.entity_id = location_state.entity_id` join and pre-generated same-origin raster overlay | Rebuild independently on its maintenance cadence |
 | Caves and world POIs | No active projection | Identify authoritative Relay tables/knowledge visibility, normalize, and fixture-test each kind |
 | Territory/grids/dungeons | Partial bindings only | Verify chunk/tile transforms and dimension semantics before rendering |

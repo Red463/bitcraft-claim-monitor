@@ -1,4 +1,4 @@
-export type MapLayerKey = "terrain" | "water" | "claims" | "markets" | "waystones" | "empire-settlements" | "watchtowers" | "players" | "resources" | "enemies" | "roads" | "claim-areas";
+export type MapLayerKey = "claims" | "claim-areas" | "roads" | "watchtowers" | "players" | "resources" | "enemies";
 export type MapLayerVisibility = Record<MapLayerKey, boolean>;
 export type MapLayerDefinition = Readonly<{
   key: MapLayerKey;
@@ -11,7 +11,7 @@ export type MapLayerDefinition = Readonly<{
   selectionRequired: boolean;
 }>;
 
-export const MAP_LAYER_PREFERENCE_KEY: "bitcraft-map-layers:v1";
+export const MAP_LAYER_PREFERENCE_KEY: "bitcraft-map-layers:v2";
 export const MAP_LAYER_DEFINITIONS: ReadonlyArray<MapLayerDefinition>;
 export function defaultMapLayerVisibility(): MapLayerVisibility;
 export function parseMapLayerVisibility(raw: unknown): MapLayerVisibility;

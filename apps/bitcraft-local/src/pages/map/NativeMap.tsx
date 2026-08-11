@@ -8,6 +8,7 @@ import { planDensePointDraw } from "./mapDensePointPlan.mjs";
 import { MAP_LAYER_DEFINITIONS, defaultMapLayerVisibility, loadMapLayerVisibility, saveMapLayerVisibility, type MapLayerKey } from "./mapLayerPreferences.mjs";
 import { MAP_MARKER_PRESENTATIONS, claimMarkerPresentation, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
+import { createMapSnapshotLoader, mapEventNeedsSnapshot } from "./mapSnapshotLoader.mjs";
 import { loadTerrainTileStatus, mapTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
 import type { MapFocus } from "./mapUtils";
 
@@ -140,7 +141,7 @@ class DensePointLayer extends L.Layer {
 const FEATURE_COLORS: Record<string, string> = {
   claim: "#f0c64f",
 };
-const MARKER_LAYER_KEYS = ["claims", "markets", "waystones", "empire-settlements", "watchtowers", "players", "roads", "claim-areas"] as const;
+const MARKER_LAYER_KEYS = ["claims", "watchtowers", "players", "claim-areas"] as const;
 
 function markerKindClass(kind: string) {
   return Object.hasOwn(MAP_MARKER_PRESENTATIONS, kind) ? kind : "fallback";
@@ -161,7 +162,7 @@ function markerIcon(kind: string, presentation: MapMarkerPresentation) {
     image.addEventListener("error", () => image.remove(), { once: true });
     content.prepend(image);
   }
-  const size = presentation.mode === "image" && presentation.badgeCrop ? 34 : 30;
+  const size = presentation.mode === "image" && presentation.badgeCrop ? 40 : 30;
   return L.divIcon({
     className: `native-map-marker native-map-marker--${markerKindClass(kind)}`,
     html: content,
@@ -201,11 +202,12 @@ export function NativeMap({
   const enemiesRef = React.useRef<DensePointLayer | null>(null);
   const terrainTilesRef = React.useRef<L.TileLayer | null>(null);
   const waterTilesRef = React.useRef<L.TileLayer | null>(null);
+  const roadTilesRef = React.useRef<L.TileLayer | null>(null);
   const [snapshot, setSnapshot] = React.useState<MapSnapshot | null>(null);
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [terrainStatus, setTerrainStatus] = React.useState<TerrainTileStatus | null>(null);
-  const [terrainTileError, setTerrainTileError] = React.useState("");
+  const [terrainStatusError, setTerrainStatusError] = React.useState("");
   const [layerVisibility, setLayerVisibility] = React.useState(() => typeof window === "undefined"
     ? defaultMapLayerVisibility()
     : loadMapLayerVisibility(() => window.localStorage));
@@ -213,7 +215,7 @@ export function NativeMap({
 
   React.useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
-    const map = L.map(hostRef.current, { crs: NATIVE_CRS, minZoom: -5, maxZoom: 5, zoomControl: true, preferCanvas: true, attributionControl: false });
+    const map = L.map(hostRef.current, { crs: NATIVE_CRS, minZoom: -6, maxZoom: 5, zoomControl: true, preferCanvas: true, attributionControl: false });
     const bounds = L.latLngBounds([MAP_WORLD_BOUNDS.minZ, MAP_WORLD_BOUNDS.minX], [MAP_WORLD_BOUNDS.maxZ, MAP_WORLD_BOUNDS.maxX]);
     const updateClaimScale = () => {
       const scale = Math.max(0.72, Math.min(1.1, 0.72 + (map.getZoom() + 5) * 0.038));
@@ -243,6 +245,7 @@ export function NativeMap({
       enemiesRef.current = null;
       terrainTilesRef.current = null;
       waterTilesRef.current = null;
+      roadTilesRef.current = null;
     };
   }, []);
 
@@ -257,10 +260,10 @@ export function NativeMap({
     }
     resourcesRef.current?.setVisible(layerVisibility.resources);
     enemiesRef.current?.setVisible(layerVisibility.enemies);
-    for (const [key, layer] of [["terrain", terrainTilesRef.current], ["water", waterTilesRef.current]] as const) {
-      if (!layer) continue;
-      if (layerVisibility[key] && !map.hasLayer(layer)) layer.addTo(map);
-      else if (!layerVisibility[key] && map.hasLayer(layer)) layer.removeFrom(map);
+    const roads = roadTilesRef.current;
+    if (roads) {
+      if (layerVisibility.roads && !map.hasLayer(roads)) roads.addTo(map);
+      else if (!layerVisibility.roads && map.hasLayer(roads)) roads.removeFrom(map);
     }
   }, [layerVisibility]);
 
@@ -271,9 +274,12 @@ export function NativeMap({
       if (document.hidden) return;
       try {
         const status = await loadTerrainTileStatus(controller.signal);
-        if (!disposed) setTerrainStatus(status);
+        if (!disposed) {
+          setTerrainStatus(status);
+          setTerrainStatusError("");
+        }
       } catch (statusError) {
-        if (!disposed && !controller.signal.aborted) setTerrainTileError(statusError instanceof Error ? statusError.message : String(statusError));
+        if (!disposed && !controller.signal.aborted) setTerrainStatusError(statusError instanceof Error ? statusError.message : String(statusError));
       }
     };
     const visibility = () => { if (!document.hidden) void load(); };
@@ -300,7 +306,7 @@ export function NativeMap({
     }
     const tileOptions = {
       tileSize: 256,
-      minZoom: -5,
+      minZoom: -6,
       maxZoom: 5,
       minNativeZoom: -5,
       maxNativeZoom: 0,
@@ -309,16 +315,10 @@ export function NativeMap({
     };
     const terrainTiles = L.tileLayer(mapTileUrl("terrain", terrainStatus.generation), tileOptions);
     const waterTiles = L.tileLayer(mapTileUrl("water", terrainStatus.generation), tileOptions);
-    const clearError = () => setTerrainTileError("");
-    const reportError = () => setTerrainTileError("Some terrain or water tiles could not be loaded; the coordinate grid remains available.");
-    terrainTiles.on("tileload", clearError);
-    waterTiles.on("tileload", clearError);
-    terrainTiles.on("tileerror", reportError);
-    waterTiles.on("tileerror", reportError);
     terrainTilesRef.current?.removeFrom(map);
     waterTilesRef.current?.removeFrom(map);
-    if (layerVisibility.terrain) terrainTiles.addTo(map);
-    if (layerVisibility.water) waterTiles.addTo(map);
+    terrainTiles.addTo(map);
+    waterTiles.addTo(map);
     terrainTilesRef.current = terrainTiles;
     waterTilesRef.current = waterTiles;
     return () => {
@@ -330,6 +330,31 @@ export function NativeMap({
   }, [terrainStatus?.available, terrainStatus?.generation]);
 
   React.useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    roadTilesRef.current?.removeFrom(map);
+    roadTilesRef.current = null;
+    const roadStatus = terrainStatus?.roads;
+    if (!roadStatus?.available || !roadStatus.generation) return;
+    const roads = L.tileLayer(mapTileUrl("roads", roadStatus.generation), {
+      tileSize: 256,
+      minZoom: -6,
+      maxZoom: 5,
+      minNativeZoom: -5,
+      maxNativeZoom: 0,
+      noWrap: false,
+      keepBuffer: 2,
+      pane: "overlayPane",
+    });
+    if (layerVisibility.roads) roads.addTo(map);
+    roadTilesRef.current = roads;
+    return () => {
+      roads.removeFrom(map);
+      if (roadTilesRef.current === roads) roadTilesRef.current = null;
+    };
+  }, [terrainStatus?.roads?.available, terrainStatus?.roads?.generation]);
+
+  React.useEffect(() => {
     if (!focus || !mapRef.current) return;
     mapRef.current.flyTo(leafletPoint({ x: focus.locationX, z: focus.locationZ }), 1, { duration: 0.6 });
   }, [focus?.name, focus?.locationX, focus?.locationZ]);
@@ -338,42 +363,51 @@ export function NativeMap({
     const controller = new AbortController();
     let events: EventSource | null = null;
     let disposed = false;
-    const load = async () => {
-      if (document.hidden) return;
-      setLoading(true);
-      try {
+    const loader = createMapSnapshotLoader<MapSnapshot>({
+      isHidden: () => document.hidden,
+      onLoading: setLoading,
+      load: async () => {
         const response = await fetch(request.snapshotUrl, { signal: controller.signal, credentials: "same-origin" });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || `Native map HTTP ${response.status}`);
+        return payload;
+      },
+      onValue: (payload) => {
         if (!disposed) {
           setSnapshot(payload);
           setError("");
         }
-      } catch (loadError) {
+      },
+      onError: (loadError) => {
         if (!disposed && !controller.signal.aborted) setError(loadError instanceof Error ? loadError.message : String(loadError));
-      } finally {
-        if (!disposed) setLoading(false);
-      }
-    };
+      },
+    });
     const connect = () => {
       if (document.hidden || disposed) return;
       events?.close();
       events = new EventSource(request.eventsUrl, { withCredentials: true });
-      events.onmessage = () => void load();
+      events.onmessage = (message) => {
+        try {
+          if (mapEventNeedsSnapshot(JSON.parse(message.data))) void loader.request();
+        } catch {
+          setError("A live map update was malformed; reconnecting.");
+        }
+      };
       events.onerror = () => setError((current) => current || "Live map updates are reconnecting.");
     };
     const visibility = () => {
       if (document.hidden) events?.close();
       else {
-        void load();
+        void loader.request();
         connect();
       }
     };
-    void load();
+    void loader.request();
     connect();
     document.addEventListener("visibilitychange", visibility);
     return () => {
       disposed = true;
+      loader.stop();
       controller.abort();
       events?.close();
       document.removeEventListener("visibilitychange", visibility);
@@ -436,11 +470,9 @@ export function NativeMap({
     return [key, { available: available && hasSelection, reason: available && !hasSelection ? selectionReason : unavailableReason as string | null }];
   }));
   Object.assign(layerAvailability, snapshot?.layerAvailability ?? {});
-  if (terrainStatus && !terrainStatus.available) {
-    const reason = terrainStatus.buildStage === "building" ? "Terrain tiles are building" : "Terrain tiles are unavailable";
-    layerAvailability.terrain = { available: false, reason };
-    layerAvailability.water = { available: false, reason };
-  }
+  layerAvailability.roads = terrainStatus?.roads?.available
+    ? { available: true, reason: null }
+    : { available: false, reason: "Road tiles have not been generated for this server yet." };
   const layerCounts = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, dataLayer }) => [key, dataLayer ? snapshot?.layers[dataLayer]?.length ?? 0 : null]));
   const toggleLayer = (key: MapLayerKey) => setLayerVisibility((current) => ({ ...current, [key]: !current[key] }));
   return (
@@ -452,10 +484,11 @@ export function NativeMap({
         {snapshot?.ageMs != null ? <span>{Math.round(snapshot.ageMs / 1000)}s old</span> : null}
         {error ? <span className="error">{error}</span> : null}
         {terrainStatus?.available ? <span>Terrain {terrainStatus.freshness} · generation {terrainStatus.generation}</span> : null}
+        {terrainStatus?.roads?.available ? <span>Roads · generation {terrainStatus.roads.generation} · {terrainStatus.roads.featureCount.toLocaleString()} paving points</span> : null}
         {terrainStatus && !terrainStatus.available ? <span>{terrainStatus.buildStage === "building"
           ? "Terrain and water are building from live Relay data; showing the coordinate fallback meanwhile."
           : "Terrain/water tiles are not installed on this server; showing the coordinate fallback."}</span> : null}
-        {terrainTileError ? <span className="error">{terrainTileError}</span> : null}
+        {terrainStatusError ? <span className="error">{terrainStatusError}</span> : null}
         {terrainStatus?.warnings?.map((warning) => <span key={warning}>{warning}</span>)}
         {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{layerAvailability[layer]?.available === false ? "unavailable" : layerVisibility[layer as MapLayerKey] ? snapshot.freshness : "hidden"}</small></li>)}</ul> : null}
         {snapshot?.warnings?.length ? <details><summary>{snapshot.warnings.length} data warning{snapshot.warnings.length === 1 ? "" : "s"}</summary><ul>{snapshot.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}

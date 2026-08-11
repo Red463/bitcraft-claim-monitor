@@ -75,11 +75,9 @@ function equalityQueries(table: string, column: string, values: string[], extraP
 }
 
 export function mapSpatialQueries(scope: MapSpatialScope): string[] {
-  const claimId = decimal(scope.claimId, "Map spatial claim id");
   const resourcePredicate = equalityPredicate("resource_state", "resource_state.resource_id", scope.resourceIds);
   const resourceJoin = "FROM resource_state JOIN location_state ON resource_state.entity_id = location_state.entity_id";
   return [
-    `SELECT * FROM waystone_state WHERE claim_entity_id = ${claimId}`,
     resourcePredicate ? `SELECT resource_state.* ${resourceJoin} WHERE (${resourcePredicate}) AND location_state.dimension = ${MAP_OVERWORLD_DIMENSION}` : null,
     resourcePredicate ? `SELECT location_state.* ${resourceJoin} WHERE (${resourcePredicate}) AND location_state.dimension = ${MAP_OVERWORLD_DIMENSION}` : null,
     scope.enemyTypes.length ? "SELECT * FROM enemy_state" : null,

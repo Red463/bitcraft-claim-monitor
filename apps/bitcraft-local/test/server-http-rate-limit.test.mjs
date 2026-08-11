@@ -15,6 +15,8 @@ test("RATE_LIMITS preserves the public route rate-limit policies", () => {
   assert.deepEqual(RATE_LIMITS.discordInteraction, { windowMs: 60 * 1000, max: 120 });
   assert.deepEqual(RATE_LIMITS.proxy, { windowMs: 60 * 1000, max: 600 });
   assert.deepEqual(RATE_LIMITS.expensiveLocal, { windowMs: 60 * 1000, max: 60 });
+  assert.deepEqual(RATE_LIMITS.mapSnapshot, { windowMs: 60 * 1000, max: 600 });
+  assert.deepEqual(RATE_LIMITS.mapEvents, { windowMs: 60 * 1000, max: 300 });
 });
 
 test("createRateLimiter allows requests through the configured max then emits the app 429 response", () => {

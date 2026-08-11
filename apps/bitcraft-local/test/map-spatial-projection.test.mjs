@@ -18,7 +18,6 @@ const scope = {
 
 test("map spatial subscriptions are bounded by requested identities", () => {
   assert.deepEqual(mapSpatialQueries(scope), [
-    "SELECT * FROM waystone_state WHERE claim_entity_id = 1369094286777412590",
     "SELECT resource_state.* FROM resource_state JOIN location_state ON resource_state.entity_id = location_state.entity_id WHERE (resource_state.resource_id = 2 OR resource_state.resource_id = 30) AND location_state.dimension = 1",
     "SELECT location_state.* FROM resource_state JOIN location_state ON resource_state.entity_id = location_state.entity_id WHERE (resource_state.resource_id = 2 OR resource_state.resource_id = 30) AND location_state.dimension = 1",
     "SELECT * FROM enemy_state",
@@ -31,15 +30,13 @@ test("map spatial subscriptions are bounded by requested identities", () => {
 
 test("map spatial subscriptions omit dense joins unless their type is selected", () => {
   const queries = mapSpatialQueries({ ...scope, resourceIds: [], enemyTypes: [], playerIds: [] });
-  assert.deepEqual(queries, [
-    "SELECT * FROM waystone_state WHERE claim_entity_id = 1369094286777412590",
-  ]);
+  assert.deepEqual(queries, []);
 });
 
 test("map spatial subscriptions split selected players into bounded queries", () => {
   const playerIds = Array.from({ length: 250 }, (_, index) => String(index + 1));
   const queries = mapSpatialQueries({ ...scope, resourceIds: [], enemyTypes: [], playerIds });
-  const playerQueries = queries.slice(1);
+  const playerQueries = queries;
   assert.equal(playerQueries.length, 3);
   assert.deepEqual(playerQueries.map((query) => (query.match(/entity_id = /g) ?? []).length), [100, 100, 50]);
   assert.ok(playerQueries.every((query) => query.endsWith("AND dimension = 1")));

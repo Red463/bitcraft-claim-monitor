@@ -38,6 +38,8 @@ import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { MapSnapshotError, authorizedMapPlayerIds, buildMapSnapshot, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
 import { serveLocalMapTile } from "./src/server/mapTiles.mjs";
 import { createTerrainTileStore } from "./src/server/terrainTileStore.mjs";
+import { createRoadTileStore } from "./src/server/roadTileStore.mjs";
+import { createLayeredTerrainTileStore, createTerrainOverviewStore } from "./src/server/terrainOverviewStore.mjs";
 import { createRelayClaimScopeFence } from "./src/server/relayClaimScopeFence.mjs";
 import { createRelayProductionLifecycleCoordinator } from "./src/server/relayProductionLifecycleCoordinator.mjs";
 import { createRelaySettlementTransitionCoordinator } from "./src/server/relaySettlementTransitionCoordinator.mjs";
@@ -402,6 +404,9 @@ const terrainTileStore = createTerrainTileStore({
     return renderTerrainTile({ generation, evidence: generation.evidence, style, zoom, x, y, tileSize });
   },
 });
+const roadTileStore = createRoadTileStore({ dataDir });
+const terrainOverviewStore = createTerrainOverviewStore({ dataDir });
+const layeredTerrainTileStore = createLayeredTerrainTileStore({ detailStore: terrainTileStore, overviewStore: terrainOverviewStore });
 const privacyLedgerPath = process.env.PRIVACY_LEDGER_PATH
   ?? (isProduction && !isTestRuntime ? "/var/backups/bitcraft-claim-monitor-relay/privacy-deletion-ledger.jsonl" : path.join(dataDir, "privacy-deletion-ledger.jsonl"));
 const readCachedServerHealthFiles = createCachedServerHealthReader(() => readServerHealthFiles(dataDir), { ttlMs: 30_000 });
@@ -594,13 +599,14 @@ const relayRegionClaimsRuntime = new RelayRegionClaimsRuntime({
   currentStateRepository,
   reconnectDelayMs: relayReconnectDelayMs,
 });
+const terrainLiveRebuildEnabled = process.env.ENABLE_RELAY_TERRAIN_LIVE_REBUILD === "true";
 const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = false;
 const MAP_ENEMY_IDENTITY_VERIFIED = false;
-const MAP_RESOURCE_COORDINATES_VERIFIED = false;
+const MAP_RESOURCE_COORDINATES_VERIFIED = true;
 const MAP_WAYSTONE_COORDINATES_VERIFIED = false;
-// Keep the combined collector cold until each query can be independently
-// enabled. EnemyType is also a sum type that deployed SQL cannot scalar-filter.
-const MAP_SPATIAL_COLLECTION_VERIFIED = false;
+// Resource/location joins are live-verified in configured region 19. Player,
+// enemy, and waystone identities remain independently gated below.
+const MAP_SPATIAL_COLLECTION_VERIFIED = true;
 const relayMapSpatialScopeManager = new RelayMapSpatialScopeManager({
   manifest: relayBindingManifest,
   // Scoped map generations are live notifications, not repository commits;
@@ -8012,7 +8018,7 @@ const server = createServer(async (req, res) => {
         staleAfterMs: relayGlobalCatalogStaleMs,
       }));
     }
-    if (req.method === "GET" && await serveLocalMapTile(url.pathname, res, terrainTileStore, undefined, relayTerrainRuntime.health())) return;
+    if (req.method === "GET" && await serveLocalMapTile(url.pathname, res, layeredTerrainTileStore, undefined, relayTerrainRuntime.health(), roadTileStore)) return;
     if (req.method === "GET" && url.pathname === "/api/local/map/catalog") {
       if (!rateLimit(req, res, "map-catalog", RATE_LIMITS.expensiveLocal)) return;
       const status = globalCatalogReadStatus();
@@ -8030,7 +8036,8 @@ const server = createServer(async (req, res) => {
       return send(res, status.freshness === "unavailable" ? 503 : 200, payload);
     }
     if (req.method === "GET" && (url.pathname === "/api/local/map/snapshot" || url.pathname === "/api/local/map/events")) {
-      if (!rateLimit(req, res, "map-spatial", RATE_LIMITS.expensiveLocal)) return;
+      if (url.pathname === "/api/local/map/snapshot" && !rateLimit(req, res, "map-snapshot", RATE_LIMITS.mapSnapshot)) return;
+      if (url.pathname === "/api/local/map/events" && !rateLimit(req, res, "map-events", RATE_LIMITS.mapEvents)) return;
       const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
       if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
       const claimId = currentClaimId();
@@ -8053,6 +8060,10 @@ const server = createServer(async (req, res) => {
         mobileIdentityVerified: MAP_PLAYER_MOBILE_IDENTITY_VERIFIED,
       });
       const permittedEnemyTypes = MAP_ENEMY_IDENTITY_VERIFIED ? scope.enemyTypes : [];
+      const spatialCollectionRequested = MAP_SPATIAL_COLLECTION_VERIFIED && (
+        permittedPlayerIds.length > 0 || scope.resourceIds.length > 0 || permittedEnemyTypes.length > 0
+      );
+      const spatialRegionIds = spatialCollectionRequested ? scope.regionIds : [];
       const spatialLeases = [];
       let requestClosed = false;
       const releaseSpatialLeases = () => Promise.allSettled(spatialLeases.map((lease) => lease.release()));
@@ -8061,7 +8072,7 @@ const server = createServer(async (req, res) => {
         void releaseSpatialLeases();
       });
       try {
-        for (const regionId of MAP_SPATIAL_COLLECTION_VERIFIED ? scope.regionIds : []) {
+        for (const regionId of spatialRegionIds) {
           if (requestClosed) throw new Error("Map request closed during spatial scope acquisition.");
           spatialLeases.push(await relayMapSpatialScopeManager.acquire({
             relayBaseUrl,
@@ -8086,7 +8097,7 @@ const server = createServer(async (req, res) => {
         const listener = {
           claimId,
           domains: new Set(domains),
-          mapSpatialScopeKeys: new Set((MAP_SPATIAL_COLLECTION_VERIFIED ? scope.regionIds : []).map((regionId) => mapSpatialScopeKey({
+          mapSpatialScopeKeys: new Set(spatialRegionIds.map((regionId) => mapSpatialScopeKey({
             claimId,
             regionId,
             playerIds: permittedPlayerIds,
@@ -8096,7 +8107,7 @@ const server = createServer(async (req, res) => {
           response: res,
         };
         gameDataGenerationListeners.add(listener);
-        res.write(`data: ${JSON.stringify({ ...currentGameDataGenerationEvent(claimId, domains), scope })}\n\n`);
+        res.write(`data: ${JSON.stringify({ ...currentGameDataGenerationEvent(claimId, domains), scope, initial: true })}\n\n`);
         const heartbeat = setInterval(() => {
           if (!res.destroyed) res.write(": keep-alive\n\n");
         }, 15_000);
@@ -9597,7 +9608,7 @@ function startBackgroundTasks() {
       if (!regionId) {
         throw new Error("Relay regional sessions are waiting for a claim region");
       }
-      try {
+      if (terrainLiveRebuildEnabled) try {
         const settings = getSettings();
         const activeRegionIds = parseRegionIds(
           `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
