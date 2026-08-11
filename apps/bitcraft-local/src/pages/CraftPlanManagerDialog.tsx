@@ -5,8 +5,7 @@ import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
 import { Dialog } from "../components/main/Dialog";
 import type { AnyRecord } from "../main-app-data";
 import { dateLabel, formatNumber, timeAgo } from "../utils/format";
-import { usePageRefresh } from "../refresh/ManualRefreshContext";
-import { createDelayedRefreshTask, pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
+import { createDelayedRefreshTask } from "../refresh/pageRefresh.mjs";
 import { buildCraftPlanBankGroups, finalizeLegacyBankMigrations, initiallyExpandedBankPlayerIds, mergeLegacyBankDiscovery, runBankDiscoveryQueue } from "./craftPlanBankSelection.mjs";
 
 const LOCAL_API = "/api/local";
@@ -31,6 +30,10 @@ type CraftPlanConfig = {
 
 function emptyConfig(): CraftPlanConfig {
   return { enabled: true, name: "Settlement craft plan", targets: [], sourceRules: { storageContainerIds: [], playerIds: [], craftPlayerIds: [], bankPlayerIds: [], bankContainerIds: [], deployableContainerIds: [] }, routeOverrides: {}, sectionOverrides: {}, rowNameOverrides: {}, multipliers: {}, gatheredItemKeys: [], buildingProgress: {} };
+}
+
+function managerConfigFromResult(result: AnyRecord): CraftPlanConfig {
+  return { ...emptyConfig(), ...(result.config ?? {}), sourceRules: { ...emptyConfig().sourceRules, ...(result.config?.sourceRules ?? {}) } };
 }
 
 function itemKind(item: AnyRecord) {
@@ -178,7 +181,6 @@ function formatStoredBytes(value: unknown) {
 }
 
 export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { open: boolean; onClose: () => void; csrfToken: string; onSaved: () => void }) {
-  const { cycle, trackPromise } = usePageRefresh();
   const [state, setState] = React.useState<AnyRecord | null>(null);
   const [config, setConfig] = React.useState<CraftPlanConfig>(emptyConfig());
   const [activeTab, setActiveTab] = React.useState<ManagerTab>("targets");
@@ -203,44 +205,54 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [expandedBankPlayers, setExpandedBankPlayers] = React.useState<string[]>([]);
   const [bankSearch, setBankSearch] = React.useState("");
   const [trackedBanksOnly, setTrackedBanksOnly] = React.useState(false);
-  async function adminApi(path: string, options: RequestInit = {}) {
+  const [savedConfigSignature, setSavedConfigSignature] = React.useState("");
+  const [refreshConfirmationOpen, setRefreshConfirmationOpen] = React.useState(false);
+  const loadRequestId = React.useRef(0);
+  const draftDirty = Boolean(savedConfigSignature) && JSON.stringify(config) !== savedConfigSignature;
+  const adminApi = React.useCallback(async (path: string, options: RequestInit = {}) => {
     const headers = new Headers(options.headers);
     headers.set("content-type", "application/json");
-    for (const [key, value] of Object.entries(cycle ? pageRefreshHeaders(cycle, "planning") : {})) headers.set(key, value);
     if (options.method && options.method !== "GET") headers.set("x-csrf-token", csrfToken);
     const response = await fetch(`${LOCAL_API}${path}`, { ...options, headers });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
     return body;
-  }
+  }, [csrfToken]);
 
   const load = React.useCallback(async (mode: "loading" | "refreshing" = "loading") => {
+    const requestId = ++loadRequestId.current;
     setBusy(true);
     setOperation(mode);
     setError(null);
     try {
-      const result = await trackPromise("craft-plan-manager", adminApi("/admin/craft-plan"));
+      const result = await adminApi("/admin/craft-plan");
+      if (requestId !== loadRequestId.current) return;
+      const loadedConfig = managerConfigFromResult(result);
       setState(result);
-      setConfig({ ...emptyConfig(), ...(result.config ?? {}), sourceRules: { ...emptyConfig().sourceRules, ...(result.config?.sourceRules ?? {}) } });
+      setConfig(loadedConfig);
+      setSavedConfigSignature(JSON.stringify(loadedConfig));
+      setRefreshConfirmationOpen(false);
       setBankLoads({});
       setBankDiscoveryStarted(false);
       setLegacyBankMigrations([]);
       setExpandedBankPlayers([]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (requestId === loadRequestId.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
-      setOperation(null);
+      if (requestId === loadRequestId.current) {
+        setBusy(false);
+        setOperation(null);
+      }
     }
-  }, [csrfToken, cycle?.sequence, trackPromise]);
+  }, [adminApi]);
 
   const loadAudit = React.useCallback(async () => {
     setAuditLoading(true);
     setAuditError(null);
     setProgressAuditError(null);
     const [settingsResult, progressResult] = await Promise.allSettled([
-      trackPromise("craft-plan-manager-audit", adminApi("/admin/craft-plan/audit?limit=100")),
-      trackPromise("craft-plan-progress-audit", adminApi("/admin/craft-plan/progress-audit")),
+      adminApi("/admin/craft-plan/audit?limit=100"),
+      adminApi("/admin/craft-plan/progress-audit"),
     ]);
     if (settingsResult.status === "fulfilled") {
       setAuditRows(Array.isArray(settingsResult.value.auditLog) ? settingsResult.value.auditLog : []);
@@ -254,7 +266,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     }
     setAuditLoading(false);
     setAuditLoaded(true);
-  }, [csrfToken, cycle?.sequence, trackPromise]);
+  }, [adminApi]);
 
   async function downloadProgressAudit(range: string) {
     setAuditDownloadRange(range);
@@ -288,7 +300,17 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
 
   React.useEffect(() => {
     if (open) return;
+    loadRequestId.current += 1;
+    setState(null);
+    setConfig(emptyConfig());
+    setBusy(false);
+    setOperation(null);
+    setStatus(null);
+    setError(null);
     setActiveTab("targets");
+    setQuery("");
+    setSearchResults([]);
+    setActiveSearchResultIndex(-1);
     setAuditRows([]);
     setAuditLoaded(false);
     setAuditLoading(false);
@@ -303,6 +325,8 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setExpandedBankPlayers([]);
     setBankSearch("");
     setTrackedBanksOnly(false);
+    setSavedConfigSignature("");
+    setRefreshConfirmationOpen(false);
   }, [open]);
 
   React.useEffect(() => {
@@ -317,7 +341,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     const wasLegacyTracked = config.sourceRules.bankPlayerIds.includes(playerId);
     setBankLoads((current) => ({ ...current, [playerId]: { status: "loading", banks: current[playerId]?.banks ?? [], warnings: [] } }));
     try {
-      const result = await trackPromise(`craft-plan-player-banks:${playerId}`, adminApi(`/admin/craft-plan/player-banks?playerId=${encodeURIComponent(playerId)}`));
+      const result = await adminApi(`/admin/craft-plan/player-banks?playerId=${encodeURIComponent(playerId)}`);
       const banks = Array.isArray(result.banks) ? result.banks : [];
       setBankLoads((current) => ({ ...current, [playerId]: { status: "loaded", banks, warnings: Array.isArray(result.warnings) ? result.warnings.map(String) : [] } }));
       setConfig((current) => {
@@ -350,16 +374,16 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     const trimmed = query.trim();
     if (trimmed.length < 2) { setSearchResults([]); return; }
     const controller = new AbortController();
-    const refresh = createDelayedRefreshTask(() => fetch(`${LOCAL_API}/catalog/search?q=${encodeURIComponent(trimmed)}&limit=16`, { headers: cycle ? pageRefreshHeaders(cycle, "planning") : {}, signal: controller.signal })
+    const refresh = createDelayedRefreshTask(() => fetch(`${LOCAL_API}/catalog/search?q=${encodeURIComponent(trimmed)}&limit=16`, { signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`catalog search HTTP ${response.status}`))), 200);
-    void trackPromise("craft-plan-manager-search", refresh.promise)
+    void refresh.promise
       .then((body) => {
         setSearchResults([...(body.items ?? []), ...(body.cargos ?? [])].slice(0, 16));
         setActiveSearchResultIndex(-1);
       })
       .catch(() => setSearchResults([]));
     return () => { refresh.cancel(); controller.abort(); };
-  }, [cycle?.sequence, query, trackPromise]);
+  }, [query]);
 
   function selectSearchResult(item: AnyRecord) {
     addTargets([withQuantity(item, 1)], `Added ${item.name ?? item.id}.`);
@@ -389,6 +413,14 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
 
   function patchConfig(patch: Partial<CraftPlanConfig>) {
     setConfig((current) => ({ ...current, ...patch }));
+  }
+
+  function requestRefresh() {
+    if (draftDirty) {
+      setRefreshConfirmationOpen(true);
+      return;
+    }
+    void load("refreshing");
   }
 
   function updateSource(kind: "storageContainerIds" | "playerIds" | "craftPlayerIds" | "bankPlayerIds" | "bankContainerIds" | "deployableContainerIds", id: string, checked: boolean) {
@@ -441,8 +473,11 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
         sourceRules: finalizeLegacyBankMigrations(config.sourceRules, legacyBankMigrations),
       };
       const result = await adminApi("/admin/craft-plan", { method: "PUT", body: JSON.stringify(submittedConfig) });
+      const loadedConfig = managerConfigFromResult(result);
       setState(result);
-      setConfig({ ...emptyConfig(), ...(result.config ?? {}), sourceRules: { ...emptyConfig().sourceRules, ...(result.config?.sourceRules ?? {}) } });
+      setConfig(loadedConfig);
+      setSavedConfigSignature(JSON.stringify(loadedConfig));
+      setRefreshConfirmationOpen(false);
       setStatus("Craft plan saved.");
       setAuditLoaded(false);
       onSaved();
@@ -478,14 +513,16 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close craft plan manager"><X size={18} /></button>
         </header>
+        <fieldset className="craft-plan-manager-session" disabled={operation === "refreshing"} aria-busy={operation === "refreshing"}>
         <div className="craft-plan-manager-actions">
           <label className="field craft-plan-name-field"><span>Plan name</span><input value={config.name} onChange={(event) => patchConfig({ name: event.target.value })} /></label>
           <label className="craft-plan-public-toggle"><input type="checkbox" checked={config.enabled !== false} onChange={(event) => patchConfig({ enabled: event.target.checked })} /><span><strong>Public board</strong><small>{config.enabled !== false ? "Visible to users" : "Hidden from users"}</small></span></label>
           <div className="craft-plan-manager-buttons">
-            <button className="toolbar-button" type="button" onClick={() => void load("refreshing")} disabled={busy}>{operation === "refreshing" ? <LoaderCircle className="is-spinning" size={14} /> : <RefreshCw size={14} />} {operation === "refreshing" ? "Refreshing…" : "Refresh"}</button>
+            <button className="toolbar-button" type="button" onClick={requestRefresh} disabled={busy}>{operation === "refreshing" ? <LoaderCircle className="is-spinning" size={14} /> : <RefreshCw size={14} />} {operation === "refreshing" ? "Refreshing…" : "Refresh"}</button>
             <button className="toolbar-button primary" type="button" onClick={save} disabled={busy}>{operation === "saving" ? <LoaderCircle className="is-spinning" size={14} /> : <Save size={14} />} {operation === "saving" ? "Saving…" : "Save Plan"}</button>
           </div>
         </div>
+        {refreshConfirmationOpen ? <div className="alert warning craft-plan-refresh-confirmation" role="group" aria-labelledby="craft-plan-refresh-confirmation-title"><div><strong id="craft-plan-refresh-confirmation-title">Discard unsaved changes?</strong><span>Refreshing reloads the last saved plan and replaces your current edits.</span></div><div><button className="toolbar-button" type="button" onClick={() => setRefreshConfirmationOpen(false)}>Keep editing</button><button className="toolbar-button danger" type="button" onClick={() => { setRefreshConfirmationOpen(false); void load("refreshing"); }}>Discard and refresh</button></div></div> : null}
         {pendingLabel ? <div className="craft-plan-manager-pending" role="status" aria-live="polite"><LoaderCircle className="is-spinning" size={16} /><span>{pendingLabel}</span></div> : null}
         {error ? <div className="alert error">{error}</div> : null}
         {status ? <div className="alert success">{status}</div> : null}
@@ -637,6 +674,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             </div> : null}
           </section> : null}
         </div>
+        </fieldset>
     </Dialog>
   );
 }

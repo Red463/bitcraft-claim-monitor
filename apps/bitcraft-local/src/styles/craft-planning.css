@@ -95,6 +95,11 @@
 .craft-plan-manager-actions { display: grid; grid-template-columns: minmax(320px, 1fr) auto auto; gap: 12px; align-items: end; padding: 14px 18px; border-bottom: 1px solid rgba(139, 159, 184, 0.18); background: rgba(8, 13, 20, 0.92); }
 .craft-plan-manager > .alert { margin: 10px 18px 0; }
 .craft-plan-manager-pending { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 7px 18px; border-bottom: 1px solid rgba(101, 183, 250, 0.24); background: rgba(18, 35, 52, 0.86); color: #9dcfff; font-size: 0.84rem; font-weight: 700; }
+.craft-plan-refresh-confirmation { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 0 18px; }
+.craft-plan-refresh-confirmation > div { display: flex; align-items: center; gap: 10px; }
+.craft-plan-refresh-confirmation > div:first-child { display: grid; gap: 2px; }
+.craft-plan-refresh-confirmation span { color: var(--muted); }
+.craft-plan-manager-session { display: contents; margin: 0; min-inline-size: 0; padding: 0; border: 0; }
 .craft-plan-manager-loading { position: absolute; inset: 0; z-index: 2; display: grid; place-content: center; justify-items: center; gap: 8px; min-height: 260px; background: rgba(3, 6, 10, 0.94); color: var(--muted); text-align: center; }
 .craft-plan-manager-loading strong { color: var(--text); font-size: 1rem; }
 .is-spinning { animation: craft-plan-spin 0.8s linear infinite; }
@@ -263,6 +268,8 @@
   .craft-plan-target-editor-actions { width: 100%; }
   .craft-plan-target-editor-actions .compact-field { flex: 1 1 auto; width: auto; }
   .craft-plan-manager-buttons, .craft-plan-tier-presets-header { justify-content: start; flex-wrap: wrap; }
+  .craft-plan-refresh-confirmation { align-items: stretch; flex-direction: column; }
+  .craft-plan-refresh-confirmation > div:last-child { flex-wrap: wrap; }
 }
 @media (max-width: 700px) {
   .craft-plan-bank-grid { grid-template-columns: 1fr; }
