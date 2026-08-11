@@ -13,6 +13,7 @@ export type TerrainTileStatus = {
   paletteVersion: number | null;
   tileCount: number;
   totalBytes: number;
+  buildStage: string;
   warnings: string[];
 };
 

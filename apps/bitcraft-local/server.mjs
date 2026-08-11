@@ -389,8 +389,14 @@ const terrainLayoutEvidence = JSON.parse(readFileSync(
   path.join(root, "test", "fixtures", "terrain-live-layout.json"),
   "utf8",
 ));
+const terrainTileBuildDeadlineSetting = Number(process.env.TERRAIN_TILE_BUILD_DEADLINE_MS ?? 600_000);
 const terrainTileStore = createTerrainTileStore({
   dataDir,
+  limits: {
+    deadlineMs: Number.isFinite(terrainTileBuildDeadlineSetting)
+      ? Math.max(120_000, terrainTileBuildDeadlineSetting)
+      : 600_000,
+  },
   encoder: async ({ generation, zoom, x, y, tileSize }) => {
     const { renderTerrainTile } = await import("./src/server/terrainTileRenderer.mjs");
     return renderTerrainTile({ generation, evidence: generation.evidence, zoom, x, y, tileSize });
@@ -7998,7 +8004,7 @@ const server = createServer(async (req, res) => {
         staleAfterMs: relayGlobalCatalogStaleMs,
       }));
     }
-    if (req.method === "GET" && await serveLocalMapTile(url.pathname, res, terrainTileStore)) return;
+    if (req.method === "GET" && await serveLocalMapTile(url.pathname, res, terrainTileStore, undefined, relayTerrainRuntime.health())) return;
     if (req.method === "GET" && url.pathname === "/api/local/map/catalog") {
       if (!rateLimit(req, res, "map-catalog", RATE_LIMITS.expensiveLocal)) return;
       const status = globalCatalogReadStatus();

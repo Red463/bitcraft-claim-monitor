@@ -11,13 +11,20 @@ function finish(res, status, body = null, headers = {}) {
   res.end(body);
 }
 
-async function terrainStatus(tileStore, now) {
+async function terrainStatus(tileStore, now, runtimeHealth) {
   const manifest = typeof tileStore?.readManifest === "function" ? await tileStore.readManifest() : null;
+  const buildStage = String(runtimeHealth?.buildStage ?? "idle");
+  const lastError = String(runtimeHealth?.lastError ?? "").trim().slice(0, 500);
   if (!manifest) return {
     provider: "relay", available: false, generation: null, generatedAt: null, observedAt: null,
     freshness: "unavailable", ageMs: null, regionIds: [], dimension: "1", bounds: null,
     zoomRange: { min: MIN_ZOOM, max: MAX_ZOOM }, paletteVersion: null, tileCount: 0, totalBytes: 0,
-    warnings: ["Relay terrain has not been installed yet."],
+    buildStage,
+    warnings: [buildStage === "building"
+      ? "Relay terrain is building its first complete tile bundle."
+      : buildStage === "error" && lastError
+        ? `Relay terrain is unavailable: ${lastError}`
+        : "Relay terrain has not been installed yet."],
   };
   const observedTime = Date.parse(manifest.observedAt ?? manifest.generatedAt ?? "");
   const ageMs = Number.isFinite(observedTime) ? Math.max(0, now().getTime() - observedTime) : null;
@@ -27,15 +34,15 @@ async function terrainStatus(tileStore, now) {
     generatedAt: manifest.generatedAt ?? null, observedAt: manifest.observedAt ?? null,
     freshness, ageMs, regionIds: Array.isArray(manifest.regionIds) ? manifest.regionIds.map(String) : [],
     dimension: "1", bounds: manifest.bounds ?? null, zoomRange: manifest.zoomRange ?? { min: MIN_ZOOM, max: MAX_ZOOM },
-    paletteVersion: manifest.paletteVersion ?? null, tileCount: Number(manifest.tileCount ?? 0), totalBytes: Number(manifest.totalBytes ?? 0),
+    paletteVersion: manifest.paletteVersion ?? null, tileCount: Number(manifest.tileCount ?? 0), totalBytes: Number(manifest.totalBytes ?? 0), buildStage,
     warnings: freshness === "stale" ? ["Relay terrain is stale; showing the last-good installed generation."] : [],
   };
 }
 
-export async function serveLocalMapTile(pathname, res, tileStore, now = () => new Date()) {
+export async function serveLocalMapTile(pathname, res, tileStore, now = () => new Date(), runtimeHealth = null) {
   if (!pathname.startsWith(TILE_PREFIX)) return false;
   if (pathname === "/api/local/map/tiles/status") {
-    finish(res, 200, JSON.stringify(await terrainStatus(tileStore, now)), {
+    finish(res, 200, JSON.stringify(await terrainStatus(tileStore, now, runtimeHealth)), {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
     });

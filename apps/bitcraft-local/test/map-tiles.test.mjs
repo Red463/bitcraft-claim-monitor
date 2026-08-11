@@ -62,14 +62,30 @@ test("map tile route returns a cacheable 404 when a local tile is not installed"
 test("map tile status returns unavailable or a public installed manifest", async () => {
   assert.ok(tileModule, "map tile module must exist");
   const unavailable = responseRecorder();
-  await tileModule.serveLocalMapTile("/api/local/map/tiles/status", unavailable, { readManifest: async () => null });
+  await tileModule.serveLocalMapTile(
+    "/api/local/map/tiles/status",
+    unavailable,
+    { readManifest: async () => null },
+    undefined,
+    { buildStage: "building" },
+  );
   assert.equal(unavailable.status, 200);
   assert.deepEqual(JSON.parse(unavailable.body), {
     provider: "relay", available: false, generation: null, generatedAt: null, observedAt: null,
     freshness: "unavailable", ageMs: null, regionIds: [], dimension: "1", bounds: null,
     zoomRange: { min: -5, max: 0 }, paletteVersion: null, tileCount: 0, totalBytes: 0,
-    warnings: ["Relay terrain has not been installed yet."],
+    buildStage: "building", warnings: ["Relay terrain is building its first complete tile bundle."],
   });
+
+  const failed = responseRecorder();
+  await tileModule.serveLocalMapTile(
+    "/api/local/map/tiles/status",
+    failed,
+    { readManifest: async () => null },
+    undefined,
+    { buildStage: "error", lastError: "regional schema mismatch" },
+  );
+  assert.deepEqual(JSON.parse(failed.body).warnings, ["Relay terrain is unavailable: regional schema mismatch"]);
 
   const available = responseRecorder();
   const manifest = {
@@ -89,6 +105,6 @@ test("map tile status returns unavailable or a public installed manifest", async
 test("production server handles same-origin map tiles before map snapshot acquisition", async () => {
   const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(server, /import \{ serveLocalMapTile \} from "\.\/src\/server\/mapTiles\.mjs"/);
-  assert.match(server, /await serveLocalMapTile\(url\.pathname, res, terrainTileStore\)/);
-  assert.ok(server.indexOf("await serveLocalMapTile(url.pathname, res, terrainTileStore)") < server.indexOf('url.pathname === "/api/local/map/snapshot"'));
+  assert.match(server, /await serveLocalMapTile\(url\.pathname, res, terrainTileStore, undefined, relayTerrainRuntime\.health\(\)\)/);
+  assert.ok(server.indexOf("await serveLocalMapTile(url.pathname, res, terrainTileStore, undefined, relayTerrainRuntime.health())") < server.indexOf('url.pathname === "/api/local/map/snapshot"'));
 });

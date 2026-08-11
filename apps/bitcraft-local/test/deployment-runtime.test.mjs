@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,7 @@ try {
 } catch {
   // The first TDD run proves the deployment runtime guard is absent.
 }
+const processRole = await import("../src/server/processRole.mjs");
 
 const canonicalWorker = {
   NODE_ENV: "production",
@@ -180,5 +181,24 @@ test("health exposes only safe deployment readiness metadata", () => {
     discordReady: true,
     version: "0.53.0-beta.1",
     buildSha: "0123456789ab",
+  });
+});
+
+test("production terrain keeps collection in the worker and bundle reads in the web role", async () => {
+  const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+  const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(packageJson.dependencies.sharp, "0.35.3");
+  assert.match(server, /const relayTerrainRuntime = new RelayTerrainRuntime/);
+  assert.match(server, /if \(processRoleConfig\.runBackgroundJobs\) startBackgroundTasks\(\)/);
+  assert.match(server, /serveLocalMapTile\(url\.pathname, res, terrainTileStore, undefined, relayTerrainRuntime\.health\(\)\)/);
+  assert.match(server, /await import\("\.\/src\/server\/terrainTileRenderer\.mjs"\)/);
+  assert.doesNotMatch(server, /fetch\([^\n]*(?:terrain|map\/tiles)[^\n]*https?:/i);
+  assert.deepEqual(processRole.processRoleCapabilities("web"), {
+    serveHttp: true,
+    runBackgroundJobs: false,
+  });
+  assert.deepEqual(processRole.processRoleCapabilities("worker"), {
+    serveHttp: false,
+    runBackgroundJobs: true,
   });
 });

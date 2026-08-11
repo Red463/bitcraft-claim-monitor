@@ -54,6 +54,9 @@ test("terrain runtime canonicalizes four regions, coalesces builds, and retains 
   assert.equal(builds.length, 2, "intermediate pending generations must be coalesced");
   assert.deepEqual(builds[1].regionIds, ["1", "2"]);
   assert.equal(runtime.health().lastGoodGeneration, "2");
+  await sessions.get("1").emit(terrain("1", 3));
+  await runtime.waitForIdle();
+  assert.equal(builds.length, 2, "identical render content must not rebuild tiles");
 
   tileStore.buildAndInstall = async () => { throw new Error("forced build failure"); };
   await sessions.get("3").emit(terrain("3"));

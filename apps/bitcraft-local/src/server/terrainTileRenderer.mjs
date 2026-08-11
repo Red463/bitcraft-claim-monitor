@@ -53,6 +53,6 @@ export async function renderTerrainTile({ generation, evidence, zoom, x, y, tile
   }
 
   return sharp(rgba, { raw: { width: tileSize, height: tileSize, channels: 4 } })
-    .webp({ quality: 82, alphaQuality: 100, smartSubsample: false, effort: 4 })
+    .webp({ quality: 82, alphaQuality: 100, smartSubsample: false, effort: 1 })
     .toBuffer();
 }

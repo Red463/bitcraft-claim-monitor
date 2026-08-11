@@ -42,6 +42,21 @@ The accepted public fixture is `apps/bitcraft-local/test/fixtures/terrain-live-l
 
 The land/water evidence was selected against the current public terrain rendering only as a visual reference. No third-party tile is committed, served, or required at runtime.
 
+## Installed first-party terrain bundle
+
+The live smoke acceptance on 2026-08-11 installed a complete region `19` bundle through the same storage and HTTP seam used in production:
+
+- Bounds: map X/Z `23040..30720`, overworld dimension `1`.
+- Zooms: `-5..0`, including legitimate negative tile-Y filenames and requests.
+- Palette version: `1`.
+- Output: 1,157 WebP tiles and 2,115,562 encoded bytes.
+- Observed at `2026-08-11T16:29:00.509Z`; atomically installed at `2026-08-11T16:32:10.172Z` (189,663 ms).
+- A representative request, `/api/local/map/tiles/terrain/0/107/-86.webp`, returned `200 image/webp`; visual inspection showed semantic green land, lakes/rivers, and ocean water.
+- The initial encoder effort exceeded the measured 600-second safety deadline and correctly left no partial pointer. WebP effort `1` completed the same semantic render within the deadline. This is an encoding-speed tradeoff only; the palette, coordinates, source cells, and response contract are unchanged.
+- Identical render content is fingerprinted and skipped. If render-relevant terrain changes while a build is running, only the newest pending complete generation is retained for the next atomic build.
+
+Production collection remains worker-owned and HTTP/tile reads remain web-owned. The smoke launcher defaults to the combined preview role so it can create a first bundle locally; set `BITCRAFT_SMOKE_PROCESS_ROLE=web` after a bundle is installed to inspect the last-good map without local collection competing with browser requests.
+
 ## Enemy identity mapping
 
 `enemy_state.enemy_type` is the generated tagged `EnemyType` enum. Its ordinal matches `enemy_desc.id`: `PracticeDummy -> 1`, `DeerMale -> 8`, and `CrystalizedHexiteCrab -> 43`. Schema fingerprint validation protects this mapping; an unknown tag makes the affected row unavailable rather than inventing an ID.
@@ -89,8 +104,8 @@ The maintained app currently implements claims, markets, banks, waystones, empir
 The current BitCraftMap browser uses `38400 x 38400` raster tiles, but no redistribution grant for those current tile assets was located. The old BSD-2-Clause GitHub repository contains a stale `23040 x 23040` map and is not projection-compatible with the current world. Consequently:
 
 - Browsers request terrain only from `/api/local/map/tiles/terrain/{z}/{x}/{y}.webp`.
-- The server reads provisioned files from `data/map-tiles/terrain/<z>/<x>/<y>.webp`; negative Y names are valid.
-- Missing local tiles return `404` and leave the coordinate grid visible with an explicit installation warning.
+- The Relay worker builds versioned bundles under `data/map-tiles/versions/` and atomically switches `data/map-tiles/current.json`; the web process reads only the selected last-good version. Negative Y names are valid.
+- Missing local tiles return `404` and leave the coordinate grid visible. The public status distinguishes `building`, unavailable, live, and stale last-good states without exposing filesystem paths or coordinates from private layers.
 - Do not copy, hotlink, or redistribute current Prism/BitCraftMap tiles until their owner grants documented permission.
 - The durable first-party alternative is now verified: a bounded Relay `terrain_chunk_state` collector can feed the app-owned tile generator using the accepted fixture above.
 
@@ -98,7 +113,7 @@ The current BitCraftMap browser uses `38400 x 38400` raster tiles, but no redist
 
 | Parity group | Current source/status | Required work |
 | --- | --- | --- |
-| Terrain/game/water | Relay layout verified; tile renderer/runtime pending | Render bounded `terrain_chunk_state` generations into the same-origin tile seam |
+| Terrain/game/water | Relay layout, renderer, atomic store, worker runtime, same-origin API, and Leaflet layer verified | Extend live bundle acceptance to each configured active region and benchmark multi-region update frequency |
 | Banks/waystones | Regional `bank_state` / `waystone_state` | Validate live counts and known locations in every enabled region |
 | Markets | Existing `marketplace_state` projection | Generalize beyond the monitored claim if parity requires all regional markets |
 | Claims/watchtowers/settlements | Existing Relay projections | Add tier/icon controls and verify every active region |

@@ -336,7 +336,9 @@ export function NativeMap({
         {snapshot?.ageMs != null ? <span>{Math.round(snapshot.ageMs / 1000)}s old</span> : null}
         {error ? <span className="error">{error}</span> : null}
         {terrainStatus?.available ? <span>Terrain {terrainStatus.freshness} · generation {terrainStatus.generation}</span> : null}
-        {terrainStatus && !terrainStatus.available ? <span>Terrain/water tiles are not installed on this server; showing the coordinate fallback.</span> : null}
+        {terrainStatus && !terrainStatus.available ? <span>{terrainStatus.buildStage === "building"
+          ? "Terrain and water are building from live Relay data; showing the coordinate fallback meanwhile."
+          : "Terrain/water tiles are not installed on this server; showing the coordinate fallback."}</span> : null}
         {terrainTileError ? <span className="error">{terrainTileError}</span> : null}
         {terrainStatus?.warnings?.map((warning) => <span key={warning}>{warning}</span>)}
         {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{snapshot.freshness}</small></li>)}</ul> : null}

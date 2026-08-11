@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { relayWebSocketUri } from "./globalCatalogRuntime.ts";
 import { RelayTerrainRegionSession, type TerrainRegionSnapshot } from "./terrainRegionSession.ts";
 import type { TerrainLayoutEvidence, NormalizedTerrainGeneration } from "./terrainProjection.ts";
@@ -19,6 +21,20 @@ type RegionEntry = {
   schemaFingerprint: string;
   port: number;
 };
+
+function terrainRenderHash(data: Pick<NormalizedTerrainGeneration, "biomes" | "chunks">): string {
+  const hash = createHash("sha256");
+  hash.update(JSON.stringify(data.biomes.map(({ biomeType, name }) => ({ biomeType, name }))));
+  for (const chunk of data.chunks) {
+    hash.update(`${chunk.chunkIndex}:${chunk.chunkX}:${chunk.chunkZ}:${chunk.side ?? ""}`);
+    for (const key of ["biomes", "elevations", "waterBodyTypes"] as const) {
+      const values = chunk[key];
+      if (ArrayBuffer.isView(values)) hash.update(Buffer.from(values.buffer, values.byteOffset, values.byteLength));
+      else if (values != null) hash.update(JSON.stringify(values));
+    }
+  }
+  return hash.digest("hex");
+}
 
 function canonicalRegions(values: unknown[]): string[] {
   const normalized = values.map((value) => String(value ?? "").trim());
@@ -42,8 +58,10 @@ export class RelayTerrainRuntime {
   #config: RuntimeConfig | null = null;
   #sessions = new Map<string, RegionEntry>();
   #snapshots = new Map<string, TerrainRegionSnapshot>();
-  #pending: (NormalizedTerrainGeneration & { regionIds: string[]; evidence: TerrainLayoutEvidence }) | null = null;
+  #pending: (NormalizedTerrainGeneration & { regionIds: string[]; evidence: TerrainLayoutEvidence; renderHash: string }) | null = null;
   #building: Promise<void> | null = null;
+  #buildingRenderHash: string | null = null;
+  #lastGoodRenderHash: string | null = null;
   #bundleGeneration = 0;
   #stopping = false;
   #health = {
@@ -147,7 +165,7 @@ export class RelayTerrainRuntime {
     const chunks = selected.flatMap(({ data }) => data.chunks).sort((left, right) => left.chunkX - right.chunkX || left.chunkZ - right.chunkZ);
     const bounds = selected.map(({ data }) => data.regionBounds);
     const latest = selected.reduce((winner, value) => value.receivedAt > winner.receivedAt ? value : winner);
-    this.#pending = {
+    const combined = {
       ...latest.data,
       observedAt: latest.receivedAt,
       regionBounds: {
@@ -162,6 +180,9 @@ export class RelayTerrainRuntime {
       regionIds: selected.map(({ regionId }) => regionId),
       evidence: this.#evidence,
     };
+    const renderHash = terrainRenderHash(combined);
+    if (renderHash === this.#lastGoodRenderHash || renderHash === this.#buildingRenderHash || renderHash === this.#pending?.renderHash) return;
+    this.#pending = { ...combined, renderHash };
     this.#health.pending = true;
     this.#refreshSessionHealth();
     if (!this.#building) this.#building = this.#drainBuilds();
@@ -174,6 +195,7 @@ export class RelayTerrainRuntime {
         this.#pending = null;
         this.#health.pending = false;
         const generation = String(++this.#bundleGeneration);
+        this.#buildingRenderHash = pending.renderHash;
         this.#health.generation = generation;
         this.#health.buildStage = "building";
         try {
@@ -184,9 +206,12 @@ export class RelayTerrainRuntime {
           this.#health.tileCount = Number(manifest.tileCount ?? 0);
           this.#health.totalBytes = Number(manifest.totalBytes ?? 0);
           this.#health.lastError = null;
+          this.#lastGoodRenderHash = pending.renderHash;
         } catch (error) {
           this.#health.buildStage = "error";
           this.#health.lastError = errorMessage(error);
+        } finally {
+          this.#buildingRenderHash = null;
         }
       }
     } finally {
