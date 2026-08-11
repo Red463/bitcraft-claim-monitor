@@ -1,5 +1,4 @@
 const OPERATIONAL_LAYERS = [
-  "banks",
   "claims",
   "empire-settlements",
   "empire-territory",

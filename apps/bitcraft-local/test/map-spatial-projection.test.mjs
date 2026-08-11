@@ -18,7 +18,6 @@ const scope = {
 
 test("map spatial subscriptions are bounded by requested identities", () => {
   assert.deepEqual(mapSpatialQueries(scope), [
-    "SELECT * FROM bank_state WHERE claim_entity_id = 1369094286777412590",
     "SELECT * FROM waystone_state WHERE claim_entity_id = 1369094286777412590",
     "SELECT resource_state.* FROM resource_state JOIN location_state ON resource_state.entity_id = location_state.entity_id WHERE (resource_state.resource_id = 2 OR resource_state.resource_id = 30) AND location_state.dimension = 1",
     "SELECT location_state.* FROM resource_state JOIN location_state ON resource_state.entity_id = location_state.entity_id WHERE (resource_state.resource_id = 2 OR resource_state.resource_id = 30) AND location_state.dimension = 1",
@@ -33,7 +32,6 @@ test("map spatial subscriptions are bounded by requested identities", () => {
 test("map spatial subscriptions omit dense joins unless their type is selected", () => {
   const queries = mapSpatialQueries({ ...scope, resourceIds: [], enemyTypes: [], playerIds: [] });
   assert.deepEqual(queries, [
-    "SELECT * FROM bank_state WHERE claim_entity_id = 1369094286777412590",
     "SELECT * FROM waystone_state WHERE claim_entity_id = 1369094286777412590",
   ]);
 });
@@ -41,7 +39,7 @@ test("map spatial subscriptions omit dense joins unless their type is selected",
 test("map spatial subscriptions split selected players into bounded queries", () => {
   const playerIds = Array.from({ length: 250 }, (_, index) => String(index + 1));
   const queries = mapSpatialQueries({ ...scope, resourceIds: [], enemyTypes: [], playerIds });
-  const playerQueries = queries.slice(2);
+  const playerQueries = queries.slice(1);
   assert.equal(playerQueries.length, 3);
   assert.deepEqual(playerQueries.map((query) => (query.match(/entity_id = /g) ?? []).length), [100, 100, 50]);
   assert.ok(playerQueries.every((query) => query.endsWith("AND dimension = 1")));
@@ -57,7 +55,6 @@ test("generated EnemyType tags map to their matching catalog ids", () => {
 test("map spatial normalization joins resources and enemies without losing entity IDs", () => {
   const normalized = normalizeMapSpatial({
     scope,
-    bankRows: [{ buildingEntityId: 300n, claimEntityId: 1369094286777412590n, coordinates: { x: 10, z: 20, dimension: 1n } }],
     waystoneRows: [{ buildingEntityId: 301n, claimEntityId: 1369094286777412590n, coordinates: { x: 30, z: 40, dimension: 1n } }],
     resourceRows: [{ entityId: 100n, resourceId: 2 }],
     enemyRows: [{ entityId: 200n, enemyType: { tag: "DeerMale" } }],
@@ -72,7 +69,7 @@ test("map spatial normalization joins resources and enemies without losing entit
   assert.deepEqual(normalized.data.resources[0], { entityId: "100", resourceId: "2", regionId: "19", locationX: 50, locationZ: 60, dimension: "1", observedAt: "2026-08-11T12:00:00.000Z" });
   assert.deepEqual(normalized.data.enemies[0], { entityId: "200", enemyType: "8", regionId: "19", locationX: 70000, locationZ: 80000, dimension: "1", observedAt: "2026-08-11T12:00:00.000Z" });
   assert.equal(normalized.data.players[0].playerEntityId, "216172782115643288");
-  assert.equal(normalized.data.banks[0].entityId, "300");
+  assert.equal("banks" in normalized.data, false);
   assert.equal(normalized.data.waystones[0].entityId, "301");
   assert.deepEqual(normalized.warnings, []);
 });

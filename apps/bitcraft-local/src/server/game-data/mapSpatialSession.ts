@@ -18,7 +18,7 @@ type SubscriptionBuilder = {
   subscribe(queries: string[]): SubscriptionHandle;
 };
 type BindingConnection = {
-  db: { bankState: CachedTable; waystoneState: CachedTable; resourceState: CachedTable; enemyState: CachedTable; locationState: CachedTable; mobileEntityState: CachedTable };
+  db: { waystoneState: CachedTable; resourceState: CachedTable; enemyState: CachedTable; locationState: CachedTable; mobileEntityState: CachedTable };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
 };
@@ -161,18 +161,17 @@ export class RelayMapSpatialSession {
     const config = this.#config;
     if (!config) return;
     try {
-      const bankRows = tableRows(connection.db.bankState);
       const waystoneRows = tableRows(connection.db.waystoneState);
       const resourceRows = tableRows(connection.db.resourceState);
       const enemyRows = tableRows(connection.db.enemyState);
       const locationRows = tableRows(connection.db.locationState);
       const mobileRows = tableRows(connection.db.mobileEntityState);
-      const rowCount = bankRows.length + waystoneRows.length + resourceRows.length + enemyRows.length + locationRows.length + mobileRows.length;
+      const rowCount = waystoneRows.length + resourceRows.length + enemyRows.length + locationRows.length + mobileRows.length;
       if (rowCount > config.maxRows) throw new Error(`Relay map-spatial row budget ${config.maxRows} exceeded by ${rowCount} rows`);
       const receivedAt = this.#now().toISOString();
       this.#health.resourceRowCount = resourceRows.length;
       this.#health.enemyRowCount = selectedMapEnemyRows(enemyRows, config.scope.enemyTypes).length;
-      const normalized = normalizeMapSpatial({ scope: config.scope, bankRows, waystoneRows, resourceRows, enemyRows, locationRows, mobileRows, observedAt: receivedAt });
+      const normalized = normalizeMapSpatial({ scope: config.scope, waystoneRows, resourceRows, enemyRows, locationRows, mobileRows, observedAt: receivedAt });
       const generation = this.#nextGeneration++;
       this.#health.rowCount = rowCount;
       Promise.resolve(this.#onSnapshot({ data: normalized.data, warnings: normalized.warnings, database: config.database, regionId: config.scope.regionId, schemaFingerprint: config.schemaFingerprint, generation, receivedAt }))
@@ -208,7 +207,7 @@ export class RelayMapSpatialSession {
 
   #attachListeners(connection: BindingConnection) {
     if (this.#listenersAttached) return;
-    for (const table of [connection.db.bankState, connection.db.waystoneState, connection.db.resourceState, connection.db.locationState, connection.db.mobileEntityState]) {
+    for (const table of [connection.db.waystoneState, connection.db.resourceState, connection.db.locationState, connection.db.mobileEntityState]) {
       table.onInsert?.(this.#changed); table.onUpdate?.(this.#changed); table.onDelete?.(this.#changed);
     }
     connection.db.enemyState.onInsert?.(this.#enemyChanged); connection.db.enemyState.onUpdate?.(this.#enemyChanged); connection.db.enemyState.onDelete?.(this.#enemyChanged);
@@ -217,7 +216,7 @@ export class RelayMapSpatialSession {
 
   #removeListeners() {
     if (!this.#connection) return;
-    if (this.#listenersAttached) for (const table of [this.#connection.db.bankState, this.#connection.db.waystoneState, this.#connection.db.resourceState, this.#connection.db.locationState, this.#connection.db.mobileEntityState]) {
+    if (this.#listenersAttached) for (const table of [this.#connection.db.waystoneState, this.#connection.db.resourceState, this.#connection.db.locationState, this.#connection.db.mobileEntityState]) {
       table.removeOnInsert?.(this.#changed); table.removeOnUpdate?.(this.#changed); table.removeOnDelete?.(this.#changed);
     }
     if (this.#listenersAttached) {

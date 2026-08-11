@@ -19,7 +19,6 @@ test("map spatial session applies a bounded resource join and selected-enemy pos
   const resourceRows = [{ entityId: 100n, resourceId: 2 }];
   const enemyRows = [{ entityId: 200n, enemyType: 8 }];
   const db = {
-    bankState: table([]),
     waystoneState: table([]),
     resourceState: table(resourceRows),
     enemyState: table(enemyRows),
@@ -57,7 +56,6 @@ test("map spatial session applies a bounded resource join and selected-enemy pos
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(subscriptions[0], [
-    "SELECT * FROM bank_state WHERE claim_entity_id = 99999999",
     "SELECT * FROM waystone_state WHERE claim_entity_id = 99999999",
     "SELECT resource_state.* FROM resource_state JOIN location_state ON resource_state.entity_id = location_state.entity_id WHERE (resource_state.resource_id = 2) AND location_state.dimension = 1",
     "SELECT location_state.* FROM resource_state JOIN location_state ON resource_state.entity_id = location_state.entity_id WHERE (resource_state.resource_id = 2) AND location_state.dimension = 1",
@@ -78,7 +76,7 @@ test("map spatial session applies a bounded resource join and selected-enemy pos
     rowCount: 5,
     resourceRowCount: 1,
     enemyRowCount: 1,
-    queryCount: 7,
+    queryCount: 6,
     lastAppliedAt: "2026-08-11T12:00:00.000Z",
     lastError: null,
   });
@@ -100,7 +98,7 @@ test("map spatial session applies a bounded resource join and selected-enemy pos
 test("map spatial session serializes enemy subscription rebuilds", async () => {
   const enemyRows = [{ entityId: 200n, enemyType: 8 }];
   const db = {
-    bankState: table([]), waystoneState: table([]), resourceState: table([]),
+    waystoneState: table([]), resourceState: table([]),
     enemyState: table(enemyRows), locationState: table([]),
     mobileEntityState: table([{ entityId: 200n, locationX: 70_000, locationZ: 80_000, dimension: 1 }, { entityId: 201n, locationX: 90_000, locationZ: 100_000, dimension: 1 }]),
   };

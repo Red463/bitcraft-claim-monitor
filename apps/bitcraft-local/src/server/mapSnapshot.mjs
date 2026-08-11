@@ -4,7 +4,6 @@ import { publicAccessDecision } from "../access/accessControl.mjs";
 export const MAP_LAYER_KEYS = [
   "claims",
   "markets",
-  "banks",
   "waystones",
   "empire-settlements",
   "empire-territory",
@@ -103,7 +102,7 @@ export function buildMapSnapshot({
   mobileIdentityVerified = false,
   enemyIdentityVerified = false,
   resourceCoordinatesVerified = false,
-  bankWaystoneCoordinatesVerified = false,
+  waystoneCoordinatesVerified = false,
   regionClaims = null,
   market = null,
   empires = null,
@@ -118,7 +117,6 @@ export function buildMapSnapshot({
       .map(String),
   )];
   const regionClaimRows = snapshotRows(regionClaims, "claims").map((row) => ({ ...row, regionId: row.regionId ?? regionClaims?.data?.regionId }));
-  const regionalBankRows = snapshotRows(regionClaims, "banks").map((row) => ({ ...row, regionId: row.regionId ?? regionClaims?.data?.regionId }));
   const regionalWaystoneRows = snapshotRows(regionClaims, "waystones").map((row) => ({ ...row, regionId: row.regionId ?? regionClaims?.data?.regionId }));
   const marketRows = snapshotRows(market, "marketplaces").map((row) => ({ ...row, regionId: row.regionId ?? market?.data?.regionId }));
   const settlementRows = snapshotRows(empires, "settlements");
@@ -135,14 +133,10 @@ export function buildMapSnapshot({
   if (layers.watchtowers) layers.watchtowers = nodeRows.filter((row) => inScope(row, scope)).map((row) => feature(row, "watchtower", row.entityId, recordPoint(row), { regionId: String(row.regionId), name: row.nickname ?? "Watchtower", empireEntityId: String(row.empireEntityId) }));
 
   const spatialRows = spatial?.data ?? {};
-  const bankWaystoneWarning = "Bank and waystone positions are unavailable until known live fixtures are live-verified.";
-  if (layers.banks) {
-    if (!bankWaystoneCoordinatesVerified && !warnings.includes(bankWaystoneWarning)) warnings.push(bankWaystoneWarning);
-    else if (bankWaystoneCoordinatesVerified) layers.banks = [...regionalBankRows, ...(Array.isArray(spatialRows.banks) ? spatialRows.banks : [])].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId ?? candidate.buildingEntityId) === String(row.entityId ?? row.buildingEntityId)) === index && inScope(row, scope)).map((row) => feature(row, "bank", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
-  }
+  const waystoneWarning = "Waystone positions are unavailable until known live fixtures are live-verified.";
   if (layers.waystones) {
-    if (!bankWaystoneCoordinatesVerified && !warnings.includes(bankWaystoneWarning)) warnings.push(bankWaystoneWarning);
-    else if (bankWaystoneCoordinatesVerified) layers.waystones = [...regionalWaystoneRows, ...(Array.isArray(spatialRows.waystones) ? spatialRows.waystones : [])].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId ?? candidate.buildingEntityId) === String(row.entityId ?? row.buildingEntityId)) === index && inScope(row, scope)).map((row) => feature(row, "waystone", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
+    if (!waystoneCoordinatesVerified && !warnings.includes(waystoneWarning)) warnings.push(waystoneWarning);
+    else if (waystoneCoordinatesVerified) layers.waystones = [...regionalWaystoneRows, ...(Array.isArray(spatialRows.waystones) ? spatialRows.waystones : [])].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId ?? candidate.buildingEntityId) === String(row.entityId ?? row.buildingEntityId)) === index && inScope(row, scope)).map((row) => feature(row, "waystone", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
   }
   if (layers.players) {
     const allowedPlayers = new Set(authorizedMapPlayerIds({ selectedPlayerIds: scope.playerIds, excludedMemberIds, members, players, mobileIdentityVerified }));
@@ -177,18 +171,16 @@ export function buildMapSnapshot({
       if (!spatial) warnings.push("Live enemy positions are unavailable.");
     }
   }
-  for (const unavailable of ["banks", "waystones"]) {
-    if (bankWaystoneCoordinatesVerified && layers[unavailable] && !Array.isArray(regionClaims?.data?.[unavailable]) && !Array.isArray(spatialRows[unavailable])) warnings.push(`${unavailable} map data is unavailable.`);
-  }
+  if (waystoneCoordinatesVerified && layers.waystones && !Array.isArray(regionClaims?.data?.waystones) && !Array.isArray(spatialRows.waystones)) warnings.push("waystones map data is unavailable.");
   if (layers["empire-territory"]) warnings.push("empire-territory map data is unavailable until the chunk-to-map polygon transform is live-verified.");
 
   const featureCount = Object.values(layers).reduce((total, rows) => total + rows.length, 0);
   if (featureCount > MAP_SCOPE_LIMITS.features) throw new MapSnapshotError(413, `Map snapshot exceeds the ${MAP_SCOPE_LIMITS.features} feature limit`);
   const snapshots = [
-    (layers.claims || layers.banks || layers.waystones) ? regionClaims : null,
+    (layers.claims || layers.waystones) ? regionClaims : null,
     layers.markets ? market : null,
     (layers["empire-settlements"] || layers["empire-territory"] || layers.watchtowers) ? empires : null,
-    (layers.players || layers.resources || layers.enemies || ((layers.banks || layers.waystones) && spatial)) ? spatial : null,
+    (layers.players || layers.resources || layers.enemies || (layers.waystones && spatial)) ? spatial : null,
   ].filter(Boolean);
   const generatedAt = oldestReceivedAt(snapshots) ?? now.toISOString();
   const ageMs = Math.max(0, now.getTime() - Date.parse(generatedAt));

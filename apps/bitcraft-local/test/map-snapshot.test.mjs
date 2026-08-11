@@ -33,6 +33,10 @@ test("map scopes are canonical, bounded, and restricted to configured regions", 
     () => parseMapScope(new URLSearchParams({ regions: "19", layers: "resources" }), { allowedRegionIds: ["19"] }),
     /resourceIds/,
   );
+  assert.throws(
+    () => parseMapScope(new URLSearchParams({ regions: "19", layers: "banks" }), { allowedRegionIds: ["19"] }),
+    (error) => error instanceof MapSnapshotError && error.statusCode === 422 && /Unknown map layer/.test(error.message),
+  );
 });
 
 test("map request access follows the configured Map page rule", () => {
@@ -152,42 +156,37 @@ test("map player subscriptions receive only selected online monitored non-exclud
   }), []);
 });
 
-test("map snapshot exposes verified bank and waystone coordinates from the scoped collector", () => {
-  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "banks,waystones" }), { allowedRegionIds: ["19"] });
+test("map snapshot exposes verified waystone coordinates from the scoped collector", () => {
+  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "waystones" }), { allowedRegionIds: ["19"] });
   const snapshot = buildMapSnapshot({
     scope,
-    bankWaystoneCoordinatesVerified: true,
+    waystoneCoordinatesVerified: true,
     spatial: {
       data: {
-        banks: [{ entityId: "300", claimEntityId: "999", regionId: "19", locationX: 10, locationZ: 20, dimension: "1" }],
         waystones: [{ entityId: "301", claimEntityId: "999", regionId: "19", locationX: 30, locationZ: 40, dimension: "1" }],
       },
       generation: 11,
       provenance: { receivedAt: "2026-08-11T12:00:00.000Z" },
     },
   });
-  assert.equal(snapshot.layers.banks[0].kind, "bank");
-  assert.equal(snapshot.layers.banks[0].point.x, 10);
   assert.equal(snapshot.layers.waystones[0].kind, "waystone");
   assert.equal(snapshot.layers.waystones[0].point.z, 40);
   assert.deepEqual(snapshot.warnings, []);
 });
 
-test("map snapshot keeps bank and waystone coordinates unavailable until live fixtures are verified", () => {
-  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "banks,waystones" }), { allowedRegionIds: ["19"] });
+test("map snapshot keeps waystone coordinates unavailable until live fixtures are verified", () => {
+  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "waystones" }), { allowedRegionIds: ["19"] });
   const snapshot = buildMapSnapshot({
     scope,
     spatial: {
       data: {
-        banks: [{ entityId: "300", claimEntityId: "999", regionId: "19", locationX: 10, locationZ: 20, dimension: "1" }],
         waystones: [{ entityId: "301", claimEntityId: "999", regionId: "19", locationX: 30, locationZ: 40, dimension: "1" }],
       },
       provenance: { receivedAt: "2026-08-11T12:00:00.000Z" },
     },
   });
-  assert.deepEqual(snapshot.layers.banks, []);
   assert.deepEqual(snapshot.layers.waystones, []);
-  assert.match(snapshot.warnings.join(" "), /bank.*waystone.*live-verified/i);
+  assert.match(snapshot.warnings.join(" "), /waystone.*live-verified/i);
 });
 
 test("map snapshot forwards scoped collector warnings to the native renderer", () => {
@@ -240,10 +239,11 @@ test("map snapshot keeps resources unavailable until the live location join is v
 });
 
 test("map snapshot freshness uses the oldest requested source and cannot be masked by a newer layer", () => {
-  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "claims,banks" }), { allowedRegionIds: ["19"] });
+  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "claims,waystones" }), { allowedRegionIds: ["19"] });
   const snapshot = buildMapSnapshot({
     scope,
     now: new Date("2026-08-11T12:10:00.000Z"),
+    waystoneCoordinatesVerified: true,
     regionClaims: {
       data: { regionId: "19", claims: [] },
       generation: 1,
@@ -251,7 +251,7 @@ test("map snapshot freshness uses the oldest requested source and cannot be mask
       provenance: { receivedAt: "2026-08-11T12:00:00.000Z" },
     },
     spatial: {
-      data: { banks: [] },
+      data: { waystones: [] },
       generation: 2,
       freshness: "live",
       provenance: { receivedAt: "2026-08-11T12:09:59.000Z" },

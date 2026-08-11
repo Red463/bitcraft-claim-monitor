@@ -596,7 +596,7 @@ const relayRegionClaimsRuntime = new RelayRegionClaimsRuntime({
 const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = false;
 const MAP_ENEMY_IDENTITY_VERIFIED = false;
 const MAP_RESOURCE_COORDINATES_VERIFIED = false;
-const MAP_BANK_WAYSTONE_COORDINATES_VERIFIED = false;
+const MAP_WAYSTONE_COORDINATES_VERIFIED = false;
 // Keep the combined collector cold until each query can be independently
 // enabled. EnemyType is also a sum type that deployed SQL cannot scalar-filter.
 const MAP_SPATIAL_COLLECTION_VERIFIED = false;
@@ -8123,7 +8123,7 @@ const server = createServer(async (req, res) => {
           mobileIdentityVerified: MAP_PLAYER_MOBILE_IDENTITY_VERIFIED,
           enemyIdentityVerified: MAP_ENEMY_IDENTITY_VERIFIED,
           resourceCoordinatesVerified: MAP_RESOURCE_COORDINATES_VERIFIED,
-          bankWaystoneCoordinatesVerified: MAP_BANK_WAYSTONE_COORDINATES_VERIFIED,
+          waystoneCoordinatesVerified: MAP_WAYSTONE_COORDINATES_VERIFIED,
         });
         const hasUsableSource = Boolean(regionClaims || market || empires || spatial);
         return send(res, hasUsableSource ? 200 : 503, hasUsableSource ? payload : { ...payload, freshness: "unavailable" });

@@ -128,7 +128,6 @@ class DensePointLayer extends L.Layer {
 const FEATURE_COLORS: Record<string, string> = {
   claim: "#f0c64f",
   market: "#68d7ff",
-  bank: "#83e3a5",
   waystone: "#c7a5ff",
   "empire-settlement": "#ff9b71",
   watchtower: "#ff6b6b",

@@ -79,7 +79,6 @@ export function mapSpatialQueries(scope: MapSpatialScope): string[] {
   const resourcePredicate = equalityPredicate("resource_state", "resource_state.resource_id", scope.resourceIds);
   const resourceJoin = "FROM resource_state JOIN location_state ON resource_state.entity_id = location_state.entity_id";
   return [
-    `SELECT * FROM bank_state WHERE claim_entity_id = ${claimId}`,
     `SELECT * FROM waystone_state WHERE claim_entity_id = ${claimId}`,
     resourcePredicate ? `SELECT resource_state.* ${resourceJoin} WHERE (${resourcePredicate}) AND location_state.dimension = ${MAP_OVERWORLD_DIMENSION}` : null,
     resourcePredicate ? `SELECT location_state.* ${resourceJoin} WHERE (${resourcePredicate}) AND location_state.dimension = ${MAP_OVERWORLD_DIMENSION}` : null,
@@ -121,7 +120,6 @@ function coordinateFields(value: unknown, label: string) {
 
 export function normalizeMapSpatial({
   scope,
-  bankRows = [],
   waystoneRows = [],
   resourceRows = [],
   enemyRows = [],
@@ -130,7 +128,6 @@ export function normalizeMapSpatial({
   observedAt = new Date().toISOString(),
 }: {
   scope: MapSpatialScope;
-  bankRows?: unknown[];
   waystoneRows?: unknown[];
   resourceRows?: unknown[];
   enemyRows?: unknown[];
@@ -151,15 +148,6 @@ export function normalizeMapSpatial({
     try { mobile.set(decimal(row.entityId ?? row.entity_id, `Map mobile ${index} entity id`), row); }
     catch (error) { warnings.push(error instanceof Error ? error.message : String(error)); }
   }
-  const banks = rows(bankRows).flatMap((row, index) => {
-    try {
-      const entityId = decimal(row.buildingEntityId ?? row.building_entity_id, `Map bank ${index} entity id`);
-      return [{ entityId, claimEntityId: decimal(row.claimEntityId ?? row.claim_entity_id, `Map bank ${entityId} claim id`), regionId, ...coordinateFields(row.coordinates, `Map bank ${entityId}`), observedAt }];
-    } catch (error) {
-      warnings.push(error instanceof Error ? error.message : String(error));
-      return [];
-    }
-  });
   const waystones = rows(waystoneRows).flatMap((row, index) => {
     try {
       const entityId = decimal(row.buildingEntityId ?? row.building_entity_id, `Map waystone ${index} entity id`);
@@ -208,5 +196,5 @@ export function normalizeMapSpatial({
       return [];
     }
   });
-  return { data: { regionId, players, resources, enemies, banks, waystones }, warnings };
+  return { data: { regionId, players, resources, enemies, waystones }, warnings };
 }
