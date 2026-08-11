@@ -247,7 +247,7 @@ export function unavailableCraftPlanEffortProgress() {
       missingWeightCount: 0,
       missingWeightKeys: [],
     },
-    warnings: ["Effort progress is unavailable until the planner catalog refresh completes."],
+    warnings: ["Effort progress is unavailable until compatible Relay catalog data is ready."],
   };
   return {
     modelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,

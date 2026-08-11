@@ -122,15 +122,15 @@ test("Discord coverage counts use the confirmed-only material plan", () => {
   assert.equal(report.shortages[0].missing, 30);
 });
 
-test("Discord refuses a raw fallback when effort is unavailable", () => {
+test("Discord uses Relay-neutral guidance when effort is unavailable", () => {
   const report = buildCraftPlanDiscordReport({
     enabled: true,
     targets: [{}],
     materials,
-    effortProgress: { state: "unavailable", warnings: ["Catalog refresh required"] },
   });
   assert.equal(report.state, "unavailable");
-  assert.match(report.message, /catalog refresh/i);
+  assert.equal(report.message, "Effort progress is unavailable until compatible Relay catalog data is ready.");
+  assert.doesNotMatch(report.message, /refresh|full catalog run|scheduled/i);
   assert.equal(report.overall, undefined);
 });
 

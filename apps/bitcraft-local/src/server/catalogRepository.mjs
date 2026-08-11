@@ -258,7 +258,7 @@ function providerRecipeProjection(descriptions) {
 }
 
 function hasLiveProjection(descriptions) {
-  return ["item_list", "extraction_recipe", "building_type"].every((kind) => (
+  return ["crafting_recipe", "extraction_recipe", "item_list", "resource", "building_type"].every((kind) => (
     Object.prototype.hasOwnProperty.call(descriptions ?? {}, kind)
   ));
 }
@@ -305,6 +305,10 @@ export function createProviderCatalogRepository(db) {
         CAST(json_extract(data_json, '$.power') AS INTEGER) DESC,
         CAST(description_id AS INTEGER) ASC
       LIMIT 1
+    `),
+    upsertEffortModelVersion: db.prepare(`
+      INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `),
   };
 
@@ -379,7 +383,11 @@ export function createProviderCatalogRepository(db) {
             catalog.listProbabilityEffortCandidates(),
             CRAFT_PLAN_EFFORT_MODEL_VERSION,
             source.receivedAt,
-            null,
+            () => statements.upsertEffortModelVersion.run(
+              "game_catalog_effort_model_version",
+              String(CRAFT_PLAN_EFFORT_MODEL_VERSION),
+              source.receivedAt,
+            ),
             { manageTransaction: false },
           );
         }
