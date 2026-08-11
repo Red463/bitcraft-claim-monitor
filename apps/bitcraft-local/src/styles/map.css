@@ -190,6 +190,16 @@
 .map-resource-list .tier-badge { grid-column: 3; grid-row: 1 / 3; }
 .map-resource-list-footer { flex: 0 0 auto; min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 6px; border-top: 1px solid rgba(154,168,190,.14); color: #8f9aaa; font-size: 11px; }
 .map-resource-list-footer .toolbar-button { min-height: 30px; padding: 0 10px; }
+.native-map-marker { width: 30px; height: 30px; border: 0; background: transparent; }
+.native-map-marker-content { position: relative; width: 30px; height: 30px; display: grid; place-items: center; overflow: hidden; border: 2px solid rgba(235,242,238,.92); border-radius: 50%; background: #10191a; color: #fff; box-shadow: 0 1px 5px rgba(0,0,0,.7); font: 800 13px/1 system-ui, sans-serif; }
+.native-map-marker img { position: relative; z-index: 1; width: 26px; height: 26px; object-fit: contain; }
+.native-map-marker-glyph { position: absolute; inset: 0; display: grid; place-items: center; }
+.native-map-marker--market .native-map-marker-content { border-color: #68d7ff; }
+.native-map-marker--waystone .native-map-marker-content { border-color: #c7a5ff; }
+.native-map-marker--empire-settlement .native-map-marker-content { border-color: #ff9b71; color: #ffb494; }
+.native-map-marker--watchtower .native-map-marker-content { border-color: #ff6b6b; color: #ff8d8d; }
+.native-map-marker--player .native-map-marker-content { border-color: #fff; color: #fff; }
+.native-map-marker--focus .native-map-marker-content { width: 32px; height: 32px; border-color: #f0c64f; color: #f0c64f; }
 
 @media (max-width: 900px) {
   .map-panel.full-height { padding: 14px; }

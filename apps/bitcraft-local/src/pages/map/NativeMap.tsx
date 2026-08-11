@@ -3,6 +3,8 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, leafletPoint } from "./mapCoordinates.mjs";
+import { planDensePointDraw } from "./mapDensePointPlan.mjs";
+import { MAP_MARKER_PRESENTATIONS, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { loadTerrainTileStatus, terrainTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
 import type { MapFocus } from "./mapUtils";
@@ -113,11 +115,10 @@ class DensePointLayer extends L.Layer {
     const context = this.#canvas.getContext("2d");
     if (!context) return;
     const bounds = this.#map.getBounds().pad(0.1);
-    const visible = this.#points.filter((point) => bounds.contains(leafletPoint(point.point)));
-    const stride = Math.max(1, Math.ceil(visible.length / 25_000));
+    const plan = planDensePointDraw(this.#points, (point) => bounds.contains(leafletPoint(point.point)), 25_000);
     context.fillStyle = this.#color;
-    for (let index = 0; index < visible.length; index += stride) {
-      const pixel = this.#map.latLngToContainerPoint(leafletPoint(visible[index].point));
+    for (const point of plan.points) {
+      const pixel = this.#map.latLngToContainerPoint(leafletPoint(point.point));
       context.beginPath();
       context.arc(pixel.x, pixel.y, 3, 0, Math.PI * 2);
       context.fill();
@@ -127,12 +128,34 @@ class DensePointLayer extends L.Layer {
 
 const FEATURE_COLORS: Record<string, string> = {
   claim: "#f0c64f",
-  market: "#68d7ff",
-  waystone: "#c7a5ff",
-  "empire-settlement": "#ff9b71",
-  watchtower: "#ff6b6b",
-  player: "#ffffff",
 };
+
+function markerKindClass(kind: string) {
+  return Object.hasOwn(MAP_MARKER_PRESENTATIONS, kind) ? kind : "fallback";
+}
+
+function markerIcon(kind: string, presentation: MapMarkerPresentation) {
+  const content = document.createElement("span");
+  content.className = "native-map-marker-content";
+  const glyph = document.createElement("span");
+  glyph.className = "native-map-marker-glyph";
+  glyph.textContent = presentation.glyph;
+  content.appendChild(glyph);
+  if (presentation.mode === "image") {
+    const image = document.createElement("img");
+    image.src = presentation.iconUrl;
+    image.alt = "";
+    image.setAttribute("aria-hidden", "true");
+    image.addEventListener("error", () => image.remove(), { once: true });
+    content.prepend(image);
+  }
+  return L.divIcon({
+    className: `native-map-marker native-map-marker--${markerKindClass(kind)}`,
+    html: content,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+  });
+}
 
 function featureLabel(feature: MapFeature) {
   return feature.name || feature.identity || `${feature.kind} ${feature.entityId}`;
@@ -159,6 +182,7 @@ export function NativeMap({
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<L.Map | null>(null);
   const markersRef = React.useRef<L.LayerGroup | null>(null);
+  const ordinaryRendererRef = React.useRef<L.Canvas | null>(null);
   const resourcesRef = React.useRef<DensePointLayer | null>(null);
   const enemiesRef = React.useRef<DensePointLayer | null>(null);
   const terrainTilesRef = React.useRef<L.TileLayer | null>(null);
@@ -176,6 +200,7 @@ export function NativeMap({
     map.setView([19_200, 19_200], -4);
     map.setMaxBounds(bounds.pad(0.25));
     new CoordinateGridLayer({ tileSize: 256, noWrap: false }).addTo(map);
+    ordinaryRendererRef.current = L.canvas({ padding: 0.25 });
     markersRef.current = L.layerGroup().addTo(map);
     resourcesRef.current = new DensePointLayer("rgba(87, 225, 151, 0.9)").addTo(map);
     enemiesRef.current = new DensePointLayer("rgba(255, 112, 112, 0.92)").addTo(map);
@@ -184,6 +209,7 @@ export function NativeMap({
       map.remove();
       mapRef.current = null;
       markersRef.current = null;
+      ordinaryRendererRef.current = null;
       resourcesRef.current = null;
       enemiesRef.current = null;
       terrainTilesRef.current = null;
@@ -293,17 +319,12 @@ export function NativeMap({
 
   React.useEffect(() => {
     const markers = markersRef.current;
-    if (!markers) return;
+    if (!markers || !ordinaryRendererRef.current) return;
     markers.clearLayers();
     if (focus) {
       const readable = displayHexPoint({ x: focus.locationX, z: focus.locationZ });
-      const focusMarker = L.circleMarker(leafletPoint({ x: focus.locationX, z: focus.locationZ }), {
-        radius: 8,
-        color: "#f0c64f",
-        weight: 3,
-        fillColor: "#0e1517",
-        fillOpacity: 1,
-      });
+      const focusPresentation = mapMarkerPresentation("focus");
+      const focusMarker = L.marker(leafletPoint({ x: focus.locationX, z: focus.locationZ }), { icon: markerIcon("focus", focusPresentation), keyboard: true });
       focusMarker.bindTooltip(`${focus.name} · N ${readable.north}, E ${readable.east}`, { permanent: true, direction: "top" });
       focusMarker.addTo(markers);
     }
@@ -311,13 +332,16 @@ export function NativeMap({
     for (const [layer, features] of Object.entries(snapshot.layers)) {
       if (layer === "resources" || layer === "enemies" || layer === "empire-territory") continue;
       for (const feature of features) {
-        const marker = L.circleMarker(leafletPoint(feature.point), {
-          radius: feature.kind === "player" ? 6 : 5,
-          color: FEATURE_COLORS[feature.kind] ?? "#dbe5df",
-          weight: 2,
-          fillOpacity: 0.85,
-          renderer: L.canvas(),
-        });
+        const presentation = mapMarkerPresentation(feature.kind);
+        const marker = presentation.mode === "canvas"
+          ? L.circleMarker(leafletPoint(feature.point), {
+              radius: 5,
+              color: FEATURE_COLORS[feature.kind] ?? "#dbe5df",
+              weight: 2,
+              fillOpacity: 0.85,
+              renderer: ordinaryRendererRef.current,
+            })
+          : L.marker(leafletPoint(feature.point), { icon: markerIcon(feature.kind, presentation), keyboard: true });
         marker.bindTooltip(`${featureLabel(feature)} · ${displayedPoint(feature)}`);
         marker.addTo(markers);
       }

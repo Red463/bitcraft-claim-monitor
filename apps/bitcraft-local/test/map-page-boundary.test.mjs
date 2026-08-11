@@ -103,6 +103,19 @@ test("Native map renders the current waypoint as a visible first-party marker", 
   assert.match(nativeMap, /bindTooltip\(`\$\{focus\.name\}/);
 });
 
+test("Native map reuses one canvas renderer and fixed marker presentations", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+
+  assert.match(nativeMap, /const ordinaryRendererRef = React\.useRef<L\.Canvas \| null>\(null\)/);
+  assert.equal((nativeMap.match(/L\.canvas\(\{ padding: 0\.25 \}\)/g) ?? []).length, 1);
+  assert.match(nativeMap, /ordinaryRendererRef\.current = L\.canvas\(\{ padding: 0\.25 \}\)/);
+  assert.match(nativeMap, /renderer: ordinaryRendererRef\.current/);
+  assert.doesNotMatch(nativeMap, /renderer: L\.canvas\(\)/);
+  assert.match(nativeMap, /mapMarkerPresentation\(feature\.kind\)/);
+  assert.match(nativeMap, /L\.divIcon\(/);
+  assert.match(nativeMap, /planDensePointDraw\(this\.#points,/);
+});
+
 test("Native map requests only same-origin locally provisioned terrain tiles", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   assert.match(nativeMap, /terrainTileUrl\(terrainStatus\.generation\)/);
