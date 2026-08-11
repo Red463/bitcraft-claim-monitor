@@ -23,8 +23,9 @@ export function prepareTerrainRenderContext(generation) {
   return context;
 }
 
-export async function renderTerrainTile({ generation, evidence, zoom, x, y, tileSize = DEFAULT_TILE_SIZE, context = null }) {
+export async function renderTerrainTile({ generation, evidence, style = "terrain", zoom, x, y, tileSize = DEFAULT_TILE_SIZE, context = null }) {
   if (!evidence?.verified) throw new TypeError("Terrain layout evidence is not verified");
+  if (style !== "terrain" && style !== "water") throw new TypeError("Terrain tile style must be terrain or water");
   requireInteger(zoom, "Terrain tile zoom");
   requireInteger(x, "Terrain tile X");
   requireInteger(y, "Terrain tile Y");
@@ -69,6 +70,8 @@ export async function renderTerrainTile({ generation, evidence, zoom, x, y, tile
       const mapX = (x * tileSize + pixelX + 0.5) / scale;
       const cell = sampleCell(mapX, mapZ);
       if (!cell) continue;
+      const waterCell = cell.surface !== "ground";
+      if ((style === "terrain" && waterCell) || (style === "water" && !waterCell)) continue;
       let colour = colourByCell.get(cell.key);
       if (!colour) {
         const north = sampleCell(mapX, mapZ + evidence.cellSize) ?? cell;

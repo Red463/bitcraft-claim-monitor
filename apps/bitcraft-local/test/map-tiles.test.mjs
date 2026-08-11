@@ -36,6 +36,18 @@ test("map tile route serves installed negative-Y terrain tiles through the store
   assert.deepEqual(res.body, expected);
 });
 
+test("map tile route serves the aligned same-origin water channel", async () => {
+  assert.ok(tileModule, "map tile module must exist");
+  const expected = Buffer.from([0x52, 0x49, 0x46, 0x46]);
+  const store = { readTile: async (request) => request.style === "water"
+    ? { bytes: expected, contentType: "image/webp", generation: "1" }
+    : null };
+  const res = responseRecorder();
+  assert.equal(await tileModule.serveLocalMapTile("/api/local/map/tiles/water/-5/0/-2.webp", res, store), true);
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, expected);
+});
+
 test("map tile route rejects unsupported styles and coordinates without filesystem traversal", async () => {
   assert.ok(tileModule, "map tile module must exist");
   const store = { readTile: async () => null };

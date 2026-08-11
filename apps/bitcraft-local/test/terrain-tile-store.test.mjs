@@ -28,10 +28,10 @@ test("terrain store installs complete bundles and retains last-good on encoder f
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "bitcraft-terrain-store-"));
   let calls = 0;
   let failAfter = Infinity;
-  const encoder = async ({ generation: value, zoom, x, y }) => {
+  const encoder = async ({ generation: value, style, zoom, x, y }) => {
     calls += 1;
     if (calls > failAfter) throw new Error("forced encoder failure");
-    return Buffer.from(`${value.generation}:${zoom}:${x}:${y}`);
+    return Buffer.from(`${value.generation}:${style}:${zoom}:${x}:${y}`);
   };
   const store = storeModule.createTerrainTileStore({
     dataDir,
@@ -43,13 +43,14 @@ test("terrain store installs complete bundles and retains last-good on encoder f
   const first = await store.buildAndInstall(generation(1));
   assert.equal(first.generation, "1");
   assert.equal((await store.readManifest()).generation, "1");
-  assert.equal((await store.readTile({ style: "terrain", z: -5, x: 0, y: -1 })).bytes.toString(), "1:-5:0:-1");
+  assert.equal((await store.readTile({ style: "terrain", z: -5, x: 0, y: -1 })).bytes.toString(), "1:terrain:-5:0:-1");
+  assert.equal((await store.readTile({ style: "water", z: -5, x: 0, y: -1 })).bytes.toString(), "1:water:-5:0:-1");
 
   calls = 0;
   failAfter = 2;
   await assert.rejects(store.buildAndInstall(generation(2)), /forced encoder failure/);
   assert.equal((await store.readManifest()).generation, "1");
-  assert.equal((await store.readTile({ style: "terrain", z: -5, x: 0, y: -1 })).bytes.toString(), "1:-5:0:-1");
+  assert.equal((await store.readTile({ style: "terrain", z: -5, x: 0, y: -1 })).bytes.toString(), "1:terrain:-5:0:-1");
   await store.close();
 });
 

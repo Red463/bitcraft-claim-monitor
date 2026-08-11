@@ -90,14 +90,32 @@ test("terrain renderer is deterministic, bounded, clips world edges, and accepts
   const request = fixtureRequest();
   const first = await rendererModule.renderTerrainTile(request);
   const second = await rendererModule.renderTerrainTile(request);
+  const water = await rendererModule.renderTerrainTile({ ...request, style: "water" });
   assert.deepEqual(createHash("sha256").update(first).digest("hex"), createHash("sha256").update(second).digest("hex"));
   assert.ok(first.byteLength <= 2_097_152);
 
   const decoded = await sharp(first).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const decodedWater = await sharp(water).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const rgbaAt = (x, y) => [...decoded.data.subarray((y * 256 + x) * 4, (y * 256 + x) * 4 + 4)];
+  const waterRgbaAt = (x, y) => [...decodedWater.data.subarray((y * 256 + x) * 4, (y * 256 + x) * 4 + 4)];
   assert.equal(rgbaAt(10, 10)[3], 0, "outside the only terrain chunk must be transparent");
-  assert.equal(rgbaAt(10, 200)[3], 255, "negative tile Y must address positive world Z");
-  assert.ok(rgbaAt(10, 200)[2] > rgbaAt(10, 200)[0], "southern half must decode as water");
+  assert.equal(waterRgbaAt(10, 200)[3], 255, "negative tile Y must address positive world Z");
+  assert.ok(waterRgbaAt(10, 200)[2] > waterRgbaAt(10, 200)[0], "southern half must decode as water");
   assert.equal(rgbaAt(10, 240)[3], 255, "covered ground remains opaque");
   assert.ok(rgbaAt(10, 240)[1] > rgbaAt(10, 240)[2], "northern half remains categorized as ground");
+});
+
+test("terrain renderer emits aligned ground and water channels", async () => {
+  assert.ok(rendererModule, "terrain renderer module must exist");
+  const request = fixtureRequest();
+  const ground = await rendererModule.renderTerrainTile({ ...request, style: "terrain" });
+  const water = await rendererModule.renderTerrainTile({ ...request, style: "water" });
+  const groundPixels = await sharp(ground).ensureAlpha().raw().toBuffer();
+  const waterPixels = await sharp(water).ensureAlpha().raw().toBuffer();
+  const alphaAt = (bytes, x, y) => bytes[(y * 256 + x) * 4 + 3];
+
+  assert.equal(alphaAt(groundPixels, 10, 240), 255, "ground channel keeps ground cells");
+  assert.equal(alphaAt(waterPixels, 10, 240), 0, "water channel hides ground cells");
+  assert.equal(alphaAt(groundPixels, 10, 200), 0, "ground channel hides water cells");
+  assert.equal(alphaAt(waterPixels, 10, 200), 255, "water channel keeps water cells");
 });

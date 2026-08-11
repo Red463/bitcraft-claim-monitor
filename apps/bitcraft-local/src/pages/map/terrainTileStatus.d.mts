@@ -18,4 +18,5 @@ export type TerrainTileStatus = {
 };
 
 export function loadTerrainTileStatus(signal?: AbortSignal): Promise<TerrainTileStatus>;
+export function mapTileUrl(style: "terrain" | "water", generation: string): string;
 export function terrainTileUrl(generation: string): string;

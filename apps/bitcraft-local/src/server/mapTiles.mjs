@@ -1,7 +1,7 @@
 import { securityHeaders } from "./httpRoutes.mjs";
 
 const TILE_PREFIX = "/api/local/map/tiles/";
-const TILE_PATH = /^\/api\/local\/map\/tiles\/(terrain|game|roads)\/(-?\d+)\/(-?\d+)\/(-?\d+)\.webp$/;
+const TILE_PATH = /^\/api\/local\/map\/tiles\/(terrain|water|game|roads)\/(-?\d+)\/(-?\d+)\/(-?\d+)\.webp$/;
 const MIN_ZOOM = -5;
 const MAX_ZOOM = 0;
 const MAX_TILE_INDEX = 1_000_000;

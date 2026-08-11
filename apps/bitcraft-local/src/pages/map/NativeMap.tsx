@@ -8,7 +8,7 @@ import { planDensePointDraw } from "./mapDensePointPlan.mjs";
 import { MAP_LAYER_DEFINITIONS, MAP_LAYER_PREFERENCE_KEY, defaultMapLayerVisibility, parseMapLayerVisibility, serializeMapLayerVisibility, type MapLayerKey } from "./mapLayerPreferences.mjs";
 import { MAP_MARKER_PRESENTATIONS, claimMarkerPresentation, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
-import { loadTerrainTileStatus, terrainTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
+import { loadTerrainTileStatus, mapTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
 import type { MapFocus } from "./mapUtils";
 
 type MapPoint = { x: number; z: number; dimension: string; coordinateSpace: string };
@@ -200,6 +200,7 @@ export function NativeMap({
   const resourcesRef = React.useRef<DensePointLayer | null>(null);
   const enemiesRef = React.useRef<DensePointLayer | null>(null);
   const terrainTilesRef = React.useRef<L.TileLayer | null>(null);
+  const waterTilesRef = React.useRef<L.TileLayer | null>(null);
   const [snapshot, setSnapshot] = React.useState<MapSnapshot | null>(null);
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
@@ -234,6 +235,7 @@ export function NativeMap({
       resourcesRef.current = null;
       enemiesRef.current = null;
       terrainTilesRef.current = null;
+      waterTilesRef.current = null;
     };
   }, []);
 
@@ -248,6 +250,11 @@ export function NativeMap({
     }
     resourcesRef.current?.setVisible(layerVisibility.resources);
     enemiesRef.current?.setVisible(layerVisibility.enemies);
+    for (const [key, layer] of [["terrain", terrainTilesRef.current], ["water", waterTilesRef.current]] as const) {
+      if (!layer) continue;
+      if (layerVisibility[key] && !map.hasLayer(layer)) layer.addTo(map);
+      else if (!layerVisibility[key] && map.hasLayer(layer)) layer.removeFrom(map);
+    }
   }, [layerVisibility]);
 
   React.useEffect(() => {
@@ -277,28 +284,41 @@ export function NativeMap({
   React.useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (!terrainStatus?.available || !terrainStatus.generation || !layerVisibility.terrain) {
+    if (!terrainStatus?.available || !terrainStatus.generation) {
       terrainTilesRef.current?.removeFrom(map);
+      waterTilesRef.current?.removeFrom(map);
       terrainTilesRef.current = null;
+      waterTilesRef.current = null;
       return;
     }
-    const terrainTiles = L.tileLayer(terrainTileUrl(terrainStatus.generation), {
+    const tileOptions = {
       tileSize: 256,
       minNativeZoom: -5,
       maxNativeZoom: 0,
       noWrap: false,
       keepBuffer: 2,
-    });
-    terrainTiles.on("tileload", () => setTerrainTileError(""));
-    terrainTiles.on("tileerror", () => setTerrainTileError("Some terrain tiles could not be loaded; the coordinate grid remains available."));
+    };
+    const terrainTiles = L.tileLayer(mapTileUrl("terrain", terrainStatus.generation), tileOptions);
+    const waterTiles = L.tileLayer(mapTileUrl("water", terrainStatus.generation), tileOptions);
+    const clearError = () => setTerrainTileError("");
+    const reportError = () => setTerrainTileError("Some terrain or water tiles could not be loaded; the coordinate grid remains available.");
+    terrainTiles.on("tileload", clearError);
+    waterTiles.on("tileload", clearError);
+    terrainTiles.on("tileerror", reportError);
+    waterTiles.on("tileerror", reportError);
     terrainTilesRef.current?.removeFrom(map);
-    terrainTiles.addTo(map);
+    waterTilesRef.current?.removeFrom(map);
+    if (layerVisibility.terrain) terrainTiles.addTo(map);
+    if (layerVisibility.water) waterTiles.addTo(map);
     terrainTilesRef.current = terrainTiles;
+    waterTilesRef.current = waterTiles;
     return () => {
       terrainTiles.removeFrom(map);
+      waterTiles.removeFrom(map);
       if (terrainTilesRef.current === terrainTiles) terrainTilesRef.current = null;
+      if (waterTilesRef.current === waterTiles) waterTilesRef.current = null;
     };
-  }, [terrainStatus?.available, terrainStatus?.generation, layerVisibility.terrain]);
+  }, [terrainStatus?.available, terrainStatus?.generation]);
 
   React.useEffect(() => {
     if (!focus || !mapRef.current) return;

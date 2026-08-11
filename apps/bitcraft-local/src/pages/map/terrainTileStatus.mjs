@@ -15,8 +15,13 @@ export async function loadTerrainTileStatus(signal) {
   return payload;
 }
 
-export function terrainTileUrl(generation) {
+export function mapTileUrl(style, generation) {
+  if (style !== "terrain" && style !== "water") throw new TypeError("Map tile style must be terrain or water");
   const normalized = String(generation ?? "");
   if (!/^\d+$/.test(normalized)) throw new TypeError("Terrain tile generation must be a decimal integer");
-  return `/api/local/map/tiles/terrain/{z}/{x}/{y}.webp?generation=${encodeURIComponent(normalized)}`;
+  return `/api/local/map/tiles/${style}/{z}/{x}/{y}.webp?generation=${encodeURIComponent(normalized)}`;
+}
+
+export function terrainTileUrl(generation) {
+  return mapTileUrl("terrain", generation);
 }

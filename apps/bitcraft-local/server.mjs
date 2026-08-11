@@ -397,9 +397,9 @@ const terrainTileStore = createTerrainTileStore({
       ? Math.max(120_000, terrainTileBuildDeadlineSetting)
       : 600_000,
   },
-  encoder: async ({ generation, zoom, x, y, tileSize }) => {
+  encoder: async ({ generation, style, zoom, x, y, tileSize }) => {
     const { renderTerrainTile } = await import("./src/server/terrainTileRenderer.mjs");
-    return renderTerrainTile({ generation, evidence: generation.evidence, zoom, x, y, tileSize });
+    return renderTerrainTile({ generation, evidence: generation.evidence, style, zoom, x, y, tileSize });
   },
 });
 const privacyLedgerPath = process.env.PRIVACY_LEDGER_PATH

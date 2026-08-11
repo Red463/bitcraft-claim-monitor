@@ -45,7 +45,10 @@ function enumerateTiles(generation, limits) {
     const maxProjectedY = -minZ / APOTHEM;
     const minTileY = Math.floor((minProjectedY * scale) / limits.tileSize);
     const maxTileY = Math.floor(((maxProjectedY * scale) - Number.EPSILON) / limits.tileSize);
-    for (let x = minTileX; x <= maxTileX; x += 1) for (let y = minTileY; y <= maxTileY; y += 1) tiles.push({ style: "terrain", zoom, x, y });
+    for (let x = minTileX; x <= maxTileX; x += 1) for (let y = minTileY; y <= maxTileY; y += 1) {
+      tiles.push({ style: "terrain", zoom, x, y });
+      tiles.push({ style: "water", zoom, x, y });
+    }
   }
   return { tiles, bounds: { minX, minZ, maxX, maxZ } };
 }
@@ -124,14 +127,18 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
     if (!within(versionsRoot, staging) || !within(versionsRoot, installed)) throw new TypeError("Terrain bundle version path escapes store");
     const started = Date.now();
     let totalBytes = 0;
+    const channelBytes = { terrain: 0, water: 0 };
+    const channelTileCounts = { terrain: 0, water: 0 };
     activeStaging.add(stagingName);
     try {
       await mkdir(staging, { recursive: false });
       for (const tile of tiles) {
         if (Date.now() - started > limits.deadlineMs) throw new Error(`Terrain bundle exceeded ${limits.deadlineMs}ms deadline`);
-        const bytes = Buffer.from(await encoder({ generation, zoom: tile.zoom, x: tile.x, y: tile.y, tileSize: limits.tileSize }));
+        const bytes = Buffer.from(await encoder({ generation, style: tile.style, zoom: tile.zoom, x: tile.x, y: tile.y, tileSize: limits.tileSize }));
         if (bytes.byteLength > limits.maxTileBytes) throw new RangeError(`Terrain tile exceeded ${limits.maxTileBytes} tile byte budget`);
         totalBytes += bytes.byteLength;
+        channelBytes[tile.style] += bytes.byteLength;
+        channelTileCounts[tile.style] += 1;
         if (totalBytes > limits.maxBytes) throw new RangeError(`Terrain bundle exceeded ${limits.maxBytes} byte budget`);
         const directory = path.join(staging, "tiles", tile.style, String(tile.zoom), String(tile.x));
         await mkdir(directory, { recursive: true });
@@ -150,6 +157,10 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
         paletteVersion: TERRAIN_PALETTE_VERSION,
         tileCount: tiles.length,
         totalBytes,
+        channels: {
+          terrain: { tileCount: channelTileCounts.terrain, totalBytes: channelBytes.terrain },
+          water: { tileCount: channelTileCounts.water, totalBytes: channelBytes.water },
+        },
         evidenceHash: generation.evidence.evidenceHash,
       };
       await writeDurableJson(path.join(staging, "manifest.json"), manifest);
@@ -181,7 +192,7 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
       return pointer ? { ...pointer.manifest } : null;
     },
     async readTile({ style, z, x, y }) {
-      if (style !== "terrain" || !Number.isSafeInteger(z) || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return null;
+      if ((style !== "terrain" && style !== "water") || !Number.isSafeInteger(z) || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return null;
       const pointer = await loadCurrent();
       if (!pointer) return null;
       leases.set(pointer.version, (leases.get(pointer.version) ?? 0) + 1);
