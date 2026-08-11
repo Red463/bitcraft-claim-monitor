@@ -129,3 +129,19 @@ test("terrain renderer emits aligned ground and water channels", async () => {
   assert.equal(alphaAt(groundPixels, 10, 200), 0, "ground channel hides water cells");
   assert.equal(alphaAt(waterPixels, 10, 200), 255, "water channel keeps water cells");
 });
+
+test("terrain renderer produces both aligned channels in one paired render", async () => {
+  assert.ok(rendererModule, "terrain renderer module must exist");
+  assert.equal(typeof rendererModule.renderTerrainTileChannels, "function");
+  const request = fixtureRequest();
+  const channels = await rendererModule.renderTerrainTileChannels(request);
+  assert.ok(channels.terrain.byteLength > 0);
+  assert.ok(channels.water.byteLength > 0);
+  const terrainPixels = await sharp(channels.terrain).ensureAlpha().raw().toBuffer();
+  const waterPixels = await sharp(channels.water).ensureAlpha().raw().toBuffer();
+  const alphaAt = (bytes, x, y) => bytes[(y * 256 + x) * 4 + 3];
+  assert.equal(alphaAt(terrainPixels, 10, 240), 255);
+  assert.equal(alphaAt(waterPixels, 10, 240), 0);
+  assert.equal(alphaAt(terrainPixels, 10, 200), 0);
+  assert.equal(alphaAt(waterPixels, 10, 200), 255);
+});
