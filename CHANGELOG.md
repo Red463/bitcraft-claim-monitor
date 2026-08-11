@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.54.1-beta.1] - 2026-08-11
+
+### Fixed
+
+- Prevented regular page refreshes from replacing unsaved changes in the open Craft Plan manager.
+
 ## [0.54.0-beta.1] - 2026-08-11
 
 ### Added
