@@ -25,6 +25,7 @@ test("terrain runtime canonicalizes four regions, coalesces builds, and retains 
   assert.ok(runtimeModule, "terrain runtime module must exist");
   const sessions = new Map();
   const builds = [];
+  const buildFailures = [];
   let releaseFirst;
   const firstBlocked = new Promise((resolve) => { releaseFirst = resolve; });
   const tileStore = {
@@ -37,6 +38,7 @@ test("terrain runtime canonicalizes four regions, coalesces builds, and retains 
   };
   const runtime = new runtimeModule.RelayTerrainRuntime({
     manifest: {}, tileStore, evidence: { verified: true, side: 32, cellSize: 3, evidenceHash: "fixture" },
+    onBuildFailure: (error) => buildFailures.push(error),
     discoverTopology: async () => ({ regions: new Map(["1", "2", "3", "4"].map((id) => [id, { ready: true, port: 3000 + Number(id), database: `bitcraft-live-${id}`, schemaFingerprint: `fp-${id}` }])) }),
     createSession: ({ onSnapshot }) => {
       const session = { startConfig: null, stopped: false, async start(config) { this.startConfig = config; sessions.set(config.regionId, { session: this, emit: onSnapshot }); }, health: () => ({ connected: true, applied: true }), async stop() { this.stopped = true; } };
@@ -63,6 +65,7 @@ test("terrain runtime canonicalizes four regions, coalesces builds, and retains 
   await runtime.waitForIdle();
   assert.equal(runtime.health().lastGoodGeneration, "2");
   assert.match(runtime.health().lastError, /forced build failure/);
+  assert.deepEqual(buildFailures, ["forced build failure"]);
   await runtime.stop();
   assert.ok([...sessions.values()].every(({ session }) => session.stopped));
 });

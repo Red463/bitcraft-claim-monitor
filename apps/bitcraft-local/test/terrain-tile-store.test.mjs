@@ -70,3 +70,36 @@ test("terrain store rejects budgets and malformed current manifests", async () =
   await reopened.close();
   await store.close();
 });
+
+test("terrain tile reads do not prune the bundle currently being built", async () => {
+  assert.ok(storeModule, "terrain tile store module must exist");
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "bitcraft-terrain-concurrent-"));
+  let releaseSecondTile;
+  let secondTileStarted;
+  const secondTileGate = new Promise((resolve) => { releaseSecondTile = resolve; });
+  const secondTileReady = new Promise((resolve) => { secondTileStarted = resolve; });
+  let generationTwoCalls = 0;
+  const store = storeModule.createTerrainTileStore({
+    dataDir,
+    encoder: async ({ generation: value, zoom, x, y }) => {
+      if (value.generation === "2") {
+        generationTwoCalls += 1;
+        if (generationTwoCalls === 2) {
+          secondTileStarted();
+          await secondTileGate;
+        }
+      }
+      return Buffer.from(`${value.generation}:${zoom}:${x}:${y}`);
+    },
+    limits: { minZoom: -5, maxZoom: -3, maxTiles: 10, maxBytes: 1024, maxTileBytes: 256, deadlineMs: 10_000 },
+  });
+
+  await store.buildAndInstall(generation(1));
+  const building = store.buildAndInstall(generation(2));
+  await secondTileReady;
+  assert.equal((await store.readTile({ style: "terrain", z: -5, x: 0, y: -1 })).bytes.toString(), "1:-5:0:-1");
+  releaseSecondTile();
+  await building;
+  assert.equal((await store.readTile({ style: "terrain", z: -5, x: 0, y: -1 })).bytes.toString(), "2:-5:0:-1");
+  await store.close();
+});

@@ -568,6 +568,7 @@ const relayTerrainRuntime = new RelayTerrainRuntime({
   manifest: relayBindingManifest,
   tileStore: terrainTileStore,
   evidence: terrainLayoutEvidence,
+  onBuildFailure: (error) => console.warn(`Relay terrain tile build failed: ${error}`),
 });
 let relayEmpireRuntimeReady = null;
 let relayGlobalCatalogRuntimeReady = null;

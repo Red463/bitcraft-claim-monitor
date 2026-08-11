@@ -76,6 +76,7 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
   let closed = false;
   let queue = Promise.resolve();
   const leases = new Map();
+  const activeStaging = new Set();
 
   async function loadCurrent() {
     if (loaded) return current;
@@ -100,7 +101,7 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
     }
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      if (entry.name.startsWith(".staging-") || (VERSION_NAME.test(entry.name) && entry.name !== current?.version && !leases.get(entry.name))) {
+      if ((entry.name.startsWith(".staging-") && !activeStaging.has(entry.name)) || (VERSION_NAME.test(entry.name) && entry.name !== current?.version && !leases.get(entry.name))) {
         const target = path.resolve(versionsRoot, entry.name);
         if (within(versionsRoot, target)) await rm(target, { recursive: true, force: true });
       }
@@ -123,6 +124,7 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
     if (!within(versionsRoot, staging) || !within(versionsRoot, installed)) throw new TypeError("Terrain bundle version path escapes store");
     const started = Date.now();
     let totalBytes = 0;
+    activeStaging.add(stagingName);
     try {
       await mkdir(staging, { recursive: false });
       for (const tile of tiles) {
@@ -163,6 +165,8 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
     } catch (error) {
       await rm(staging, { recursive: true, force: true });
       throw error;
+    } finally {
+      activeStaging.delete(stagingName);
     }
   }
 

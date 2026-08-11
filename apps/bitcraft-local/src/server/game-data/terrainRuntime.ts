@@ -55,6 +55,7 @@ export class RelayTerrainRuntime {
   readonly #evidence: TerrainLayoutEvidence;
   readonly #discoverTopology: (baseUrl: string) => Promise<RelayTopology>;
   readonly #createSession: (options: ConstructorParameters<typeof RelayTerrainRegionSession>[0]) => TerrainSession;
+  readonly #onBuildFailure: (error: string) => void;
   #config: RuntimeConfig | null = null;
   #sessions = new Map<string, RegionEntry>();
   #snapshots = new Map<string, TerrainRegionSnapshot>();
@@ -84,12 +85,14 @@ export class RelayTerrainRuntime {
     evidence,
     discoverTopology: discover = discoverRelayTopology,
     createSession = (options) => new RelayTerrainRegionSession(options),
+    onBuildFailure = () => {},
   }: {
     manifest: BindingManifest;
     tileStore: TerrainTileStore;
     evidence: TerrainLayoutEvidence;
     discoverTopology?: (baseUrl: string) => Promise<RelayTopology>;
     createSession?: (options: ConstructorParameters<typeof RelayTerrainRegionSession>[0]) => TerrainSession;
+    onBuildFailure?: (error: string) => void;
   }) {
     if (!evidence?.verified) throw new TypeError("Terrain runtime requires verified layout evidence");
     this.#manifest = manifest;
@@ -97,6 +100,7 @@ export class RelayTerrainRuntime {
     this.#evidence = evidence;
     this.#discoverTopology = discover;
     this.#createSession = createSession;
+    this.#onBuildFailure = onBuildFailure;
   }
 
   async start(config: RuntimeConfig): Promise<void> {
@@ -210,6 +214,7 @@ export class RelayTerrainRuntime {
         } catch (error) {
           this.#health.buildStage = "error";
           this.#health.lastError = errorMessage(error);
+          this.#onBuildFailure(this.#health.lastError);
         } finally {
           this.#buildingRenderHash = null;
         }
