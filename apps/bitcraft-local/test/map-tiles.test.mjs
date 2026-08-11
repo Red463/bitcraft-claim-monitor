@@ -62,6 +62,6 @@ test("map tile route returns a cacheable 404 when a local tile is not installed"
 test("production server handles same-origin map tiles before map snapshot acquisition", async () => {
   const server = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(server, /import \{ serveLocalMapTile \} from "\.\/src\/server\/mapTiles\.mjs"/);
-  assert.match(server, /await serveLocalMapTile\(url\.pathname, res, dataDir\)/);
-  assert.ok(server.indexOf("await serveLocalMapTile(url.pathname, res, dataDir)") < server.indexOf('url.pathname === "/api/local/map/snapshot"'));
+  assert.match(server, /await serveLocalMapTile\(url\.pathname, res, terrainTileStore\)/);
+  assert.ok(server.indexOf("await serveLocalMapTile(url.pathname, res, terrainTileStore)") < server.indexOf('url.pathname === "/api/local/map/snapshot"'));
 });

@@ -40,5 +40,6 @@ export * from "./schemaManifest.ts";
 export * from "./storageActivity.ts";
 export * from "./terrainProjection.ts";
 export * from "./terrainRegionSession.ts";
+export * from "./terrainRuntime.ts";
 export * from "./topology.ts";
 export * from "./toolchainManifest.ts";

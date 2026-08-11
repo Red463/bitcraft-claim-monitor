@@ -37,6 +37,7 @@ import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { MapSnapshotError, authorizedMapPlayerIds, buildMapSnapshot, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
 import { serveLocalMapTile } from "./src/server/mapTiles.mjs";
+import { createTerrainTileStore } from "./src/server/terrainTileStore.mjs";
 import { createRelayClaimScopeFence } from "./src/server/relayClaimScopeFence.mjs";
 import { createRelayProductionLifecycleCoordinator } from "./src/server/relayProductionLifecycleCoordinator.mjs";
 import { createRelaySettlementTransitionCoordinator } from "./src/server/relaySettlementTransitionCoordinator.mjs";
@@ -164,6 +165,7 @@ import {
   RelayMapSpatialScopeManager,
   mapSpatialScopeKey,
   RelayStorageActivityService,
+  RelayTerrainRuntime,
   runtimeHealthWithPersistedSnapshot,
 } from "./dist-server/game-data/index.js";
 import {
@@ -383,6 +385,17 @@ const relayHttpRefreshMs = Number.isFinite(relayHttpRefreshSetting)
 const relayBaseUrl = process.env.BITCRAFT_RELAY_ORIGIN ?? "https://relay.bitcraftsync.app";
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
+const terrainLayoutEvidence = JSON.parse(readFileSync(
+  path.join(root, "test", "fixtures", "terrain-live-layout.json"),
+  "utf8",
+));
+const terrainTileStore = createTerrainTileStore({
+  dataDir,
+  encoder: async ({ generation, zoom, x, y, tileSize }) => {
+    const { renderTerrainTile } = await import("./src/server/terrainTileRenderer.mjs");
+    return renderTerrainTile({ generation, evidence: generation.evidence, zoom, x, y, tileSize });
+  },
+});
 const privacyLedgerPath = process.env.PRIVACY_LEDGER_PATH
   ?? (isProduction && !isTestRuntime ? "/var/backups/bitcraft-claim-monitor-relay/privacy-deletion-ledger.jsonl" : path.join(dataDir, "privacy-deletion-ledger.jsonl"));
 const readCachedServerHealthFiles = createCachedServerHealthReader(() => readServerHealthFiles(dataDir), { ttlMs: 30_000 });
@@ -545,6 +558,11 @@ const relayBindingManifest = JSON.parse(readFileSync(
   path.join(root, "src", "server", "game-data", "bindings", "schema-manifest.json"),
   "utf8",
 ));
+const relayTerrainRuntime = new RelayTerrainRuntime({
+  manifest: relayBindingManifest,
+  tileStore: terrainTileStore,
+  evidence: terrainLayoutEvidence,
+});
 let relayEmpireRuntimeReady = null;
 let relayGlobalCatalogRuntimeReady = null;
 const relayGlobalCatalogRuntime = new RelayGlobalCatalogRuntime({
@@ -682,7 +700,13 @@ let relayPublicCraftStarted = false;
 let relayRegionalMarketStarted = false;
 let relayEmpireStarted = false;
 let relayRegionClaimsStarted = false;
+let relayTerrainStarted = false;
 const relayClaimScopeFence = createRelayClaimScopeFence([
+  {
+    stop: async () => {
+      try { await relayTerrainRuntime.stop(); } finally { relayTerrainStarted = false; }
+    },
+  },
   {
     stop: async () => {
       try { await relayPublicCraftRuntime.stop(); } finally { relayPublicCraftStarted = false; }
@@ -7974,7 +7998,7 @@ const server = createServer(async (req, res) => {
         staleAfterMs: relayGlobalCatalogStaleMs,
       }));
     }
-    if (req.method === "GET" && await serveLocalMapTile(url.pathname, res, dataDir)) return;
+    if (req.method === "GET" && await serveLocalMapTile(url.pathname, res, terrainTileStore)) return;
     if (req.method === "GET" && url.pathname === "/api/local/map/catalog") {
       if (!rateLimit(req, res, "map-catalog", RATE_LIMITS.expensiveLocal)) return;
       const status = globalCatalogReadStatus();
@@ -9552,6 +9576,20 @@ function startBackgroundTasks() {
       const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();
       if (!regionId) {
         throw new Error("Relay regional sessions are waiting for a claim region");
+      }
+      try {
+        const settings = getSettings();
+        const activeRegionIds = parseRegionIds(
+          `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+        ).slice(0, 4);
+        if (!relayTerrainStarted) {
+          await relayTerrainRuntime.start({ relayBaseUrl, activeRegionIds });
+          relayTerrainStarted = true;
+        } else {
+          await relayTerrainRuntime.reconcile({ relayBaseUrl, activeRegionIds });
+        }
+      } catch (error) {
+        if (!isTestRuntime) console.warn(`Relay terrain startup failed: ${errorMessage(error)}`);
       }
       if (!relayPublicCraftStarted) {
         try {
