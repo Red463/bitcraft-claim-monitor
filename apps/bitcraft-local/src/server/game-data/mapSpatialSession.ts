@@ -58,7 +58,18 @@ export class RelayMapSpatialSession {
   #detailListeners = false;
   #rebuildQueued = false;
   #applyQueued = false;
-  #health = { connected: false, applied: false, stage: "idle", rowCount: 0, lastAppliedAt: null as string | null, lastError: null as string | null };
+  #health = {
+    connected: false,
+    applied: false,
+    stage: "idle",
+    rowCount: 0,
+    resourceRowCount: 0,
+    enemyRowCount: 0,
+    detailEntityCount: 0,
+    detailQueryCount: 0,
+    lastAppliedAt: null as string | null,
+    lastError: null as string | null,
+  };
 
   readonly #baseChanged = () => this.#queueDetailRebuild();
   readonly #detailChanged = () => this.#queueApply();
@@ -106,7 +117,18 @@ export class RelayMapSpatialSession {
     if (!config) return;
     this.#detailSubscription?.unsubscribe();
     this.#detailSubscription = null;
-    const queries = mapSpatialDetailQueries({ playerIds: config.scope.playerIds, resourceRows: tableRows(connection.db.resourceState), enemyRows: selectedMapEnemyRows(tableRows(connection.db.enemyState), config.scope.enemyTypes) });
+    const resourceRows = tableRows(connection.db.resourceState);
+    const enemyRows = selectedMapEnemyRows(tableRows(connection.db.enemyState), config.scope.enemyTypes);
+    const queries = mapSpatialDetailQueries({ playerIds: config.scope.playerIds, resourceRows, enemyRows });
+    const detailEntities = new Set([
+      ...config.scope.playerIds,
+      ...resourceRows.map((row) => String((row as Record<string, unknown>).entityId ?? (row as Record<string, unknown>).entity_id ?? "")),
+      ...enemyRows.map((row) => String(row.entityId ?? row.entity_id ?? "")),
+    ].filter(Boolean));
+    this.#health.resourceRowCount = resourceRows.length;
+    this.#health.enemyRowCount = enemyRows.length;
+    this.#health.detailEntityCount = detailEntities.size;
+    this.#health.detailQueryCount = queries.length;
     if (!queries.length) {
       this.#apply(connection);
       return;

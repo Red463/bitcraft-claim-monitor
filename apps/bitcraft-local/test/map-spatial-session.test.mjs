@@ -68,6 +68,18 @@ test("map spatial session applies a bounded two-stage joined generation", async 
   assert.equal(snapshots[0].data.players[0].playerEntityId, "101");
   assert.equal(snapshots[0].data.resources[0].entityId, "100");
   assert.equal(snapshots[0].data.enemies[0].entityId, "200");
+  assert.deepEqual(session.health(), {
+    connected: true,
+    applied: true,
+    stage: "applied",
+    rowCount: 5,
+    resourceRowCount: 1,
+    enemyRowCount: 1,
+    detailEntityCount: 3,
+    detailQueryCount: 2,
+    lastAppliedAt: "2026-08-11T12:00:00.000Z",
+    lastError: null,
+  });
 
   resourceRows.splice(0);
   db.resourceState.emit("delete");

@@ -33,6 +33,15 @@ test("map spatial subscriptions are bounded by requested identities", () => {
   ]);
 });
 
+test("map spatial detail subscriptions split dense entity joins into proven Relay-sized queries", () => {
+  const resourceRows = Array.from({ length: 101 }, (_, index) => ({ entityId: BigInt(index + 1), resourceId: 2 }));
+  const queries = mapSpatialDetailQueries({ playerIds: [], resourceRows, enemyRows: [] });
+
+  assert.equal(queries.length, 2);
+  assert.equal((queries[0].match(/entity_id = /g) ?? []).length, 100);
+  assert.equal(queries[1], "SELECT * FROM location_state WHERE entity_id = 101");
+});
+
 test("generated EnemyType tags map to their matching catalog ids", () => {
   assert.equal(mapEnemyTypeId({ tag: "PracticeDummy" }), "1");
   assert.equal(mapEnemyTypeId({ tag: "DeerMale" }), "8");

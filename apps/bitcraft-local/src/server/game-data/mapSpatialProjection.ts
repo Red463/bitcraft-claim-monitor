@@ -11,6 +11,7 @@ type WireRecord = Record<string, unknown>;
 // Relay's live overworld rows use dimension 1. Keep this local because this
 // module is compiled into the isolated provider runtime.
 const MAP_OVERWORLD_DIMENSION = "1";
+const MAX_IDS_PER_DETAIL_QUERY = 100;
 const ENEMY_TYPE_TAGS = [
   "None", "PracticeDummy", "GrassBird", "DesertBird", "SwampBird", "Goat", "MountainGoat", "DeerFemale", "DeerMale", "Elk",
   "BoarFemale", "BoarMale", "BoarElder", "PlainsOx", "TundraOx", "JungleLargeBird", "DesertLargeBird", "Jakyl", "AlphaJakyl", "KingJakyl",
@@ -55,6 +56,16 @@ function equalityQuery(table: string, column: string, values: string[]): string 
   return ids.length ? `SELECT * FROM ${table} WHERE ${ids.map((id) => `${column} = ${id}`).join(" OR ")}` : null;
 }
 
+function equalityQueries(table: string, column: string, values: string[], maxIdsPerQuery = MAX_IDS_PER_DETAIL_QUERY): string[] {
+  const ids = [...new Set(values.map((value) => decimal(value, `${table} scope`)))].sort((left, right) => left.length - right.length || left.localeCompare(right));
+  const queries: string[] = [];
+  for (let offset = 0; offset < ids.length; offset += maxIdsPerQuery) {
+    const query = equalityQuery(table, column, ids.slice(offset, offset + maxIdsPerQuery));
+    if (query) queries.push(query);
+  }
+  return queries;
+}
+
 export function mapSpatialBaseQueries(scope: MapSpatialScope): string[] {
   const claimId = decimal(scope.claimId, "Map spatial claim id");
   return [
@@ -73,9 +84,9 @@ export function mapSpatialDetailQueries({ playerIds, resourceRows, enemyRows }: 
     try { return [decimal(row.entityId ?? row.entity_id, `Map enemy ${index} entity id`)]; } catch { return []; }
   });
   return [
-    equalityQuery("location_state", "entity_id", resourceEntityIds),
-    equalityQuery("mobile_entity_state", "entity_id", [...enemyEntityIds, ...playerIds]),
-  ].filter((query): query is string => Boolean(query));
+    ...equalityQueries("location_state", "entity_id", resourceEntityIds),
+    ...equalityQueries("mobile_entity_state", "entity_id", [...enemyEntityIds, ...playerIds]),
+  ];
 }
 
 function coordinateFields(value: unknown, label: string) {
