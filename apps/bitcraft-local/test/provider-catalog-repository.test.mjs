@@ -67,6 +67,10 @@ test("provider catalog snapshot atomically preserves item/cargo identity and rem
     ["cargo:42", "items:42"],
   );
   assert.deepEqual(repository.listEntities().map((row) => row.name), ["Timber Crate", "Timber Plank"]);
+  assert.equal(
+    db.prepare("SELECT value FROM app_settings WHERE key = 'game_catalog_effort_model_version'").get(),
+    undefined,
+  );
 });
 
 test("provider catalog findEntities does not truncate candidates before live-order filters", () => {
@@ -125,10 +129,12 @@ test("provider catalog repository replaces normalized description tables in the 
   const repository = catalogRepositoryModule.createProviderCatalogRepository(db);
   const descriptions = {
     crafting_recipe: [{ kind: "crafting_recipe", id: "77", name: "Saw Timber" }],
+    extraction_recipe: [],
+    item_list: [],
     construction_recipe: [],
     building: [],
+    building_type: [],
     skill: [{ kind: "skill", id: "5", name: "Forestry" }],
-    resource: [],
     equipment: [],
     buff: [],
     claim_tech: [],
@@ -153,6 +159,10 @@ test("provider catalog repository replaces normalized description tables in the 
     name: "Saw Timber",
   });
   assert.equal(repository.getDescription("crafting_recipe", "999"), null);
+  assert.equal(
+    db.prepare("SELECT value FROM app_settings WHERE key = 'game_catalog_effort_model_version'").get(),
+    undefined,
+  );
 
   repository.replaceCatalogSnapshot({
     entities: [{ kind: "item", id: "42", name: "Timber", tier: 2 }],
@@ -305,6 +315,10 @@ test("provider catalog generation atomically replaces live recipes, probabilitie
     db.prepare("SELECT COUNT(*) AS count FROM game_catalog_effort_weights").get().count >= 1,
     "live provider generation should publish planner effort weights",
   );
+  assert.deepEqual(
+    { ...db.prepare("SELECT value, updated_at FROM app_settings WHERE key = 'game_catalog_effort_model_version'").get() },
+    { value: "3", updated_at: "2026-07-30T12:00:00.000Z" },
+  );
 });
 
 test("malformed live catalog projection rolls back the complete provider generation", () => {
@@ -312,7 +326,17 @@ test("malformed live catalog projection rolls back the complete provider generat
   const db = createDb();
   const repository = catalogRepositoryModule.createProviderCatalogRepository(db);
   const descriptions = {
-    crafting_recipe: [],
+    crafting_recipe: [{
+      kind: "crafting_recipe",
+      id: "76",
+      name: "Last good recipe",
+      actionsRequired: 1,
+      isPassive: false,
+      buildingRequirement: null,
+      levelRequirements: [],
+      inputs: [],
+      outputs: [{ kind: "item", id: "42", quantity: "1" }],
+    }],
     extraction_recipe: [],
     item_list: [{
       kind: "item_list",
@@ -342,7 +366,7 @@ test("malformed live catalog projection rolls back the complete provider generat
     claim_tech: [],
   };
   repository.replaceCatalogSnapshot({
-    entities: [{ kind: "item", id: "42", name: "Last good", itemListId: "17" }],
+    entities: [{ kind: "item", id: "42", name: "Last good" }],
     descriptions,
   }, {
     provider: "relay",
@@ -351,9 +375,18 @@ test("malformed live catalog projection rolls back the complete provider generat
     generation: 1,
     receivedAt: "2026-07-30T12:00:00.000Z",
   });
+  const previousMarker = { ...db.prepare(
+    "SELECT value, updated_at FROM app_settings WHERE key = 'game_catalog_effort_model_version'",
+  ).get() };
+  const previousWeights = db.prepare(`
+    SELECT catalog_key, model_version, effort_weight, method, source_key, updated_at
+    FROM game_catalog_effort_weights ORDER BY catalog_key
+  `).all();
+  assert.deepEqual(previousMarker, { value: "3", updated_at: "2026-07-30T12:00:00.000Z" });
+  assert.equal(previousWeights.length, 1);
 
   assert.throws(() => repository.replaceCatalogSnapshot({
-    entities: [{ kind: "item", id: "42", name: "Must roll back", itemListId: "17" }],
+    entities: [{ kind: "item", id: "42", name: "Must roll back" }],
     descriptions: {
       ...descriptions,
       crafting_recipe: [{
@@ -379,5 +412,16 @@ test("malformed live catalog projection rolls back the complete provider generat
   assert.equal(repository.getEntity("items:42").name, "Last good");
   assert.equal(repository.getSourceState().generation, 1);
   assert.equal(repository.getProbabilitySnapshot().sourceRevision, "global-v1");
-  assert.deepEqual(db.prepare("SELECT recipe_key FROM game_catalog_recipes").all(), []);
+  assert.deepEqual(
+    db.prepare("SELECT recipe_key FROM game_catalog_recipes").all().map((row) => ({ ...row })),
+    [{ recipe_key: "recipe:76" }],
+  );
+  assert.deepEqual(
+    { ...db.prepare("SELECT value, updated_at FROM app_settings WHERE key = 'game_catalog_effort_model_version'").get() },
+    previousMarker,
+  );
+  assert.deepEqual(db.prepare(`
+    SELECT catalog_key, model_version, effort_weight, method, source_key, updated_at
+    FROM game_catalog_effort_weights ORDER BY catalog_key
+  `).all(), previousWeights);
 });
