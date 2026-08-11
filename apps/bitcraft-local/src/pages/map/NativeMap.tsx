@@ -293,6 +293,8 @@ export function NativeMap({
     }
     const tileOptions = {
       tileSize: 256,
+      minZoom: -5,
+      maxZoom: 5,
       minNativeZoom: -5,
       maxNativeZoom: 0,
       noWrap: false,

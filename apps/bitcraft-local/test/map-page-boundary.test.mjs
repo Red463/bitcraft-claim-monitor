@@ -130,6 +130,7 @@ test("Native map requests only same-origin locally provisioned terrain tiles", (
   assert.match(nativeMap, /60_000/);
   assert.match(nativeMap, /minNativeZoom: -5/);
   assert.match(nativeMap, /maxNativeZoom: 0/);
+  assert.match(nativeMap, /const tileOptions = \{\s*tileSize: 256,\s*minZoom: -5,\s*maxZoom: 5,\s*minNativeZoom: -5,/);
   assert.doesNotMatch(nativeMap, /prism\.brico\.app|bitcraftmap\.com/);
   assert.match(nativeMap, /Terrain\/water tiles are not installed on this server/);
   assert.ok(nativeMap.indexOf("new CoordinateGridLayer") < nativeMap.indexOf('mapTileUrl("terrain", terrainStatus.generation)'));
