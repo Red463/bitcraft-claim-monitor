@@ -7,17 +7,20 @@ import type { AnyRecord } from "../main-app-data";
 import { dateLabel, formatNumber, timeAgo } from "../utils/format";
 import { usePageRefresh } from "../refresh/ManualRefreshContext";
 import { createDelayedRefreshTask, pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
+import { buildCraftPlanBankGroups, finalizeLegacyBankMigrations, initiallyExpandedBankPlayerIds, mergeLegacyBankDiscovery, runBankDiscoveryQueue } from "./craftPlanBankSelection.mjs";
 
 const LOCAL_API = "/api/local";
-const TABS = ["targets", "sources", "players", "routes", "buffers", "audit"] as const;
+const BANK_LOAD_CONCURRENCY = 3;
+const TABS = ["targets", "sources", "players", "banks", "routes", "buffers", "audit"] as const;
 type ManagerTab = typeof TABS[number];
 type ManagerOperation = "loading" | "refreshing" | "saving" | "preset" | null;
+type PlayerBankLoad = { status: "loading" | "loaded" | "error"; banks: AnyRecord[]; warnings: string[]; error?: string };
 
 type CraftPlanConfig = {
   enabled: boolean;
   name: string;
   targets: AnyRecord[];
-  sourceRules: { storageContainerIds: string[]; playerIds: string[]; craftPlayerIds: string[]; bankPlayerIds: string[]; deployableContainerIds: string[] };
+  sourceRules: { storageContainerIds: string[]; playerIds: string[]; craftPlayerIds: string[]; bankPlayerIds: string[]; bankContainerIds: string[]; deployableContainerIds: string[] };
   routeOverrides: Record<string, string>;
   sectionOverrides: Record<string, string>;
   rowNameOverrides: Record<string, string>;
@@ -27,7 +30,7 @@ type CraftPlanConfig = {
 };
 
 function emptyConfig(): CraftPlanConfig {
-  return { enabled: true, name: "Settlement craft plan", targets: [], sourceRules: { storageContainerIds: [], playerIds: [], craftPlayerIds: [], bankPlayerIds: [], deployableContainerIds: [] }, routeOverrides: {}, sectionOverrides: {}, rowNameOverrides: {}, multipliers: {}, gatheredItemKeys: [], buildingProgress: {} };
+  return { enabled: true, name: "Settlement craft plan", targets: [], sourceRules: { storageContainerIds: [], playerIds: [], craftPlayerIds: [], bankPlayerIds: [], bankContainerIds: [], deployableContainerIds: [] }, routeOverrides: {}, sectionOverrides: {}, rowNameOverrides: {}, multipliers: {}, gatheredItemKeys: [], buildingProgress: {} };
 }
 
 function itemKind(item: AnyRecord) {
@@ -73,8 +76,8 @@ function itemTypeLabel(item: AnyRecord) {
   return kind === "building" ? "Workstation" : kind === "cargo" ? "Cargo" : "Item";
 }
 
-function itemPreview(items: AnyRecord[] = []) {
-  const top = items.slice().sort((a, b) => Number(b.quantity ?? 0) - Number(a.quantity ?? 0)).slice(0, 10);
+function itemPreview(items: AnyRecord[] = [], limit = 4) {
+  const top = items.slice().sort((a, b) => Number(b.quantity ?? 0) - Number(a.quantity ?? 0)).slice(0, limit);
   return top.length ? (
     <div className="craft-plan-source-items">
       {top.map((item) => <span key={`${itemKey(item)}:${item.quantity}`}><ItemLabel item={item} meta={itemTypeLabel(item)} /><strong>{formatNumber(Number(item.quantity) || 0, 0)}</strong></span>)}
@@ -102,13 +105,11 @@ function playerSourceCard(
   source: AnyRecord,
   inventoryChecked: boolean,
   craftsChecked: boolean,
-  banksChecked: boolean,
   onInventoryChange: (checked: boolean) => void,
   onCraftsChange: (checked: boolean) => void,
-  onBanksChange: (checked: boolean) => void,
 ) {
   return (
-    <article className={`craft-plan-source-card craft-plan-player-source-card${inventoryChecked || craftsChecked || banksChecked ? " is-included" : ""}`} key={source.playerId}>
+    <article className={`craft-plan-source-card craft-plan-player-source-card${inventoryChecked || craftsChecked ? " is-included" : ""}`} key={source.playerId}>
       <header>
         <div>
           <strong>{source.label}</strong>
@@ -117,7 +118,6 @@ function playerSourceCard(
         <div className="craft-plan-player-source-toggles">
           <label className="compact-toggle"><input type="checkbox" checked={inventoryChecked} onChange={(event) => onInventoryChange(event.target.checked)} /><span>Inventory</span></label>
           <label className="compact-toggle"><input type="checkbox" checked={craftsChecked} onChange={(event) => onCraftsChange(event.target.checked)} /><span>Crafts</span></label>
-          <label className="compact-toggle"><input type="checkbox" checked={banksChecked} onChange={(event) => onBanksChange(event.target.checked)} /><span>Banks</span></label>
         </div>
       </header>
     </article>
@@ -153,6 +153,7 @@ const CRAFT_PLAN_AUDIT_CATEGORY_LABELS: Record<string, string> = {
   storage: "Settlement storage",
   player_inventory: "Player inventory",
   player_crafts: "Player crafts",
+  player_bank: "Player bank",
   deployable: "Deployable",
   gathered_item: "Gathered item",
 };
@@ -196,6 +197,12 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [progressAuditError, setProgressAuditError] = React.useState<string | null>(null);
   const [auditDownloadRange, setAuditDownloadRange] = React.useState<string | null>(null);
   const [auditDownloadError, setAuditDownloadError] = React.useState<string | null>(null);
+  const [bankLoads, setBankLoads] = React.useState<Record<string, PlayerBankLoad>>({});
+  const [bankDiscoveryStarted, setBankDiscoveryStarted] = React.useState(false);
+  const [legacyBankMigrations, setLegacyBankMigrations] = React.useState<string[]>([]);
+  const [expandedBankPlayers, setExpandedBankPlayers] = React.useState<string[]>([]);
+  const [bankSearch, setBankSearch] = React.useState("");
+  const [trackedBanksOnly, setTrackedBanksOnly] = React.useState(false);
   async function adminApi(path: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers);
     headers.set("content-type", "application/json");
@@ -215,6 +222,10 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
       const result = await trackPromise("craft-plan-manager", adminApi("/admin/craft-plan"));
       setState(result);
       setConfig({ ...emptyConfig(), ...(result.config ?? {}), sourceRules: { ...emptyConfig().sourceRules, ...(result.config?.sourceRules ?? {}) } });
+      setBankLoads({});
+      setBankDiscoveryStarted(false);
+      setLegacyBankMigrations([]);
+      setExpandedBankPlayers([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -286,12 +297,54 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setProgressAuditError(null);
     setAuditDownloadRange(null);
     setAuditDownloadError(null);
+    setBankLoads({});
+    setBankDiscoveryStarted(false);
+    setLegacyBankMigrations([]);
+    setExpandedBankPlayers([]);
+    setBankSearch("");
+    setTrackedBanksOnly(false);
   }, [open]);
 
   React.useEffect(() => {
     if (!open || activeTab !== "audit" || auditLoaded || auditLoading) return;
     void loadAudit();
   }, [open, activeTab, auditLoaded, auditLoading, loadAudit]);
+
+  async function loadPlayerBanks(player: AnyRecord) {
+    const playerId = String(player.playerId ?? "");
+    if (!playerId) return;
+    const initiallyExpanded = initiallyExpandedBankPlayerIds(config.sourceRules).includes(playerId);
+    const wasLegacyTracked = config.sourceRules.bankPlayerIds.includes(playerId);
+    setBankLoads((current) => ({ ...current, [playerId]: { status: "loading", banks: current[playerId]?.banks ?? [], warnings: [] } }));
+    try {
+      const result = await trackPromise(`craft-plan-player-banks:${playerId}`, adminApi(`/admin/craft-plan/player-banks?playerId=${encodeURIComponent(playerId)}`));
+      const banks = Array.isArray(result.banks) ? result.banks : [];
+      setBankLoads((current) => ({ ...current, [playerId]: { status: "loaded", banks, warnings: Array.isArray(result.warnings) ? result.warnings.map(String) : [] } }));
+      setConfig((current) => {
+        const sourceRules = mergeLegacyBankDiscovery(current.sourceRules, playerId, banks);
+        return sourceRules === current.sourceRules ? current : { ...current, sourceRules };
+      });
+      if (wasLegacyTracked) setLegacyBankMigrations((current) => current.includes(playerId) ? current : [...current, playerId]);
+      if (initiallyExpanded) setExpandedBankPlayers((current) => current.includes(playerId) ? current : [...current, playerId]);
+    } catch (err) {
+      setBankLoads((current) => ({ ...current, [playerId]: { status: "error", banks: current[playerId]?.banks ?? [], warnings: [], error: err instanceof Error ? err.message : String(err) } }));
+    }
+  }
+
+  React.useEffect(() => {
+    if (open && activeTab === "banks") setBankDiscoveryStarted(true);
+  }, [open, activeTab]);
+
+  React.useEffect(() => {
+    if (!open || !bankDiscoveryStarted) return;
+    const players = Array.isArray(state?.sources?.players) ? state.sources.players : [];
+    if (!players.length) return;
+    let cancelled = false;
+    void runBankDiscoveryQueue(players, async (player: AnyRecord) => {
+      if (!cancelled) await loadPlayerBanks(player);
+    }, BANK_LOAD_CONCURRENCY);
+    return () => { cancelled = true; };
+  }, [open, bankDiscoveryStarted, state?.sources?.players]);
 
   React.useEffect(() => {
     const trimmed = query.trim();
@@ -338,7 +391,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setConfig((current) => ({ ...current, ...patch }));
   }
 
-  function updateSource(kind: "storageContainerIds" | "playerIds" | "craftPlayerIds" | "bankPlayerIds" | "deployableContainerIds", id: string, checked: boolean) {
+  function updateSource(kind: "storageContainerIds" | "playerIds" | "craftPlayerIds" | "bankPlayerIds" | "bankContainerIds" | "deployableContainerIds", id: string, checked: boolean) {
     setConfig((current) => {
       const currentValues = current.sourceRules[kind] ?? [];
       const nextValues = checked ? [...new Set([...currentValues, id])] : currentValues.filter((value) => value !== id);
@@ -383,7 +436,11 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setError(null);
     setStatus(null);
     try {
-      const result = await adminApi("/admin/craft-plan", { method: "PUT", body: JSON.stringify(config) });
+      const submittedConfig = {
+        ...config,
+        sourceRules: finalizeLegacyBankMigrations(config.sourceRules, legacyBankMigrations),
+      };
+      const result = await adminApi("/admin/craft-plan", { method: "PUT", body: JSON.stringify(submittedConfig) });
       setState(result);
       setConfig({ ...emptyConfig(), ...(result.config ?? {}), sourceRules: { ...emptyConfig().sourceRules, ...(result.config?.sourceRules ?? {}) } });
       setStatus("Craft plan saved.");
@@ -406,6 +463,10 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const tierPresets = state?.sources?.tierPresets ?? [];
   const workstationPresets = state?.sources?.workstationPresets ?? [];
   const routeSteps = Array.isArray(state?.plan?.steps) ? state.plan.steps : [];
+  const trackedBankIds = new Set(config.sourceRules.bankContainerIds.map(String));
+  const bankGroups = buildCraftPlanBankGroups({ players: playerSources, bankLoads, trackedBankIds: config.sourceRules.bankContainerIds, search: bankSearch, trackedOnly: trackedBanksOnly });
+  const loadedBankPlayers = Object.values(bankLoads).filter((entry) => entry.status === "loaded" || entry.status === "error").length;
+  const trackedBankCount = config.sourceRules.bankContainerIds.length;
   const pendingLabel = operation === "loading" ? "Loading plan data…" : operation === "refreshing" ? "Refreshing plan data…" : operation === "saving" ? "Saving plan…" : operation === "preset" ? "Loading workstation preset…" : null;
 
   return (
@@ -433,6 +494,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             ["targets", <Target size={15} />, "Targets"],
             ["sources", <Package size={15} />, "Storage"],
             ["players", <Package size={15} />, "Players & Deployables"],
+            ["banks", <Package size={15} />, "Banks"],
             ["routes", <Route size={15} />, "Routes"],
             ["buffers", <SlidersHorizontal size={15} />, "Buffers"],
             ["audit", <History size={15} />, "Audit"],
@@ -481,7 +543,43 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
 
           {activeTab === "sources" ? <section className="craft-plan-manager-panel"><h3>Settlement storage</h3><p className="legend">Inventory cards show the largest visible item stacks from each live Relay storage container.</p><div className="craft-plan-source-grid">{storageSources.length ? storageSources.map((source: AnyRecord) => sourceCard(source, config.sourceRules.storageContainerIds.includes(String(source.sourceId)), (checked) => updateSource("storageContainerIds", String(source.sourceId), checked))) : <p className="legend">No settlement storage sources found.</p>}</div></section> : null}
 
-          {activeTab === "players" ? <section className="craft-plan-manager-panel"><h3>Players & deployables</h3><p className="legend">Choose which player inventories, active crafts, and banks count toward the plan. Banks include all Relay-visible settlement banks for that player, including banks in other settlements, as confirmed stock.</p><div className="craft-plan-source-grid compact">{playerSources.length ? playerSources.map((source: AnyRecord) => playerSourceCard(source, config.sourceRules.playerIds.includes(String(source.playerId)), config.sourceRules.craftPlayerIds.includes(String(source.playerId)), config.sourceRules.bankPlayerIds.includes(String(source.playerId)), (checked) => updateSource("playerIds", String(source.playerId), checked), (checked) => updateSource("craftPlayerIds", String(source.playerId), checked), (checked) => updateSource("bankPlayerIds", String(source.playerId), checked))) : <p className="legend">No settlement players found.</p>}</div><h4>Deployables</h4>{deployableGroups.length ? <div className="craft-plan-deployable-groups">{deployableGroups.map((group) => <section className="craft-plan-deployable-group" key={group.playerId}><header><strong>{group.playerName}</strong><small>{formatNumber(group.sources.length, 0)} deployables</small></header><div className="craft-plan-source-grid compact">{group.sources.map((source: AnyRecord) => sourceCard({ ...source, label: String(source.label ?? source.containerKind ?? "Deployable storage") }, config.sourceRules.deployableContainerIds.includes(String(source.sourceId)), (checked) => updateSource("deployableContainerIds", String(source.sourceId), checked)))}</div></section>)}</div> : <p className="legend">No deployables discovered for the selected players yet.</p>}</section> : null}
+          {activeTab === "players" ? <section className="craft-plan-manager-panel"><h3>Players & deployables</h3><p className="legend">Choose which player inventories and active crafts count toward the plan. Individual bank tracking is managed from the Banks tab.</p><div className="craft-plan-source-grid compact">{playerSources.length ? playerSources.map((source: AnyRecord) => playerSourceCard(source, config.sourceRules.playerIds.includes(String(source.playerId)), config.sourceRules.craftPlayerIds.includes(String(source.playerId)), (checked) => updateSource("playerIds", String(source.playerId), checked), (checked) => updateSource("craftPlayerIds", String(source.playerId), checked))) : <p className="legend">No settlement players found.</p>}</div><h4>Deployables</h4>{deployableGroups.length ? <div className="craft-plan-deployable-groups">{deployableGroups.map((group) => <section className="craft-plan-deployable-group" key={group.playerId}><header><strong>{group.playerName}</strong><small>{formatNumber(group.sources.length, 0)} deployables</small></header><div className="craft-plan-source-grid compact">{group.sources.map((source: AnyRecord) => sourceCard({ ...source, label: String(source.label ?? source.containerKind ?? "Deployable storage") }, config.sourceRules.deployableContainerIds.includes(String(source.sourceId)), (checked) => updateSource("deployableContainerIds", String(source.sourceId), checked)))}</div></section>)}</div> : <p className="legend">No deployables discovered for the selected players yet.</p>}</section> : null}
+
+          {activeTab === "banks" ? <section className="craft-plan-manager-panel craft-plan-bank-panel">
+            <div className="split-header"><div><h3>Player banks</h3><p className="legend">Track only the individual banks whose stock should count toward this plan. Empty untracked banks are hidden.</p></div><small>{formatNumber(trackedBankCount, 0)} tracked</small></div>
+            <div className="craft-plan-bank-toolbar">
+              <label className="search"><Search size={16} /><input value={bankSearch} onChange={(event) => setBankSearch(event.target.value)} placeholder="Search players, banks, or settlements" aria-label="Search player banks" /></label>
+              <label className="craft-plan-bank-filter"><input type="checkbox" checked={trackedBanksOnly} onChange={(event) => setTrackedBanksOnly(event.target.checked)} /><span>Tracked only</span></label>
+              <span className="craft-plan-bank-progress" role="status" aria-live="polite">{loadedBankPlayers < playerSources.length ? <><LoaderCircle className="is-spinning" size={14} /> Discovering banks {loadedBankPlayers}/{playerSources.length}</> : `${loadedBankPlayers} players checked`}</span>
+            </div>
+            {bankGroups.length ? <div className="craft-plan-bank-groups">{bankGroups.map((group: AnyRecord) => {
+              const expanded = Boolean(bankSearch.trim()) || expandedBankPlayers.includes(group.playerId);
+              return <section className={`craft-plan-bank-group${group.trackedCount ? " has-tracked" : ""}`} key={group.playerId}>
+                <button className="craft-plan-bank-group-toggle" type="button" aria-expanded={expanded} onClick={() => setExpandedBankPlayers((current) => current.includes(group.playerId) ? current.filter((id) => id !== group.playerId) : [...current, group.playerId])}>
+                  <span><strong>{group.playerName}</strong><small>{group.loadState?.status === "loaded" ? `${formatNumber(group.nonEmptyCount, 0)} non-empty banks · ${formatNumber(group.trackedCount, 0)} tracked` : group.loadState?.status === "error" ? "Bank discovery failed" : "Discovering banks…"}</small></span>
+                  <span>{expanded ? "Hide" : "Show"}</span>
+                </button>
+                {expanded ? <div className="craft-plan-bank-group-body">
+                  {group.loadState?.status === "loading" || !group.loadState ? <div className="craft-plan-bank-state"><LoaderCircle className="is-spinning" size={18} /><span>Loading {group.playerName}’s banks…</span></div> : null}
+                  {group.loadState?.status === "error" ? <div className="craft-plan-bank-state is-error"><span>{group.loadState.error}</span><button className="toolbar-button" type="button" onClick={() => void loadPlayerBanks({ playerId: group.playerId, label: group.playerName })}><RefreshCw size={14} /> Retry</button></div> : null}
+                  {group.loadState?.warnings?.length ? <div className="alert warning">{group.loadState.warnings.join(" ")}</div> : null}
+                  {group.loadState?.status === "loaded" && group.visibleBanks.length ? <div className="craft-plan-bank-grid">{group.visibleBanks.map((bank: AnyRecord) => {
+                    const sourceId = String(bank.sourceId);
+                    const tracked = trackedBankIds.has(sourceId);
+                    const items = Array.isArray(bank.items) ? bank.items : [];
+                    const itemCount = Number(bank.itemCount ?? items.length ?? 0);
+                    const unavailable = bank.unavailable === true;
+                    return <article className={`craft-plan-bank-card${tracked ? " is-included" : ""}`} key={sourceId}>
+                      <header><div><strong>{bank.label ?? sourceId}</strong><small>{unavailable ? "Unavailable — tracked" : itemCount > 0 ? `${formatNumber(itemCount, 0)} visible stacks` : "Empty — tracked"}</small></div><label className="compact-toggle"><input type="checkbox" checked={tracked} onChange={(event) => updateSource("bankContainerIds", sourceId, event.target.checked)} /><span>{tracked ? "Tracked" : "Track"}</span></label></header>
+                      {unavailable ? <div className="alert warning">This tracked bank is not present in the latest Relay data.</div> : itemCount > 0 ? itemPreview(items, 4) : <p className="legend">This tracked bank currently has no visible items.</p>}
+                      {items.length > 4 ? <details className="craft-plan-bank-items"><summary>Show all {formatNumber(items.length, 0)} stacks</summary>{itemPreview(items, items.length)}</details> : null}
+                    </article>;
+                  })}</div> : null}
+                  {group.loadState?.status === "loaded" && !group.visibleBanks.length ? <p className="legend">No banks match the current filters.</p> : null}
+                </div> : null}
+              </section>;
+            })}</div> : loadedBankPlayers >= playerSources.length ? <div className="craft-plan-audit-state compact"><Package size={22} /><strong>No banks to show</strong><span>No non-empty or tracked banks match the current filters.</span></div> : null}
+          </section> : null}
 
           {activeTab === "routes" ? <section className="craft-plan-manager-panel"><div className="split-header"><div><h3>Recipe routes in use</h3><p className="legend">These are the recipes currently pulled into the plan from your targets. Change a dropdown, then save the plan to recalculate needed materials.</p></div><small>{routeSteps.length ? `${routeSteps.length} recipe steps` : "No recipe steps"}</small></div>{routeSteps.length ? <div className="craft-plan-route-overview-list">{routeSteps.map((step: AnyRecord, index: number) => { const outputKey = routeOutputKey(step); const alternatives = Array.isArray(step.alternatives) ? step.alternatives : []; const selectedRecipeId = String(config.routeOverrides[outputKey] ?? step.selectedRecipeId ?? ""); return <article className="craft-plan-route-overview-card" key={`${outputKey}:${step.id ?? index}`}><div><strong><ItemLabel item={step.output ?? step} /></strong><small>{step.recipeName ?? "Selected recipe"}{step.buildingName ? ` - ${step.buildingName}` : ""}</small></div><label className="field compact-field"><span>Recipe</span><select value={selectedRecipeId} disabled={alternatives.length <= 1} onChange={(event) => setConfig((current) => ({ ...current, routeOverrides: { ...current.routeOverrides, [outputKey]: event.target.value } }))}>{alternatives.length ? alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{routeOptionLabel(recipe)}</option>) : <option value={selectedRecipeId}>{step.recipeName ?? "Default recipe"}</option>}</select></label>{config.routeOverrides[outputKey] ? <button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => { const next = { ...current.routeOverrides }; delete next[outputKey]; return { ...current, routeOverrides: next }; })}><Trash2 size={14} /> Reset</button> : <span className="legend">Default</span>}</article>; })}</div> : <p className="legend">Add targets and save the plan to see the recipe chain used for the current goals.</p>}</section> : null}
 
