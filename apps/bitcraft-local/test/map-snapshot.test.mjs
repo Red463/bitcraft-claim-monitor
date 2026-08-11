@@ -46,6 +46,24 @@ test("map request access follows the configured Map page rule", () => {
   assert.equal(mapRequestAccess(config, { user: { discordId: "123456", characterStatus: "approved" } }).allowed, true);
 });
 
+test("roads and claim areas are accepted but fail closed until coordinates are verified", () => {
+  const scope = parseMapScope(new URLSearchParams({
+    regions: "19",
+    layers: "roads,claim-areas",
+  }), { allowedRegionIds: ["19"] });
+  const snapshot = buildMapSnapshot({ scope, now: new Date("2026-08-11T12:00:00.000Z") });
+
+  assert.deepEqual(snapshot.layers.roads, []);
+  assert.deepEqual(snapshot.layers["claim-areas"], []);
+  assert.deepEqual(snapshot.layerAvailability.roads, {
+    available: false,
+    reason: "Unavailable — awaiting verified Relay coordinates",
+  });
+  assert.equal(snapshot.layerAvailability["claim-areas"].available, false);
+  assert.match(snapshot.warnings.join(" "), /roads.*verified Relay coordinates/i);
+  assert.match(snapshot.warnings.join(" "), /claim areas.*verified Relay coordinates/i);
+});
+
 test("map snapshot projects available operations and reports uncollected layers", () => {
   const scope = parseMapScope(new URLSearchParams({
     regions: "19",

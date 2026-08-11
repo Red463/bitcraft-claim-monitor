@@ -5,6 +5,8 @@ const OPERATIONAL_LAYERS = [
   "markets",
   "watchtowers",
   "waystones",
+  "roads",
+  "claim-areas",
 ];
 
 function decimalSort(values) {

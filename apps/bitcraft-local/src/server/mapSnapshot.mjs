@@ -11,6 +11,8 @@ export const MAP_LAYER_KEYS = [
   "players",
   "resources",
   "enemies",
+  "roads",
+  "claim-areas",
 ];
 
 export const MAP_SCOPE_LIMITS = Object.freeze({
@@ -111,6 +113,7 @@ export function buildMapSnapshot({
   spatial = null,
 } = {}) {
   const layers = Object.fromEntries(scope.layers.map((layer) => [layer, []]));
+  const layerAvailability = Object.fromEntries(scope.layers.map((layer) => [layer, { available: true, reason: null }]));
   const warnings = [...new Set(
     [regionClaims, market, empires, spatial]
       .flatMap((snapshot) => Array.isArray(snapshot?.warnings) ? snapshot.warnings : [])
@@ -173,6 +176,15 @@ export function buildMapSnapshot({
   }
   if (waystoneCoordinatesVerified && layers.waystones && !Array.isArray(regionClaims?.data?.waystones) && !Array.isArray(spatialRows.waystones)) warnings.push("waystones map data is unavailable.");
   if (layers["empire-territory"]) warnings.push("empire-territory map data is unavailable until the chunk-to-map polygon transform is live-verified.");
+  const unverifiedGeometryReason = "Unavailable — awaiting verified Relay coordinates";
+  if (layers.roads) {
+    layerAvailability.roads = { available: false, reason: unverifiedGeometryReason };
+    warnings.push("Roads are unavailable — awaiting verified Relay coordinates.");
+  }
+  if (layers["claim-areas"]) {
+    layerAvailability["claim-areas"] = { available: false, reason: unverifiedGeometryReason };
+    warnings.push("Claim areas are unavailable — awaiting verified Relay coordinates.");
+  }
 
   const featureCount = Object.values(layers).reduce((total, rows) => total + rows.length, 0);
   if (featureCount > MAP_SCOPE_LIMITS.features) throw new MapSnapshotError(413, `Map snapshot exceeds the ${MAP_SCOPE_LIMITS.features} feature limit`);
@@ -198,6 +210,7 @@ export function buildMapSnapshot({
     coordinateSystem: { version: 1, staticSpace: "map-xz", mobileScale: 1_000, leafletOrder: "z-x", dimension: MAP_OVERWORLD_DIMENSION, bounds: MAP_WORLD_BOUNDS },
     scope,
     layers,
+    layerAvailability,
   };
   if (Buffer.byteLength(JSON.stringify(result)) > MAP_SCOPE_LIMITS.bytes) throw new MapSnapshotError(413, "Map snapshot exceeds the response byte limit");
   return result;
