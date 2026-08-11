@@ -8,4 +8,5 @@ export type MapCoordinatePoint = { x: number; z: number; dimension: string; coor
 export function normalizeStaticMapPoint(value: MapCoordinateInput): MapCoordinatePoint;
 export function mapPointFromMobile(value: MapCoordinateInput): MapCoordinatePoint;
 export function leafletPoint(value: Pick<MapCoordinateInput, "x" | "z">): [number, number];
+export function gridTileOrigin(coords: { x: number; y: number; z: number }, tileSize: number): { north: number; east: number };
 export function displayHexPoint(value: Pick<MapCoordinateInput, "x" | "z">): { north: number; east: number };

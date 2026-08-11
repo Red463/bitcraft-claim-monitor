@@ -54,3 +54,39 @@ Acceptance requires a complete generation proving:
 7. Warm snapshots remain below 500 ms, 50,000 features, and 8 MiB uncompressed JSON.
 
 Until items 1–3 pass, the server deliberately returns no player coordinates. A schema mismatch or unverified source must remain an unavailable layer and retain only non-player last-good data.
+
+## First-party renderer and BitCraftMap parity target
+
+In this project, **native** means an app-owned renderer and same-origin API. It does not require a platform-native UI toolkit, and it does not permit the browser to contact BitCraftMap, Prism, BitJita, or a third-party tile host.
+
+The current public BitCraftMap application was inspected on 2026-08-11. Its visible layer inventory is the parity target, not the older GitHub application's `23040 x 23040` image map:
+
+- Terrain and game basemaps, including visible land and water.
+- Events, wonders, hexite deposits, Maker's Trees, temples, ruined cities, traveler camps, volcanic geysers, hermit crab dens, shipwrecks, uncharted ruins, and silkmoth breeding grounds.
+- Banks, markets, waystones, grids, dungeons, territories, watchtowers, claims by tier, caves by tier, roads, and custom waypoints.
+- User-selected resources, enemies, and players.
+
+The maintained app currently implements claims, markets, banks, waystones, empire settlements, watchtowers, selected players/resources/enemies, and custom focus/waypoints. A zero count means Relay returned no usable feature for that requested region/generation; it must not be presented as proof that the feature does not exist globally. On the map, a bank is a `bank_state` world marker. Settlement/player bank inventories are a separate operational feature and are not map geometry.
+
+### Basemap ownership boundary
+
+The current BitCraftMap browser uses `38400 x 38400` raster tiles, but no redistribution grant for those current tile assets was located. The old BSD-2-Clause GitHub repository contains a stale `23040 x 23040` map and is not projection-compatible with the current world. Consequently:
+
+- Browsers request terrain only from `/api/local/map/tiles/terrain/{z}/{x}/{y}.webp`.
+- The server reads provisioned files from `data/map-tiles/terrain/<z>/<x>/<y>.webp`; negative Y names are valid.
+- Missing local tiles return `404` and leave the coordinate grid visible with an explicit installation warning.
+- Do not copy, hotlink, or redistribute current Prism/BitCraftMap tiles until their owner grants documented permission.
+- The durable first-party alternative is a bounded Relay `terrain_chunk_state` collector and an offline/self-hosted tile generator. Its biome, elevation, and water-array-to-pixel semantics still require live fixture verification before implementation.
+
+### Remaining parity data work
+
+| Parity group | Current source/status | Required work |
+| --- | --- | --- |
+| Terrain/game/water | Same-origin tile seam; no tile set provisioned | Obtain a redistribution grant and provision a versioned bundle, or verify and render `terrain_chunk_state` |
+| Banks/waystones | Regional `bank_state` / `waystone_state` | Validate live counts and known locations in every enabled region |
+| Markets | Existing `marketplace_state` projection | Generalize beyond the monitored claim if parity requires all regional markets |
+| Claims/watchtowers/settlements | Existing Relay projections | Add tier/icon controls and verify every active region |
+| Resources/enemies/players | Bounded live sessions | Complete the pending live coordinate/deletion acceptance above |
+| Roads | No active projection | Verify `paved_tile_state` coordinate decoding and build a bounded/vector or raster layer |
+| Caves and world POIs | No active projection | Identify authoritative Relay tables/knowledge visibility, normalize, and fixture-test each kind |
+| Territory/grids/dungeons | Partial bindings only | Verify chunk/tile transforms and dimension semantics before rendering |

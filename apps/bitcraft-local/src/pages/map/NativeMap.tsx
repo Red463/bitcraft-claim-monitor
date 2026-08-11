@@ -2,7 +2,7 @@ import React from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, leafletPoint } from "./mapCoordinates.mjs";
+import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, leafletPoint } from "./mapCoordinates.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import type { MapFocus } from "./mapUtils";
 
@@ -56,7 +56,8 @@ class CoordinateGridLayer extends L.GridLayer {
     context.strokeRect(0.5, 0.5, size.x - 1, size.y - 1);
     context.fillStyle = "rgba(218, 229, 221, 0.58)";
     context.font = "12px system-ui";
-    context.fillText(`${coords.x}, ${coords.y}`, 10, 20);
+    const origin = gridTileOrigin(coords, size.x);
+    context.fillText(`N ${origin.north} · E ${origin.east}`, 10, 20);
     return tile;
   }
 }
@@ -163,6 +164,7 @@ export function NativeMap({
   const [snapshot, setSnapshot] = React.useState<MapSnapshot | null>(null);
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
+  const [terrainStatus, setTerrainStatus] = React.useState<"unknown" | "available" | "missing">("unknown");
   const request = React.useMemo(() => nativeMapRequest({ regionIds, playerIds, resourceIds, enemyTypes }), [regionIds.join(","), playerIds.join(","), resourceIds.join(","), enemyTypes.join(",")]);
 
   React.useEffect(() => {
@@ -172,6 +174,22 @@ export function NativeMap({
     map.setView([19_200, 19_200], -4);
     map.setMaxBounds(bounds.pad(0.25));
     new CoordinateGridLayer({ tileSize: 256, noWrap: false }).addTo(map);
+    let terrainTileLoaded = false;
+    const terrainTiles = L.tileLayer("/api/local/map/tiles/terrain/{z}/{x}/{y}.webp", {
+      tileSize: 256,
+      minNativeZoom: -5,
+      maxNativeZoom: 0,
+      noWrap: false,
+      keepBuffer: 2,
+    });
+    terrainTiles.on("tileload", () => {
+      terrainTileLoaded = true;
+      setTerrainStatus("available");
+    });
+    terrainTiles.on("tileerror", () => {
+      if (!terrainTileLoaded) setTerrainStatus("missing");
+    });
+    terrainTiles.addTo(map);
     markersRef.current = L.layerGroup().addTo(map);
     resourcesRef.current = new DensePointLayer("rgba(87, 225, 151, 0.9)").addTo(map);
     enemiesRef.current = new DensePointLayer("rgba(255, 112, 112, 0.92)").addTo(map);
@@ -238,8 +256,21 @@ export function NativeMap({
 
   React.useEffect(() => {
     const markers = markersRef.current;
-    if (!markers || !snapshot) return;
+    if (!markers) return;
     markers.clearLayers();
+    if (focus) {
+      const readable = displayHexPoint({ x: focus.locationX, z: focus.locationZ });
+      const focusMarker = L.circleMarker(leafletPoint({ x: focus.locationX, z: focus.locationZ }), {
+        radius: 8,
+        color: "#f0c64f",
+        weight: 3,
+        fillColor: "#0e1517",
+        fillOpacity: 1,
+      });
+      focusMarker.bindTooltip(`${focus.name} · N ${readable.north}, E ${readable.east}`, { permanent: true, direction: "top" });
+      focusMarker.addTo(markers);
+    }
+    if (!snapshot) return;
     for (const [layer, features] of Object.entries(snapshot.layers)) {
       if (layer === "resources" || layer === "enemies" || layer === "empire-territory") continue;
       for (const feature of features) {
@@ -256,7 +287,7 @@ export function NativeMap({
     }
     resourcesRef.current?.setPoints(snapshot.layers.resources ?? []);
     enemiesRef.current?.setPoints(snapshot.layers.enemies ?? []);
-  }, [snapshot]);
+  }, [snapshot, focus?.name, focus?.locationX, focus?.locationZ]);
 
   const denseFeatures = [...(snapshot?.layers.resources ?? []), ...(snapshot?.layers.enemies ?? [])];
   return (
@@ -266,6 +297,7 @@ export function NativeMap({
         <strong>{loading && !snapshot ? "Loading native map…" : snapshot ? `${snapshot.freshness} · generation ${snapshot.generation}` : "Native map unavailable"}</strong>
         {snapshot?.ageMs != null ? <span>{Math.round(snapshot.ageMs / 1000)}s old</span> : null}
         {error ? <span className="error">{error}</span> : null}
+        {terrainStatus === "missing" ? <span>Terrain/water tiles are not installed on this server; showing the coordinate fallback.</span> : null}
         {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{snapshot.freshness}</small></li>)}</ul> : null}
         {snapshot?.warnings?.length ? <details><summary>{snapshot.warnings.length} data warning{snapshot.warnings.length === 1 ? "" : "s"}</summary><ul>{snapshot.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
       </div>

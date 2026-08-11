@@ -36,6 +36,7 @@ import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTrans
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { MapSnapshotError, authorizedMapPlayerIds, buildMapSnapshot, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
+import { serveLocalMapTile } from "./src/server/mapTiles.mjs";
 import { createRelayClaimScopeFence } from "./src/server/relayClaimScopeFence.mjs";
 import { createRelayProductionLifecycleCoordinator } from "./src/server/relayProductionLifecycleCoordinator.mjs";
 import { createRelaySettlementTransitionCoordinator } from "./src/server/relaySettlementTransitionCoordinator.mjs";
@@ -7973,6 +7974,7 @@ const server = createServer(async (req, res) => {
         staleAfterMs: relayGlobalCatalogStaleMs,
       }));
     }
+    if (req.method === "GET" && await serveLocalMapTile(url.pathname, res, dataDir)) return;
     if (req.method === "GET" && url.pathname === "/api/local/map/catalog") {
       if (!rateLimit(req, res, "map-catalog", RATE_LIMITS.expensiveLocal)) return;
       const status = globalCatalogReadStatus();

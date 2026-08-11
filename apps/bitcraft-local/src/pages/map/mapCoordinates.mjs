@@ -39,6 +39,15 @@ export function leafletPoint(value) {
   return [finite(value?.z, "Map z"), finite(value?.x, "Map x")];
 }
 
+export function gridTileOrigin(coords, tileSize) {
+  const scale = 2 ** finite(coords?.z, "Map grid zoom");
+  const size = finite(tileSize, "Map grid tile size");
+  return {
+    north: Math.round(-(finite(coords?.y, "Map grid y") * size / scale) * MAP_HEX_APOTHEM),
+    east: Math.round(finite(coords?.x, "Map grid x") * size / scale),
+  };
+}
+
 export function displayHexPoint(value) {
   return {
     north: Math.round(finite(value?.z, "Map z") / MAP_DISPLAY_SCALE),

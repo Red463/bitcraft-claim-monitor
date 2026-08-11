@@ -5,6 +5,7 @@ import {
   MAP_WORLD_BOUNDS,
   MAP_OVERWORLD_DIMENSION,
   displayHexPoint,
+  gridTileOrigin,
   leafletPoint,
   mapPointFromMobile,
   normalizeStaticMapPoint,
@@ -20,6 +21,11 @@ test("map coordinate transforms keep x/z semantics explicit", () => {
   });
   assert.deepEqual(leafletPoint({ x: 123, z: -456 }), [-456, 123]);
   assert.deepEqual(displayHexPoint({ x: 123, z: -456 }), { north: -152, east: 41 });
+});
+
+test("coordinate grid labels use map coordinates instead of Leaflet tile indexes", () => {
+  const origin = gridTileOrigin({ x: 96, y: -134, z: 1 }, 256);
+  assert.deepEqual(origin, { north: 19805, east: 12288 });
 });
 
 test("mobile positions convert from fixed thousandths before rendering", () => {

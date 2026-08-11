@@ -80,3 +80,20 @@ test("Native map projection preserves X and squishes only Leaflet Y", () => {
   assert.match(nativeMap, /new L\.Transformation\(1, 0, 1, 0\)/);
 });
 
+test("Native map renders the current waypoint as a visible first-party marker", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+
+  assert.match(nativeMap, /focusMarker/);
+  assert.match(nativeMap, /leafletPoint\(\{ x: focus\.locationX, z: focus\.locationZ \}\)/);
+  assert.match(nativeMap, /bindTooltip\(`\$\{focus\.name\}/);
+});
+
+test("Native map requests only same-origin locally provisioned terrain tiles", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  assert.match(nativeMap, /\/api\/local\/map\/tiles\/terrain\/\{z\}\/\{x\}\/\{y\}\.webp/);
+  assert.match(nativeMap, /minNativeZoom: -5/);
+  assert.match(nativeMap, /maxNativeZoom: 0/);
+  assert.doesNotMatch(nativeMap, /prism\.brico\.app|bitcraftmap\.com/);
+  assert.match(nativeMap, /Terrain\/water tiles are not installed on this server/);
+});
+
