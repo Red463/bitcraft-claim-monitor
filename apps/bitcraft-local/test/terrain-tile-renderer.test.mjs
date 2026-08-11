@@ -49,6 +49,16 @@ function fixtureRequest() {
   };
 }
 
+test("terrain render context indexes each immutable generation once", () => {
+  assert.ok(rendererModule, "terrain renderer module must exist");
+  const request = fixtureRequest();
+  const first = rendererModule.prepareTerrainRenderContext(request.generation);
+  const second = rendererModule.prepareTerrainRenderContext(request.generation);
+  assert.strictEqual(first, second);
+  assert.equal(first.chunks.get("0:0"), request.generation.chunks[0]);
+  assert.equal(first.biomeNames.get(7), "Grasslands");
+});
+
 test("terrain palette gives water semantic priority and deterministic elevation shading", () => {
   assert.ok(paletteModule, "terrain palette module must exist");
   assert.deepEqual(paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Uncharted Ocean", elevation: -20 }), [24, 59, 86, 255]);

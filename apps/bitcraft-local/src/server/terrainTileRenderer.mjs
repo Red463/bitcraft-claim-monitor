@@ -5,13 +5,25 @@ import { terrainCellRgba } from "./terrainPalette.mjs";
 const APOTHEM = 2 / Math.sqrt(3);
 const DEFAULT_TILE_SIZE = 256;
 const MAX_TILE_SIZE = 512;
+const TERRAIN_CONTEXTS = new WeakMap();
 
 function requireInteger(value, label) {
   if (!Number.isSafeInteger(value)) throw new TypeError(`${label} must be a safe integer`);
   return value;
 }
 
-export async function renderTerrainTile({ generation, evidence, zoom, x, y, tileSize = DEFAULT_TILE_SIZE }) {
+export function prepareTerrainRenderContext(generation) {
+  const cached = TERRAIN_CONTEXTS.get(generation);
+  if (cached) return cached;
+  const context = {
+    chunks: new Map(generation.chunks.map((chunk) => [`${chunk.chunkX}:${chunk.chunkZ}`, chunk])),
+    biomeNames: new Map((generation.biomes ?? []).map((biome) => [biome.biomeType, biome.name])),
+  };
+  TERRAIN_CONTEXTS.set(generation, context);
+  return context;
+}
+
+export async function renderTerrainTile({ generation, evidence, zoom, x, y, tileSize = DEFAULT_TILE_SIZE, context = null }) {
   if (!evidence?.verified) throw new TypeError("Terrain layout evidence is not verified");
   requireInteger(zoom, "Terrain tile zoom");
   requireInteger(x, "Terrain tile X");
@@ -22,8 +34,8 @@ export async function renderTerrainTile({ generation, evidence, zoom, x, y, tile
   if (!Number.isFinite(scale) || scale <= 0) throw new RangeError("Terrain tile zoom is unsupported");
 
   const chunkSpan = evidence.side * evidence.cellSize;
-  const chunks = new Map(generation.chunks.map((chunk) => [`${chunk.chunkX}:${chunk.chunkZ}`, chunk]));
-  const biomeNames = new Map((generation.biomes ?? []).map((biome) => [biome.biomeType, biome.name]));
+  const prepared = context ?? prepareTerrainRenderContext(generation);
+  const { chunks, biomeNames } = prepared;
   const rgba = Buffer.alloc(tileSize * tileSize * 4);
   const warnings = [];
 
