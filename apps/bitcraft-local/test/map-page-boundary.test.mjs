@@ -117,6 +117,8 @@ test("Native map reuses one canvas renderer and fixed marker presentations", () 
   assert.match(nativeMap, /const accessibleFeatures =/);
   assert.match(nativeMap, /presentation\.mode === "canvas"/);
   assert.match(nativeMap, /accessibleFeatures\.slice\(0, 250\)/);
+  assert.match(nativeMap, /feature\.kind === "claim"\s*\? claimMarkerPresentation\(feature\.tier\)/);
+  assert.match(nativeMap, /keyboard: true/);
 });
 
 test("Native map requests only same-origin locally provisioned terrain tiles", () => {

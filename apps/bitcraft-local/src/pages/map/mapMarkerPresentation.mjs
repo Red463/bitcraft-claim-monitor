@@ -18,6 +18,18 @@ const presentations = {
 
 export const MAP_MARKER_PRESENTATIONS = Object.freeze(presentations);
 
+const CLAIM_TIER_GLYPHS = Object.freeze(["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]);
+
+export function claimMarkerPresentation(tier) {
+  if (!Number.isInteger(tier) || tier < 1 || tier > 10) return presentations.claim;
+  return Object.freeze({
+    mode: "image",
+    iconUrl: `/map-icons/claims/claim_t${tier}.png`,
+    glyph: CLAIM_TIER_GLYPHS[tier],
+    badgeCrop: true,
+  });
+}
+
 const FALLBACK_PRESENTATION = Object.freeze({ mode: "glyph", glyph: "•" });
 
 export function mapMarkerPresentation(kind) {

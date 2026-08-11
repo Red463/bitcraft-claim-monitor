@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 
 import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, leafletPoint } from "./mapCoordinates.mjs";
 import { planDensePointDraw } from "./mapDensePointPlan.mjs";
-import { MAP_MARKER_PRESENTATIONS, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
+import { MAP_MARKER_PRESENTATIONS, claimMarkerPresentation, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { loadTerrainTileStatus, terrainTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
 import type { MapFocus } from "./mapUtils";
@@ -16,6 +16,7 @@ type MapFeature = {
   regionId?: string;
   name?: string;
   identity?: string;
+  tier?: number | null;
   point: MapPoint;
 };
 type MapSnapshot = {
@@ -136,7 +137,7 @@ function markerKindClass(kind: string) {
 
 function markerIcon(kind: string, presentation: MapMarkerPresentation) {
   const content = document.createElement("span");
-  content.className = "native-map-marker-content";
+  content.className = `native-map-marker-content${presentation.mode === "image" && presentation.badgeCrop ? " native-map-marker-content--badge-crop" : ""}`;
   const glyph = document.createElement("span");
   glyph.className = "native-map-marker-glyph";
   glyph.textContent = presentation.glyph;
@@ -149,11 +150,12 @@ function markerIcon(kind: string, presentation: MapMarkerPresentation) {
     image.addEventListener("error", () => image.remove(), { once: true });
     content.prepend(image);
   }
+  const size = presentation.mode === "image" && presentation.badgeCrop ? 34 : 30;
   return L.divIcon({
     className: `native-map-marker native-map-marker--${markerKindClass(kind)}`,
     html: content,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
 }
 
@@ -332,7 +334,9 @@ export function NativeMap({
     for (const [layer, features] of Object.entries(snapshot.layers)) {
       if (layer === "resources" || layer === "enemies" || layer === "empire-territory") continue;
       for (const feature of features) {
-        const presentation = mapMarkerPresentation(feature.kind);
+        const presentation = feature.kind === "claim"
+          ? claimMarkerPresentation(feature.tier)
+          : mapMarkerPresentation(feature.kind);
         const marker = presentation.mode === "canvas"
           ? L.circleMarker(leafletPoint(feature.point), {
               radius: 5,
@@ -342,7 +346,8 @@ export function NativeMap({
               renderer: ordinaryRendererRef.current,
             })
           : L.marker(leafletPoint(feature.point), { icon: markerIcon(feature.kind, presentation), keyboard: true });
-        marker.bindTooltip(`${featureLabel(feature)} · ${displayedPoint(feature)}`);
+        const tierLabel = feature.kind === "claim" && Number.isInteger(feature.tier) ? ` · Tier ${feature.tier}` : "";
+        marker.bindTooltip(`${featureLabel(feature)}${tierLabel} · ${displayedPoint(feature)}`);
         marker.addTo(markers);
       }
     }
@@ -354,7 +359,7 @@ export function NativeMap({
     ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {
         if (layer === "empire-territory") return [];
         if (layer === "resources" || layer === "enemies") return features;
-        return features.filter((feature) => mapMarkerPresentation(feature.kind).mode === "canvas");
+        return features.filter((feature) => (feature.kind === "claim" ? claimMarkerPresentation(feature.tier) : mapMarkerPresentation(feature.kind)).mode === "canvas");
       })
     : [];
   return (
