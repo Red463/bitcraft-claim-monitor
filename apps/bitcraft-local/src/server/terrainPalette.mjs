@@ -1,4 +1,4 @@
-export const TERRAIN_PALETTE_VERSION = 1;
+export const TERRAIN_PALETTE_VERSION = 2;
 
 const WATER = Object.freeze({
   lake: [42, 91, 119, 255],
@@ -33,20 +33,43 @@ function biomeBase(name) {
   return null;
 }
 
-export function terrainCellRgba({ surface, biomeName, elevation, warnings = null }) {
+export function terrainCellRgba({
+  surface,
+  biomeName,
+  elevation,
+  originalElevation = elevation,
+  biomeDensity = 50,
+  relief = 0,
+  depth = 0,
+  shoreline = false,
+  warnings = null,
+}) {
   const water = WATER[surface];
-  if (water) return [...water];
+  if (water) {
+    const boundedDepth = clamp(Number(depth) || 0, 0, 24);
+    const depthShade = Math.trunc(boundedDepth / 3);
+    const coastShade = shoreline ? 8 : 0;
+    return [
+      clamp(water[0] - depthShade + coastShade, 0, 255),
+      clamp(water[1] - depthShade + coastShade, 0, 255),
+      clamp(water[2] + depthShade + Math.trunc(coastShade / 2), 0, 255),
+      255,
+    ];
+  }
   const known = biomeBase(biomeName);
   const base = known ?? UNKNOWN_GROUND;
   if (!known && Array.isArray(warnings)) {
     const warning = `Unknown terrain biome: ${String(biomeName ?? "") || "(empty)"}`;
     if (!warnings.includes(warning)) warnings.push(warning);
   }
-  const shade = Math.trunc(clamp(Number(elevation) || 0, -24, 24) / 3);
+  const meanElevation = ((Number(elevation) || 0) + (Number(originalElevation) || 0)) / 2;
+  const elevationShade = Math.trunc(clamp(meanElevation, -24, 24) / 3);
+  const densityShade = Math.trunc((clamp(Number(biomeDensity) || 0, 0, 100) - 50) / 12);
+  const reliefShade = Math.trunc(clamp(Number(relief) || 0, -24, 24) / 4);
   return [
-    clamp(base[0] + shade, 0, 255),
-    clamp(base[1] + shade, 0, 255),
-    clamp(base[2] + shade, 0, 255),
+    clamp(base[0] + elevationShade + reliefShade, 0, 255),
+    clamp(base[1] + elevationShade + reliefShade + densityShade, 0, 255),
+    clamp(base[2] + elevationShade + reliefShade - Math.trunc(densityShade / 2), 0, 255),
     255,
   ];
 }

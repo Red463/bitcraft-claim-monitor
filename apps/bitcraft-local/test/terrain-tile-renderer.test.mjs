@@ -61,6 +61,7 @@ test("terrain render context indexes each immutable generation once", () => {
 
 test("terrain palette gives water semantic priority and deterministic elevation shading", () => {
   assert.ok(paletteModule, "terrain palette module must exist");
+  assert.equal(paletteModule.TERRAIN_PALETTE_VERSION, 2);
   assert.deepEqual(paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Uncharted Ocean", elevation: -20 }), [24, 59, 86, 255]);
   assert.deepEqual(paletteModule.terrainCellRgba({ surface: "river", biomeName: "Grasslands", elevation: 0 }), [58, 125, 145, 255]);
   assert.deepEqual(
@@ -74,6 +75,14 @@ test("terrain palette gives water semantic priority and deterministic elevation 
   const warnings = [];
   assert.deepEqual(paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Unknown Future Biome", elevation: 0, warnings }), [104, 108, 103, 255]);
   assert.deepEqual(warnings, ["Unknown terrain biome: Unknown Future Biome"]);
+
+  const flat = paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 0, originalElevation: 0, biomeDensity: 50, relief: 0, depth: 0, shoreline: false });
+  const raised = paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 8, originalElevation: 8, biomeDensity: 80, relief: 12, depth: 0, shoreline: false });
+  assert.notDeepEqual(raised, flat);
+  const deepOcean = paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Grasslands", elevation: -10, originalElevation: -10, biomeDensity: 50, relief: 0, depth: 12, shoreline: false });
+  const coastOcean = paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Grasslands", elevation: -2, originalElevation: -2, biomeDensity: 50, relief: 0, depth: 2, shoreline: true });
+  assert.notDeepEqual(deepOcean, coastOcean);
+  assert.equal(deepOcean[2] > deepOcean[0], true);
 });
 
 test("terrain renderer is deterministic, bounded, clips world edges, and accepts negative tile Y", async () => {
@@ -89,4 +98,6 @@ test("terrain renderer is deterministic, bounded, clips world edges, and accepts
   assert.equal(rgbaAt(10, 10)[3], 0, "outside the only terrain chunk must be transparent");
   assert.equal(rgbaAt(10, 200)[3], 255, "negative tile Y must address positive world Z");
   assert.ok(rgbaAt(10, 200)[2] > rgbaAt(10, 200)[0], "southern half must decode as water");
+  assert.equal(rgbaAt(10, 240)[3], 255, "covered ground remains opaque");
+  assert.ok(rgbaAt(10, 240)[1] > rgbaAt(10, 240)[2], "northern half remains categorized as ground");
 });

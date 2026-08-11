@@ -38,28 +38,50 @@ export async function renderTerrainTile({ generation, evidence, zoom, x, y, tile
   const { chunks, biomeNames } = prepared;
   const rgba = Buffer.alloc(tileSize * tileSize * 4);
   const warnings = [];
+  const colourByCell = new Map();
+
+  const sampleCell = (mapX, mapZ) => {
+    const chunkX = Math.floor((mapX - evidence.chunkOriginX) / chunkSpan);
+    const chunkZ = Math.floor((mapZ - evidence.chunkOriginZ) / chunkSpan);
+    const chunk = chunks.get(`${chunkX}:${chunkZ}`);
+    if (!chunk || chunk.side !== evidence.side) return null;
+    const localX = Math.floor((mapX - evidence.chunkOriginX - chunkX * chunkSpan) / evidence.cellSize);
+    const sourceLocalZ = Math.floor((mapZ - evidence.chunkOriginZ - chunkZ * chunkSpan) / evidence.cellSize);
+    if (localX < 0 || localX >= evidence.side || sourceLocalZ < 0 || sourceLocalZ >= evidence.side) return null;
+    const localZ = evidence.zDirection === 1 ? sourceLocalZ : evidence.side - 1 - sourceLocalZ;
+    const cellIndex = evidence.indexOrder === "z-major" ? localZ * evidence.side + localX : localX * evidence.side + localZ;
+    const elevation = Number(chunk.elevations[cellIndex]) || 0;
+    return {
+      key: `${chunkX}:${chunkZ}:${cellIndex}`,
+      surface: evidence.surfaceTypes[chunk.waterBodyTypes[cellIndex]] ?? "ground",
+      biomeName: biomeNames.get(chunk.biomes[cellIndex]) ?? "",
+      elevation,
+      originalElevation: Number(chunk.originalElevations?.[cellIndex] ?? elevation) || 0,
+      biomeDensity: Number(chunk.biomeDensity?.[cellIndex] ?? 50) || 0,
+      waterLevel: Number(chunk.waterLevels?.[cellIndex] ?? elevation) || 0,
+    };
+  };
 
   for (let pixelY = 0; pixelY < tileSize; pixelY += 1) {
     const projectedY = (y * tileSize + pixelY + 0.5) / scale;
     const mapZ = -projectedY * APOTHEM;
-    const chunkZ = Math.floor((mapZ - evidence.chunkOriginZ) / chunkSpan);
     for (let pixelX = 0; pixelX < tileSize; pixelX += 1) {
       const mapX = (x * tileSize + pixelX + 0.5) / scale;
-      const chunkX = Math.floor((mapX - evidence.chunkOriginX) / chunkSpan);
-      const chunk = chunks.get(`${chunkX}:${chunkZ}`);
-      if (!chunk || chunk.side !== evidence.side) continue;
-      const localX = Math.floor((mapX - evidence.chunkOriginX - chunkX * chunkSpan) / evidence.cellSize);
-      const sourceLocalZ = Math.floor((mapZ - evidence.chunkOriginZ - chunkZ * chunkSpan) / evidence.cellSize);
-      if (localX < 0 || localX >= evidence.side || sourceLocalZ < 0 || sourceLocalZ >= evidence.side) continue;
-      const localZ = evidence.zDirection === 1 ? sourceLocalZ : evidence.side - 1 - sourceLocalZ;
-      const cellIndex = evidence.indexOrder === "z-major" ? localZ * evidence.side + localX : localX * evidence.side + localZ;
-      const surface = evidence.surfaceTypes[chunk.waterBodyTypes[cellIndex]] ?? "ground";
-      const colour = terrainCellRgba({
-        surface,
-        biomeName: biomeNames.get(chunk.biomes[cellIndex]) ?? "",
-        elevation: chunk.elevations[cellIndex],
-        warnings,
-      });
+      const cell = sampleCell(mapX, mapZ);
+      if (!cell) continue;
+      let colour = colourByCell.get(cell.key);
+      if (!colour) {
+        const north = sampleCell(mapX, mapZ + evidence.cellSize) ?? cell;
+        const east = sampleCell(mapX + evidence.cellSize, mapZ) ?? cell;
+        const south = sampleCell(mapX, mapZ - evidence.cellSize) ?? cell;
+        const west = sampleCell(mapX - evidence.cellSize, mapZ) ?? cell;
+        const neighbors = [north, east, south, west];
+        const relief = (west.originalElevation - east.originalElevation) + (north.originalElevation - south.originalElevation);
+        const depth = Math.max(0, cell.waterLevel - cell.elevation);
+        const shoreline = neighbors.some((neighbor) => neighbor.surface !== cell.surface && (neighbor.surface === "ground" || cell.surface === "ground"));
+        colour = terrainCellRgba({ ...cell, relief, depth, shoreline, warnings });
+        colourByCell.set(cell.key, colour);
+      }
       rgba.set(colour, (pixelY * tileSize + pixelX) * 4);
     }
   }
