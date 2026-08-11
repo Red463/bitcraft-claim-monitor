@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.53.2-beta.3] - 2026-08-11
+
+### Fixed
+
+- Restored Craft Planning completion percentages and Discord progress reports after the Relay catalog migration.
+
 ## [0.53.2-beta.2] - 2026-08-10
 
 ### Changed
