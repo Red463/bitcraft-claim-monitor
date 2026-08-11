@@ -87,3 +87,9 @@ test("terrain runtime rejects empty and over-cap scopes", async () => {
   await assert.rejects(runtime.start({ relayBaseUrl: "https://relay.example", activeRegionIds: [] }), /at least one/);
   await assert.rejects(runtime.start({ relayBaseUrl: "https://relay.example", activeRegionIds: ["1", "2", "3", "4", "5"] }), /four/);
 });
+
+test("terrain render hash includes the palette version", () => {
+  assert.ok(runtimeModule, "terrain runtime module must exist");
+  const data = terrain("1").data;
+  assert.notEqual(runtimeModule.terrainRenderHash(data, 2), runtimeModule.terrainRenderHash(data, 3));
+});

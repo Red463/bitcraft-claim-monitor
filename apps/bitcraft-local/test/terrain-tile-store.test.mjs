@@ -39,6 +39,7 @@ test("terrain store installs complete bundles and retains last-good on encoder f
     now: () => new Date("2026-08-11T16:00:00.000Z"),
     limits: { minZoom: -5, maxZoom: -3, maxTiles: 10, maxBytes: 1024, maxTileBytes: 256, deadlineMs: 10_000 },
   });
+  assert.equal(store.paletteVersion, 3, "runtime cache identity must use the installed palette version");
 
   const first = await store.buildAndInstall(generation(1));
   assert.equal(first.generation, "1");

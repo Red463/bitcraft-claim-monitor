@@ -8,6 +8,7 @@ import { discoverRelayTopology, type RelayTopology } from "./topology.ts";
 type BindingManifest = Parameters<RelayTerrainRegionSession["start"]>[0]["manifest"];
 type TerrainSession = Pick<RelayTerrainRegionSession, "start" | "health" | "stop">;
 type TerrainTileStore = {
+  paletteVersion?: number;
   buildAndInstall(generation: NormalizedTerrainGeneration & {
     generation: string;
     regionIds: string[];
@@ -22,8 +23,9 @@ type RegionEntry = {
   port: number;
 };
 
-function terrainRenderHash(data: Pick<NormalizedTerrainGeneration, "biomes" | "chunks">): string {
+export function terrainRenderHash(data: Pick<NormalizedTerrainGeneration, "biomes" | "chunks">, paletteVersion = 0): string {
   const hash = createHash("sha256");
+  hash.update(`palette:${paletteVersion};`);
   hash.update(JSON.stringify(data.biomes.map(({ biomeType, name }) => ({ biomeType, name }))));
   for (const chunk of data.chunks) {
     hash.update(`${chunk.chunkIndex}:${chunk.chunkX}:${chunk.chunkZ}:${chunk.side ?? ""}`);
@@ -184,7 +186,7 @@ export class RelayTerrainRuntime {
       regionIds: selected.map(({ regionId }) => regionId),
       evidence: this.#evidence,
     };
-    const renderHash = terrainRenderHash(combined);
+    const renderHash = terrainRenderHash(combined, this.#tileStore.paletteVersion);
     if (renderHash === this.#lastGoodRenderHash || renderHash === this.#buildingRenderHash || renderHash === this.#pending?.renderHash) return;
     this.#pending = { ...combined, renderHash };
     this.#health.pending = true;

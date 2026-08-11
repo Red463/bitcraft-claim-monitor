@@ -61,19 +61,21 @@ test("terrain render context indexes each immutable generation once", () => {
 
 test("terrain palette gives water semantic priority and deterministic elevation shading", () => {
   assert.ok(paletteModule, "terrain palette module must exist");
-  assert.equal(paletteModule.TERRAIN_PALETTE_VERSION, 2);
-  assert.deepEqual(paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Uncharted Ocean", elevation: -20 }), [24, 59, 86, 255]);
-  assert.deepEqual(paletteModule.terrainCellRgba({ surface: "river", biomeName: "Grasslands", elevation: 0 }), [58, 125, 145, 255]);
+  assert.equal(paletteModule.TERRAIN_PALETTE_VERSION, 3);
+  const ocean = paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Uncharted Ocean", elevation: -20, mapX: 10, mapZ: 20 });
+  const river = paletteModule.terrainCellRgba({ surface: "river", biomeName: "Grasslands", elevation: 0, mapX: 10, mapZ: 20 });
+  assert.ok(ocean[2] > ocean[1] && ocean[1] > ocean[0], "ocean must read as deep navy blue");
+  assert.ok(river[1] > ocean[1], "rivers must remain lighter than open ocean");
   assert.deepEqual(
-    paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Grasslands", elevation: 50 }),
-    paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Uncharted Ocean", elevation: -20 }),
+    paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Grasslands", elevation: 50, mapX: 10, mapZ: 20 }),
+    paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Uncharted Ocean", elevation: -20, mapX: 10, mapZ: 20 }),
   );
   assert.notDeepEqual(
     paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: -10 }),
     paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 10 }),
   );
   const warnings = [];
-  assert.deepEqual(paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Unknown Future Biome", elevation: 0, warnings }), [104, 108, 103, 255]);
+  assert.equal(paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Unknown Future Biome", elevation: 0, mapX: 0, mapZ: 0, warnings })[3], 255);
   assert.deepEqual(warnings, ["Unknown terrain biome: Unknown Future Biome"]);
 
   const flat = paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 0, originalElevation: 0, biomeDensity: 50, relief: 0, depth: 0, shoreline: false });
@@ -82,7 +84,15 @@ test("terrain palette gives water semantic priority and deterministic elevation 
   const deepOcean = paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Grasslands", elevation: -10, originalElevation: -10, biomeDensity: 50, relief: 0, depth: 12, shoreline: false });
   const coastOcean = paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Grasslands", elevation: -2, originalElevation: -2, biomeDensity: 50, relief: 0, depth: 2, shoreline: true });
   assert.notDeepEqual(deepOcean, coastOcean);
+  assert.ok(coastOcean[0] - deepOcean[0] >= 10, "shoreline water must be visibly brighter than deep water");
   assert.equal(deepOcean[2] > deepOcean[0], true);
+
+  const texturedA = paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 0, mapX: 310, mapZ: -87 });
+  const texturedARepeat = paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 0, mapX: 310, mapZ: -87 });
+  const texturedB = paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 0, mapX: 311, mapZ: -87 });
+  assert.deepEqual(texturedARepeat, texturedA, "texture must be deterministic for the same map cell");
+  assert.notDeepEqual(texturedB, texturedA, "adjacent map cells should receive fine deterministic texture variation");
+  assert.ok(Math.max(...texturedA.slice(0, 3).map((value, index) => Math.abs(value - texturedB[index]))) <= 6, "texture must remain subtle");
 });
 
 test("terrain renderer is deterministic, bounded, clips world edges, and accepts negative tile Y", async () => {

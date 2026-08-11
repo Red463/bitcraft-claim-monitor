@@ -54,6 +54,8 @@ export async function renderTerrainTile({ generation, evidence, style = "terrain
     const elevation = Number(chunk.elevations[cellIndex]) || 0;
     return {
       key: `${chunkX}:${chunkZ}:${cellIndex}`,
+      mapX: chunkX * evidence.side + localX,
+      mapZ: chunkZ * evidence.side + sourceLocalZ,
       surface: evidence.surfaceTypes[chunk.waterBodyTypes[cellIndex]] ?? "ground",
       biomeName: biomeNames.get(chunk.biomes[cellIndex]) ?? "",
       elevation,

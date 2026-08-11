@@ -182,6 +182,7 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
   }
 
   return {
+    paletteVersion: TERRAIN_PALETTE_VERSION,
     buildAndInstall(generation) {
       const operation = queue.then(() => build(generation));
       queue = operation.catch(() => undefined);
