@@ -39,6 +39,7 @@
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "sharp": "0.35.3",
     "spacetimedb": "2.7.0",
     "typescript": "~5.9.3",
     "vite": "catalog:"
