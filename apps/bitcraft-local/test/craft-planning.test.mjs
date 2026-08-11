@@ -437,6 +437,7 @@ test("normalizeCraftPlanConfig preserves targets, sources, route overrides, and 
       playerIds: ["player-1"],
       craftPlayerIds: ["player-1"],
       bankPlayerIds: ["player-bank", "player-bank", ""],
+      bankContainerIds: ["player-bank:bank-2", "", "player-bank:bank-2"],
       deployableContainerIds: ["player-1:cart-1"],
     },
     routeOverrides: { [recipeKey("items", "900")]: "lake-route" },
@@ -449,6 +450,7 @@ test("normalizeCraftPlanConfig preserves targets, sources, route overrides, and 
   assert.deepEqual(config.sourceRules.playerIds, ["player-1"]);
   assert.deepEqual(config.sourceRules.craftPlayerIds, ["player-1"]);
   assert.deepEqual(config.sourceRules.bankPlayerIds, ["player-bank"]);
+  assert.deepEqual(config.sourceRules.bankContainerIds, ["player-bank:bank-2"]);
   assert.deepEqual(config.sourceRules.deployableContainerIds, ["player-1:cart-1"]);
   assert.equal(config.routeOverrides[recipeKey("items", "900")], "lake-route");
   assert.equal(config.multipliers[recipeKey("items", "200")].multiplier, 1.75);
@@ -463,6 +465,7 @@ test("normalizeCraftPlanConfig defaults craft tracking to selected players for e
 
   assert.deepEqual(config.sourceRules.craftPlayerIds, ["player-1", "player-2"]);
   assert.deepEqual(config.sourceRules.bankPlayerIds, []);
+  assert.deepEqual(config.sourceRules.bankContainerIds, []);
 });
 
 test("normalizeCraftPlanConfig validates, deduplicates, and sorts gathered item keys", () => {
@@ -538,6 +541,7 @@ test("craftPlanAuditDetails records saved toggle additions and removals with lab
       storageContainerIds: ["store-old"],
       playerIds: ["player-1"],
       craftPlayerIds: [],
+      bankContainerIds: ["player-1:bank-old"],
       deployableContainerIds: ["player-1:cart"],
     },
   });
@@ -547,6 +551,7 @@ test("craftPlanAuditDetails records saved toggle additions and removals with lab
       storageContainerIds: ["store-new"],
       playerIds: ["player-1"],
       craftPlayerIds: ["player-1"],
+      bankContainerIds: ["player-1:bank-new"],
       deployableContainerIds: [],
     },
   });
@@ -555,6 +560,7 @@ test("craftPlanAuditDetails records saved toggle additions and removals with lab
     storage: { "store-old": "Old Warehouse", "store-new": "New Warehouse" },
     player_inventory: { "player-1": "Alice" },
     player_crafts: { "player-1": "Alice" },
+    player_bank: { "player-1:bank-old": "Old Town Bank", "player-1:bank-new": "New Town Bank" },
     deployable: { "player-1:cart": "Alice's Handcart" },
   }), {
     changes: [
@@ -562,6 +568,8 @@ test("craftPlanAuditDetails records saved toggle additions and removals with lab
       { category: "storage", entityId: "store-new", label: "New Warehouse", enabled: true },
       { category: "storage", entityId: "store-old", label: "Old Warehouse", enabled: false },
       { category: "player_crafts", entityId: "player-1", label: "Alice", enabled: true },
+      { category: "player_bank", entityId: "player-1:bank-new", label: "New Town Bank", enabled: true },
+      { category: "player_bank", entityId: "player-1:bank-old", label: "Old Town Bank", enabled: false },
       { category: "deployable", entityId: "player-1:cart", label: "Alice's Handcart", enabled: false },
     ],
     otherSettingsChanged: false,

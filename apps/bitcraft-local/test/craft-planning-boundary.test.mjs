@@ -234,8 +234,14 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /Settlement storage/);
   assert.match(manager, /Players & deployables/);
   assert.match(manager, /bankPlayerIds/);
-  assert.match(manager, />Banks<\/span>/);
-  assert.match(manager, /all Relay-visible settlement banks/i);
+  assert.match(manager, /bankContainerIds/);
+  assert.match(manager, /const TABS = \[[^\]]*"banks"/);
+  assert.match(manager, /\/admin\/craft-plan\/player-banks\?playerId=/);
+  assert.match(manager, /BANK_LOAD_CONCURRENCY\s*=\s*3/);
+  assert.match(manager, /Tracked only/);
+  assert.match(manager, /Empty — tracked/);
+  assert.match(manager, /Unavailable — tracked/);
+  assert.doesNotMatch(manager, />Banks<\/span>/);
   assert.match(manager, /craft-plan-player-source-card/);
   assert.match(styles, /\.craft-plan-player-source-toggles\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(100px,\s*1fr\)\)/s);
   assert.match(styles, /\.craft-plan-player-source-card\s+header\s*\{[^}]*display:\s*grid/s);
@@ -259,6 +265,7 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(server, /currentClaimBuildingsProjection\(claimId\)/);
   assert.doesNotMatch(server, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/buildings/);
   assert.match(server, /\/api\/local\/admin\/craft-plan\/workstation-preset/);
+  assert.match(server, /\/api\/local\/admin\/craft-plan\/player-banks/);
   assert.match(server, /providerCatalogRepository\.listDescriptions\("building"\)/);
   assert.match(server, /providerCatalogRepository\.listDescriptions\("construction_recipe"\)/);
   assert.match(server, /normalizeCatalogWorkstationTarget/);
@@ -388,6 +395,7 @@ test("Craft Planning reads the continuously projected Relay catalog without a sc
   assert.match(computedCraftPlan, /config\.sourceRules\.craftPlayerIds/);
   assert.match(computedCraftPlan, /selectedPlayerInventoryIds\(config\.sourceRules\)/);
   assert.match(computedCraftPlan, /config\.sourceRules\.bankPlayerIds/);
+  assert.match(computedCraftPlan, /filterSelectedPlayerBankSources\(config\.sourceRules, sources\.banks\)/);
   assert.match(computedCraftPlan, /sources\.banks/);
   assert.match(computedCraftPlan, /bankSources/);
   assert.match(computedCraftPlan, /trackedRelayCraftPlanOutputs\(\s*craftsPayload,\s*detailsByKey,\s*claimId,\s*config\.sourceRules\.craftPlayerIds/);
@@ -402,7 +410,7 @@ test("Craft Planning reads the continuously projected Relay catalog without a sc
   const playerInventoryLoop = computedCraftPlan.match(/for \(const playerId of selectedPlayerInventoryIds\(config\.sourceRules\)\)[\s\S]*?const livePlan/)?.[0] ?? "";
   assert.equal((playerInventoryLoop.match(/relayPlayerDataService\.inventory/g) ?? []).length, 1);
   assert.match(playerInventoryLoop, /inventoryPlayerIds\.has\(playerId\)/);
-  assert.match(playerInventoryLoop, /bankPlayerIds\.has\(playerId\)/);
+  assert.match(playerInventoryLoop, /filterSelectedPlayerBankSources/);
   assert.doesNotMatch(computedCraftPlan, /recipeDetailFromCatalogOrFetch|addCraftPlanItemOutputDetails|addCraftPlanCargoDerivationDetails|collectRecipeDetails|enrichCraftPlanSourceItems|fetchCraftPlanItemDetail/);
 });
 

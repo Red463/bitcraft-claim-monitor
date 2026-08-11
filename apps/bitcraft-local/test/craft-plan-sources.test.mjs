@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemFromContents, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs, trackedRelayCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
+import { filterSelectedPlayerBankSources, playerBankOptions, playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemFromContents, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs, trackedRelayCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
 
 const MONITORED_CLAIM_ID = "claim-monitored";
 
@@ -435,7 +435,46 @@ test("selectedPlayerInventoryIds shares inventory requests across source familie
   assert.deepEqual(selectedPlayerInventoryIds({
     playerIds: ["player-1", "player-2"],
     bankPlayerIds: ["player-1", "player-3"],
-  }), ["player-1", "player-2", "player-3"]);
+    bankContainerIds: ["player-4:bank-8", "player-2:bank-9"],
+  }), ["player-1", "player-2", "player-3", "player-4"]);
+});
+
+test("filterSelectedPlayerBankSources prefers exact bank IDs while preserving legacy players", () => {
+  const sources = [
+    { sourceId: "player-1:bank-a", playerId: "player-1" },
+    { sourceId: "player-1:bank-b", playerId: "player-1" },
+    { sourceId: "player-2:bank-a", playerId: "player-2" },
+    { sourceId: "player-3:bank-a", playerId: "player-3" },
+  ];
+
+  assert.deepEqual(filterSelectedPlayerBankSources({
+    bankContainerIds: ["player-1:bank-b"],
+    bankPlayerIds: ["player-1", "player-2"],
+  }, sources).map((source) => source.sourceId), ["player-1:bank-b", "player-2:bank-a"]);
+});
+
+test("playerBankOptions exposes normalized banks and preserves missing tracked bank IDs", () => {
+  const banks = playerBankOptions("player-1", "Alice", {
+    items: [{ id: 10, name: "Timber" }],
+    inventories: [{
+      entityId: "bank-stocked",
+      inventoryName: "Town Bank",
+      claimName: "Timbersteel",
+      pockets: [{ contents: { itemId: 10, itemType: 0, quantity: 12 } }],
+    }, {
+      entityId: "bank-empty",
+      inventoryName: "Town Bank",
+      claimName: "Northwatch",
+      pockets: [],
+    }],
+  }, ["player-1:bank-missing"]);
+
+  assert.deepEqual(banks.map((bank) => ({ sourceId: bank.sourceId, claimName: bank.claimName, itemCount: bank.itemCount })), [
+    { sourceId: "player-1:bank-stocked", claimName: "Timbersteel", itemCount: 1 },
+    { sourceId: "player-1:bank-empty", claimName: "Northwatch", itemCount: 0 },
+    { sourceId: "player-1:bank-missing", claimName: null, itemCount: 0 },
+  ]);
+  assert.deepEqual(banks[0].items.map((item) => [item.kind, item.id, item.quantity]), [["items", "10", 12]]);
 });
 
 test("player banks preserve item and cargo identity", () => {

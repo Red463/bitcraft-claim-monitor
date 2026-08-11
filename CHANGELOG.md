@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.54.0-beta.1] - 2026-08-11
+
+### Added
+
+- Added individual Craft Planning bank tracking for each settlement player, including progressive discovery, search, filtering, and tracked-empty bank visibility.
+
+### Changed
+
+- Enlarged and rebalanced the Craft Planning manager for clearer desktop, laptop, and mobile use.
+
 ## [0.53.2-beta.3] - 2026-08-11
 
 ### Fixed

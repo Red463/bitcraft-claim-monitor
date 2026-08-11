@@ -107,7 +107,9 @@ import {
 import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
 import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
 import { buildWorkstationPresets, normalizeCatalogWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
-import { playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedRelayCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
+import { filterSelectedPlayerBankSources, playerBankOptions, playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedRelayCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
+import { bankSourceBelongsToPlayer } from "./src/craftPlanBankIdentity.mjs";
+import { resolveCraftPlanPlayerBanks } from "./src/server/craftPlanPlayerBanksAdmin.mjs";
 import {
   MANUAL_REFRESH_HEADER,
   createManualRefreshGuard,
@@ -1707,6 +1709,7 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
   const storageSources = settlementStorageSourcesFromInventories(inventoriesPayload, []);
   const members = unwrap(membersPayload, "members", []);
   const deployableOptions = [];
+  const bankOptions = [];
   const selectedInventoryPlayers = new Set(selectedPlayerInventoryIds(config.sourceRules));
   for (const member of members.filter((entry) => selectedInventoryPlayers.has(String(entry.playerEntityId ?? entry.entityId ?? "")))) {
     const playerId = String(member.playerEntityId ?? member.entityId ?? "");
@@ -1724,6 +1727,10 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
         gameCatalogRepository,
         sources.deployableOptions,
       ));
+      bankOptions.push(...enrichCraftPlanSourcesFromLocalCatalog(
+        gameCatalogRepository,
+        playerBankOptions(playerId, label, envelope.data, config.sourceRules.bankContainerIds),
+      ));
     } catch {
       // The admin page can still save selected players even if deployable discovery is temporarily unavailable.
     }
@@ -1738,6 +1745,7 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
     sources: {
       storage: storageSources.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length, items: source.items.slice(0, 12) })),
       players: members.map((member) => ({ playerId: String(member.playerEntityId ?? member.entityId ?? ""), label: String(member.userName ?? member.username ?? member.playerName ?? "Unknown member") })).filter((member) => member.playerId),
+      banks: bankOptions,
       deployables: deployableOptions,
       tierPresets: await craftPlanTierPresets(claimId),
       workstationPresets,
@@ -1745,15 +1753,31 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
   };
 }
 
+async function craftPlanPlayerBankResponse(playerId, claimId = getSettings().claimId) {
+  return resolveCraftPlanPlayerBanks({
+    playerId,
+    members: unwrap(currentMembersProjection(claimId), "members", []),
+    trackedBankIds: storedCraftPlanConfig().sourceRules.bankContainerIds,
+    loadInventory: (cleanPlayerId) => relayPlayerDataService.inventory({
+      configuredClaimId: currentClaimId(),
+      claimId: String(claimId),
+      playerId: cleanPlayerId,
+      forceRefresh: false,
+    }),
+    enrichBanks: (banks) => enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, banks),
+  });
+}
+
 function craftPlanAuditLabels(sources = {}, materials = []) {
   const storage = Object.fromEntries((sources.storage ?? []).map((source) => [String(source.sourceId), String(source.label ?? source.sourceId)]));
   const players = Object.fromEntries((sources.players ?? []).map((source) => [String(source.playerId), String(source.label ?? source.playerId)]));
+  const playerBank = Object.fromEntries((sources.banks ?? []).map((source) => [String(source.sourceId), String(source.label ?? source.sourceId)]));
   const deployable = Object.fromEntries((sources.deployables ?? []).map((source) => [String(source.sourceId), String(source.label ?? source.sourceId)]));
   const gatheredItem = Object.fromEntries((materials ?? []).map((item) => {
     const key = String(item.key ?? `${item.kind === "cargo" || item.itemType === 1 ? "cargo" : "items"}:${item.id}`);
     return [key, String(item.name ?? key)];
   }));
-  return { storage, player_inventory: players, player_crafts: players, deployable, gathered_item: gatheredItem };
+  return { storage, player_inventory: players, player_crafts: players, player_bank: playerBank, deployable, gathered_item: gatheredItem };
 }
 
 
@@ -1924,9 +1948,11 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
       if (inventoryPlayerIds.has(playerId)) {
         playerSources.push(enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, sources.inventory, catalogWarnings));
       }
-      if (bankPlayerIds.has(playerId)) {
-        bankSources.push(...enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, sources.banks, catalogWarnings));
-      }
+      bankSources.push(...enrichCraftPlanSourcesFromLocalCatalog(
+        gameCatalogRepository,
+        filterSelectedPlayerBankSources(config.sourceRules, sources.banks),
+        catalogWarnings,
+      ));
       deployableSources.push(...enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, sources.deployables, catalogWarnings));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1939,8 +1965,11 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
       if (inventoryPlayerIds.has(playerId)) {
         playerSources.push({ sourceId: playerId, label: `${label} inventory`, type: "Player inventory", unavailable: true, error: message, items: [] });
       }
+      const exactBankIds = config.sourceRules.bankContainerIds.filter((sourceId) => bankSourceBelongsToPlayer(sourceId, playerId));
       if (bankPlayerIds.has(playerId)) {
         bankSources.push({ sourceId: `${playerId}:banks`, label: `${label} banks`, type: "Player bank", playerId, playerName: label, unavailable: true, error: message, items: [] });
+      } else {
+        bankSources.push(...exactBankIds.map((sourceId) => ({ sourceId, label: sourceId, type: "Player bank", playerId, playerName: label, unavailable: true, error: message, items: [] })));
       }
       if (config.sourceRules.deployableContainerIds.length) {
         deployableSources.push({ sourceId: `${playerId}:deployables`, label: `${label} deployables`, type: "Player deployable", playerId, playerName: label, unavailable: true, error: message, items: [] });
@@ -8399,6 +8428,11 @@ const server = createServer(async (req, res) => {
       if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan") {
         return send(res, 200, await craftPlanAdminResponse(getSettings().claimId));
       }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/player-banks") {
+        const playerId = String(url.searchParams.get("playerId") ?? "").trim();
+        const result = await craftPlanPlayerBankResponse(playerId, getSettings().claimId);
+        return send(res, result.status, result.body);
+      }
       if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/workstation-preset") {
         try {
           return send(res, 200, await resolveCraftPlanWorkstationPreset(url.searchParams.get("tier")));
@@ -8422,7 +8456,7 @@ const server = createServer(async (req, res) => {
         audit(user, "craft_plan.update", {
           targets: config.targets.length,
           players: config.sourceRules.playerIds.length,
-          banks: config.sourceRules.bankPlayerIds.length,
+          banks: config.sourceRules.bankContainerIds.length + config.sourceRules.bankPlayerIds.length,
           deployables: config.sourceRules.deployableContainerIds.length,
           changes: auditDetails.changes,
           otherSettingsChanged: auditDetails.otherSettingsChanged,

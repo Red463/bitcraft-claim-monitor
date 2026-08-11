@@ -72,6 +72,7 @@ function normalizeSourceRules(value = {}) {
     playerIds: sortedStrings(value.playerIds),
     craftPlayerIds: sortedStrings(value.craftPlayerIds),
     bankPlayerIds: sortedStrings(value.bankPlayerIds),
+    bankContainerIds: sortedStrings(value.bankContainerIds),
     deployableContainerIds: sortedStrings(value.deployableContainerIds),
   };
 }
