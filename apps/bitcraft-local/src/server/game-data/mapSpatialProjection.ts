@@ -11,7 +11,9 @@ type WireRecord = Record<string, unknown>;
 // Relay's live overworld rows use dimension 1. Keep this local because this
 // module is compiled into the isolated provider runtime.
 const MAP_OVERWORLD_DIMENSION = "1";
-const MAX_IDS_PER_DETAIL_QUERY = 100;
+const MAP_WORLD_MAX = 38_400;
+const MAP_MOBILE_WORLD_MAX = MAP_WORLD_MAX * 1_000;
+const MAX_IDS_PER_QUERY = 100;
 const ENEMY_TYPE_TAGS = [
   "None", "PracticeDummy", "GrassBird", "DesertBird", "SwampBird", "Goat", "MountainGoat", "DeerFemale", "DeerMale", "Elk",
   "BoarFemale", "BoarMale", "BoarElder", "PlainsOx", "TundraOx", "JungleLargeBird", "DesertLargeBird", "Jakyl", "AlphaJakyl", "KingJakyl",
@@ -51,51 +53,69 @@ export function selectedMapEnemyRows(values: unknown[], enemyTypes: string[]): W
   });
 }
 
-function equalityQuery(table: string, column: string, values: string[]): string | null {
+function equalityPredicate(table: string, column: string, values: string[]): string | null {
   const ids = [...new Set(values.map((value) => decimal(value, `${table} scope`)))].sort((left, right) => left.length - right.length || left.localeCompare(right));
-  return ids.length ? `SELECT * FROM ${table} WHERE ${ids.map((id) => `${column} = ${id}`).join(" OR ")}` : null;
+  return ids.length ? ids.map((id) => `${column} = ${id}`).join(" OR ") : null;
 }
 
-function equalityQueries(table: string, column: string, values: string[], maxIdsPerQuery = MAX_IDS_PER_DETAIL_QUERY): string[] {
+function equalityQuery(table: string, column: string, values: string[], extraPredicate = ""): string | null {
+  const predicate = equalityPredicate(table, column, values);
+  if (!predicate) return null;
+  return `SELECT * FROM ${table} WHERE ${extraPredicate ? `(${predicate}) AND ${extraPredicate}` : predicate}`;
+}
+
+function equalityQueries(table: string, column: string, values: string[], extraPredicate = ""): string[] {
   const ids = [...new Set(values.map((value) => decimal(value, `${table} scope`)))].sort((left, right) => left.length - right.length || left.localeCompare(right));
   const queries: string[] = [];
-  for (let offset = 0; offset < ids.length; offset += maxIdsPerQuery) {
-    const query = equalityQuery(table, column, ids.slice(offset, offset + maxIdsPerQuery));
+  for (let offset = 0; offset < ids.length; offset += MAX_IDS_PER_QUERY) {
+    const query = equalityQuery(table, column, ids.slice(offset, offset + MAX_IDS_PER_QUERY), extraPredicate);
     if (query) queries.push(query);
   }
   return queries;
 }
 
-export function mapSpatialBaseQueries(scope: MapSpatialScope): string[] {
+export function mapSpatialQueries(scope: MapSpatialScope): string[] {
   const claimId = decimal(scope.claimId, "Map spatial claim id");
+  const resourcePredicate = equalityPredicate("resource_state", "resource_state.resource_id", scope.resourceIds);
+  const resourceJoin = "FROM resource_state JOIN location_state ON resource_state.entity_id = location_state.entity_id";
   return [
     `SELECT * FROM bank_state WHERE claim_entity_id = ${claimId}`,
     `SELECT * FROM waystone_state WHERE claim_entity_id = ${claimId}`,
-    equalityQuery("resource_state", "resource_id", scope.resourceIds),
+    resourcePredicate ? `SELECT resource_state.* ${resourceJoin} WHERE (${resourcePredicate}) AND location_state.dimension = ${MAP_OVERWORLD_DIMENSION}` : null,
+    resourcePredicate ? `SELECT location_state.* ${resourceJoin} WHERE (${resourcePredicate}) AND location_state.dimension = ${MAP_OVERWORLD_DIMENSION}` : null,
     scope.enemyTypes.length ? "SELECT * FROM enemy_state" : null,
+    ...equalityQueries("mobile_entity_state", "entity_id", scope.playerIds, `dimension = ${MAP_OVERWORLD_DIMENSION}`),
   ].filter((query): query is string => Boolean(query));
 }
 
-export function mapSpatialDetailQueries({ playerIds, resourceRows, enemyRows }: { playerIds: string[]; resourceRows: unknown[]; enemyRows: unknown[] }): string[] {
-  const resourceEntityIds = rows(resourceRows).flatMap((row, index) => {
-    try { return [decimal(row.entityId ?? row.entity_id, `Map resource ${index} entity id`)]; } catch { return []; }
+export function mapEnemyMobileQueries(enemyRows: unknown[]): string[] {
+  const entityIds = rows(enemyRows).flatMap((row, index) => {
+    try { return [decimal(row.entityId ?? row.entity_id, `Map enemy ${index} entity id`)]; }
+    catch { return []; }
   });
-  const enemyEntityIds = rows(enemyRows).flatMap((row, index) => {
-    try { return [decimal(row.entityId ?? row.entity_id, `Map enemy ${index} entity id`)]; } catch { return []; }
-  });
-  return [
-    ...equalityQueries("location_state", "entity_id", resourceEntityIds),
-    ...equalityQueries("mobile_entity_state", "entity_id", [...enemyEntityIds, ...playerIds]),
-  ];
+  return equalityQueries("mobile_entity_state", "entity_id", entityIds, `dimension = ${MAP_OVERWORLD_DIMENSION}`);
+}
+
+function overworldDimension(value: unknown, label: string): string {
+  if (value == null) throw new TypeError(`${label} dimension is missing`);
+  const dimension = decimal(value, `${label} dimension`);
+  if (dimension !== MAP_OVERWORLD_DIMENSION) throw new TypeError(`${label} dimension ${dimension} is not overworld ${MAP_OVERWORLD_DIMENSION}`);
+  return dimension;
+}
+
+function boundedCoordinate(value: unknown, label: string, max: number): number {
+  const coordinate = integer(value, label);
+  if (coordinate < 0 || coordinate > max) throw new RangeError(`${label} is outside verified world bounds`);
+  return coordinate;
 }
 
 function coordinateFields(value: unknown, label: string) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${label} coordinates are missing`);
   const point = value as WireRecord;
   return {
-    locationX: integer(point.x, `${label} x`),
-    locationZ: integer(point.z, `${label} z`),
-    dimension: decimal(point.dimension ?? MAP_OVERWORLD_DIMENSION, `${label} dimension`),
+    locationX: boundedCoordinate(point.x, `${label} x`, MAP_WORLD_MAX),
+    locationZ: boundedCoordinate(point.z, `${label} z`, MAP_WORLD_MAX),
+    dimension: overworldDimension(point.dimension, label),
   };
 }
 
@@ -157,21 +177,23 @@ export function normalizeMapSpatial({
         warnings.push(`Map resource ${entityId} has no location_state row.`);
         return [];
       }
-      return [{ entityId, resourceId: decimal(row.resourceId ?? row.resource_id, `Map resource ${entityId} type`), regionId, locationX: integer(location.x, `Map resource ${entityId} x`), locationZ: integer(location.z, `Map resource ${entityId} z`), dimension: decimal(location.dimension ?? MAP_OVERWORLD_DIMENSION, `Map resource ${entityId} dimension`), observedAt }];
+      return [{ entityId, resourceId: decimal(row.resourceId ?? row.resource_id, `Map resource ${entityId} type`), regionId, locationX: boundedCoordinate(location.x, `Map resource ${entityId} x`, MAP_WORLD_MAX), locationZ: boundedCoordinate(location.z, `Map resource ${entityId} z`, MAP_WORLD_MAX), dimension: overworldDimension(location.dimension, `Map resource ${entityId}`), observedAt }];
     } catch (error) {
       warnings.push(error instanceof Error ? error.message : String(error));
       return [];
     }
   });
   const enemies = rows(enemyRows).flatMap((row, index) => {
-    const entityId = decimal(row.entityId ?? row.entity_id, `Map enemy ${index} entity id`);
-    const position = mobile.get(entityId);
-    if (!position) {
-      warnings.push(`Map enemy ${entityId} has no mobile_entity_state row.`);
-      return [];
-    }
     try {
-      return [{ entityId, enemyType: mapEnemyTypeId(row.enemyType ?? row.enemy_type), regionId, locationX: integer(position.locationX ?? position.location_x, `Map enemy ${entityId} x`), locationZ: integer(position.locationZ ?? position.location_z, `Map enemy ${entityId} z`), dimension: decimal(position.dimension ?? MAP_OVERWORLD_DIMENSION, `Map enemy ${entityId} dimension`), observedAt }];
+      const entityId = decimal(row.entityId ?? row.entity_id, `Map enemy ${index} entity id`);
+      const enemyType = mapEnemyTypeId(row.enemyType ?? row.enemy_type);
+      if (!scope.enemyTypes.includes(enemyType)) return [];
+      const position = mobile.get(entityId);
+      if (!position) {
+        warnings.push(`Map enemy ${entityId} has no mobile_entity_state row.`);
+        return [];
+      }
+      return [{ entityId, enemyType, regionId, locationX: boundedCoordinate(position.locationX ?? position.location_x, `Map enemy ${entityId} x`, MAP_MOBILE_WORLD_MAX), locationZ: boundedCoordinate(position.locationZ ?? position.location_z, `Map enemy ${entityId} z`, MAP_MOBILE_WORLD_MAX), dimension: overworldDimension(position.dimension, `Map enemy ${entityId}`), observedAt }];
     } catch (error) {
       warnings.push(error instanceof Error ? error.message : String(error));
       return [];
@@ -180,7 +202,7 @@ export function normalizeMapSpatial({
   const selectedPlayers = new Set(scope.playerIds.map(String));
   const players = [...mobile].filter(([entityId]) => selectedPlayers.has(entityId)).flatMap(([playerEntityId, position]) => {
     try {
-      return [{ playerEntityId, regionId, locationX: integer(position.locationX ?? position.location_x, `Map player ${playerEntityId} x`), locationZ: integer(position.locationZ ?? position.location_z, `Map player ${playerEntityId} z`), dimension: decimal(position.dimension ?? MAP_OVERWORLD_DIMENSION, `Map player ${playerEntityId} dimension`), observedAt }];
+      return [{ playerEntityId, regionId, locationX: boundedCoordinate(position.locationX ?? position.location_x, `Map player ${playerEntityId} x`, MAP_MOBILE_WORLD_MAX), locationZ: boundedCoordinate(position.locationZ ?? position.location_z, `Map player ${playerEntityId} z`, MAP_MOBILE_WORLD_MAX), dimension: overworldDimension(position.dimension, `Map player ${playerEntityId}`), observedAt }];
     } catch (error) {
       warnings.push(error instanceof Error ? error.message : String(error));
       return [];

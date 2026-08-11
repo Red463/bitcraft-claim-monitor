@@ -101,6 +101,9 @@ export function buildMapSnapshot({
   now = new Date(),
   excludedMemberIds = [],
   mobileIdentityVerified = false,
+  enemyIdentityVerified = false,
+  resourceCoordinatesVerified = false,
+  bankWaystoneCoordinatesVerified = false,
   regionClaims = null,
   market = null,
   empires = null,
@@ -132,8 +135,15 @@ export function buildMapSnapshot({
   if (layers.watchtowers) layers.watchtowers = nodeRows.filter((row) => inScope(row, scope)).map((row) => feature(row, "watchtower", row.entityId, recordPoint(row), { regionId: String(row.regionId), name: row.nickname ?? "Watchtower", empireEntityId: String(row.empireEntityId) }));
 
   const spatialRows = spatial?.data ?? {};
-  if (layers.banks) layers.banks = [...regionalBankRows, ...(Array.isArray(spatialRows.banks) ? spatialRows.banks : [])].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId ?? candidate.buildingEntityId) === String(row.entityId ?? row.buildingEntityId)) === index && inScope(row, scope)).map((row) => feature(row, "bank", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
-  if (layers.waystones) layers.waystones = [...regionalWaystoneRows, ...(Array.isArray(spatialRows.waystones) ? spatialRows.waystones : [])].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId ?? candidate.buildingEntityId) === String(row.entityId ?? row.buildingEntityId)) === index && inScope(row, scope)).map((row) => feature(row, "waystone", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
+  const bankWaystoneWarning = "Bank and waystone positions are unavailable until known live fixtures are live-verified.";
+  if (layers.banks) {
+    if (!bankWaystoneCoordinatesVerified && !warnings.includes(bankWaystoneWarning)) warnings.push(bankWaystoneWarning);
+    else if (bankWaystoneCoordinatesVerified) layers.banks = [...regionalBankRows, ...(Array.isArray(spatialRows.banks) ? spatialRows.banks : [])].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId ?? candidate.buildingEntityId) === String(row.entityId ?? row.buildingEntityId)) === index && inScope(row, scope)).map((row) => feature(row, "bank", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
+  }
+  if (layers.waystones) {
+    if (!bankWaystoneCoordinatesVerified && !warnings.includes(bankWaystoneWarning)) warnings.push(bankWaystoneWarning);
+    else if (bankWaystoneCoordinatesVerified) layers.waystones = [...regionalWaystoneRows, ...(Array.isArray(spatialRows.waystones) ? spatialRows.waystones : [])].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId ?? candidate.buildingEntityId) === String(row.entityId ?? row.buildingEntityId)) === index && inScope(row, scope)).map((row) => feature(row, "waystone", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
+  }
   if (layers.players) {
     const allowedPlayers = new Set(authorizedMapPlayerIds({ selectedPlayerIds: scope.playerIds, excludedMemberIds, members, players, mobileIdentityVerified }));
     const monitored = new Map(members.map((row) => [String(row.playerEntityId ?? row.entityId), row]));
@@ -150,17 +160,25 @@ export function buildMapSnapshot({
     else if (!spatial) warnings.push("Live player positions are unavailable.");
   }
   if (layers.resources) {
-    const selected = new Set(scope.resourceIds);
-    layers.resources = (Array.isArray(spatialRows.resources) ? spatialRows.resources : []).filter((row) => selected.has(String(row.resourceId)) && inScope(row, scope)).map((row) => feature(row, "resource", row.entityId, recordPoint(row), { regionId: String(row.regionId), resourceId: String(row.resourceId), identity: `resource:${row.resourceId}` }));
-    if (!spatial) warnings.push("Live resource positions are unavailable.");
+    const unavailableWarning = "Resource positions are unavailable until the Relay resource/location join is live-verified.";
+    if (!resourceCoordinatesVerified && !warnings.includes(unavailableWarning)) warnings.push(unavailableWarning);
+    else {
+      const selected = new Set(scope.resourceIds);
+      layers.resources = (Array.isArray(spatialRows.resources) ? spatialRows.resources : []).filter((row) => selected.has(String(row.resourceId)) && inScope(row, scope)).map((row) => feature(row, "resource", row.entityId, recordPoint(row), { regionId: String(row.regionId), resourceId: String(row.resourceId), identity: `resource:${row.resourceId}` }));
+      if (!spatial) warnings.push("Live resource positions are unavailable.");
+    }
   }
   if (layers.enemies) {
-    const selected = new Set(scope.enemyTypes);
-    layers.enemies = (Array.isArray(spatialRows.enemies) ? spatialRows.enemies : []).filter((row) => selected.has(String(row.enemyType)) && inScope(row, scope)).map((row) => feature(row, "enemy", row.entityId, recordPoint(row, true), { regionId: String(row.regionId), enemyType: String(row.enemyType), identity: `enemy:${row.enemyType}` }));
-    if (!spatial) warnings.push("Live enemy positions are unavailable.");
+    const unavailableWarning = "Enemy positions are unavailable until the Relay EnemyType to catalog mapping is live-verified.";
+    if (!enemyIdentityVerified && !warnings.includes(unavailableWarning)) warnings.push(unavailableWarning);
+    else {
+      const selected = new Set(scope.enemyTypes);
+      layers.enemies = (Array.isArray(spatialRows.enemies) ? spatialRows.enemies : []).filter((row) => selected.has(String(row.enemyType)) && inScope(row, scope)).map((row) => feature(row, "enemy", row.entityId, recordPoint(row, true), { regionId: String(row.regionId), enemyType: String(row.enemyType), identity: `enemy:${row.enemyType}` }));
+      if (!spatial) warnings.push("Live enemy positions are unavailable.");
+    }
   }
   for (const unavailable of ["banks", "waystones"]) {
-    if (layers[unavailable] && !Array.isArray(regionClaims?.data?.[unavailable]) && !Array.isArray(spatialRows[unavailable])) warnings.push(`${unavailable} map data is unavailable.`);
+    if (bankWaystoneCoordinatesVerified && layers[unavailable] && !Array.isArray(regionClaims?.data?.[unavailable]) && !Array.isArray(spatialRows[unavailable])) warnings.push(`${unavailable} map data is unavailable.`);
   }
   if (layers["empire-territory"]) warnings.push("empire-territory map data is unavailable until the chunk-to-map polygon transform is live-verified.");
 

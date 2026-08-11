@@ -156,6 +156,7 @@ test("map snapshot exposes verified bank and waystone coordinates from the scope
   const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "banks,waystones" }), { allowedRegionIds: ["19"] });
   const snapshot = buildMapSnapshot({
     scope,
+    bankWaystoneCoordinatesVerified: true,
     spatial: {
       data: {
         banks: [{ entityId: "300", claimEntityId: "999", regionId: "19", locationX: 10, locationZ: 20, dimension: "1" }],
@@ -170,6 +171,23 @@ test("map snapshot exposes verified bank and waystone coordinates from the scope
   assert.equal(snapshot.layers.waystones[0].kind, "waystone");
   assert.equal(snapshot.layers.waystones[0].point.z, 40);
   assert.deepEqual(snapshot.warnings, []);
+});
+
+test("map snapshot keeps bank and waystone coordinates unavailable until live fixtures are verified", () => {
+  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "banks,waystones" }), { allowedRegionIds: ["19"] });
+  const snapshot = buildMapSnapshot({
+    scope,
+    spatial: {
+      data: {
+        banks: [{ entityId: "300", claimEntityId: "999", regionId: "19", locationX: 10, locationZ: 20, dimension: "1" }],
+        waystones: [{ entityId: "301", claimEntityId: "999", regionId: "19", locationX: 30, locationZ: 40, dimension: "1" }],
+      },
+      provenance: { receivedAt: "2026-08-11T12:00:00.000Z" },
+    },
+  });
+  assert.deepEqual(snapshot.layers.banks, []);
+  assert.deepEqual(snapshot.layers.waystones, []);
+  assert.match(snapshot.warnings.join(" "), /bank.*waystone.*live-verified/i);
 });
 
 test("map snapshot forwards scoped collector warnings to the native renderer", () => {
@@ -191,6 +209,34 @@ test("map snapshot forwards scoped collector warnings to the native renderer", (
 
   assert.equal(snapshot.freshness, "partial");
   assert.deepEqual(snapshot.warnings, [warning]);
+});
+
+test("map snapshot keeps enemy positions unavailable until type mapping is verified", () => {
+  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "enemies", enemyTypes: "8" }), { allowedRegionIds: ["19"] });
+  const snapshot = buildMapSnapshot({
+    scope,
+    spatial: {
+      data: { enemies: [{ entityId: "200", enemyType: "8", regionId: "19", locationX: 70_000, locationZ: 80_000, dimension: "1" }] },
+      generation: 12,
+      provenance: { receivedAt: "2026-08-11T12:00:00.000Z" },
+    },
+  });
+  assert.deepEqual(snapshot.layers.enemies, []);
+  assert.match(snapshot.warnings.join(" "), /enemy positions.*catalog mapping.*live-verified/i);
+});
+
+test("map snapshot keeps resources unavailable until the live location join is verified", () => {
+  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "resources", resourceIds: "54" }), { allowedRegionIds: ["19"] });
+  const snapshot = buildMapSnapshot({
+    scope,
+    spatial: {
+      data: { resources: [{ entityId: "100", resourceId: "54", regionId: "19", locationX: 100, locationZ: 200, dimension: "1" }] },
+      generation: 12,
+      provenance: { receivedAt: "2026-08-11T12:00:00.000Z" },
+    },
+  });
+  assert.deepEqual(snapshot.layers.resources, []);
+  assert.match(snapshot.warnings.join(" "), /resource positions.*location join.*live-verified/i);
 });
 
 test("map snapshot freshness uses the oldest requested source and cannot be masked by a newer layer", () => {

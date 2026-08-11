@@ -1,4 +1,4 @@
-import { mapSpatialBaseQueries, mapSpatialDetailQueries, normalizeMapSpatial, selectedMapEnemyRows } from "./mapSpatialProjection.ts";
+import { mapEnemyMobileQueries, mapSpatialQueries, normalizeMapSpatial, selectedMapEnemyRows } from "./mapSpatialProjection.ts";
 import { assertSchemaFingerprint, schemaBindingsReady } from "./schemaManifest.ts";
 
 type BindingManifest = Parameters<typeof assertSchemaFingerprint>[0];
@@ -50,13 +50,14 @@ export class RelayMapSpatialSession {
   readonly #now: () => Date;
   #connection: BindingConnection | null = null;
   #baseSubscription: SubscriptionHandle | null = null;
-  #detailSubscription: SubscriptionHandle | null = null;
+  #activeEnemySubscription: SubscriptionHandle | null = null;
+  #pendingEnemySubscription: SubscriptionHandle | null = null;
+  #enemyRebuildRequested = false;
   #config: (SessionConfig & { maxRows: number }) | null = null;
   #nextGeneration = 1;
   #stopping = false;
-  #baseListeners = false;
-  #detailListeners = false;
-  #rebuildQueued = false;
+  #listenersAttached = false;
+  #enemyRebuildQueued = false;
   #applyQueued = false;
   #health = {
     connected: false,
@@ -65,14 +66,13 @@ export class RelayMapSpatialSession {
     rowCount: 0,
     resourceRowCount: 0,
     enemyRowCount: 0,
-    detailEntityCount: 0,
-    detailQueryCount: 0,
+    queryCount: 0,
     lastAppliedAt: null as string | null,
     lastError: null as string | null,
   };
 
-  readonly #baseChanged = () => this.#queueDetailRebuild();
-  readonly #detailChanged = () => this.#queueApply();
+  readonly #changed = () => this.#queueApply();
+  readonly #enemyChanged = () => this.#queueEnemyRebuild();
 
   constructor({ loadBindings = loadBundledRegionalBindings, onSnapshot, onFailure = () => {}, now = () => new Date() }: { loadBindings?: () => Promise<RegionalBindingModule>; onSnapshot: (snapshot: MapSpatialSnapshot) => void | Promise<void>; onFailure?: (error: string) => void; now?: () => Date }) {
     this.#loadBindings = loadBindings;
@@ -95,14 +95,16 @@ export class RelayMapSpatialSession {
       .withDatabaseName(config.database)
       .onConnect((connection) => {
         this.#health.connected = true;
-        this.#health.stage = "base";
+        this.#health.stage = "subscription";
+        const queries = mapSpatialQueries(config.scope);
+        this.#health.queryCount = queries.length;
         this.#baseSubscription = connection.subscriptionBuilder()
           .onApplied(() => {
-            this.#attachBaseListeners(connection);
-            this.#rebuildDetails(connection);
+            this.#attachListeners(connection);
+            this.#rebuildEnemyPositions(connection);
           })
           .onError((_context, error) => this.#recordError(error))
-          .subscribe(mapSpatialBaseQueries(config.scope));
+          .subscribe(queries);
       })
       .onConnectError((_context, error) => { if (!this.#stopping) this.#recordError(error); })
       .onDisconnect((_context, error) => {
@@ -112,35 +114,47 @@ export class RelayMapSpatialSession {
       .build();
   }
 
-  #rebuildDetails(connection: BindingConnection) {
+  #rebuildEnemyPositions(connection: BindingConnection) {
     const config = this.#config;
     if (!config) return;
-    this.#detailSubscription?.unsubscribe();
-    this.#detailSubscription = null;
-    const resourceRows = tableRows(connection.db.resourceState);
-    const enemyRows = selectedMapEnemyRows(tableRows(connection.db.enemyState), config.scope.enemyTypes);
-    const queries = mapSpatialDetailQueries({ playerIds: config.scope.playerIds, resourceRows, enemyRows });
-    const detailEntities = new Set([
-      ...config.scope.playerIds,
-      ...resourceRows.map((row) => String((row as Record<string, unknown>).entityId ?? (row as Record<string, unknown>).entity_id ?? "")),
-      ...enemyRows.map((row) => String(row.entityId ?? row.entity_id ?? "")),
-    ].filter(Boolean));
-    this.#health.resourceRowCount = resourceRows.length;
-    this.#health.enemyRowCount = enemyRows.length;
-    this.#health.detailEntityCount = detailEntities.size;
-    this.#health.detailQueryCount = queries.length;
+    if (this.#pendingEnemySubscription) {
+      this.#enemyRebuildRequested = true;
+      return;
+    }
+    const selectedEnemies = selectedMapEnemyRows(tableRows(connection.db.enemyState), config.scope.enemyTypes);
+    const queries = mapEnemyMobileQueries(selectedEnemies);
+    this.#health.enemyRowCount = selectedEnemies.length;
+    this.#health.queryCount = mapSpatialQueries(config.scope).length + queries.length;
     if (!queries.length) {
+      this.#activeEnemySubscription?.unsubscribe();
+      this.#activeEnemySubscription = null;
       this.#apply(connection);
       return;
     }
-    this.#health.stage = "details";
-    this.#detailSubscription = connection.subscriptionBuilder()
+    this.#health.stage = "enemy-positions";
+    let next: SubscriptionHandle;
+    next = connection.subscriptionBuilder()
       .onApplied(() => {
-        this.#attachDetailListeners(connection);
-        this.#apply(connection);
+        if (this.#pendingEnemySubscription !== next) {
+          next.unsubscribe();
+          return;
+        }
+        this.#activeEnemySubscription?.unsubscribe();
+        this.#activeEnemySubscription = next;
+        this.#pendingEnemySubscription = null;
+        if (this.#enemyRebuildRequested) {
+          this.#enemyRebuildRequested = false;
+          this.#rebuildEnemyPositions(connection);
+        } else {
+          this.#apply(connection);
+        }
       })
-      .onError((_context, error) => this.#recordError(error))
+      .onError((_context, error) => {
+        if (this.#pendingEnemySubscription === next) this.#pendingEnemySubscription = null;
+        this.#recordError(error);
+      })
       .subscribe(queries);
+    this.#pendingEnemySubscription = next;
   }
 
   #apply(connection: BindingConnection) {
@@ -150,12 +164,14 @@ export class RelayMapSpatialSession {
       const bankRows = tableRows(connection.db.bankState);
       const waystoneRows = tableRows(connection.db.waystoneState);
       const resourceRows = tableRows(connection.db.resourceState);
-      const enemyRows = selectedMapEnemyRows(tableRows(connection.db.enemyState), config.scope.enemyTypes);
+      const enemyRows = tableRows(connection.db.enemyState);
       const locationRows = tableRows(connection.db.locationState);
       const mobileRows = tableRows(connection.db.mobileEntityState);
       const rowCount = bankRows.length + waystoneRows.length + resourceRows.length + enemyRows.length + locationRows.length + mobileRows.length;
       if (rowCount > config.maxRows) throw new Error(`Relay map-spatial row budget ${config.maxRows} exceeded by ${rowCount} rows`);
       const receivedAt = this.#now().toISOString();
+      this.#health.resourceRowCount = resourceRows.length;
+      this.#health.enemyRowCount = selectedMapEnemyRows(enemyRows, config.scope.enemyTypes).length;
       const normalized = normalizeMapSpatial({ scope: config.scope, bankRows, waystoneRows, resourceRows, enemyRows, locationRows, mobileRows, observedAt: receivedAt });
       const generation = this.#nextGeneration++;
       this.#health.rowCount = rowCount;
@@ -172,15 +188,6 @@ export class RelayMapSpatialSession {
     }
   }
 
-  #queueDetailRebuild() {
-    if (this.#rebuildQueued || !this.#connection) return;
-    this.#rebuildQueued = true;
-    queueMicrotask(() => {
-      this.#rebuildQueued = false;
-      if (this.#connection) this.#rebuildDetails(this.#connection);
-    });
-  }
-
   #queueApply() {
     if (this.#applyQueued || !this.#connection) return;
     this.#applyQueued = true;
@@ -190,32 +197,33 @@ export class RelayMapSpatialSession {
     });
   }
 
-  #attachBaseListeners(connection: BindingConnection) {
-    if (this.#baseListeners) return;
-    for (const table of [connection.db.bankState, connection.db.waystoneState, connection.db.resourceState, connection.db.enemyState]) {
-      table.onInsert?.(this.#baseChanged); table.onUpdate?.(this.#baseChanged); table.onDelete?.(this.#baseChanged);
-    }
-    this.#baseListeners = true;
+  #queueEnemyRebuild() {
+    if (this.#enemyRebuildQueued || !this.#connection) return;
+    this.#enemyRebuildQueued = true;
+    queueMicrotask(() => {
+      this.#enemyRebuildQueued = false;
+      if (this.#connection) this.#rebuildEnemyPositions(this.#connection);
+    });
   }
 
-  #attachDetailListeners(connection: BindingConnection) {
-    if (this.#detailListeners) return;
-    for (const table of [connection.db.locationState, connection.db.mobileEntityState]) {
-      table.onInsert?.(this.#detailChanged); table.onUpdate?.(this.#detailChanged); table.onDelete?.(this.#detailChanged);
+  #attachListeners(connection: BindingConnection) {
+    if (this.#listenersAttached) return;
+    for (const table of [connection.db.bankState, connection.db.waystoneState, connection.db.resourceState, connection.db.locationState, connection.db.mobileEntityState]) {
+      table.onInsert?.(this.#changed); table.onUpdate?.(this.#changed); table.onDelete?.(this.#changed);
     }
-    this.#detailListeners = true;
+    connection.db.enemyState.onInsert?.(this.#enemyChanged); connection.db.enemyState.onUpdate?.(this.#enemyChanged); connection.db.enemyState.onDelete?.(this.#enemyChanged);
+    this.#listenersAttached = true;
   }
 
   #removeListeners() {
     if (!this.#connection) return;
-    if (this.#baseListeners) for (const table of [this.#connection.db.bankState, this.#connection.db.waystoneState, this.#connection.db.resourceState, this.#connection.db.enemyState]) {
-      table.removeOnInsert?.(this.#baseChanged); table.removeOnUpdate?.(this.#baseChanged); table.removeOnDelete?.(this.#baseChanged);
+    if (this.#listenersAttached) for (const table of [this.#connection.db.bankState, this.#connection.db.waystoneState, this.#connection.db.resourceState, this.#connection.db.locationState, this.#connection.db.mobileEntityState]) {
+      table.removeOnInsert?.(this.#changed); table.removeOnUpdate?.(this.#changed); table.removeOnDelete?.(this.#changed);
     }
-    if (this.#detailListeners) for (const table of [this.#connection.db.locationState, this.#connection.db.mobileEntityState]) {
-      table.removeOnInsert?.(this.#detailChanged); table.removeOnUpdate?.(this.#detailChanged); table.removeOnDelete?.(this.#detailChanged);
+    if (this.#listenersAttached) {
+      this.#connection.db.enemyState.removeOnInsert?.(this.#enemyChanged); this.#connection.db.enemyState.removeOnUpdate?.(this.#enemyChanged); this.#connection.db.enemyState.removeOnDelete?.(this.#enemyChanged);
     }
-    this.#baseListeners = false;
-    this.#detailListeners = false;
+    this.#listenersAttached = false;
   }
 
   #recordError(error: unknown) {
@@ -228,10 +236,12 @@ export class RelayMapSpatialSession {
   async stop() {
     this.#stopping = true;
     this.#removeListeners();
-    this.#detailSubscription?.unsubscribe();
+    this.#pendingEnemySubscription?.unsubscribe();
+    this.#activeEnemySubscription?.unsubscribe();
     this.#baseSubscription?.unsubscribe();
     this.#connection?.disconnect();
-    this.#detailSubscription = null;
+    this.#pendingEnemySubscription = null;
+    this.#activeEnemySubscription = null;
     this.#baseSubscription = null;
     this.#connection = null;
     this.#config = null;

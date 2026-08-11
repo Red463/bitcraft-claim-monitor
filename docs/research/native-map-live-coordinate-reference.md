@@ -84,7 +84,9 @@ Acceptance requires a complete generation proving:
 6. Empire chunk rows align with an independently verified polygon transform; until then, territory remains unavailable.
 7. Warm snapshots remain below 500 ms, 50,000 features, and 8 MiB uncompressed JSON.
 
-Until items 1–3 pass, the server deliberately returns no player coordinates. A schema mismatch or unverified source must remain an unavailable layer and retain only non-player last-good data.
+The provider implementation now avoids the dense per-entity resource fan-out: selected resources and `location_state` are materialized with an indexed two-table subscription join. Enemy mobile subscriptions are derived only from locally selected enemy identities and split into batches of at most 100 entity IDs; player queries use the same limit. Normalization rejects missing/non-overworld dimensions and coordinates outside the verified `0..38400` world bounds (mobile fixed-point `0..38400000`).
+
+Production deliberately keeps the combined `map-spatial` collector cold until the pending fixtures pass. Player, resource, enemy, bank, and waystone layers return explicit unavailable warnings rather than inferred coordinates. The two latest 120-second resource probes remained at `connected:false` / `stage:"idle"`, so they did not validate or reject the new indexed join. A schema mismatch or unverified source must remain unavailable and retain only independently verified last-good data.
 
 ## First-party renderer and BitCraftMap parity target
 

@@ -593,6 +593,13 @@ const relayRegionClaimsRuntime = new RelayRegionClaimsRuntime({
   currentStateRepository,
   reconnectDelayMs: relayReconnectDelayMs,
 });
+const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = false;
+const MAP_ENEMY_IDENTITY_VERIFIED = false;
+const MAP_RESOURCE_COORDINATES_VERIFIED = false;
+const MAP_BANK_WAYSTONE_COORDINATES_VERIFIED = false;
+// Keep the combined collector cold until each query can be independently
+// enabled. EnemyType is also a sum type that deployed SQL cannot scalar-filter.
+const MAP_SPATIAL_COLLECTION_VERIFIED = false;
 const relayMapSpatialScopeManager = new RelayMapSpatialScopeManager({
   manifest: relayBindingManifest,
   // Scoped map generations are live notifications, not repository commits;
@@ -8042,7 +8049,9 @@ const server = createServer(async (req, res) => {
         excludedMemberIds: getSettings().excludedMemberIds,
         members: memberRows,
         players: playerRows,
+        mobileIdentityVerified: MAP_PLAYER_MOBILE_IDENTITY_VERIFIED,
       });
+      const permittedEnemyTypes = MAP_ENEMY_IDENTITY_VERIFIED ? scope.enemyTypes : [];
       const spatialLeases = [];
       let requestClosed = false;
       const releaseSpatialLeases = () => Promise.allSettled(spatialLeases.map((lease) => lease.release()));
@@ -8051,12 +8060,12 @@ const server = createServer(async (req, res) => {
         void releaseSpatialLeases();
       });
       try {
-        for (const regionId of scope.regionIds) {
+        for (const regionId of MAP_SPATIAL_COLLECTION_VERIFIED ? scope.regionIds : []) {
           if (requestClosed) throw new Error("Map request closed during spatial scope acquisition.");
           spatialLeases.push(await relayMapSpatialScopeManager.acquire({
             relayBaseUrl,
             claimId,
-            scope: { claimId, regionId, playerIds: permittedPlayerIds, resourceIds: scope.resourceIds, enemyTypes: scope.enemyTypes },
+            scope: { claimId, regionId, playerIds: permittedPlayerIds, resourceIds: scope.resourceIds, enemyTypes: permittedEnemyTypes },
           }));
         }
       } catch (error) {
@@ -8076,12 +8085,12 @@ const server = createServer(async (req, res) => {
         const listener = {
           claimId,
           domains: new Set(domains),
-          mapSpatialScopeKeys: new Set(scope.regionIds.map((regionId) => mapSpatialScopeKey({
+          mapSpatialScopeKeys: new Set((MAP_SPATIAL_COLLECTION_VERIFIED ? scope.regionIds : []).map((regionId) => mapSpatialScopeKey({
             claimId,
             regionId,
             playerIds: permittedPlayerIds,
             resourceIds: scope.resourceIds,
-            enemyTypes: scope.enemyTypes,
+            enemyTypes: permittedEnemyTypes,
           }))),
           response: res,
         };
@@ -8111,6 +8120,10 @@ const server = createServer(async (req, res) => {
           members: memberRows,
           players: playerRows,
           spatial,
+          mobileIdentityVerified: MAP_PLAYER_MOBILE_IDENTITY_VERIFIED,
+          enemyIdentityVerified: MAP_ENEMY_IDENTITY_VERIFIED,
+          resourceCoordinatesVerified: MAP_RESOURCE_COORDINATES_VERIFIED,
+          bankWaystoneCoordinatesVerified: MAP_BANK_WAYSTONE_COORDINATES_VERIFIED,
         });
         const hasUsableSource = Boolean(regionClaims || market || empires || spatial);
         return send(res, hasUsableSource ? 200 : 503, hasUsableSource ? payload : { ...payload, freshness: "unavailable" });
