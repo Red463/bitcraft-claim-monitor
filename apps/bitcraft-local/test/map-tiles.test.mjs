@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -21,16 +21,15 @@ function responseRecorder() {
   };
 }
 
-test("map tile route serves locally provisioned negative-Y terrain tiles", async () => {
+test("map tile route serves installed negative-Y terrain tiles through the store", async () => {
   assert.ok(tileModule, "map tile module must exist");
-  const dataDir = await mkdtemp(path.join(os.tmpdir(), "bitcraft-map-tiles-"));
-  const tileDir = path.join(dataDir, "map-tiles", "terrain", "-5", "0");
-  await mkdir(tileDir, { recursive: true });
   const expected = Buffer.from([0x52, 0x49, 0x46, 0x46]);
-  await writeFile(path.join(tileDir, "-2.webp"), expected);
+  const store = { readTile: async (request) => request.style === "terrain" && request.z === -5 && request.x === 0 && request.y === -2
+    ? { bytes: expected, contentType: "image/webp", generation: "1" }
+    : null };
 
   const res = responseRecorder();
-  assert.equal(await tileModule.serveLocalMapTile("/api/local/map/tiles/terrain/-5/0/-2.webp", res, dataDir), true);
+  assert.equal(await tileModule.serveLocalMapTile("/api/local/map/tiles/terrain/-5/0/-2.webp", res, store), true);
   assert.equal(res.status, 200);
   assert.equal(res.headers["content-type"], "image/webp");
   assert.match(res.headers["cache-control"], /^public, max-age=/);
@@ -39,23 +38,23 @@ test("map tile route serves locally provisioned negative-Y terrain tiles", async
 
 test("map tile route rejects unsupported styles and coordinates without filesystem traversal", async () => {
   assert.ok(tileModule, "map tile module must exist");
-  const dataDir = await mkdtemp(path.join(os.tmpdir(), "bitcraft-map-tiles-"));
+  const store = { readTile: async () => null };
   for (const pathname of [
     "/api/local/map/tiles/external/-5/0/-2.webp",
     "/api/local/map/tiles/terrain/-6/0/-2.webp",
     "/api/local/map/tiles/terrain/-5/0/../../secret.webp",
   ]) {
     const res = responseRecorder();
-    assert.equal(await tileModule.serveLocalMapTile(pathname, res, dataDir), true);
+    assert.equal(await tileModule.serveLocalMapTile(pathname, res, store), true);
     assert.equal(res.status, 400);
   }
 });
 
 test("map tile route returns a cacheable 404 when a local tile is not installed", async () => {
   assert.ok(tileModule, "map tile module must exist");
-  const dataDir = await mkdtemp(path.join(os.tmpdir(), "bitcraft-map-tiles-"));
+  const store = { readTile: async () => null };
   const res = responseRecorder();
-  assert.equal(await tileModule.serveLocalMapTile("/api/local/map/tiles/game/0/4/-3.webp", res, dataDir), true);
+  assert.equal(await tileModule.serveLocalMapTile("/api/local/map/tiles/game/0/4/-3.webp", res, store), true);
   assert.equal(res.status, 404);
   assert.equal(res.body, null);
 });

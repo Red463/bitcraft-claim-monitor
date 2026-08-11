@@ -1,6 +1,3 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-
 import { securityHeaders } from "./httpRoutes.mjs";
 
 const TILE_PREFIX = "/api/local/map/tiles/";
@@ -14,7 +11,7 @@ function finish(res, status, body = null, headers = {}) {
   res.end(body);
 }
 
-export async function serveLocalMapTile(pathname, res, dataDir) {
+export async function serveLocalMapTile(pathname, res, tileStore) {
   if (!pathname.startsWith(TILE_PREFIX)) return false;
   const match = TILE_PATH.exec(pathname);
   if (!match) {
@@ -29,15 +26,14 @@ export async function serveLocalMapTile(pathname, res, dataDir) {
     finish(res, 400, null, { "cache-control": "no-store" });
     return true;
   }
-  const tilePath = path.join(dataDir, "map-tiles", style, rawZoom, rawX, `${rawY}.webp`);
-  try {
-    const bytes = await readFile(tilePath);
-    finish(res, 200, bytes, {
-      "content-type": "image/webp",
+  const tile = typeof tileStore?.readTile === "function" ? await tileStore.readTile({ style, z: zoom, x, y }) : null;
+  if (tile) {
+    if (tile.bytes.byteLength > 2 * 1024 * 1024) throw new RangeError("Installed map tile exceeds response budget");
+    finish(res, 200, tile.bytes, {
+      "content-type": tile.contentType,
       "cache-control": "public, max-age=86400, immutable",
     });
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
+  } else {
     finish(res, 404, null, { "cache-control": "public, max-age=60" });
   }
   return true;
