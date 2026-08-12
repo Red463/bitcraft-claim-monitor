@@ -20,12 +20,24 @@ export const MAP_MARKER_PRESENTATIONS = Object.freeze(presentations);
 
 const CLAIM_TIER_GLYPHS = Object.freeze(["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]);
 
-export function claimMarkerPresentation(tier) {
-  if (!Number.isInteger(tier) || tier < 1 || tier > 10) return presentations.claim;
+export function claimDisplayTier(tier) {
+  if (!Number.isInteger(tier) || tier < 0 || tier > 10) return null;
+  return tier === 0 ? 1 : tier;
+}
+
+export function claimMarkerPresentation(tier, npc = false) {
+  if (npc === true) return Object.freeze({
+    mode: "image",
+    iconUrl: "/map-icons/claims/claim_npc.png",
+    glyph: "NPC",
+    badgeCrop: true,
+  });
+  const displayTier = claimDisplayTier(tier);
+  if (displayTier == null) return presentations.claim;
   return Object.freeze({
     mode: "image",
-    iconUrl: `/map-icons/claims/claim_t${tier}.png`,
-    glyph: CLAIM_TIER_GLYPHS[tier],
+    iconUrl: `/map-icons/claims/claim_t${displayTier}.png`,
+    glyph: CLAIM_TIER_GLYPHS[displayTier],
     badgeCrop: true,
   });
 }

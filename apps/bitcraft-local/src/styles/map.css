@@ -205,11 +205,11 @@
 @keyframes native-map-player-pulse { 0% { opacity: .72; transform: translate(-50%, -50%) scale(.75); } 75%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(2.75); } }
 @media (prefers-reduced-motion: reduce) { .native-map-player-pulse { animation: none; } }
 .native-map-marker--focus .native-map-marker-content { width: 32px; height: 32px; border-color: #f0c64f; color: #f0c64f; }
-.native-map-marker--claim { width: 40px; height: 40px; }
+.native-map-marker--claim { width: 36px; height: 36px; }
 .native-map-marker--claim .native-map-marker-content--badge-crop {
   box-sizing: border-box;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   overflow: visible;
   border: 0;
@@ -222,10 +222,10 @@
 }
 .native-map-marker--claim .native-map-marker-content--badge-crop img {
   position: absolute;
-  inset: -7px;
+  inset: -6px;
   z-index: 1;
-  width: 54px;
-  height: 54px;
+  width: 48px;
+  height: 48px;
   max-width: none;
   object-fit: fill;
   transform: none;

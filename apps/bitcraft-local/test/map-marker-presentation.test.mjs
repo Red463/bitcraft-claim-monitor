@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MAP_MARKER_PRESENTATIONS, claimMarkerPresentation, mapMarkerPresentation } from "../src/pages/map/mapMarkerPresentation.mjs";
+import { MAP_MARKER_PRESENTATIONS, claimDisplayTier, claimMarkerPresentation, mapMarkerPresentation } from "../src/pages/map/mapMarkerPresentation.mjs";
 
 test("map markers use fixed local presentation with app-owned fallbacks", () => {
   assert.deepEqual(mapMarkerPresentation("waystone"), {
@@ -28,7 +28,23 @@ test("claim marker tiers select only the matching same-origin badge", () => {
     badgeCrop: true,
   });
   assert.equal(claimMarkerPresentation(10).iconUrl, "/map-icons/claims/claim_t10.png");
-  assert.equal(claimMarkerPresentation(0).mode, "canvas");
+  assert.equal(claimDisplayTier(0), 1);
+  assert.equal(claimDisplayTier(1), 1);
+  assert.equal(claimDisplayTier(10), 10);
+  assert.equal(claimDisplayTier(11), null);
+  assert.deepEqual(claimMarkerPresentation(0), {
+    mode: "image",
+    iconUrl: "/map-icons/claims/claim_t1.png",
+    glyph: "I",
+    badgeCrop: true,
+  });
+  assert.deepEqual(claimMarkerPresentation(null, true), {
+    mode: "image",
+    iconUrl: "/map-icons/claims/claim_npc.png",
+    glyph: "NPC",
+    badgeCrop: true,
+  });
+  assert.equal(claimMarkerPresentation(7, true).iconUrl, "/map-icons/claims/claim_npc.png");
   assert.equal(claimMarkerPresentation(11).mode, "canvas");
   assert.equal(claimMarkerPresentation("6").mode, "canvas");
   assert.doesNotMatch(JSON.stringify(claimMarkerPresentation(6)), /https?:\/\//);

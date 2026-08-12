@@ -5,6 +5,7 @@ export type MapMarkerPresentation =
 
 export const MAP_MARKER_PRESENTATIONS: Readonly<Record<string, MapMarkerPresentation>>;
 
-export function claimMarkerPresentation(tier: unknown): MapMarkerPresentation;
+export function claimDisplayTier(tier: unknown): number | null;
+export function claimMarkerPresentation(tier: unknown, npc?: boolean): MapMarkerPresentation;
 
 export function mapMarkerPresentation(kind: string): MapMarkerPresentation;

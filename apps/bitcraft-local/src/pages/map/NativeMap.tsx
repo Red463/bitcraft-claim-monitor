@@ -6,7 +6,7 @@ import { MapLayersControl } from "./MapLayersControl";
 import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, leafletPoint } from "./mapCoordinates.mjs";
 import { planDensePointDraw } from "./mapDensePointPlan.mjs";
 import { MAP_LAYER_DEFINITIONS, defaultMapLayerVisibility, loadMapLayerVisibility, saveMapLayerVisibility, type MapLayerKey } from "./mapLayerPreferences.mjs";
-import { MAP_MARKER_PRESENTATIONS, claimMarkerPresentation, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
+import { MAP_MARKER_PRESENTATIONS, claimDisplayTier, claimMarkerPresentation, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { assignPlayerMarkerColours } from "./playerMarkerColours.mjs";
 import { applyResourceViewport, resourceLayerStatus } from "./resourceViewport.mjs";
@@ -25,6 +25,7 @@ type MapFeature = {
   identity?: string;
   playerEntityId?: string;
   tier?: number | null;
+  npc?: boolean;
   point: MapPoint;
 };
 type MapSnapshot = {
@@ -196,7 +197,7 @@ function markerIcon(kind: string, presentation: MapMarkerPresentation, color?: s
     image.addEventListener("error", () => image.remove(), { once: true });
     content.prepend(image);
   }
-  const size = kind === "player" ? 24 : presentation.mode === "image" && presentation.badgeCrop ? 40 : 30;
+  const size = kind === "player" ? 24 : presentation.mode === "image" && presentation.badgeCrop ? 36 : 30;
   return L.divIcon({
     className: `native-map-marker native-map-marker--${markerKindClass(kind)}`,
     html: content,
@@ -488,10 +489,17 @@ export function NativeMap({
       if (!markerGroup) continue;
       for (const feature of features) {
         const presentation = feature.kind === "claim"
-          ? claimMarkerPresentation(feature.tier)
+          ? claimMarkerPresentation(feature.tier, feature.npc)
           : mapMarkerPresentation(feature.kind);
-        const tierLabel = feature.kind === "claim" && Number.isInteger(feature.tier) ? ` · Tier ${feature.tier}` : "";
-        const accessibleLabel = `${featureLabel(feature)}${tierLabel} · ${displayedPoint(feature)}`;
+        const displayTier = claimDisplayTier(feature.tier);
+        const claimLabel = feature.kind !== "claim"
+          ? ""
+          : feature.npc
+            ? " · NPC town"
+            : displayTier != null
+              ? ` · Tier ${displayTier}`
+              : "";
+        const accessibleLabel = `${featureLabel(feature)}${claimLabel} · ${displayedPoint(feature)}`;
         const marker = presentation.mode === "canvas"
           ? L.circleMarker(leafletPoint(feature.point), {
               radius: 5,
@@ -541,7 +549,7 @@ export function NativeMap({
         if (!layerVisibility[layer as MapLayerKey]) return [];
         if (layer === "empire-territory") return [];
         if (layer === "resources" || layer === "enemies") return features;
-        return features.filter((feature) => (feature.kind === "claim" ? claimMarkerPresentation(feature.tier) : mapMarkerPresentation(feature.kind)).mode === "canvas");
+        return features.filter((feature) => (feature.kind === "claim" ? claimMarkerPresentation(feature.tier, feature.npc) : mapMarkerPresentation(feature.kind)).mode === "canvas");
       })
     : [];
   const layerAvailability: Record<string, LayerAvailability> = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, available, unavailableReason, selectionRequired }) => {

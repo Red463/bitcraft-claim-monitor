@@ -117,7 +117,13 @@ test("Native map reuses one canvas renderer and fixed marker presentations", () 
   assert.match(nativeMap, /const accessibleFeatures =/);
   assert.match(nativeMap, /presentation\.mode === "canvas"/);
   assert.match(nativeMap, /accessibleFeatures\.slice\(0, 250\)/);
-  assert.match(nativeMap, /feature\.kind === "claim"\s*\? claimMarkerPresentation\(feature\.tier\)/);
+  assert.match(nativeMap, /feature\.kind === "claim"\s*\? claimMarkerPresentation\(feature\.tier, feature\.npc\)/);
+  assert.match(nativeMap, /claimDisplayTier\(feature\.tier\)/);
+  assert.match(nativeMap, /feature\.npc\s*\?\s*" · NPC town"/);
+  assert.match(nativeMap, /badgeCrop\s*\?\s*36/);
+  const css = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+  assert.match(css, /native-map-marker--claim\s*\{[^}]*width:\s*36px;[^}]*height:\s*36px;/s);
+  assert.match(css, /native-map-marker-content--badge-crop\s*img\s*\{[^}]*width:\s*48px;[^}]*height:\s*48px;/s);
   assert.match(nativeMap, /keyboard: true/);
 });
 
@@ -209,12 +215,12 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   assert.match(nativeMap, /zoomend/);
   assert.match(nativeMap, /--native-map-claim-scale/);
   const css = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
-  assert.match(css, /native-map-marker--claim[^}]*width:\s*40px[^}]*height:\s*40px/s);
+  assert.match(css, /native-map-marker--claim[^}]*width:\s*36px[^}]*height:\s*36px/s);
   assert.match(css, /badge-crop[^}]*padding:\s*0/s);
   assert.match(css, /badge-crop[^}]*box-shadow:\s*none/s);
   assert.match(css, /badge-crop[^}]*background:\s*transparent/s);
   assert.match(css, /badge-crop[^}]*clip-path:\s*polygon\(50% 0%, 93\.3% 25%, 93\.3% 75%, 50% 100%, 6\.7% 75%, 6\.7% 25%\)/s);
-  assert.match(css, /badge-crop img[^}]*inset:\s*-7px[^}]*width:\s*54px[^}]*height:\s*54px/s);
+  assert.match(css, /badge-crop img[^}]*inset:\s*-6px[^}]*width:\s*48px[^}]*height:\s*48px/s);
   assert.match(nativeMap, /selectionRequired.*resourceIds\.length.*enemyTypes\.length/s);
 });
 
