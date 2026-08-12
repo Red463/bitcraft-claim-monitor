@@ -150,6 +150,27 @@ test("player positions require selected online monitored non-excluded members", 
     coordinateSpace: "map-xz",
     sourceCoordinateSpace: "mobile-fixed-1000",
   });
+
+  const previouslyLiveSpatial = {
+    data: { players: [{ playerEntityId: "101", regionId: "19", locationX: 12_000, locationZ: 24_000, dimension: "1" }] },
+    generation: 10,
+    provenance: { receivedAt: "2026-08-11T11:59:59.000Z" },
+  };
+  assert.deepEqual(buildMapSnapshot({
+    scope: { ...scope, playerIds: ["101"] },
+    mobileIdentityVerified: true,
+    members: [{ playerEntityId: "101" }],
+    players: [{ entityId: "101", signedIn: false }],
+    spatial: previouslyLiveSpatial,
+  }).layers.players, []);
+  assert.deepEqual(buildMapSnapshot({
+    scope: { ...scope, playerIds: ["101"] },
+    excludedMemberIds: ["101"],
+    mobileIdentityVerified: true,
+    members: [{ playerEntityId: "101" }],
+    players: [{ entityId: "101", signedIn: true }],
+    spatial: previouslyLiveSpatial,
+  }).layers.players, []);
 });
 
 test("map player subscriptions receive only selected online monitored non-excluded ids", () => {

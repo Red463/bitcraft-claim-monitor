@@ -184,12 +184,12 @@ test("Native map separates event and snapshot limits and ignores the initial str
   assert.match(server, /initial: true/);
 });
 
-test("configured-region resource tracking is enabled without enabling unverified mobile identities", () => {
+test("configured-region resource and verified player tracking are enabled without enabling unverified enemy identities", () => {
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(server, /const MAP_RESOURCE_COORDINATES_VERIFIED = true/);
   assert.match(server, /const MAP_SPATIAL_COLLECTION_VERIFIED = true/);
-  assert.match(server, /const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = false/);
+  assert.match(server, /const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = true/);
   assert.match(server, /const MAP_ENEMY_IDENTITY_VERIFIED = false/);
-  assert.match(server, /const spatialCollectionRequested = .*scope\.resourceIds\.length/s);
+  assert.match(server, /const spatialCollectionRequested = .*permittedPlayerIds\.length.*scope\.resourceIds\.length/s);
 });
 

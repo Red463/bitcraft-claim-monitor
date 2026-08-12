@@ -600,7 +600,7 @@ const relayRegionClaimsRuntime = new RelayRegionClaimsRuntime({
   reconnectDelayMs: relayReconnectDelayMs,
 });
 const terrainLiveRebuildEnabled = process.env.ENABLE_RELAY_TERRAIN_LIVE_REBUILD === "true";
-const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = false;
+const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = true;
 const MAP_ENEMY_IDENTITY_VERIFIED = false;
 const MAP_RESOURCE_COORDINATES_VERIFIED = true;
 const MAP_WAYSTONE_COORDINATES_VERIFIED = false;

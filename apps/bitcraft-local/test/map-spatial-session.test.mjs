@@ -18,12 +18,13 @@ function table(rows) {
 test("map spatial session applies a bounded resource join and selected-enemy position generation", async () => {
   const resourceRows = [{ entityId: 100n, resourceId: 2 }];
   const enemyRows = [{ entityId: 200n, enemyType: 8 }];
+  const mobileRows = [{ entityId: 200n, locationX: 70_000, locationZ: 80_000, dimension: 1 }, { entityId: 101n, locationX: 90_000, locationZ: 100_000, dimension: 1 }];
   const db = {
     waystoneState: table([]),
     resourceState: table(resourceRows),
     enemyState: table(enemyRows),
     locationState: table([{ entityId: 100n, x: 50, z: 60, dimension: 1n }]),
-    mobileEntityState: table([{ entityId: 200n, locationX: 70_000, locationZ: 80_000, dimension: 1 }, { entityId: 101n, locationX: 90_000, locationZ: 100_000, dimension: 1 }]),
+    mobileEntityState: table(mobileRows),
   };
   const subscriptions = [];
   const snapshots = [];
@@ -91,6 +92,12 @@ test("map spatial session applies a bounded resource join and selected-enemy pos
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(snapshots.at(-1).data.enemies, []);
+
+  mobileRows.splice(0);
+  db.mobileEntityState.emit("delete");
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(snapshots.at(-1).data.players, []);
   await session.stop();
 });
 
