@@ -128,7 +128,7 @@ test("Native map gives each visible player a stable accessible colour marker", (
   assert.match(nativeMap, /snapshot\.layers\.players/);
   assert.match(nativeMap, /--player-marker-color/);
   assert.match(nativeMap, /markerIcon\(feature\.kind, presentation, playerColours/);
-  assert.match(nativeMap, /alt: accessibleLabel, title: accessibleLabel/);
+  assert.match(nativeMap, /alt:\s*accessibleLabel,\s*title:\s*accessibleLabel/s);
   assert.match(nativeMap, /setAttribute\("aria-label", accessibleLabel\)/);
   assert.match(css, /native-map-player-dot[^}]*--player-marker-color/s);
   assert.match(css, /native-map-marker--player[^}]*border[^}]*box-shadow/s);
@@ -148,7 +148,8 @@ test("Native map keeps resource canvases and player markers above ordinary featu
   assert.match(nativeMap, /playerPane\.style\.zIndex\s*=\s*"700"/);
   assert.match(nativeMap, /new DensePointLayer\([^\n]+"native-map-resources"\)/);
   assert.match(nativeMap, /L\.layerGroup\(\[\], \{ pane: "native-map-players" \}\)/);
-  assert.match(nativeMap, /pane: feature\.kind === "player" \? "native-map-players" : undefined/);
+  assert.match(nativeMap, /\.\.\.\(feature\.kind === "player" \? \{ pane: "native-map-players" \} : \{\}\)/);
+  assert.doesNotMatch(nativeMap, /pane: feature\.kind === "player" \? "native-map-players" : undefined/);
 });
 
 test("Native map requests only same-origin locally provisioned terrain tiles", () => {
@@ -194,7 +195,7 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   assert.doesNotMatch(control, /setResourceIds|setEnemyTypes|resourceIds\s*=|enemyTypes\s*=/);
   assert.match(control, /aria-describedby/);
   assert.match(control, />Layers</);
-  assert.match(nativeMap, /alt: accessibleLabel, title: accessibleLabel/);
+  assert.match(nativeMap, /alt:\s*accessibleLabel,\s*title:\s*accessibleLabel/s);
   assert.match(nativeMap, /setAttribute\("aria-label", accessibleLabel\)/);
   assert.match(nativeMap, /zoomend/);
   assert.match(nativeMap, /--native-map-claim-scale/);
@@ -204,7 +205,7 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   assert.match(css, /badge-crop[^}]*box-shadow:\s*none/s);
   assert.match(css, /badge-crop[^}]*background:\s*transparent/s);
   assert.match(css, /badge-crop[^}]*clip-path:\s*polygon\(50% 0%, 93\.3% 25%, 93\.3% 75%, 50% 100%, 6\.7% 75%, 6\.7% 25%\)/s);
-  assert.match(css, /badge-crop img[^}]*width:\s*40px[^}]*height:\s*40px/s);
+  assert.match(css, /badge-crop img[^}]*inset:\s*-7px[^}]*width:\s*54px[^}]*height:\s*54px/s);
   assert.match(nativeMap, /selectionRequired.*resourceIds\.length.*enemyTypes\.length/s);
 });
 

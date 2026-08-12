@@ -465,7 +465,13 @@ export function NativeMap({
               fillOpacity: 0.85,
               renderer: ordinaryRendererRef.current,
             })
-          : L.marker(leafletPoint(feature.point), { icon: markerIcon(feature.kind, presentation, playerColours[String(feature.playerEntityId ?? feature.entityId)]), pane: feature.kind === "player" ? "native-map-players" : undefined, keyboard: true, alt: accessibleLabel, title: accessibleLabel });
+          : L.marker(leafletPoint(feature.point), {
+              icon: markerIcon(feature.kind, presentation, playerColours[String(feature.playerEntityId ?? feature.entityId)]),
+              ...(feature.kind === "player" ? { pane: "native-map-players" } : {}),
+              keyboard: true,
+              alt: accessibleLabel,
+              title: accessibleLabel,
+            });
         marker.bindTooltip(accessibleLabel);
         marker.on("add", () => marker.getElement()?.setAttribute("aria-label", accessibleLabel));
         marker.addTo(markerGroup);
