@@ -50,7 +50,15 @@ export type MapResourceRuntimeHealth = {
     resourceCount: number;
     leaseCount: number;
     failure: string | null;
-    subscription: ReturnType<RegionSession["health"]> | null;
+    subscription: {
+      connected: boolean;
+      applied: boolean;
+      stage: "idle" | "connecting" | "subscribed" | "applied" | "partial" | "error" | "stopped";
+      rowCount: number;
+      firstGenerationLatencyMs: number | null;
+      lastAppliedAt: string | null;
+      lastError: string | null;
+    } | null;
   }>;
 };
 
@@ -132,9 +140,11 @@ export class RelayMapResourceRuntime {
     this.#stopped = false;
     this.#config = { relayBaseUrl: String(input.relayBaseUrl).replace(/\/+$/, ""), primaryRegionId, activeRegionIds };
     for (const entry of this.#regions.values()) {
+      const wasPinned = entry.pinned;
       entry.configured = activeRegionIds.includes(entry.regionId);
       entry.pinned = entry.regionId === primaryRegionId;
       if (!entry.configured && this.#leaseCount(entry) === 0) await this.#closeRegion(entry);
+      else if (wasPinned && !entry.pinned && entry.resources.size === 0 && this.#leaseCount(entry) === 0) this.#scheduleRegionIdleClose(entry);
     }
     const primary = await this.#ensureRegion(primaryRegionId);
     primary.pinned = true;
@@ -321,9 +331,12 @@ export class RelayMapResourceRuntime {
     }
     resource.waiters.clear();
     entry.resources.delete(resource.resourceId);
-    if (!entry.pinned && entry.resources.size === 0) {
-      entry.idleTimer = this.#setTimer(() => { void this.#closeRegion(entry); }, this.#regionIdleMs);
-    }
+    if (!entry.pinned && entry.resources.size === 0) this.#scheduleRegionIdleClose(entry);
+  }
+
+  #scheduleRegionIdleClose(entry: RegionEntry) {
+    if (entry.idleTimer != null) return;
+    entry.idleTimer = this.#setTimer(() => { void this.#closeRegion(entry); }, this.#regionIdleMs);
   }
 
   async #closeRegion(entry: RegionEntry) {
@@ -361,8 +374,21 @@ export class RelayMapResourceRuntime {
       coldStartsInWindow: this.#coldStarts.length,
       regions: regions.map((entry) => ({
         regionId: entry.regionId, pinned: entry.pinned, resourceCount: entry.resources.size,
-        leaseCount: this.#leaseCount(entry), failure: entry.failure, subscription: entry.session?.health() ?? null,
+        leaseCount: this.#leaseCount(entry), failure: entry.failure,
+        subscription: entry.session ? this.#healthSummary(entry.session.health()) : null,
       })),
+    };
+  }
+
+  #healthSummary(health: ReturnType<RegionSession["health"]>) {
+    return {
+      connected: health.connected,
+      applied: health.applied,
+      stage: health.stage,
+      rowCount: health.rowCount,
+      firstGenerationLatencyMs: health.firstGenerationLatencyMs,
+      lastAppliedAt: health.lastAppliedAt,
+      lastError: health.lastError,
     };
   }
 

@@ -82,6 +82,39 @@ test("reconcile pins only the primary regional connection without resource subsc
   await runtime.stop();
 });
 
+test("runtime health exposes only aggregate regional subscription diagnostics", async () => {
+  assert.ok(runtimeModule, "map-resource runtime module must exist");
+  const runtime = new runtimeModule.RelayMapResourceRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({ regions: new Map([["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }]]) }),
+    createSession: () => ({
+      async start() {}, async subscribe() {}, unsubscribe() {}, async stop() {},
+      health: () => ({ connected: true, applied: true, stage: "applied", lastError: null, lastAppliedAt: "2026-08-12T10:00:00.000Z", firstGenerationLatencyMs: 8, rowCount: 2, appliedResourceIds: ["28"], points: [{ x: 101, z: 202 }] }),
+    }),
+  });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const serialized = JSON.stringify(runtime.health());
+  assert.equal(serialized.includes("28"), false, "health must not disclose selected resource IDs");
+  assert.equal(serialized.includes("101"), false, "health must not disclose resource coordinates");
+  assert.deepEqual(runtime.health().regions[0].subscription, {
+    connected: true, applied: true, stage: "applied", lastError: null, lastAppliedAt: "2026-08-12T10:00:00.000Z", firstGenerationLatencyMs: 8, rowCount: 2,
+  });
+  await runtime.stop();
+});
+
+test("reconcile starts the normal idle close window when an empty primary region is demoted", async () => {
+  assert.ok(runtimeModule, "map-resource runtime module must exist");
+  const { runtime, sessions, clock } = runtimeFixture();
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "20", activeRegionIds: ["19", "20"] });
+  await clock.advance(59_999);
+  assert.equal(sessions[0].stopped, false);
+  await clock.advance(1);
+  assert.equal(sessions[0].stopped, true, "the demoted empty region must close after its normal idle window");
+  assert.equal(sessions[1].stopped, false, "the new primary region remains pinned");
+  await runtime.stop();
+});
+
 test("leases share canonical resource entries, snapshots, and the owning regional connection", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
   const { runtime, sessions } = runtimeFixture();
