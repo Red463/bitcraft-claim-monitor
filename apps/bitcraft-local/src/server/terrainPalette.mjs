@@ -1,26 +1,11 @@
-export const TERRAIN_PALETTE_VERSION = 3;
+import {
+  TERRAIN_BIOME_COLOURS,
+  TERRAIN_PALETTE_VERSION,
+  TERRAIN_UNKNOWN_GROUND_COLOUR,
+  TERRAIN_WATER_COLOURS,
+} from "../shared/terrainPaletteDefinition.mjs";
 
-const WATER = Object.freeze({
-  lake: [35, 68, 103, 255],
-  river: [48, 92, 122, 255],
-  ocean: [20, 43, 72, 255],
-  "ocean-biome": [20, 43, 72, 255],
-  swamp: [43, 72, 65, 255],
-});
-
-const BIOMES = Object.freeze({
-  grasslands: [67, 83, 53, 255],
-  forest: [39, 66, 45, 255],
-  desert: [130, 109, 61, 255],
-  tundra: [105, 116, 111, 255],
-  mountains: [89, 87, 82, 255],
-  mountain: [89, 87, 82, 255],
-  wetlands: [53, 75, 55, 255],
-  swamp: [53, 75, 55, 255],
-  volcanic: [78, 62, 57, 255],
-});
-
-const UNKNOWN_GROUND = Object.freeze([84, 89, 80, 255]);
+export { TERRAIN_PALETTE_VERSION };
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
@@ -28,8 +13,8 @@ function clamp(value, minimum, maximum) {
 
 function biomeBase(name) {
   const normalized = String(name ?? "").trim().toLowerCase();
-  if (BIOMES[normalized]) return BIOMES[normalized];
-  for (const [token, rgba] of Object.entries(BIOMES)) if (normalized.includes(token)) return rgba;
+  if (TERRAIN_BIOME_COLOURS[normalized]) return TERRAIN_BIOME_COLOURS[normalized];
+  for (const [token, rgba] of Object.entries(TERRAIN_BIOME_COLOURS)) if (normalized.includes(token)) return rgba;
   return null;
 }
 
@@ -53,7 +38,7 @@ export function terrainCellRgba({
   warnings = null,
 }) {
   const texture = textureShade(mapX, mapZ);
-  const water = WATER[surface];
+  const water = TERRAIN_WATER_COLOURS[surface];
   if (water) {
     const boundedDepth = clamp(Number(depth) || 0, 0, 24);
     const depthShade = Math.trunc(boundedDepth / 2);
@@ -66,7 +51,7 @@ export function terrainCellRgba({
     ];
   }
   const known = biomeBase(biomeName);
-  const base = known ?? UNKNOWN_GROUND;
+  const base = known ?? TERRAIN_UNKNOWN_GROUND_COLOUR;
   if (!known && Array.isArray(warnings)) {
     const warning = `Unknown terrain biome: ${String(biomeName ?? "") || "(empty)"}`;
     if (!warnings.includes(warning)) warnings.push(warning);
