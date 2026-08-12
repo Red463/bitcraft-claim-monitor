@@ -75,11 +75,7 @@ function equalityQueries(table: string, column: string, values: string[], extraP
 }
 
 export function mapSpatialQueries(scope: MapSpatialScope): string[] {
-  const resourcePredicate = equalityPredicate("resource_state", "resource_state.resource_id", scope.resourceIds);
-  const resourceJoin = "FROM resource_state JOIN location_state ON resource_state.entity_id = location_state.entity_id";
   return [
-    resourcePredicate ? `SELECT resource_state.* ${resourceJoin} WHERE (${resourcePredicate}) AND location_state.dimension = ${MAP_OVERWORLD_DIMENSION}` : null,
-    resourcePredicate ? `SELECT location_state.* ${resourceJoin} WHERE (${resourcePredicate}) AND location_state.dimension = ${MAP_OVERWORLD_DIMENSION}` : null,
     scope.enemyTypes.length ? "SELECT * FROM enemy_state" : null,
     ...equalityQueries("mobile_entity_state", "entity_id", scope.playerIds, `dimension = ${MAP_OVERWORLD_DIMENSION}`),
   ].filter((query): query is string => Boolean(query));
@@ -119,28 +115,19 @@ function coordinateFields(value: unknown, label: string) {
 export function normalizeMapSpatial({
   scope,
   waystoneRows = [],
-  resourceRows = [],
   enemyRows = [],
-  locationRows = [],
   mobileRows = [],
   observedAt = new Date().toISOString(),
 }: {
   scope: MapSpatialScope;
   waystoneRows?: unknown[];
-  resourceRows?: unknown[];
   enemyRows?: unknown[];
-  locationRows?: unknown[];
   mobileRows?: unknown[];
   observedAt?: string;
 }) {
   const regionId = decimal(scope.regionId, "Map spatial region id");
   const warnings: string[] = [];
   if (scope.enemyTypes.length && !enemyRows.length) warnings.push("No enemies matched the selected types in this region.");
-  const locations = new Map<string, WireRecord>();
-  for (const [index, row] of rows(locationRows).entries()) {
-    try { locations.set(decimal(row.entityId ?? row.entity_id, `Map location ${index} entity id`), row); }
-    catch (error) { warnings.push(error instanceof Error ? error.message : String(error)); }
-  }
   const mobile = new Map<string, WireRecord>();
   for (const [index, row] of rows(mobileRows).entries()) {
     try { mobile.set(decimal(row.entityId ?? row.entity_id, `Map mobile ${index} entity id`), row); }
@@ -150,20 +137,6 @@ export function normalizeMapSpatial({
     try {
       const entityId = decimal(row.buildingEntityId ?? row.building_entity_id, `Map waystone ${index} entity id`);
       return [{ entityId, claimEntityId: decimal(row.claimEntityId ?? row.claim_entity_id, `Map waystone ${entityId} claim id`), regionId, ...coordinateFields(row.coordinates, `Map waystone ${entityId}`), observedAt }];
-    } catch (error) {
-      warnings.push(error instanceof Error ? error.message : String(error));
-      return [];
-    }
-  });
-  const resources = rows(resourceRows).flatMap((row, index) => {
-    try {
-      const entityId = decimal(row.entityId ?? row.entity_id, `Map resource ${index} entity id`);
-      const location = locations.get(entityId);
-      if (!location) {
-        warnings.push(`Map resource ${entityId} has no location_state row.`);
-        return [];
-      }
-      return [{ entityId, resourceId: decimal(row.resourceId ?? row.resource_id, `Map resource ${entityId} type`), regionId, locationX: boundedCoordinate(location.x, `Map resource ${entityId} x`, MAP_WORLD_MAX), locationZ: boundedCoordinate(location.z, `Map resource ${entityId} z`, MAP_WORLD_MAX), dimension: overworldDimension(location.dimension, `Map resource ${entityId}`), observedAt }];
     } catch (error) {
       warnings.push(error instanceof Error ? error.message : String(error));
       return [];
@@ -194,5 +167,5 @@ export function normalizeMapSpatial({
       return [];
     }
   });
-  return { data: { regionId, players, resources, enemies, waystones }, warnings };
+  return { data: { regionId, players, resources: [], enemies, waystones }, warnings };
 }
