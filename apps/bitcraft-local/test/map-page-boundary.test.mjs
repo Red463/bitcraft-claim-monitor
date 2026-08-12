@@ -152,6 +152,15 @@ test("Native map keeps resource canvases and player markers above ordinary featu
   assert.doesNotMatch(nativeMap, /pane: feature\.kind === "player" \? "native-map-players" : undefined/);
 });
 
+test("Native map frames a newly selected off-screen resource result once", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  assert.match(nativeMap, /applyResourceViewport/);
+  assert.match(nativeMap, /resourceFrameSelectionRef/);
+  assert.match(nativeMap, /map\.fitBounds\(L\.latLngBounds\(features\.map/);
+  assert.match(nativeMap, /padding:\s*\[32, 32\]/);
+  assert.match(nativeMap, /maxZoom:\s*1/);
+});
+
 test("Native map requests only same-origin locally provisioned terrain tiles", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   assert.match(nativeMap, /mapTileUrl\("terrain", terrainStatus\.generation\)/);

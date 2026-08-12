@@ -9,6 +9,7 @@ import { MAP_LAYER_DEFINITIONS, defaultMapLayerVisibility, loadMapLayerVisibilit
 import { MAP_MARKER_PRESENTATIONS, claimMarkerPresentation, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { assignPlayerMarkerColours } from "./playerMarkerColours.mjs";
+import { applyResourceViewport } from "./resourceViewport.mjs";
 import { createMapSnapshotLoader, mapEventNeedsSnapshot } from "./mapSnapshotLoader.mjs";
 import { loadTerrainTileStatus, mapTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
 import type { MapFocus } from "./mapUtils";
@@ -30,6 +31,7 @@ type MapSnapshot = {
   freshness: "live" | "partial" | "stale" | "unavailable";
   ageMs: number | null;
   warnings: string[];
+  scope?: { resourceIds?: string[] };
   layers: Record<string, MapFeature[]>;
   layerAvailability?: Record<string, { available: boolean; reason: string | null }>;
 };
@@ -216,6 +218,7 @@ export function NativeMap({
   const terrainTilesRef = React.useRef<L.TileLayer | null>(null);
   const waterTilesRef = React.useRef<L.TileLayer | null>(null);
   const roadTilesRef = React.useRef<L.TileLayer | null>(null);
+  const resourceFrameSelectionRef = React.useRef("");
   const [snapshot, setSnapshot] = React.useState<MapSnapshot | null>(null);
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
@@ -225,6 +228,7 @@ export function NativeMap({
     ? defaultMapLayerVisibility()
     : loadMapLayerVisibility(() => window.localStorage));
   const request = React.useMemo(() => nativeMapRequest({ regionIds, playerIds, resourceIds, enemyTypes }), [regionIds.join(","), playerIds.join(","), resourceIds.join(","), enemyTypes.join(",")]);
+  const resourceSelectionKey = React.useMemo(() => [...resourceIds].sort((left, right) => left.localeCompare(right)).join(","), [resourceIds.join(",")]);
 
   React.useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
@@ -477,9 +481,28 @@ export function NativeMap({
         marker.addTo(markerGroup);
       }
     }
-    resourcesRef.current?.setPoints(snapshot.layers.resources ?? []);
+    const resourcePoints = snapshot.layers.resources ?? [];
+    const snapshotResourceSelectionKey = [...(snapshot.scope?.resourceIds ?? [])].sort((left, right) => left.localeCompare(right)).join(",");
+    resourcesRef.current?.setPoints(resourcePoints);
     enemiesRef.current?.setPoints(snapshot.layers.enemies ?? []);
-  }, [snapshot, focus?.name, focus?.locationX, focus?.locationZ]);
+    const map = mapRef.current;
+    if (!resourceSelectionKey) resourceFrameSelectionRef.current = "";
+    else if (map) {
+      resourceFrameSelectionRef.current = applyResourceViewport({
+        selectionKey: resourceSelectionKey,
+        snapshotSelectionKey: snapshotResourceSelectionKey,
+        consumedSelectionKey: resourceFrameSelectionRef.current,
+        points: resourcePoints,
+        isVisible: (feature: MapFeature) => map.getBounds().contains(leafletPoint(feature.point)),
+        frame: (features: readonly MapFeature[]) => {
+          map.fitBounds(L.latLngBounds(features.map((feature) => leafletPoint(feature.point))), {
+            padding: [32, 32],
+            maxZoom: 1,
+          });
+        },
+      });
+    }
+  }, [snapshot, resourceSelectionKey, focus?.name, focus?.locationX, focus?.locationZ]);
 
   const accessibleFeatures = snapshot
     ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {
