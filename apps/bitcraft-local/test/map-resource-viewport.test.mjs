@@ -85,6 +85,18 @@ test("explicit loading status wins over legacy unavailable reason text", () => {
   }), "loading");
 });
 
+test("explicit unavailable status beats the legacy loading reason", () => {
+  assert.equal(resourceLayerStatus({
+    selectionKey: "28",
+    snapshotSelectionKey: "28",
+    available: false,
+    status: "unavailable",
+    reason: "Live resource positions are unavailable.",
+    visible: true,
+    freshness: "partial",
+  }), "unavailable");
+});
+
 test("warm resource points remain visible while the next selection loads", () => {
   assert.equal(resourceLayerStatus({
     selectionKey: "28",

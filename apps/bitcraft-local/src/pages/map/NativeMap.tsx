@@ -11,6 +11,7 @@ import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { assignPlayerMarkerColours } from "./playerMarkerColours.mjs";
 import { applyResourceViewport, resourceLayerStatus } from "./resourceViewport.mjs";
 import { createMapSnapshotLoader, mapEventNeedsSnapshot } from "./mapSnapshotLoader.mjs";
+import { replaceMapSnapshot } from "./mapSnapshotState.mjs";
 import { loadTerrainTileStatus, mapTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
 import type { MapFocus } from "./mapUtils";
 
@@ -35,7 +36,7 @@ type MapSnapshot = {
   layers: Record<string, MapFeature[]>;
   layerAvailability?: Record<string, {
     available: boolean;
-    status: "live" | "partial" | "stale" | "loading" | "unavailable";
+    status?: "live" | "partial" | "stale" | "loading" | "unavailable";
     reason: string | null;
   }>;
 };
@@ -244,7 +245,9 @@ export function NativeMap({
   const snapshotResourceSelectionKey = [...(snapshot?.scope?.resourceIds ?? [])].sort((left, right) => left.localeCompare(right)).join(",");
   const resourceLayerLoading = snapshot?.layerAvailability?.resources?.status === "loading"
     || snapshot?.layerAvailability?.resources?.status === "partial"
-    || (snapshot?.layerAvailability?.resources?.available === false && snapshot?.layerAvailability?.resources?.reason === "Live resource positions are unavailable.");
+    || (snapshot?.layerAvailability?.resources?.status == null
+      && snapshot?.layerAvailability?.resources?.available === false
+      && snapshot?.layerAvailability?.resources?.reason === "Live resource positions are unavailable.");
 
   React.useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
@@ -412,8 +415,9 @@ export function NativeMap({
         return payload;
       },
       onValue: ({ requestKey, value }) => {
-        if (!disposed && requestKey === snapshotRequestKeyRef.current) {
-          setSnapshot(value);
+        const nextSnapshot = replaceMapSnapshot({ currentRequestKey: snapshotRequestKeyRef.current, requested: { requestKey, value } });
+        if (!disposed && nextSnapshot) {
+          setSnapshot(nextSnapshot);
           setError("");
         }
       },

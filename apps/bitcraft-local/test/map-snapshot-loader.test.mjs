@@ -8,6 +8,13 @@ try {
   // RED: the coalescing map loader does not exist yet.
 }
 
+let snapshotStateModule = null;
+try {
+  snapshotStateModule = await import("../src/pages/map/mapSnapshotState.mjs");
+} catch {
+  // RED: request-keyed map snapshot replacement does not exist yet.
+}
+
 test("map snapshot loader coalesces concurrent notifications into one follow-up load", async () => {
   assert.ok(loaderModule);
   const resolvers = [];
@@ -52,6 +59,27 @@ test("map snapshot loader retains warm values until the matching request complet
   resolvers.shift().resolve({ generation: "B" });
   await next;
   assert.deepEqual(values.map(({ value }) => value.generation), ["A", "B"]);
+});
+
+test("a matching response replaces warm resource points and removes old types", () => {
+  assert.ok(snapshotStateModule);
+  const warmSnapshot = {
+    scope: { resourceIds: ["28", "54"] },
+    layers: { resources: [{ resourceId: "28" }, { resourceId: "54" }] },
+  };
+  const matchingSnapshot = snapshotStateModule.replaceMapSnapshot({
+    currentRequestKey: "resourceIds=54",
+    requested: {
+      requestKey: "resourceIds=54",
+      value: {
+        scope: { resourceIds: ["54"] },
+        layers: { resources: [{ resourceId: "54" }] },
+      },
+    },
+  });
+
+  assert.deepEqual(warmSnapshot.layers.resources.map(({ resourceId }) => resourceId), ["28", "54"]);
+  assert.deepEqual(matchingSnapshot.layers.resources.map(({ resourceId }) => resourceId), ["54"]);
 });
 
 test("map snapshot loader never commits A after B becomes current", async () => {
