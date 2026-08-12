@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 
 import { MapBiomeKey } from "./MapBiomeKey";
 import { MapLayersControl } from "./MapLayersControl";
+import { createBiomeHighlightController } from "./biomeHighlightState.mjs";
 import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, leafletPoint } from "./mapCoordinates.mjs";
 import { planDensePointDraw } from "./mapDensePointPlan.mjs";
 import { MAP_LAYER_DEFINITIONS, defaultMapLayerVisibility, loadMapLayerVisibility, saveMapLayerVisibility, type MapLayerKey } from "./mapLayerPreferences.mjs";
@@ -15,7 +16,7 @@ import { mergeMapResourcePayload } from "./mapResourceSnapshotState.mjs";
 import { createMapSnapshotLoader, mapEventNeedsSnapshot } from "./mapSnapshotLoader.mjs";
 import { replaceMapSnapshot } from "./mapSnapshotState.mjs";
 import { RESOURCE_NODE_FALLBACK_COLOUR, resourceFeatureColour } from "./resourceNodeColours.mjs";
-import { loadTerrainTileStatus, mapTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
+import { biomeTileUrl, loadTerrainTileStatus, mapTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
 import type { MapFocus } from "./mapUtils";
 
 type MapPoint = { x: number; z: number; dimension: string; coordinateSpace: string };
@@ -241,6 +242,7 @@ export function NativeMap({
   const enemiesRef = React.useRef<DensePointLayer | null>(null);
   const terrainTilesRef = React.useRef<L.TileLayer | null>(null);
   const waterTilesRef = React.useRef<L.TileLayer | null>(null);
+  const biomeMaskTilesRef = React.useRef<L.TileLayer | null>(null);
   const roadTilesRef = React.useRef<L.TileLayer | null>(null);
   const resourceFrameSelectionRef = React.useRef("");
   const [snapshot, setSnapshot] = React.useState<MapSnapshot | null>(null);
@@ -248,6 +250,14 @@ export function NativeMap({
   const [loading, setLoading] = React.useState(true);
   const [terrainStatus, setTerrainStatus] = React.useState<TerrainTileStatus | null>(null);
   const [terrainStatusError, setTerrainStatusError] = React.useState("");
+  const [biomeHighlight, setBiomeHighlight] = React.useState<{ active: number | null; pinned: number | null }>({ active: null, pinned: null });
+  const biomeHighlightControllerRef = React.useRef<ReturnType<typeof createBiomeHighlightController> | null>(null);
+  const biomeHighlightController = React.useMemo(() => ({
+    preview: (biomeType: number) => biomeHighlightControllerRef.current?.preview(biomeType),
+    leave: () => biomeHighlightControllerRef.current?.leave(),
+    pin: (biomeType: number) => biomeHighlightControllerRef.current?.pin(biomeType),
+    clear: () => biomeHighlightControllerRef.current?.clear(),
+  }), []);
   const [layerVisibility, setLayerVisibility] = React.useState(() => typeof window === "undefined"
     ? defaultMapLayerVisibility()
     : loadMapLayerVisibility(() => window.localStorage));
@@ -263,8 +273,24 @@ export function NativeMap({
       && snapshot?.layerAvailability?.resources?.reason === "Live resource positions are unavailable.");
 
   React.useEffect(() => {
+    const controller = createBiomeHighlightController({ onChange: setBiomeHighlight });
+    biomeHighlightControllerRef.current = controller;
+    return () => {
+      controller.dispose();
+      if (biomeHighlightControllerRef.current === controller) biomeHighlightControllerRef.current = null;
+    };
+  }, []);
+
+  React.useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
     const map = L.map(hostRef.current, { crs: NATIVE_CRS, minZoom: -6, maxZoom: 5, zoomControl: true, preferCanvas: true, attributionControl: false });
+    const terrainPane = map.createPane("native-map-terrain");
+    terrainPane.style.zIndex = "200";
+    const waterPane = map.createPane("native-map-water");
+    waterPane.style.zIndex = "210";
+    const biomeMaskPane = map.createPane("native-map-biome-mask");
+    biomeMaskPane.style.zIndex = "250";
+    biomeMaskPane.style.pointerEvents = "none";
     const resourcePane = map.createPane("native-map-resources");
     resourcePane.style.zIndex = "650";
     resourcePane.style.pointerEvents = "none";
@@ -299,6 +325,7 @@ export function NativeMap({
       enemiesRef.current = null;
       terrainTilesRef.current = null;
       waterTilesRef.current = null;
+      biomeMaskTilesRef.current = null;
       roadTilesRef.current = null;
     };
   }, []);
@@ -367,8 +394,8 @@ export function NativeMap({
       noWrap: false,
       keepBuffer: 2,
     };
-    const terrainTiles = L.tileLayer(mapTileUrl("terrain", terrainStatus.generation), tileOptions);
-    const waterTiles = L.tileLayer(mapTileUrl("water", terrainStatus.generation), tileOptions);
+    const terrainTiles = L.tileLayer(mapTileUrl("terrain", terrainStatus.generation), { ...tileOptions, pane: "native-map-terrain" });
+    const waterTiles = L.tileLayer(mapTileUrl("water", terrainStatus.generation), { ...tileOptions, pane: "native-map-water" });
     terrainTilesRef.current?.removeFrom(map);
     waterTilesRef.current?.removeFrom(map);
     terrainTiles.addTo(map);
@@ -382,6 +409,36 @@ export function NativeMap({
       if (waterTilesRef.current === waterTiles) waterTilesRef.current = null;
     };
   }, [terrainStatus?.available, terrainStatus?.generation]);
+
+  const activeBiomePresent = biomeHighlight.active != null
+    && terrainStatus?.biomes.some((biome) => biome.biomeType === biomeHighlight.active && biome.present) === true;
+
+  React.useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    biomeMaskTilesRef.current?.removeFrom(map);
+    biomeMaskTilesRef.current = null;
+    hostRef.current?.classList.remove("is-biome-highlight-active");
+    if (!terrainStatus?.available || !terrainStatus.generation || biomeHighlight.active == null || !activeBiomePresent) return;
+    const biomeMaskTiles = L.tileLayer(biomeTileUrl(biomeHighlight.active, terrainStatus.generation), {
+      tileSize: 256,
+      minZoom: -6,
+      maxZoom: 5,
+      minNativeZoom: -5,
+      maxNativeZoom: 0,
+      noWrap: false,
+      keepBuffer: 2,
+      pane: "native-map-biome-mask",
+    });
+    biomeMaskTiles.addTo(map);
+    biomeMaskTilesRef.current = biomeMaskTiles;
+    hostRef.current?.classList.add("is-biome-highlight-active");
+    return () => {
+      biomeMaskTiles.removeFrom(map);
+      if (biomeMaskTilesRef.current === biomeMaskTiles) biomeMaskTilesRef.current = null;
+      hostRef.current?.classList.remove("is-biome-highlight-active");
+    };
+  }, [activeBiomePresent, biomeHighlight.active, terrainStatus?.available, terrainStatus?.generation]);
 
   React.useEffect(() => {
     const map = mapRef.current;
@@ -587,7 +644,15 @@ export function NativeMap({
       <div ref={hostRef} className="native-map-canvas" role="application" aria-label="Interactive BitCraft coordinate map" tabIndex={0} />
       <div className="native-map-controls">
         <MapLayersControl visibility={layerVisibility} availability={layerAvailability} counts={layerCounts} onToggle={toggleLayer} />
-        <MapBiomeKey />
+        <MapBiomeKey
+          biomes={terrainStatus?.biomes ?? []}
+          activeBiomeType={biomeHighlight.active}
+          pinnedBiomeType={biomeHighlight.pinned}
+          onPreview={biomeHighlightController.preview}
+          onLeave={biomeHighlightController.leave}
+          onPin={biomeHighlightController.pin}
+          onClear={biomeHighlightController.clear}
+        />
       </div>
       <div className="native-map-status" aria-live="polite">
         <strong>{loading && !snapshot ? "Loading native map…" : snapshot ? `${snapshot.freshness} · generation ${snapshot.generation}` : "Native map unavailable"}</strong>

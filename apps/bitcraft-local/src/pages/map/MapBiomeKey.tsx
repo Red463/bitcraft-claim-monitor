@@ -6,20 +6,20 @@ import { TERRAIN_LEGEND_GROUPS } from "../../shared/terrainPaletteDefinition.mjs
 import type { TerrainBiomeStatus } from "./terrainTileStatus.mjs";
 
 type MapBiomeKeyProps = {
-  biomes?: TerrainBiomeStatus[];
-  activeBiomeType?: number | null;
-  pinnedBiomeType?: number | null;
-  onPreview?: (biomeType: number) => void;
-  onLeave?: () => void;
-  onPin?: (biomeType: number) => void;
-  onClear?: () => void;
+  biomes: TerrainBiomeStatus[];
+  activeBiomeType: number | null;
+  pinnedBiomeType: number | null;
+  onPreview: (biomeType: number) => void;
+  onLeave: () => void;
+  onPin: (biomeType: number) => void;
+  onClear: () => void;
 };
 
 function rgba(colour: readonly number[]) {
   return `rgba(${colour[0]}, ${colour[1]}, ${colour[2]}, ${colour[3] / 255})`;
 }
 
-export function MapBiomeKey({ biomes = [], activeBiomeType = null, pinnedBiomeType = null, onPreview = () => {}, onLeave = () => {}, onPin = () => {}, onClear = () => {} }: MapBiomeKeyProps = {}) {
+export function MapBiomeKey({ biomes, activeBiomeType, pinnedBiomeType, onPreview, onLeave, onPin, onClear }: MapBiomeKeyProps) {
   const [open, setOpen] = React.useState(false);
   const sortedBiomes = [...biomes].sort((left, right) => left.biomeType - right.biomeType);
   const waterEntries = TERRAIN_LEGEND_GROUPS.find(({ key }) => key === "water")?.entries ?? [];

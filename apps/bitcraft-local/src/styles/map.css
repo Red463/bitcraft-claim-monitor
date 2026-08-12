@@ -351,13 +351,48 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.35rem 0.65rem;
 }
+.native-map-canvas .leaflet-native-map-terrain-pane,
+.native-map-canvas .leaflet-native-map-water-pane {
+  transition: filter 120ms ease;
+}
+.native-map-canvas.is-biome-highlight-active .leaflet-native-map-terrain-pane,
+.native-map-canvas.is-biome-highlight-active .leaflet-native-map-water-pane {
+  filter: brightness(32%);
+}
 .native-map-biome-key-row {
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 0.45rem;
+  padding: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: transparent;
   color: var(--text);
   font-size: 0.72rem;
+  text-align: left;
+}
+button.native-map-biome-key-row { cursor: pointer; }
+.native-map-biome-key-row:hover:not(:disabled),
+.native-map-biome-key-row:focus-visible,
+.native-map-biome-key-row.is-active {
+  border-color: color-mix(in srgb, var(--accent) 52%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  outline: none;
+}
+.native-map-biome-key-row.is-pinned {
+  border-color: #d8ad4b;
+  box-shadow: inset 0 0 0 1px rgb(216 173 75 / 25%);
+}
+.native-map-biome-key-row.is-unavailable {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+.native-map-biome-key-row small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 0.62rem;
 }
 .native-map-biome-key-swatch {
   width: 1.15rem;

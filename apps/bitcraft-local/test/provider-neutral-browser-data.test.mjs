@@ -189,6 +189,7 @@ test("native terrain browser code is same-origin and contains no third-party til
   assert.match(browserTerrain, /\/api\/local\/map\/tiles\/status/);
   assert.match(browserTerrain, /mapTileUrl\("terrain"/);
   assert.match(browserTerrain, /mapTileUrl\("water"/);
+  assert.match(browserTerrain, /biomeTileUrl\(/);
   assert.doesNotMatch(browserTerrain, /https?:\/\/|prism\.brico|bitcraftmap\.com|BitJita|SpacetimeDB|sharp/i);
 });
 

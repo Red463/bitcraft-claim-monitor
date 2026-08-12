@@ -172,6 +172,18 @@ test("Native map requests only same-origin locally provisioned terrain tiles", (
   assert.match(nativeMap, /mapTileUrl\("terrain", terrainStatus\.generation\)/);
   assert.match(nativeMap, /mapTileUrl\("water", terrainStatus\.generation\)/);
   assert.match(nativeMap, /mapTileUrl\("roads", roadStatus\.generation\)/);
+  assert.match(nativeMap, /biomeTileUrl\(biomeHighlight\.active, terrainStatus\.generation\)/);
+  assert.match(nativeMap, /createPane\("native-map-terrain"\)/);
+  assert.match(nativeMap, /createPane\("native-map-water"\)/);
+  assert.match(nativeMap, /createPane\("native-map-biome-mask"\)/);
+  assert.match(nativeMap, /terrainPane\.style\.zIndex\s*=\s*"200"/);
+  assert.match(nativeMap, /waterPane\.style\.zIndex\s*=\s*"210"/);
+  assert.match(nativeMap, /biomeMaskPane\.style\.zIndex\s*=\s*"250"/);
+  assert.match(nativeMap, /biomeMaskPane\.style\.pointerEvents\s*=\s*"none"/);
+  assert.match(nativeMap, /pane:\s*"native-map-terrain"/);
+  assert.match(nativeMap, /pane:\s*"native-map-water"/);
+  assert.match(nativeMap, /pane:\s*"native-map-biome-mask"/);
+  assert.match(nativeMap, /biomeMaskTilesRef/);
   assert.match(nativeMap, /roadTilesRef/);
   assert.match(nativeMap, /loadTerrainTileStatus/);
   assert.match(nativeMap, /visibilitychange/);
@@ -229,11 +241,22 @@ test("Native map places a viewport-bounded biome key beside Layers", () => {
   const key = readFileSync(new URL("../src/pages/map/MapBiomeKey.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
 
-  assert.match(nativeMap, /native-map-controls[\s\S]*<MapLayersControl[\s\S]*<MapBiomeKey \/>/);
+  assert.match(nativeMap, /native-map-controls[\s\S]*<MapLayersControl[\s\S]*<MapBiomeKey/);
+  assert.match(nativeMap, /biomes=\{terrainStatus\?\.biomes \?\? \[\]\}/);
+  assert.match(nativeMap, /activeBiomeType=\{biomeHighlight\.active\}/);
+  assert.match(nativeMap, /pinnedBiomeType=\{biomeHighlight\.pinned\}/);
+  assert.match(nativeMap, /onPreview=\{biomeHighlightController\.preview\}/);
+  assert.match(nativeMap, /onClear=\{biomeHighlightController\.clear\}/);
+  assert.match(nativeMap, /React\.useEffect\(\(\) => \{\s*const controller = createBiomeHighlightController/);
+  assert.match(nativeMap, /biomeHighlightControllerRef\.current === controller[\s\S]*biomeHighlightControllerRef\.current = null/);
   assert.match(key, /<span>Key<\/span>/);
   assert.match(css, /native-map-biome-key-popover[^}]*max-height:\s*min\(30rem, calc\(100dvh - 8rem\)\)[^}]*overflow:\s*auto/s);
   assert.match(css, /native-map-biome-key-grid[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/s);
   assert.match(css, /@media \(max-width: 620px\)[\s\S]*native-map-biome-key-grid[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+  assert.match(css, /is-biome-highlight-active[^}]*leaflet-native-map-terrain-pane[^}]*filter:\s*brightness\(32%\)/s);
+  assert.match(css, /is-biome-highlight-active[^}]*leaflet-native-map-water-pane[^}]*filter:\s*brightness\(32%\)/s);
+  assert.match(css, /native-map-biome-key-row\.is-active/);
+  assert.match(css, /native-map-biome-key-row\.is-pinned/);
 });
 
 test("Native map separates event and snapshot limits and ignores the initial stream event", () => {
