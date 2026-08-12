@@ -44,6 +44,52 @@ test("different requested type scopes never share cached spatial rows", async ()
   await manager.stop();
 });
 
+test("shared spatial scopes expose bounded first-generation readiness", async () => {
+  const sessions = [];
+  const timers = [];
+  const manager = new RelayMapSpatialScopeManager({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({ regions: new Map([["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }]]) }),
+    createSession: (options) => {
+      const session = { options, async start() {}, health() { return { connected: true, applied: true }; }, async stop() {} };
+      sessions.push(session);
+      return session;
+    },
+    setTimer: (callback) => { timers.push(callback); return callback; },
+    clearTimer(timer) { const index = timers.indexOf(timer); if (index >= 0) timers.splice(index, 1); },
+  });
+  const request = { relayBaseUrl: "https://relay.example", claimId: "99999999", scope: { claimId: "99999999", regionId: "19", playerIds: [], resourceIds: ["54"], enemyTypes: [] } };
+  const first = await manager.acquire(request);
+  const second = await manager.acquire(request);
+  const firstReady = first.waitForSnapshot(2_000);
+  const secondReady = second.waitForSnapshot(2_000);
+  const snapshot = { data: { players: [], resources: [{ entityId: "100" }], enemies: [], waystones: [] }, warnings: [], generation: 4, receivedAt: "2026-08-11T12:00:00.000Z", database: "relay-region-19", regionId: "19", schemaFingerprint: "regional-v1" };
+  sessions[0].options.onSnapshot(snapshot);
+  assert.equal(await firstReady, snapshot);
+  assert.equal(await secondReady, snapshot);
+  assert.equal(await first.waitForSnapshot(2_000), snapshot);
+  assert.equal(sessions.length, 1);
+  await manager.stop();
+});
+
+test("spatial readiness timeout returns null without closing its shared session", async () => {
+  let stopped = false;
+  const timers = [];
+  const manager = new RelayMapSpatialScopeManager({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({ regions: new Map([["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }]]) }),
+    createSession: () => ({ async start() {}, health() { return { connected: true, applied: false }; }, async stop() { stopped = true; } }),
+    setTimer: (callback) => { timers.push(callback); return callback; },
+    clearTimer() {},
+  });
+  const lease = await manager.acquire({ relayBaseUrl: "https://relay.example", claimId: "99999999", scope: { claimId: "99999999", regionId: "19", playerIds: [], resourceIds: ["54"], enemyTypes: [] } });
+  const ready = lease.waitForSnapshot(2_000);
+  await timers[0]();
+  assert.equal(await ready, null);
+  assert.equal(stopped, false);
+  await manager.stop();
+});
+
 test("disconnected scopes retain static last-good rows but withhold player positions", async () => {
   let connected = true;
   let session;

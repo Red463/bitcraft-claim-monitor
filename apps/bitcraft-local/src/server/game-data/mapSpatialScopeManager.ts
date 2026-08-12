@@ -4,7 +4,8 @@ import { discoverRelayTopology, type RelayTopology } from "./topology.ts";
 
 type Scope = { claimId: string; regionId: string; playerIds: string[]; resourceIds: string[]; enemyTypes: string[] };
 type Session = { start(config: Parameters<RelayMapSpatialSession["start"]>[0]): Promise<void>; health(): unknown; stop(): Promise<void> };
-type Entry = { key: string; relayBaseUrl: string; scope: Scope; session: Session | null; leases: number; snapshot: MapSpatialSnapshot | null; closeTimer: unknown; restartTimer: unknown; restartAttempts: number; openedAt: number };
+type SnapshotWaiter = { timer: unknown; resolve(snapshot: MapSpatialSnapshot | null): void };
+type Entry = { key: string; relayBaseUrl: string; scope: Scope; session: Session | null; leases: number; snapshot: MapSpatialSnapshot | null; snapshotWaiters: Set<SnapshotWaiter>; closeTimer: unknown; restartTimer: unknown; restartAttempts: number; openedAt: number };
 type Dependencies = {
   manifest: Parameters<RelayMapSpatialSession["start"]>[0]["manifest"];
   discoverTopology?: (baseUrl: string) => Promise<RelayTopology>;
@@ -85,6 +86,18 @@ export class RelayMapSpatialScopeManager {
           warnings: [...entry.snapshot.warnings, "Live player positions are unavailable; last-known player positions were withheld."],
         };
       },
+      waitForSnapshot: (timeoutMs: number) => {
+        if (entry.snapshot) return Promise.resolve(entry.snapshot);
+        const delay = Number.isFinite(timeoutMs) && timeoutMs >= 0 ? timeoutMs : 0;
+        return new Promise<MapSpatialSnapshot | null>((resolve) => {
+          const waiter: SnapshotWaiter = { timer: null, resolve };
+          waiter.timer = this.#setTimer(() => {
+            entry.snapshotWaiters.delete(waiter);
+            resolve(null);
+          }, delay);
+          entry.snapshotWaiters.add(waiter);
+        });
+      },
       release: async () => {
         if (released) return;
         released = true;
@@ -110,7 +123,7 @@ export class RelayMapSpatialScopeManager {
       if (!idle) throw new Error(`Relay map-spatial scope capacity ${this.#maxSessions} is exhausted`);
       await this.#close(idle[0], idle[1]);
     }
-    const entry: Entry = { key, relayBaseUrl, scope, session: null, leases: 0, snapshot: null, closeTimer: null, restartTimer: null, restartAttempts: 0, openedAt: this.#now() };
+    const entry: Entry = { key, relayBaseUrl, scope, session: null, leases: 0, snapshot: null, snapshotWaiters: new Set(), closeTimer: null, restartTimer: null, restartAttempts: 0, openedAt: this.#now() };
     await this.#replaceSession(entry);
     this.#entries.set(key, entry);
     return entry;
@@ -124,6 +137,11 @@ export class RelayMapSpatialScopeManager {
       onSnapshot: (snapshot) => {
         if (entry.session !== session) return;
         entry.snapshot = snapshot;
+        for (const waiter of entry.snapshotWaiters) {
+          this.#clearTimer(waiter.timer);
+          waiter.resolve(snapshot);
+        }
+        entry.snapshotWaiters.clear();
         entry.restartAttempts = 0;
         this.#onGeneration(snapshot, entry.scope);
       },
@@ -155,6 +173,11 @@ export class RelayMapSpatialScopeManager {
     if (entry.closeTimer != null) this.#clearTimer(entry.closeTimer);
     if (entry.restartTimer != null) this.#clearTimer(entry.restartTimer);
     entry.closeTimer = null;
+    for (const waiter of entry.snapshotWaiters) {
+      this.#clearTimer(waiter.timer);
+      waiter.resolve(null);
+    }
+    entry.snapshotWaiters.clear();
     this.#entries.delete(key);
     await entry.session?.stop();
   }
@@ -170,6 +193,11 @@ export class RelayMapSpatialScopeManager {
     for (const [, entry] of entries) {
       if (entry.closeTimer != null) this.#clearTimer(entry.closeTimer);
       if (entry.restartTimer != null) this.#clearTimer(entry.restartTimer);
+      for (const waiter of entry.snapshotWaiters) {
+        this.#clearTimer(waiter.timer);
+        waiter.resolve(null);
+      }
+      entry.snapshotWaiters.clear();
       await entry.session?.stop();
     }
   }

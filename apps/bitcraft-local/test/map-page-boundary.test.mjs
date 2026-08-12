@@ -195,6 +195,8 @@ test("Native map separates event and snapshot limits and ignores the initial str
   assert.match(server, /"map-snapshot", RATE_LIMITS\.mapSnapshot/);
   assert.match(server, /"map-events", RATE_LIMITS\.mapEvents/);
   assert.match(server, /initial: true/);
+  assert.match(server, /MAP_SPATIAL_INITIAL_WAIT_MS\s*=\s*2_000/);
+  assert.match(server, /waitForSnapshot\(MAP_SPATIAL_INITIAL_WAIT_MS\).*combineMapSpatialLeases/s);
 });
 
 test("configured-region resource and verified player tracking are enabled without enabling unverified enemy identities", () => {

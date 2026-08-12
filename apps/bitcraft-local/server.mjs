@@ -601,6 +601,7 @@ const relayRegionClaimsRuntime = new RelayRegionClaimsRuntime({
 });
 const terrainLiveRebuildEnabled = process.env.ENABLE_RELAY_TERRAIN_LIVE_REBUILD === "true";
 const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = true;
+const MAP_SPATIAL_INITIAL_WAIT_MS = 2_000;
 const MAP_ENEMY_IDENTITY_VERIFIED = false;
 const MAP_RESOURCE_COORDINATES_VERIFIED = true;
 const MAP_WAYSTONE_COORDINATES_VERIFIED = false;
@@ -8118,6 +8119,7 @@ const server = createServer(async (req, res) => {
         });
         return;
       }
+      await Promise.all(spatialLeases.map((lease) => lease.waitForSnapshot(MAP_SPATIAL_INITIAL_WAIT_MS)));
       try {
         const regionClaims = currentStateRepository.read(claimId, "region-claims");
         const market = currentStateRepository.read(claimId, "market");
