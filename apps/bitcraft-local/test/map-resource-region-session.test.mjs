@@ -60,7 +60,7 @@ function fixture({ resourceRows = [], locationRows = [], connectOnBuild = true }
     },
     disconnect() { disconnectCount += 1; },
   };
-  const loadBindings = async () => ({ DbConnection: { builder() {
+  const bindings = { DbConnection: { builder() {
     return {
       withUri() { return this; },
       withDatabaseName() { return this; },
@@ -69,9 +69,10 @@ function fixture({ resourceRows = [], locationRows = [], connectOnBuild = true }
       onDisconnect(callback) { disconnected = callback; return this; },
       build() { if (connectOnBuild) connected(connection); return connection; },
     };
-  } } });
+  } } };
+  const loadBindings = async () => bindings;
   return {
-    db, subscriptions, handles, loadBindings,
+    db, subscriptions, handles, bindings, loadBindings,
     connect: () => connected(connection),
     disconnect: (error) => disconnected(undefined, error),
     connectError: (error) => connectError(undefined, error),
@@ -130,6 +131,37 @@ test("resource session rejects pending start and disconnects when stopped before
   await Promise.resolve();
   await Promise.resolve();
   assert.match(startError?.message ?? "", /stopped while connecting/i);
+  assert.equal(relay.disconnectCount(), 1);
+});
+
+test("resource session ignores a late Relay connection callback after pending start is stopped", async () => {
+  const relay = fixture({ connectOnBuild: false });
+  const session = new RelayMapResourceRegionSession({ loadBindings: relay.loadBindings, onSnapshot() {}, onFailure() {} });
+  let startError = null;
+  void session.start(config()).catch((error) => { startError = error; });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  await session.stop();
+  relay.connect();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.match(startError?.message ?? "", /stopped while connecting/i);
+  assert.equal(relay.disconnectCount(), 1);
+});
+
+test("resource session cancels startup stopped before bindings finish loading", async () => {
+  const relay = fixture({ connectOnBuild: false });
+  let resolveBindings;
+  const session = new RelayMapResourceRegionSession({
+    loadBindings: () => new Promise((resolve) => { resolveBindings = resolve; }),
+    onSnapshot() {},
+    onFailure() {},
+  });
+  const starting = session.start(config());
+  await session.stop();
+  resolveBindings(relay.bindings);
+  await assert.rejects(starting, /stopped while connecting/i);
   assert.equal(relay.disconnectCount(), 1);
 });
 
