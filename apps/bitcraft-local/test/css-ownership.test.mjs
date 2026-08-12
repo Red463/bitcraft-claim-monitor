@@ -90,11 +90,11 @@ test("map mobile queries do not duplicate desktop player-control declarations", 
   assert.match(mobile, /\.map-frame\s*\{[^}]*min-height:\s*420px;[^}]*height:\s*58dvh;/s);
 });
 
-test("native map layer control stays viewport-contained with touch-sized phone toggles", () => {
+test("native map controls stay viewport-contained with touch-sized phone toggles", () => {
   const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
   const phone = extractMediaBody(mapCss, "(max-width: 620px)");
 
-  assert.match(mapCss, /\.native-map-layers-control\s*\{[^}]*position:\s*absolute[^}]*z-index:/s);
+  assert.match(mapCss, /\.native-map-controls\s*\{[^}]*position:\s*absolute[^}]*z-index:/s);
   assert.match(mapCss, /\.native-map-layers-popover\s*\{[^}]*max-height:\s*min\([^}]*overflow:\s*auto/s);
   assert.match(phone, /\.native-map-layer-row\s*\{[^}]*min-height:\s*44px/s);
 });
