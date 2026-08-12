@@ -89,7 +89,7 @@ test("map snapshot projects available operations and reports uncollected layers"
     now: new Date("2026-08-11T12:00:10.000Z"),
     excludedMemberIds: [],
     regionClaims: {
-      data: { regionId: "19", claims: [{ entityId: "1369094286777412590", name: "Timbersteel", tier: 6, locationX: 10, locationZ: 20, locationDimension: "1" }] },
+      data: { regionId: "19", claims: [{ entityId: "1369094286777412590", name: "Timbersteel", tier: 6, npc: true, locationX: 10, locationZ: 20, locationDimension: "1" }] },
       generation: 7,
       provenance: { receivedAt: "2026-08-11T12:00:00.000Z" },
     },
@@ -110,6 +110,7 @@ test("map snapshot projects available operations and reports uncollected layers"
 
   assert.equal(snapshot.provider, "relay");
   assert.equal(snapshot.layers.claims[0].entityId, "1369094286777412590");
+  assert.equal(snapshot.layers.claims[0].npc, true);
   assert.equal(snapshot.layers.markets[0].point.x, 30);
   assert.equal(snapshot.layers.watchtowers[0].point.z, 60);
   assert.deepEqual(snapshot.layers.players, []);

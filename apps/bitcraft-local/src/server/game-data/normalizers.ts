@@ -511,11 +511,11 @@ export function normalizeRegionalClaims(options: {
         row.ownerBuildingEntityId ?? row.owner_building_entity_id,
         `Regional claim ${entityId} owner building id`,
       );
-      if (ownerPlayerEntityId === "0" || row.neutral === true) continue;
+      const npc = ownerPlayerEntityId === "0" || row.neutral === true;
       const local = localById.get(entityId);
       if (!local) warnings.push(`Regional claim ${entityId} has no claim_local_state row.`);
       const ownerPlayerUsername = usernameById.get(ownerPlayerEntityId) || null;
-      if (!ownerPlayerUsername) {
+      if (!npc && !ownerPlayerUsername) {
         missingOwnerUsernameCount += 1;
       }
       const learnedTechIds = learnedTechIdsByClaimId.get(entityId);
@@ -533,6 +533,7 @@ export function normalizeRegionalClaims(options: {
         ownerPlayerUsername,
         name: String(row.name ?? "").trim(),
         neutral: row.neutral === true,
+        npc,
         supplies: local ? integer(local.supplies, `Regional claim ${entityId} supplies`) : null,
         treasury: local
           ? decimalString(local.treasury, `Regional claim ${entityId} treasury`)
