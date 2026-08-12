@@ -21,8 +21,13 @@ test("native map requests are same-origin, canonical, and omit empty bounded lay
 });
 
 test("native map request keeps resource and enemy namespaces separate", () => {
-  const request = nativeMapRequest({ regionIds: ["19"], playerIds: [], resourceIds: ["123"], enemyTypes: ["123"] });
-  assert.equal(new URL(request.snapshotUrl, "http://local").searchParams.get("resourceIds"), "123");
+  const request = nativeMapRequest({ regionIds: ["24", "19"], playerIds: [], resourceIds: ["456", "123"], enemyTypes: ["123"] });
+  assert.equal(new URL(request.snapshotUrl, "http://local").searchParams.has("resourceIds"), false);
+  assert.equal(new URL(request.snapshotUrl, "http://local").searchParams.get("layers").includes("resources"), false);
+  assert.equal(new URL(request.resourceUrl, "http://local").searchParams.get("regions"), "19,24");
+  assert.equal(new URL(request.resourceUrl, "http://local").searchParams.get("resourceIds"), "123,456");
+  assert.equal(new URL(request.resourceUrl, "http://local").searchParams.get("layers"), "resources");
+  assert.equal(new URL(request.eventsUrl, "http://local").searchParams.get("resourceIds"), "123,456");
   assert.equal(new URL(request.snapshotUrl, "http://local").searchParams.get("enemyTypes"), "123");
 });
 

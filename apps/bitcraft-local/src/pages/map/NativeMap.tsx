@@ -10,6 +10,7 @@ import { MAP_MARKER_PRESENTATIONS, claimDisplayTier, claimMarkerPresentation, ma
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { assignPlayerMarkerColours } from "./playerMarkerColours.mjs";
 import { applyResourceViewport, resourceLayerStatus } from "./resourceViewport.mjs";
+import { mergeMapResourcePayload } from "./mapResourceSnapshotState.mjs";
 import { createMapSnapshotLoader, mapEventNeedsSnapshot } from "./mapSnapshotLoader.mjs";
 import { replaceMapSnapshot } from "./mapSnapshotState.mjs";
 import { RESOURCE_NODE_FALLBACK_COLOUR, resourceFeatureColour } from "./resourceNodeColours.mjs";
@@ -250,8 +251,8 @@ export function NativeMap({
     ? defaultMapLayerVisibility()
     : loadMapLayerVisibility(() => window.localStorage));
   const request = React.useMemo(() => nativeMapRequest({ regionIds, playerIds, resourceIds, enemyTypes }), [regionIds.join(","), playerIds.join(","), resourceIds.join(","), enemyTypes.join(",")]);
-  const snapshotRequestKeyRef = React.useRef(request.snapshotUrl);
-  snapshotRequestKeyRef.current = request.snapshotUrl;
+  const snapshotRequestKeyRef = React.useRef(request.eventsUrl);
+  snapshotRequestKeyRef.current = request.eventsUrl;
   const resourceSelectionKey = React.useMemo(() => [...resourceIds].sort((left, right) => left.localeCompare(right)).join(","), [resourceIds.join(",")]);
   const snapshotResourceSelectionKey = [...(snapshot?.scope?.resourceIds ?? [])].sort((left, right) => left.localeCompare(right)).join(",");
   const resourceLayerLoading = snapshot?.layerAvailability?.resources?.status === "loading"
@@ -419,11 +420,18 @@ export function NativeMap({
       isHidden: () => document.hidden,
       currentRequestKey: () => snapshotRequestKeyRef.current,
       onLoading: setLoading,
-      load: async (requestKey) => {
-        const response = await fetch(requestKey, { signal: controller.signal, credentials: "same-origin" });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || `Native map HTTP ${response.status}`);
-        return payload;
+      load: async () => {
+        const loadJson = async (url: string) => {
+          const response = await fetch(url, { signal: controller.signal, credentials: "same-origin" });
+          const payload = await response.json();
+          if (!response.ok && !payload?.provider) throw new Error(payload.error || `Native map HTTP ${response.status}`);
+          return payload;
+        };
+        const [baseSnapshot, resourcePayload] = await Promise.all([
+          loadJson(request.snapshotUrl),
+          request.resourceUrl ? loadJson(request.resourceUrl) : Promise.resolve(null),
+        ]);
+        return resourcePayload ? mergeMapResourcePayload(baseSnapshot, resourcePayload) : baseSnapshot;
       },
       onValue: ({ requestKey, value }) => {
         const nextSnapshot = replaceMapSnapshot({ currentRequestKey: snapshotRequestKeyRef.current, requested: { requestKey, value } });
@@ -442,7 +450,7 @@ export function NativeMap({
       events = new EventSource(request.eventsUrl, { withCredentials: true });
       events.onmessage = (message) => {
         try {
-          if (mapEventNeedsSnapshot(JSON.parse(message.data))) void loader.request(request.snapshotUrl);
+          if (mapEventNeedsSnapshot(JSON.parse(message.data))) void loader.request(request.eventsUrl);
         } catch {
           setError("A live map update was malformed; reconnecting.");
         }
@@ -452,11 +460,11 @@ export function NativeMap({
     const visibility = () => {
       if (document.hidden) events?.close();
       else {
-        void loader.request(request.snapshotUrl);
+        void loader.request(request.eventsUrl);
         connect();
       }
     };
-    void loader.request(request.snapshotUrl);
+    void loader.request(request.eventsUrl);
     connect();
     document.addEventListener("visibilitychange", visibility);
     return () => {
@@ -466,7 +474,7 @@ export function NativeMap({
       events?.close();
       document.removeEventListener("visibilitychange", visibility);
     };
-  }, [request.snapshotUrl, request.eventsUrl]);
+  }, [request.snapshotUrl, request.resourceUrl, request.eventsUrl]);
 
   React.useEffect(() => {
     const markerGroups = markerGroupsRef.current;

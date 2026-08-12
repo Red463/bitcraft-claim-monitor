@@ -35,7 +35,7 @@ import {
 import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
-import { MapSnapshotError, authorizedMapPlayerIds, buildMapSnapshot, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
+import { MapSnapshotError, authorizedMapPlayerIds, buildMapResourcePayload, buildMapSnapshot, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
 import { serveLocalMapTile } from "./src/server/mapTiles.mjs";
 import { createTerrainTileStore } from "./src/server/terrainTileStore.mjs";
 import { createRoadTileStore } from "./src/server/roadTileStore.mjs";
@@ -8054,8 +8054,8 @@ const server = createServer(async (req, res) => {
       };
       return send(res, status.freshness === "unavailable" ? 503 : 200, payload);
     }
-    if (req.method === "GET" && (url.pathname === "/api/local/map/snapshot" || url.pathname === "/api/local/map/events")) {
-      if (url.pathname === "/api/local/map/snapshot" && !rateLimit(req, res, "map-snapshot", RATE_LIMITS.mapSnapshot)) return;
+    if (req.method === "GET" && ["/api/local/map/snapshot", "/api/local/map/resources", "/api/local/map/events"].includes(url.pathname)) {
+      if (["/api/local/map/snapshot", "/api/local/map/resources"].includes(url.pathname) && !rateLimit(req, res, "map-snapshot", RATE_LIMITS.mapSnapshot)) return;
       if (url.pathname === "/api/local/map/events" && !rateLimit(req, res, "map-events", RATE_LIMITS.mapEvents)) return;
       const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
       if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
@@ -8063,6 +8063,9 @@ const server = createServer(async (req, res) => {
       let scope;
       try {
         scope = parseMapScope(url.searchParams, { allowedRegionIds: configuredRegionalMarketRegionIds(claimId) });
+        if (url.pathname === "/api/local/map/resources" && (scope.layers.length !== 1 || scope.layers[0] !== "resources")) {
+          throw new MapSnapshotError(422, "Compact map resource requests require only the resources layer");
+        }
       } catch (error) {
         const statusCode = error instanceof MapSnapshotError ? error.statusCode : 422;
         return send(res, statusCode, { error: error instanceof Error ? error.message : String(error) });
@@ -8170,6 +8173,14 @@ const server = createServer(async (req, res) => {
         const empires = currentStateRepository.read(claimId, "empires");
         const spatial = combineMapSpatialLeases(spatialLeases);
         const resourceCollection = combineMapResourceLeases(resourceLeases);
+        if (url.pathname === "/api/local/map/resources") {
+          const payload = buildMapResourcePayload({
+            scope,
+            resourceCollection,
+            resourceCoordinatesVerified: MAP_RESOURCE_COORDINATES_VERIFIED,
+          });
+          return send(res, payload.layerAvailability.status === "unavailable" ? 503 : 200, payload);
+        }
         const payload = buildMapSnapshot({
           scope,
           excludedMemberIds: getSettings().excludedMemberIds,

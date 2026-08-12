@@ -114,6 +114,14 @@ test("partial resource selections block framing only while pending keys remain",
   }), "frame");
 });
 
+test("live resources stay live when unrelated map layers are partial", () => {
+  assert.equal(resourceLayerStatus({
+    selectionKey: "28,54", snapshotSelectionKey: "28,54", available: true,
+    status: "live", pending: false, reason: null,
+    visible: true, freshness: "partial",
+  }), "live");
+});
+
 test("warm resource points remain visible while the next selection loads", () => {
   assert.equal(resourceLayerStatus({
     selectionKey: "28",

@@ -242,7 +242,10 @@ test("Native map uses event-driven snapshot loading without a snapshot polling t
 
   assert.match(snapshotEffect, /new EventSource\(request\.eventsUrl/);
   assert.match(snapshotEffect, /mapEventNeedsSnapshot\(JSON\.parse\(message\.data\)\)/);
-  assert.match(snapshotEffect, /void loader\.request\(request\.snapshotUrl\)/);
+  assert.match(snapshotEffect, /void loader\.request\(request\.eventsUrl\)/);
+  assert.match(snapshotEffect, /loadJson\(request\.snapshotUrl\)/);
+  assert.match(snapshotEffect, /request\.resourceUrl \? loadJson\(request\.resourceUrl\)/);
+  assert.match(snapshotEffect, /mergeMapResourcePayload/);
   assert.doesNotMatch(snapshotEffect, /setInterval|setTimeout/);
 });
 

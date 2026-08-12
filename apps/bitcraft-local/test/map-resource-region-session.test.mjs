@@ -275,11 +275,44 @@ test("resource session health counts rows for each selected resource independent
     "28": { resourceState: 1, locationState: 1 },
     "54": { resourceState: 2, locationState: 2 },
   });
-  assert.equal(session.health().rowCount, 6, "the row budget still covers the complete shared cache");
+  assert.equal(session.health().rowCount, 6, "the row budget covers active typed subscriptions");
   session.unsubscribe("28");
   assert.deepEqual(session.health().rowsPerType, {
     "54": { resourceState: 2, locationState: 2 },
   }, "unsubscribed resources must not remain in per-subscription diagnostics");
+  assert.equal(session.health().rowCount, 4, "unsubscribed resources must leave the active row budget");
+  await session.stop();
+});
+
+test("resource session budgets only actively selected resource rows", async () => {
+  const relay = fixture({
+    resourceRows: [
+      { entityId: 1n, resourceId: 28 },
+      ...Array.from({ length: 10 }, (_, index) => ({ entityId: BigInt(index + 100), resourceId: 999 })),
+    ],
+    locationRows: [
+      { entityId: 1n, x: 100, z: 200, dimension: 1 },
+      ...Array.from({ length: 10 }, (_, index) => ({ entityId: BigInt(index + 100), x: index, z: index, dimension: 1 })),
+    ],
+  });
+  const snapshots = [];
+  const failures = [];
+  const session = new RelayMapResourceRegionSession({
+    loadBindings: relay.loadBindings,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+    onFailure: (warning) => failures.push(warning),
+  });
+  await session.start(config({ maxRows: 4 }));
+  await session.subscribe("28", 7);
+
+  relay.subscriptions[0].apply();
+  await drainMicrotasks();
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].data.resources.length, 1);
+  assert.deepEqual(session.health().rowsPerType, { "28": { resourceState: 1, locationState: 1 } });
+  assert.equal(session.health().rowCount, 2);
+  assert.deepEqual(failures, []);
   await session.stop();
 });
 

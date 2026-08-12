@@ -101,6 +101,56 @@ export function authorizedMapPlayerIds({ selectedPlayerIds = [], excludedMemberI
     .sort((left, right) => left.length - right.length || left.localeCompare(right));
 }
 
+function resourceLayerAvailability(resourceCollection) {
+  const requestedCount = resourceCollection?.requestedKeys?.length ?? 0;
+  const readyCount = resourceCollection?.readyKeys?.length ?? 0;
+  const loadingCount = resourceCollection?.loadingKeys?.length ?? 0;
+  const resourceWarning = resourceCollection?.warnings?.[0] ?? null;
+  if (requestedCount > 0 && readyCount === requestedCount) {
+    const stale = resourceCollection?.freshness === "stale";
+    return { available: true, status: stale ? "stale" : "live", reason: stale ? (resourceWarning ?? "Live resource positions are stale.") : null };
+  }
+  if (readyCount > 0) return { available: true, status: "partial", pending: loadingCount > 0, reason: loadingCount > 0 ? "Some selected resource positions are still loading." : "Some selected resource positions are unavailable." };
+  if (loadingCount > 0) return { available: false, status: "loading", pending: true, reason: "Selected resource positions are loading." };
+  return { available: false, status: "unavailable", reason: resourceWarning ?? "Live resource positions are unavailable." };
+}
+
+export function buildMapResourcePayload({ scope, resourceCollection, resourceCoordinatesVerified = false } = {}) {
+  const warnings = [...new Set((resourceCollection?.warnings ?? []).map(String))];
+  if (!resourceCoordinatesVerified) {
+    const reason = "Resource positions are unavailable until the Relay resource/location join is live-verified.";
+    if (!warnings.includes(reason)) warnings.push(reason);
+    return {
+      provider: "relay",
+      generation: String(Number(resourceCollection?.generation) || 0),
+      generatedAt: resourceCollection?.provenance?.receivedAt ?? null,
+      freshness: "unavailable",
+      warnings,
+      scope: { regionIds: scope?.regionIds ?? [], resourceIds: scope?.resourceIds ?? [] },
+      resources: [],
+      layerAvailability: { available: false, status: "unavailable", reason },
+    };
+  }
+  const selected = new Set(scope.resourceIds);
+  const resources = (Array.isArray(resourceCollection?.data?.resources) ? resourceCollection.data.resources : [])
+    .filter((row) => selected.has(String(row.resourceId)) && inScope(row, scope))
+    .map((row) => {
+      const point = recordPoint(row);
+      return [String(row.entityId), String(row.regionId), String(row.resourceId), point.x, point.z];
+    });
+  const layerAvailability = resourceLayerAvailability(resourceCollection);
+  return {
+    provider: "relay",
+    generation: String(Number(resourceCollection?.generation) || 0),
+    generatedAt: resourceCollection?.provenance?.receivedAt ?? null,
+    freshness: layerAvailability.status === "live" ? "live" : layerAvailability.status === "stale" ? "stale" : "partial",
+    warnings,
+    scope: { regionIds: scope.regionIds, resourceIds: scope.resourceIds },
+    resources,
+    layerAvailability,
+  };
+}
+
 export function buildMapSnapshot({
   scope,
   now = new Date(),
@@ -191,20 +241,7 @@ export function buildMapSnapshot({
       const selected = new Set(scope.resourceIds);
       const resourceRows = Array.isArray(resourceCollection?.data?.resources) ? resourceCollection.data.resources : [];
       layers.resources = resourceRows.filter((row) => selected.has(String(row.resourceId)) && inScope(row, scope)).map((row) => feature(row, "resource", row.entityId, recordPoint(row), { regionId: String(row.regionId), resourceId: String(row.resourceId), identity: `resource:${row.resourceId}` }));
-      const requestedCount = resourceCollection?.requestedKeys?.length ?? 0;
-      const readyCount = resourceCollection?.readyKeys?.length ?? 0;
-      const loadingCount = resourceCollection?.loadingKeys?.length ?? 0;
-      const resourceWarning = resourceCollection?.warnings?.[0] ?? null;
-      if (requestedCount > 0 && readyCount === requestedCount) {
-        const stale = resourceCollection?.freshness === "stale";
-        layerAvailability.resources = { available: true, status: stale ? "stale" : "live", reason: stale ? (resourceWarning ?? "Live resource positions are stale.") : null };
-      } else if (readyCount > 0) {
-        layerAvailability.resources = { available: true, status: "partial", pending: loadingCount > 0, reason: loadingCount > 0 ? "Some selected resource positions are still loading." : "Some selected resource positions are unavailable." };
-      } else if (loadingCount > 0) {
-        layerAvailability.resources = { available: false, status: "loading", pending: true, reason: "Selected resource positions are loading." };
-      } else {
-        layerAvailability.resources = { available: false, status: "unavailable", reason: resourceWarning ?? "Live resource positions are unavailable." };
-      }
+      layerAvailability.resources = resourceLayerAvailability(resourceCollection);
     }
   }
   if (layers.enemies) {

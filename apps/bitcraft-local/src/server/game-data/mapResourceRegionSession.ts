@@ -281,6 +281,10 @@ export class RelayMapResourceRegionSession {
     subscription.handle.unsubscribe();
     this.#subscriptions.delete(resourceId);
     delete this.#health.rowsPerType[resourceId];
+    this.#health.rowCount = Object.values(this.#health.rowsPerType).reduce(
+      (total, counts) => total + counts.resourceState + counts.locationState,
+      0,
+    );
     this.#refreshAppliedResourceIds();
   }
 
@@ -322,8 +326,6 @@ export class RelayMapResourceRegionSession {
     try {
       const resourceRows = tableRows(connection.db.resourceState);
       const locationRows = tableRows(connection.db.locationState);
-      const rowCount = resourceRows.length + locationRows.length;
-      if (rowCount > config.maxRows) throw new Error(`Relay map resource row budget ${config.maxRows} exceeded by ${rowCount} rows`);
       const receivedAt = this.#now().toISOString();
       const normalized = normalizeMapResourceGeneration({
         regionId: config.regionId,
@@ -332,8 +334,14 @@ export class RelayMapResourceRegionSession {
         locationRows,
         observedAt: receivedAt,
       });
-      this.#health.rowCount = rowCount;
       this.#health.rowsPerType[subscription.resourceId] = { ...normalized.rowCounts };
+      const subscriptionRowCount = normalized.rowCounts.resourceState + normalized.rowCounts.locationState;
+      const rowCount = Object.values(this.#health.rowsPerType).reduce(
+        (total, counts) => total + counts.resourceState + counts.locationState,
+        0,
+      );
+      this.#health.rowCount = rowCount;
+      if (subscriptionRowCount > config.maxRows) throw new Error(`Relay map resource row budget ${config.maxRows} exceeded by ${subscriptionRowCount} rows`);
       if (!normalized.complete) {
         const warning = normalized.warnings.join(" ") || "Relay map resource generation is incomplete";
         this.#health.stage = "partial";

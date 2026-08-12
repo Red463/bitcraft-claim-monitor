@@ -19,5 +19,5 @@ export function resourceLayerStatus({ selectionKey, snapshotSelectionKey, availa
   if (status === "loading" || (status === "partial" && pending !== false)) return "loading";
   if (status == null && selectionKey && selectionKey === snapshotSelectionKey && available === false && reason === "Live resource positions are unavailable.") return "loading";
   if (available === false) return "unavailable";
-  return visible ? freshness : "hidden";
+  return visible ? (status ?? freshness) : "hidden";
 }

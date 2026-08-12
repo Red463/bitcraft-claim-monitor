@@ -27,13 +27,22 @@ export function nativeMapRequest({ regionIds = [], playerIds = [], resourceIds =
     ...(resources.length ? ["resources"] : []),
     ...(enemies.length ? ["enemies"] : []),
   ].sort();
-  const params = new URLSearchParams({ regions: regions.join(","), layers: layers.join(",") });
-  if (players.length) params.set("playerIds", players.join(","));
-  if (resources.length) params.set("resourceIds", resources.join(","));
-  if (enemies.length) params.set("enemyTypes", enemies.join(","));
+  const snapshotLayers = layers.filter((layer) => layer !== "resources");
+  const snapshotParams = new URLSearchParams({ regions: regions.join(","), layers: snapshotLayers.join(",") });
+  if (players.length) snapshotParams.set("playerIds", players.join(","));
+  if (enemies.length) snapshotParams.set("enemyTypes", enemies.join(","));
+  const eventParams = new URLSearchParams(snapshotParams);
+  if (resources.length) {
+    eventParams.set("layers", layers.join(","));
+    eventParams.set("resourceIds", resources.join(","));
+  }
+  const resourceParams = resources.length
+    ? new URLSearchParams({ regions: regions.join(","), layers: "resources", resourceIds: resources.join(",") })
+    : null;
   return {
     layers,
-    snapshotUrl: `/api/local/map/snapshot?${params}`,
-    eventsUrl: `/api/local/map/events?${params}`,
+    snapshotUrl: `/api/local/map/snapshot?${snapshotParams}`,
+    resourceUrl: resourceParams ? `/api/local/map/resources?${resourceParams}` : null,
+    eventsUrl: `/api/local/map/events?${eventParams}`,
   };
 }
