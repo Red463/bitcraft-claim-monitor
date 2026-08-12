@@ -121,6 +121,19 @@ test("Native map reuses one canvas renderer and fixed marker presentations", () 
   assert.match(nativeMap, /keyboard: true/);
 });
 
+test("Native map gives each visible player a stable accessible colour marker", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+  assert.match(nativeMap, /assignPlayerMarkerColours/);
+  assert.match(nativeMap, /snapshot\.layers\.players/);
+  assert.match(nativeMap, /--player-marker-color/);
+  assert.match(nativeMap, /markerIcon\(feature\.kind, presentation, playerColours/);
+  assert.match(nativeMap, /alt: accessibleLabel, title: accessibleLabel/);
+  assert.match(nativeMap, /setAttribute\("aria-label", accessibleLabel\)/);
+  assert.match(css, /native-map-marker--player[^}]*--player-marker-color/s);
+  assert.match(css, /native-map-marker--player[^}]*border[^}]*box-shadow/s);
+});
+
 test("Native map requests only same-origin locally provisioned terrain tiles", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   assert.match(nativeMap, /mapTileUrl\("terrain", terrainStatus\.generation\)/);

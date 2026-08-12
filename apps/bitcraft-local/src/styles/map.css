@@ -198,7 +198,7 @@
 .native-map-marker--waystone .native-map-marker-content { border-color: #c7a5ff; }
 .native-map-marker--empire-settlement .native-map-marker-content { border-color: #ff9b71; color: #ffb494; }
 .native-map-marker--watchtower .native-map-marker-content { border-color: #ff6b6b; color: #ff8d8d; }
-.native-map-marker--player .native-map-marker-content { border-color: #fff; color: #fff; }
+.native-map-marker--player .native-map-marker-content { background: var(--player-marker-color, #38bdf8); border: 2px solid #fff; color: #071014; box-shadow: 0 0 0 2px rgba(7,16,20,.88), 0 2px 7px rgba(0,0,0,.82), inset 0 0 0 2px rgba(255,255,255,.24); text-shadow: 0 1px 0 rgba(255,255,255,.45); }
 .native-map-marker--focus .native-map-marker-content { width: 32px; height: 32px; border-color: #f0c64f; color: #f0c64f; }
 .native-map-marker--claim { width: 40px; height: 40px; }
 .native-map-marker--claim .native-map-marker-content--badge-crop {

@@ -8,6 +8,7 @@ import { planDensePointDraw } from "./mapDensePointPlan.mjs";
 import { MAP_LAYER_DEFINITIONS, defaultMapLayerVisibility, loadMapLayerVisibility, saveMapLayerVisibility, type MapLayerKey } from "./mapLayerPreferences.mjs";
 import { MAP_MARKER_PRESENTATIONS, claimMarkerPresentation, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
+import { assignPlayerMarkerColours } from "./playerMarkerColours.mjs";
 import { createMapSnapshotLoader, mapEventNeedsSnapshot } from "./mapSnapshotLoader.mjs";
 import { loadTerrainTileStatus, mapTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
 import type { MapFocus } from "./mapUtils";
@@ -19,6 +20,7 @@ type MapFeature = {
   regionId?: string;
   name?: string;
   identity?: string;
+  playerEntityId?: string;
   tier?: number | null;
   point: MapPoint;
 };
@@ -147,9 +149,10 @@ function markerKindClass(kind: string) {
   return Object.hasOwn(MAP_MARKER_PRESENTATIONS, kind) ? kind : "fallback";
 }
 
-function markerIcon(kind: string, presentation: MapMarkerPresentation) {
+function markerIcon(kind: string, presentation: MapMarkerPresentation, color?: string) {
   const content = document.createElement("span");
   content.className = `native-map-marker-content${presentation.mode === "image" && presentation.badgeCrop ? " native-map-marker-content--badge-crop" : ""}`;
+  if (kind === "player" && color) content.style.setProperty("--player-marker-color", color);
   const glyph = document.createElement("span");
   glyph.className = "native-map-marker-glyph";
   glyph.textContent = presentation.glyph;
@@ -428,6 +431,7 @@ export function NativeMap({
       focusMarker.addTo(focusGroup);
     }
     if (!snapshot) return;
+    const playerColours = assignPlayerMarkerColours((snapshot.layers.players ?? []).map((feature) => String(feature.playerEntityId ?? feature.entityId)));
     for (const [layer, features] of Object.entries(snapshot.layers)) {
       if (layer === "resources" || layer === "enemies" || layer === "empire-territory") continue;
       const markerGroup = markerGroups[layer];
@@ -446,7 +450,7 @@ export function NativeMap({
               fillOpacity: 0.85,
               renderer: ordinaryRendererRef.current,
             })
-          : L.marker(leafletPoint(feature.point), { icon: markerIcon(feature.kind, presentation), keyboard: true, alt: accessibleLabel, title: accessibleLabel });
+          : L.marker(leafletPoint(feature.point), { icon: markerIcon(feature.kind, presentation, playerColours[String(feature.playerEntityId ?? feature.entityId)]), keyboard: true, alt: accessibleLabel, title: accessibleLabel });
         marker.bindTooltip(accessibleLabel);
         marker.on("add", () => marker.getElement()?.setAttribute("aria-label", accessibleLabel));
         marker.addTo(markerGroup);
