@@ -12,6 +12,7 @@ type SnapshotWaiter = { timer: unknown; resolve: (snapshot: MapResourceSnapshot 
 type ResourceEntry = {
   resourceId: string;
   leases: number;
+  subscribed: boolean;
   snapshot: MapResourceSnapshot | null;
   nextGeneration: number;
   idleTimer: unknown | null;
@@ -44,6 +45,13 @@ export type MapResourceRuntimeHealth = {
   configuredRegionIds: string[];
   pinnedRegionIds: string[];
   coldStartsInWindow: number;
+  regionalConnectionCount: number;
+  activeResourceSubscriptionCount: number;
+  idleRetainedResourceSubscriptionCount: number;
+  rowsPerSubscription: number[];
+  firstGenerationLatencyMs: { sampleCount: number; min: number; max: number; average: number } | null;
+  reconnectAttemptCount: number;
+  capacityRejectionCount: number;
   regions: Array<{
     regionId: string;
     pinned: boolean;
@@ -55,6 +63,7 @@ export type MapResourceRuntimeHealth = {
       applied: boolean;
       stage: "idle" | "connecting" | "subscribed" | "applied" | "partial" | "error" | "stopped";
       rowCount: number;
+      rowsPerSubscription: number[];
       firstGenerationLatencyMs: number | null;
       lastAppliedAt: string | null;
       lastError: string | null;
@@ -117,6 +126,7 @@ export class RelayMapResourceRuntime {
   #regions = new Map<string, RegionEntry>();
   #opening = new Map<string, Promise<RegionEntry>>();
   #coldStarts: number[] = [];
+  #capacityRejectionCount = 0;
   #stopped = false;
 
   constructor(dependencies: Dependencies) {
@@ -171,10 +181,11 @@ export class RelayMapResourceRuntime {
     let resource = region.resources.get(resourceId);
     if (!resource) {
       if (region.resources.size >= this.#maxResourceTypesPerRegion) {
+        this.#capacityRejectionCount += 1;
         throw new Error(`Relay map resource capacity ${this.#maxResourceTypesPerRegion} is exhausted for region ${regionId}`);
       }
       this.#recordColdStart();
-      resource = { resourceId, leases: 0, snapshot: null, nextGeneration: 1, idleTimer: null, waiters: new Set(), failure: region.failure };
+      resource = { resourceId, leases: 0, subscribed: false, snapshot: null, nextGeneration: 1, idleTimer: null, waiters: new Set(), failure: region.failure };
       region.resources.set(resourceId, resource);
       await this.#subscribe(region, resource);
       if (!region.session && !region.schemaUnavailable) this.#scheduleRestart(region);
@@ -230,7 +241,10 @@ export class RelayMapResourceRuntime {
   }
 
   async #openRegion(regionId: string): Promise<RegionEntry> {
-    if (this.#regions.size >= this.#maxRegions) throw new Error(`Relay map resource region capacity ${this.#maxRegions} is exhausted`);
+    if (this.#regions.size >= this.#maxRegions) {
+      this.#capacityRejectionCount += 1;
+      throw new Error(`Relay map resource region capacity ${this.#maxRegions} is exhausted`);
+    }
     const entry: RegionEntry = {
       regionId, pinned: this.#config?.primaryRegionId === regionId,
       configured: this.#config?.activeRegionIds.includes(regionId) ?? false,
@@ -266,6 +280,7 @@ export class RelayMapResourceRuntime {
         onFailure: (error) => this.#failRegion(entry, session!, error),
       });
       entry.session = session;
+      for (const resource of entry.resources.values()) resource.subscribed = false;
       await session.start({
         uri: relayWebSocketUri(config.relayBaseUrl, source.port), database: source.database,
         schemaFingerprint: source.schemaFingerprint, manifest: this.#manifest,
@@ -296,8 +311,10 @@ export class RelayMapResourceRuntime {
     }
     try {
       await entry.session.subscribe(resource.resourceId, resource.nextGeneration);
+      resource.subscribed = true;
       resource.failure = null;
     } catch (error) {
+      resource.subscribed = false;
       resource.failure = errorMessage(error);
       this.#failRegion(entry, entry.session, resource.failure);
     }
@@ -324,7 +341,10 @@ export class RelayMapResourceRuntime {
   #failRegion(entry: RegionEntry, session: RegionSession, error: string) {
     if (this.#stopped || entry.session !== session) return;
     entry.failure = error;
-    for (const resource of entry.resources.values()) resource.failure = error;
+    for (const resource of entry.resources.values()) {
+      resource.subscribed = false;
+      resource.failure = error;
+    }
     if (/schema.*mismatch/i.test(error)) {
       entry.schemaUnavailable = true;
       return;
@@ -392,7 +412,10 @@ export class RelayMapResourceRuntime {
   #recordColdStart() {
     const minimum = this.#now() - this.#coldStartWindowMs;
     this.#coldStarts = this.#coldStarts.filter((startedAt) => startedAt > minimum);
-    if (this.#coldStarts.length >= this.#maxColdStartsPerWindow) throw new Error(`Relay map resource cold-start limit ${this.#maxColdStartsPerWindow} is exhausted`);
+    if (this.#coldStarts.length >= this.#maxColdStartsPerWindow) {
+      this.#capacityRejectionCount += 1;
+      throw new Error(`Relay map resource cold-start limit ${this.#maxColdStartsPerWindow} is exhausted`);
+    }
     this.#coldStarts.push(this.#now());
   }
 
@@ -408,10 +431,27 @@ export class RelayMapResourceRuntime {
     const minimum = this.#now() - this.#coldStartWindowMs;
     this.#coldStarts = this.#coldStarts.filter((startedAt) => startedAt > minimum);
     const regions = [...this.#regions.values()].sort((left, right) => BigInt(left.regionId) < BigInt(right.regionId) ? -1 : 1);
+    const subscriptionHealth = regions.flatMap((entry) => entry.session ? [this.#healthSummary(entry.session.health())] : []);
+    const rowsPerSubscription = subscriptionHealth.flatMap((health) => health.rowsPerSubscription).sort((left, right) => left - right);
+    const latencySamples = subscriptionHealth
+      .map((health) => health.firstGenerationLatencyMs)
+      .filter((latency): latency is number => Number.isFinite(latency) && latency !== null && latency >= 0);
     return {
       configuredRegionIds: [...(this.#config?.activeRegionIds ?? [])],
       pinnedRegionIds: regions.filter((entry) => entry.pinned).map((entry) => entry.regionId),
       coldStartsInWindow: this.#coldStarts.length,
+      regionalConnectionCount: subscriptionHealth.filter((health) => health.connected).length,
+      activeResourceSubscriptionCount: regions.reduce((total, entry) => total + (entry.session?.health().connected ? [...entry.resources.values()].filter((resource) => resource.subscribed && resource.leases > 0).length : 0), 0),
+      idleRetainedResourceSubscriptionCount: regions.reduce((total, entry) => total + (entry.session?.health().connected ? [...entry.resources.values()].filter((resource) => resource.subscribed && resource.leases === 0).length : 0), 0),
+      rowsPerSubscription,
+      firstGenerationLatencyMs: latencySamples.length ? {
+        sampleCount: latencySamples.length,
+        min: Math.min(...latencySamples),
+        max: Math.max(...latencySamples),
+        average: latencySamples.reduce((total, latency) => total + latency, 0) / latencySamples.length,
+      } : null,
+      reconnectAttemptCount: regions.reduce((total, entry) => total + entry.reconnectAttempts, 0),
+      capacityRejectionCount: this.#capacityRejectionCount,
       regions: regions.map((entry) => ({
         regionId: entry.regionId, pinned: entry.pinned, resourceCount: entry.resources.size,
         leaseCount: this.#leaseCount(entry), failure: entry.failure,
@@ -421,11 +461,15 @@ export class RelayMapResourceRuntime {
   }
 
   #healthSummary(health: ReturnType<RegionSession["health"]>) {
+    const rowsPerSubscription = Object.values(health.rowsPerType ?? {})
+      .map((counts) => counts.resourceState + counts.locationState)
+      .sort((left, right) => left - right);
     return {
       connected: health.connected,
       applied: health.applied,
       stage: health.stage,
       rowCount: health.rowCount,
+      rowsPerSubscription,
       firstGenerationLatencyMs: health.firstGenerationLatencyMs,
       lastAppliedAt: health.lastAppliedAt,
       lastError: health.lastError,

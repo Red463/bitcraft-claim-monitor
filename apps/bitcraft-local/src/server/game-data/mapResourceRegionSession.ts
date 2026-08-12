@@ -269,6 +269,7 @@ export class RelayMapResourceRegionSession {
     if (!subscription) return;
     subscription.handle.unsubscribe();
     this.#subscriptions.delete(resourceId);
+    delete this.#health.rowsPerType[resourceId];
     this.#refreshAppliedResourceIds();
   }
 
@@ -321,7 +322,7 @@ export class RelayMapResourceRegionSession {
         observedAt: receivedAt,
       });
       this.#health.rowCount = rowCount;
-      this.#health.rowsPerType[subscription.resourceId] = { resourceState: resourceRows.length, locationState: locationRows.length };
+      this.#health.rowsPerType[subscription.resourceId] = { ...normalized.rowCounts };
       if (!normalized.complete) {
         this.#health.stage = "partial";
         this.#health.lastError = normalized.warnings.join(" ") || "Relay map resource generation is incomplete";

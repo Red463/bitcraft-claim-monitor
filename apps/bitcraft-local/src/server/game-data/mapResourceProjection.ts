@@ -16,6 +16,7 @@ export type MapResourcePoint = {
 export type MapResourceGenerationData = {
   complete: boolean;
   resources: MapResourcePoint[];
+  rowCounts: { resourceState: number; locationState: number };
   warnings: string[];
 };
 
@@ -121,5 +122,10 @@ export function normalizeMapResourceGeneration({
     }
   });
   resources.sort((left, right) => left.entityId.length - right.entityId.length || left.entityId.localeCompare(right.entityId));
-  return { complete, resources, warnings };
+  return {
+    complete,
+    resources,
+    rowCounts: { resourceState: selectedResources.length, locationState: locations.size },
+    warnings,
+  };
 }

@@ -86,23 +86,98 @@ test("reconcile pins only the primary regional connection without resource subsc
   await runtime.stop();
 });
 
-test("runtime health exposes only aggregate regional subscription diagnostics", async () => {
+test("runtime health aggregates active, idle, row, and latency diagnostics without resource identities", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
   const runtime = new runtimeModule.RelayMapResourceRuntime({
     manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
     discoverTopology: async () => ({ regions: new Map([["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }]]) }),
     createSession: () => ({
       async start() {}, async subscribe() {}, unsubscribe() {}, async stop() {},
-      health: () => ({ connected: true, applied: true, stage: "applied", lastError: null, lastAppliedAt: "2026-08-12T10:00:00.000Z", firstGenerationLatencyMs: 8, rowCount: 2, appliedResourceIds: ["28"], points: [{ x: 101, z: 202 }] }),
+      health: () => ({ connected: true, applied: true, stage: "applied", lastError: null, lastAppliedAt: "2026-08-12T10:00:00.000Z", firstGenerationLatencyMs: 8, rowCount: 10, rowsPerType: { "54": { resourceState: 3, locationState: 2 }, "28": { resourceState: 1, locationState: 1 } }, appliedResourceIds: ["28", "54"], points: [{ x: 101, z: 202 }] }),
     }),
   });
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const active = await runtime.acquire({ regionId: "19", resourceId: "28" });
+  const idle = await runtime.acquire({ regionId: "19", resourceId: "54" });
+  await idle.release();
   const serialized = JSON.stringify(runtime.health());
   assert.equal(serialized.includes("28"), false, "health must not disclose selected resource IDs");
   assert.equal(serialized.includes("101"), false, "health must not disclose resource coordinates");
+  assert.equal(runtime.health().regionalConnectionCount, 1);
+  assert.equal(runtime.health().activeResourceSubscriptionCount, 1);
+  assert.equal(runtime.health().idleRetainedResourceSubscriptionCount, 1);
+  assert.deepEqual(runtime.health().rowsPerSubscription, [2, 5]);
+  assert.deepEqual(runtime.health().firstGenerationLatencyMs, { sampleCount: 1, min: 8, max: 8, average: 8 });
+  assert.equal(runtime.health().reconnectAttemptCount, 0);
+  assert.equal(runtime.health().capacityRejectionCount, 0);
   assert.deepEqual(runtime.health().regions[0].subscription, {
-    connected: true, applied: true, stage: "applied", lastError: null, lastAppliedAt: "2026-08-12T10:00:00.000Z", firstGenerationLatencyMs: 8, rowCount: 2,
+    connected: true, applied: true, stage: "applied", lastError: null, lastAppliedAt: "2026-08-12T10:00:00.000Z", firstGenerationLatencyMs: 8, rowCount: 10, rowsPerSubscription: [2, 5],
   });
+  await active.release();
+  await runtime.stop();
+});
+
+test("runtime health excludes disconnected retained sessions from the regional connection count", async () => {
+  assert.ok(runtimeModule, "map-resource runtime module must exist");
+  const runtime = new runtimeModule.RelayMapResourceRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({ regions: new Map([["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }]]) }),
+    createSession: () => ({
+      async start() {}, async subscribe() {}, unsubscribe() {}, async stop() {},
+      health: () => ({ connected: false, applied: false, stage: "error", lastError: "disconnected", lastAppliedAt: null, firstGenerationLatencyMs: null, rowCount: 0, rowsPerType: {} }),
+    }),
+  });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  assert.equal(runtime.health().regionalConnectionCount, 0);
+  await runtime.stop();
+});
+
+test("runtime health excludes failed resource entries from active and idle subscription counts", async () => {
+  assert.ok(runtimeModule, "map-resource runtime module must exist");
+  const runtime = new runtimeModule.RelayMapResourceRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({ regions: new Map([["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }]]) }),
+    createSession: () => ({
+      async start() {}, async subscribe() { throw new Error("subscription rejected"); }, unsubscribe() {}, async stop() {},
+      health: () => ({ connected: false, applied: false, stage: "error", lastError: "subscription rejected", lastAppliedAt: null, firstGenerationLatencyMs: null, rowCount: 0, rowsPerType: {} }),
+    }),
+  });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const lease = await runtime.acquire({ regionId: "19", resourceId: "28" });
+  assert.equal(runtime.health().activeResourceSubscriptionCount, 0);
+  await lease.release();
+  assert.equal(runtime.health().idleRetainedResourceSubscriptionCount, 0);
+  await runtime.stop();
+});
+
+test("runtime health aggregates latency and reconnect attempts across connected regions", async () => {
+  assert.ok(runtimeModule, "map-resource runtime module must exist");
+  let sessionIndex = 0;
+  const sessionRecords = [];
+  const runtime = new runtimeModule.RelayMapResourceRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({ regions: new Map([
+      ["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }],
+      ["20", { ready: true, port: 4020, database: "relay-region-20", schemaFingerprint: "regional-v1" }],
+    ]) }),
+    createSession: (options) => {
+      const index = sessionIndex++;
+      const session = {
+        async start() {}, async subscribe() {}, unsubscribe() {}, async stop() {},
+        health: () => ({ connected: true, applied: true, stage: "applied", lastError: null, lastAppliedAt: null, firstGenerationLatencyMs: index === 0 ? 8 : 20, rowCount: 0, rowsPerType: {} }),
+        fail: () => options.onFailure("temporary disconnect"),
+      };
+      sessionRecords.push(session);
+      return session;
+    },
+  });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
+  await runtime.acquire({ regionId: "20", resourceId: "28" });
+  sessionRecords[0].fail();
+  sessionRecords[1].fail();
+  const health = runtime.health();
+  assert.deepEqual(health.firstGenerationLatencyMs, { sampleCount: 2, min: 8, max: 20, average: 14 });
+  assert.equal(health.reconnectAttemptCount, 2);
   await runtime.stop();
 });
 
@@ -316,6 +391,7 @@ test("configuration, capacity, and cold-start limits reject only cold creation",
   await constrained.acquire({ regionId: "19", resourceId: "1" });
   await assert.rejects(constrained.acquire({ regionId: "19", resourceId: "2" }), /resource.*capacity/i);
   await assert.rejects(constrained.acquire({ regionId: "20", resourceId: "1" }), /region.*capacity/i);
+  assert.equal(constrained.health().capacityRejectionCount, 2);
   await constrained.stop();
 
   const rate = runtimeFixture({ clock });
@@ -330,6 +406,7 @@ test("configuration, capacity, and cold-start limits reject only cold creation",
   const leases = [];
   for (let resourceId = 1; resourceId <= 64; resourceId += 1) leases.push(await limited.acquire({ regionId: "19", resourceId: String(resourceId) }));
   await assert.rejects(limited.acquire({ regionId: "19", resourceId: "65" }), /cold-start/i);
+  assert.equal(limited.health().capacityRejectionCount, 1);
   await leases[0].release();
   await limited.acquire({ regionId: "19", resourceId: "1" });
   await limited.stop();

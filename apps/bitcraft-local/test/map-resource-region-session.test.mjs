@@ -249,6 +249,40 @@ test("resource session maintains independent applied subscriptions on one region
   await session.stop();
 });
 
+test("resource session health counts rows for each selected resource independently", async () => {
+  const relay = fixture({
+    resourceRows: [
+      { entityId: 1n, resourceId: 28 },
+      { entityId: 2n, resourceId: 54 },
+      { entityId: 3n, resourceId: 54 },
+    ],
+    locationRows: [
+      { entityId: 1n, x: 100, z: 200, dimension: 1 },
+      { entityId: 2n, x: 101, z: 201, dimension: 1 },
+      { entityId: 3n, x: 102, z: 202, dimension: 1 },
+    ],
+  });
+  const session = new RelayMapResourceRegionSession({ loadBindings: relay.loadBindings, onSnapshot() {}, onFailure() {} });
+  await session.start(config());
+  await session.subscribe("28", 7);
+  await session.subscribe("54", 8);
+
+  relay.subscriptions[0].apply();
+  relay.subscriptions[1].apply();
+  await drainMicrotasks();
+
+  assert.deepEqual(session.health().rowsPerType, {
+    "28": { resourceState: 1, locationState: 1 },
+    "54": { resourceState: 2, locationState: 2 },
+  });
+  assert.equal(session.health().rowCount, 6, "the row budget still covers the complete shared cache");
+  session.unsubscribe("28");
+  assert.deepEqual(session.health().rowsPerType, {
+    "54": { resourceState: 2, locationState: 2 },
+  }, "unsubscribed resources must not remain in per-subscription diagnostics");
+  await session.stop();
+});
+
 test("resource session coalesces cache changes and retains a prior generation through an incomplete join", async () => {
   const resourceRows = [{ entityId: 1n, resourceId: 28 }];
   const locationRows = [{ entityId: 1n, x: 100, z: 200, dimension: 1 }];

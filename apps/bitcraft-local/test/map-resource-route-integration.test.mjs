@@ -146,14 +146,25 @@ test("public resource health exposes aggregate counts and latency without points
   assert.equal(typeof routeModule.sanitizedMapResourceHealth, "function");
   const health = routeModule.sanitizedMapResourceHealth({
     configuredRegionIds: ["19", "24"], pinnedRegionIds: ["19"], coldStartsInWindow: 2,
+    regionalConnectionCount: 1, activeResourceSubscriptionCount: 1, idleRetainedResourceSubscriptionCount: 1,
+    rowsPerSubscription: [5, 2], firstGenerationLatencyMs: { sampleCount: 1, min: 18, max: 18, average: 18 },
+    reconnectAttemptCount: 3, capacityRejectionCount: 4,
     regions: [{
       regionId: "19", pinned: true, resourceCount: 1, leaseCount: 2, failure: null,
-      subscription: { connected: true, applied: true, stage: "applied", rowCount: 42, firstGenerationLatencyMs: 18, lastAppliedAt: "2026-08-12T10:00:00.000Z", lastError: null, appliedResourceIds: ["28"], points: [{ x: 1, z: 2 }] },
+      subscription: { connected: true, applied: true, stage: "applied", rowCount: 42, rowsPerSubscription: [5, 2], firstGenerationLatencyMs: 18, lastAppliedAt: "2026-08-12T10:00:00.000Z", lastError: null, appliedResourceIds: ["28"], points: [{ x: 1, z: 2 }] },
     }],
   });
   assert.equal(health.configuredRegionCount, 2);
   assert.equal(health.resourceCount, 1);
   assert.equal(health.leaseCount, 2);
+  assert.equal(health.regionalConnectionCount, 1);
+  assert.equal(health.activeResourceSubscriptionCount, 1);
+  assert.equal(health.idleRetainedResourceSubscriptionCount, 1);
+  assert.deepEqual(health.rowsPerSubscription, [2, 5]);
+  assert.deepEqual(health.firstGenerationLatencyMs, { sampleCount: 1, min: 18, max: 18, average: 18 });
+  assert.equal(health.reconnectAttemptCount, 3);
+  assert.equal(health.capacityRejectionCount, 4);
+  assert.deepEqual(health.regions[0].subscription.rowsPerSubscription, [2, 5]);
   assert.equal(health.regions[0].subscription.firstGenerationLatencyMs, 18);
   const serialized = JSON.stringify(health);
   assert.equal(serialized.includes("points"), false);
