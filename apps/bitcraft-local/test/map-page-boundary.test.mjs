@@ -130,8 +130,14 @@ test("Native map gives each visible player a stable accessible colour marker", (
   assert.match(nativeMap, /markerIcon\(feature\.kind, presentation, playerColours/);
   assert.match(nativeMap, /alt: accessibleLabel, title: accessibleLabel/);
   assert.match(nativeMap, /setAttribute\("aria-label", accessibleLabel\)/);
-  assert.match(css, /native-map-marker--player[^}]*--player-marker-color/s);
+  assert.match(css, /native-map-player-dot[^}]*--player-marker-color/s);
   assert.match(css, /native-map-marker--player[^}]*border[^}]*box-shadow/s);
+  assert.match(nativeMap, /native-map-player-pulse/);
+  assert.match(nativeMap, /native-map-player-dot/);
+  assert.match(nativeMap, /kind === "player" \? 24/);
+  assert.match(css, /native-map-player-dot[^}]*width:\s*8px[^}]*height:\s*8px/s);
+  assert.match(css, /native-map-player-pulse[^}]*animation:\s*native-map-player-pulse/s);
+  assert.match(css, /prefers-reduced-motion:\s*reduce[^}]*native-map-player-pulse[^}]*animation:\s*none/s);
 });
 
 test("Native map keeps resource canvases and player markers above ordinary features", () => {

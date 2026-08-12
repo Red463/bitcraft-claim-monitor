@@ -154,12 +154,20 @@ function markerKindClass(kind: string) {
 function markerIcon(kind: string, presentation: MapMarkerPresentation, color?: string) {
   const content = document.createElement("span");
   content.className = `native-map-marker-content${presentation.mode === "image" && presentation.badgeCrop ? " native-map-marker-content--badge-crop" : ""}`;
-  if (kind === "player" && color) content.style.setProperty("--player-marker-color", color);
-  const glyph = document.createElement("span");
-  glyph.className = "native-map-marker-glyph";
-  glyph.textContent = presentation.glyph;
-  content.appendChild(glyph);
-  if (presentation.mode === "image") {
+  if (kind === "player") {
+    if (color) content.style.setProperty("--player-marker-color", color);
+    const pulse = document.createElement("span");
+    pulse.className = "native-map-player-pulse";
+    const dot = document.createElement("span");
+    dot.className = "native-map-player-dot";
+    content.append(pulse, dot);
+  } else {
+    const glyph = document.createElement("span");
+    glyph.className = "native-map-marker-glyph";
+    glyph.textContent = presentation.glyph;
+    content.appendChild(glyph);
+  }
+  if (kind !== "player" && presentation.mode === "image") {
     const image = document.createElement("img");
     image.src = presentation.iconUrl;
     image.alt = "";
@@ -167,7 +175,7 @@ function markerIcon(kind: string, presentation: MapMarkerPresentation, color?: s
     image.addEventListener("error", () => image.remove(), { once: true });
     content.prepend(image);
   }
-  const size = presentation.mode === "image" && presentation.badgeCrop ? 40 : 30;
+  const size = kind === "player" ? 24 : presentation.mode === "image" && presentation.badgeCrop ? 40 : 30;
   return L.divIcon({
     className: `native-map-marker native-map-marker--${markerKindClass(kind)}`,
     html: content,

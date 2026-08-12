@@ -198,7 +198,12 @@
 .native-map-marker--waystone .native-map-marker-content { border-color: #c7a5ff; }
 .native-map-marker--empire-settlement .native-map-marker-content { border-color: #ff9b71; color: #ffb494; }
 .native-map-marker--watchtower .native-map-marker-content { border-color: #ff6b6b; color: #ff8d8d; }
-.native-map-marker--player .native-map-marker-content { background: var(--player-marker-color, #38bdf8); border: 2px solid #fff; color: #071014; box-shadow: 0 0 0 2px rgba(7,16,20,.88), 0 2px 7px rgba(0,0,0,.82), inset 0 0 0 2px rgba(255,255,255,.24); text-shadow: 0 1px 0 rgba(255,255,255,.45); }
+.native-map-marker--player { width: 24px; height: 24px; }
+.native-map-marker--player .native-map-marker-content { width: 24px; height: 24px; overflow: visible; background: transparent; border: 0; box-shadow: none; }
+.native-map-player-dot { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; border: 1px solid rgba(255,255,255,.96); border-radius: 50%; background: var(--player-marker-color, #38bdf8); box-shadow: 0 1px 3px rgba(0,0,0,.9); transform: translate(-50%, -50%); }
+.native-map-player-pulse { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; border: 2px solid var(--player-marker-color, #38bdf8); border-radius: 50%; animation: native-map-player-pulse 2s ease-out infinite; pointer-events: none; }
+@keyframes native-map-player-pulse { 0% { opacity: .72; transform: translate(-50%, -50%) scale(.75); } 75%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(2.75); } }
+@media (prefers-reduced-motion: reduce) { .native-map-player-pulse { animation: none; } }
 .native-map-marker--focus .native-map-marker-content { width: 32px; height: 32px; border-color: #f0c64f; color: #f0c64f; }
 .native-map-marker--claim { width: 40px; height: 40px; }
 .native-map-marker--claim .native-map-marker-content--badge-crop {
