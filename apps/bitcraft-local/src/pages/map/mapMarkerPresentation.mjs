@@ -11,7 +11,12 @@ const presentations = {
   }),
   claim: Object.freeze({ mode: "canvas", glyph: "C" }),
   "empire-settlement": Object.freeze({ mode: "glyph", glyph: "E" }),
-  watchtower: Object.freeze({ mode: "glyph", glyph: "T" }),
+  watchtower: Object.freeze({
+    mode: "image",
+    iconUrl: "/map-icons/claims/watchtower.png",
+    glyph: "T",
+    variant: "watchtower",
+  }),
   player: Object.freeze({ mode: "glyph", glyph: "P" }),
   focus: Object.freeze({ mode: "glyph", glyph: "+" }),
 };
@@ -30,7 +35,7 @@ export function claimMarkerPresentation(tier, npc = false) {
     mode: "image",
     iconUrl: "/map-icons/claims/claim_npc.png",
     glyph: "NPC",
-    badgeCrop: true,
+    variant: "claim-npc",
   });
   const displayTier = claimDisplayTier(tier);
   if (displayTier == null) return presentations.claim;
@@ -39,6 +44,7 @@ export function claimMarkerPresentation(tier, npc = false) {
     iconUrl: `/map-icons/claims/claim_t${displayTier}.png`,
     glyph: CLAIM_TIER_GLYPHS[displayTier],
     badgeCrop: true,
+    variant: "claim-tier",
   });
 }
 

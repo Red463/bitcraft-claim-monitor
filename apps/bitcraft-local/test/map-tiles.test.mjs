@@ -113,7 +113,7 @@ test("map tile status returns unavailable or a public installed manifest", async
     provider: "relay", available: false, generation: null, generatedAt: null, observedAt: null,
     freshness: "unavailable", ageMs: null, regionIds: [], dimension: "1", bounds: null,
     zoomRange: { min: -5, max: 0 }, paletteVersion: null, tileCount: 0, totalBytes: 0,
-    biomes: [], channels: { terrain: { tileCount: 0, totalBytes: 0 }, water: { tileCount: 0, totalBytes: 0 }, biomeMasks: { tileCount: 0, totalBytes: 0 } },
+    biomes: [], waterTypes: [], channels: { terrain: { tileCount: 0, totalBytes: 0 }, water: { tileCount: 0, totalBytes: 0 }, biomeMasks: { tileCount: 0, totalBytes: 0 } },
     buildStage: "building", warnings: ["Relay terrain is building its first complete tile bundle."],
   });
 
@@ -134,6 +134,7 @@ test("map tile status returns unavailable or a public installed manifest", async
     zoomRange: { min: -5, max: 0 }, paletteVersion: 1, tileCount: 12, totalBytes: 345,
     channels: { terrain: { tileCount: 4, totalBytes: 100 }, water: { tileCount: 4, totalBytes: 100 }, biomeMasks: { tileCount: 4, totalBytes: 145 } },
     biomes: [{ biomeType: 1, name: "Calm Forest", description: "Calm", hazardLevel: "Safe", disallowPlayerBuild: false, present: true, iconAddress: "must-not-leak" }],
+    waterTypes: ["lake", "river", "ocean", "ocean-biome", "swamp", "lava"],
   };
   await tileModule.serveLocalMapTile("/api/local/map/tiles/status", available, { readManifest: async () => manifest }, () => new Date("2026-08-11T16:00:00.000Z"));
   const payload = JSON.parse(available.body);
@@ -144,6 +145,7 @@ test("map tile status returns unavailable or a public installed manifest", async
   assert.equal(payload.dataDir, undefined);
   assert.deepEqual(payload.biomes, [{ biomeType: 1, name: "Calm Forest", description: "Calm", hazardLevel: "Safe", disallowPlayerBuild: false, present: true }]);
   assert.equal(payload.biomes[0].iconAddress, undefined);
+  assert.deepEqual(payload.waterTypes, ["lake", "ocean", "ocean-biome", "river", "swamp"]);
   assert.deepEqual(payload.channels.biomeMasks, { tileCount: 4, totalBytes: 145 });
 
   const withRoads = responseRecorder();

@@ -10,6 +10,13 @@ const EMPTY_CHANNELS = Object.freeze({
   water: Object.freeze({ tileCount: 0, totalBytes: 0 }),
   biomeMasks: Object.freeze({ tileCount: 0, totalBytes: 0 }),
 });
+const PUBLIC_WATER_TYPES = new Set(["lake", "river", "ocean", "ocean-biome", "swamp"]);
+
+function publicWaterTypes(manifest) {
+  return [...new Set(manifest?.waterTypes ?? [])]
+    .filter((waterType) => typeof waterType === "string" && PUBLIC_WATER_TYPES.has(waterType))
+    .sort();
+}
 
 function publicBiomes(manifest) {
   return [...(manifest?.biomes ?? [])].map((biome) => ({
@@ -54,7 +61,7 @@ async function terrainStatus(tileStore, now, runtimeHealth, roadTileStore) {
     provider: "relay", available: false, generation: null, generatedAt: null, observedAt: null,
     freshness: "unavailable", ageMs: null, regionIds: [], dimension: "1", bounds: null,
     zoomRange: { min: MIN_ZOOM, max: MAX_ZOOM }, paletteVersion: null, tileCount: 0, totalBytes: 0,
-    biomes: [], channels: EMPTY_CHANNELS,
+    biomes: [], waterTypes: [], channels: EMPTY_CHANNELS,
     buildStage,
     warnings: [buildStage === "building"
       ? "Relay terrain is building its first complete tile bundle."
@@ -71,7 +78,7 @@ async function terrainStatus(tileStore, now, runtimeHealth, roadTileStore) {
     freshness, ageMs, regionIds: Array.isArray(manifest.regionIds) ? manifest.regionIds.map(String) : [],
     dimension: "1", bounds: manifest.bounds ?? null, zoomRange: manifest.zoomRange ?? { min: MIN_ZOOM, max: MAX_ZOOM },
     paletteVersion: manifest.paletteVersion ?? null, tileCount: Number(manifest.tileCount ?? 0), totalBytes: Number(manifest.totalBytes ?? 0), buildStage,
-    biomes: publicBiomes(manifest), channels: publicChannels(manifest),
+    biomes: publicBiomes(manifest), waterTypes: publicWaterTypes(manifest), channels: publicChannels(manifest),
     warnings: freshness === "stale" ? ["Relay terrain is stale; showing the last-good installed generation."] : [], ...roadStatus,
   };
 }

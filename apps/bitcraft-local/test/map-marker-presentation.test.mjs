@@ -26,6 +26,7 @@ test("claim marker tiers select only the matching same-origin badge", () => {
     iconUrl: "/map-icons/claims/claim_t1.png",
     glyph: "I",
     badgeCrop: true,
+    variant: "claim-tier",
   });
   assert.equal(claimMarkerPresentation(10).iconUrl, "/map-icons/claims/claim_t10.png");
   assert.equal(claimDisplayTier(0), 1);
@@ -37,15 +38,25 @@ test("claim marker tiers select only the matching same-origin badge", () => {
     iconUrl: "/map-icons/claims/claim_t1.png",
     glyph: "I",
     badgeCrop: true,
+    variant: "claim-tier",
   });
   assert.deepEqual(claimMarkerPresentation(null, true), {
     mode: "image",
     iconUrl: "/map-icons/claims/claim_npc.png",
     glyph: "NPC",
-    badgeCrop: true,
+    variant: "claim-npc",
   });
   assert.equal(claimMarkerPresentation(7, true).iconUrl, "/map-icons/claims/claim_npc.png");
   assert.equal(claimMarkerPresentation(11).mode, "canvas");
   assert.equal(claimMarkerPresentation("6").mode, "canvas");
   assert.doesNotMatch(JSON.stringify(claimMarkerPresentation(6)), /https?:\/\//);
+});
+
+test("watchtowers use the dedicated uncropped local badge", () => {
+  assert.deepEqual(mapMarkerPresentation("watchtower"), {
+    mode: "image",
+    iconUrl: "/map-icons/claims/watchtower.png",
+    glyph: "T",
+    variant: "watchtower",
+  });
 });

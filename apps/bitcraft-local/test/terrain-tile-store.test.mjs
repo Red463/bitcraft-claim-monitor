@@ -33,6 +33,7 @@ function encodedChannels(value, zoom, x, y, biomeIds = [1, 2]) {
     terrain: Buffer.from(`${value.generation}:terrain:${zoom}:${x}:${y}`),
     water: Buffer.from(`${value.generation}:water:${zoom}:${x}:${y}`),
     biomeMasks: new Map(biomeIds.map((biomeType) => [biomeType, Buffer.from(`${value.generation}:biome-${biomeType}:${zoom}:${x}:${y}`)])),
+    waterTypes: zoom === -5 ? ["lake", "river"] : ["river", "ocean"],
   };
 }
 
@@ -62,6 +63,7 @@ test("terrain store installs complete bundles and retains last-good on encoder f
   assert.equal((await store.readTile({ style: "biome-1", z: -5, x: 0, y: -1 })).bytes.toString(), "1:biome-1:-5:0:-1");
   assert.equal(await store.readTile({ style: "biome-3", z: -5, x: 0, y: -1 }), null);
   assert.deepEqual(first.biomes.map(({ biomeType, present }) => [biomeType, present]), [[1, true], [2, true], [3, false]]);
+  assert.deepEqual(first.waterTypes, ["lake", "ocean", "river"]);
   assert.equal(first.channels.biomeMasks.tileCount, 2 * first.channels.terrain.tileCount);
 
   calls = 0;

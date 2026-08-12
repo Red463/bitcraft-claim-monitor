@@ -181,7 +181,8 @@ function markerKindClass(kind: string) {
 
 function markerIcon(kind: string, presentation: MapMarkerPresentation, color?: string) {
   const content = document.createElement("span");
-  content.className = `native-map-marker-content${presentation.mode === "image" && presentation.badgeCrop ? " native-map-marker-content--badge-crop" : ""}`;
+  const variant = presentation.mode === "image" ? presentation.variant : undefined;
+  content.className = `native-map-marker-content${presentation.mode === "image" && presentation.badgeCrop ? " native-map-marker-content--badge-crop" : ""}${variant ? ` native-map-marker-content--${variant}` : ""}`;
   if (kind === "player") {
     if (color) content.style.setProperty("--player-marker-color", color);
     const pulse = document.createElement("span");
@@ -203,7 +204,7 @@ function markerIcon(kind: string, presentation: MapMarkerPresentation, color?: s
     image.addEventListener("error", () => image.remove(), { once: true });
     content.prepend(image);
   }
-  const size = kind === "player" ? 24 : presentation.mode === "image" && presentation.badgeCrop ? 36 : 30;
+  const size = kind === "player" || variant === "watchtower" ? 24 : variant === "claim-tier" || variant === "claim-npc" ? 32 : 30;
   return L.divIcon({
     className: `native-map-marker native-map-marker--${markerKindClass(kind)}`,
     html: content,
@@ -728,6 +729,7 @@ export function NativeMap({
         <MapLayersControl visibility={layerVisibility} availability={layerAvailability} counts={layerCounts} onToggle={toggleLayer} />
         <MapBiomeKey
           biomes={terrainStatus?.biomes ?? []}
+          waterTypes={terrainStatus?.waterTypes ?? []}
           activeBiomeType={biomeHighlight.active}
           pinnedBiomeType={biomeHighlight.pinned}
           onPreview={biomeHighlightController.preview}

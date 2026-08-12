@@ -4,6 +4,7 @@ function validStatus(value) {
   if (!value || typeof value !== "object" || value.provider !== "relay" || typeof value.available !== "boolean") return false;
   if (value.available && !/^\d+$/.test(String(value.generation ?? ""))) return false;
   if (!Array.isArray(value.warnings)) return false;
+  if (!Array.isArray(value.waterTypes) || !value.waterTypes.every((waterType) => ["lake", "river", "ocean", "ocean-biome", "swamp"].includes(waterType))) return false;
   if (!Array.isArray(value.biomes) || !value.biomes.every((biome) => biome
     && Number.isInteger(biome.biomeType) && biome.biomeType >= 0 && biome.biomeType <= 255
     && typeof biome.name === "string" && biome.name.trim()

@@ -134,6 +134,7 @@ test("terrain renderer emits aligned ground and water channels", async () => {
   assert.equal(alphaAt(waterPixels, 10, 240), 0, "water channel hides ground cells");
   assert.equal(alphaAt(groundPixels, 10, 200), 0, "ground channel hides water cells");
   assert.equal(alphaAt(waterPixels, 10, 200), 255, "water channel keeps water cells");
+  assert.deepEqual(channels.waterTypes, ["ocean"]);
 });
 
 test("terrain renderer produces both aligned channels in one paired render", async () => {

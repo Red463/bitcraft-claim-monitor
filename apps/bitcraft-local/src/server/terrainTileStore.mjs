@@ -130,12 +130,16 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
     const channelBytes = { terrain: 0, water: 0, biomeMasks: 0 };
     const channelTileCounts = { terrain: 0, water: 0, biomeMasks: 0 };
     const presentBiomeIds = new Set();
+    const presentWaterTypes = new Set();
     activeStaging.add(stagingName);
     try {
       await mkdir(staging, { recursive: false });
       for (const tile of tiles) {
         if (Date.now() - started > limits.deadlineMs) throw new Error(`Terrain bundle exceeded ${limits.deadlineMs}ms deadline`);
         const channels = await encoder({ generation, zoom: tile.zoom, x: tile.x, y: tile.y, tileSize: limits.tileSize });
+        for (const waterType of channels?.waterTypes ?? []) {
+          if (["lake", "river", "ocean", "ocean-biome", "swamp"].includes(waterType)) presentWaterTypes.add(waterType);
+        }
         const outputs = [
           { style: "terrain", group: "terrain", value: channels?.terrain },
           { style: "water", group: "water", value: channels?.water },
@@ -187,6 +191,7 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
         tileCount,
         totalBytes,
         biomes,
+        waterTypes: [...presentWaterTypes].sort(),
         channels: {
           terrain: { tileCount: channelTileCounts.terrain, totalBytes: channelBytes.terrain },
           water: { tileCount: channelTileCounts.water, totalBytes: channelBytes.water },

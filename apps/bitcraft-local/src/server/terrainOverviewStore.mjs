@@ -33,6 +33,10 @@ function mergeChannels(manifests) {
   return result;
 }
 
+function mergeWaterTypes(manifests) {
+  return [...new Set(manifests.flatMap((manifest) => manifest?.waterTypes ?? []))].sort();
+}
+
 async function compositeTiles(tiles) {
   if (!tiles.length) return null;
   if (tiles.length === 1) return tiles[0];
@@ -88,6 +92,7 @@ export function createTerrainOverviewStore({ dataDir }) {
         tileCount: manifests.reduce((total, value) => total + Number(value.tileCount ?? 0), 0),
         totalBytes: manifests.reduce((total, value) => total + Number(value.totalBytes ?? 0), 0),
         biomes: mergeBiomes(manifests),
+        waterTypes: mergeWaterTypes(manifests),
         channels: mergeChannels(manifests),
       };
     },
@@ -122,6 +127,7 @@ export function createLayeredTerrainTileStore({ detailStore, overviewStore }) {
         tileCount: manifests.reduce((total, value) => total + Number(value.tileCount ?? 0), 0),
         totalBytes: manifests.reduce((total, value) => total + Number(value.totalBytes ?? 0), 0),
         biomes: mergeBiomes(manifests),
+        waterTypes: mergeWaterTypes(manifests),
         channels: mergeChannels(manifests),
         overviewAvailable: Boolean(overview),
       };

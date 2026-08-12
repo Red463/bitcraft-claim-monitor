@@ -17,6 +17,7 @@ test("terrain tile client uses same-origin status and generation-busted tile URL
     return { ok: true, json: async () => ({
       provider: "relay", available: true, generation: "42", freshness: "live", warnings: [],
       biomes: [{ biomeType: 1, name: "Calm Forest", description: "Calm", hazardLevel: "Safe", disallowPlayerBuild: false, present: true }],
+      waterTypes: ["lake", "ocean"],
       channels: { terrain: { tileCount: 1, totalBytes: 1 }, water: { tileCount: 1, totalBytes: 1 }, biomeMasks: { tileCount: 1, totalBytes: 1 } },
     }) };
   };
@@ -25,6 +26,7 @@ test("terrain tile client uses same-origin status and generation-busted tile URL
     const status = await statusModule.loadTerrainTileStatus(controller.signal);
     assert.equal(status.generation, "42");
     assert.equal(status.biomes[0].name, "Calm Forest");
+    assert.deepEqual(status.waterTypes, ["lake", "ocean"]);
     assert.equal(requested.url, "/api/local/map/tiles/status");
     assert.equal(requested.options.credentials, "same-origin");
     assert.equal(requested.options.signal, controller.signal);

@@ -41,6 +41,7 @@ export async function renderTerrainTileChannels({ generation, evidence, zoom, x,
   const biomeMaskRgba = new Map();
   const warnings = [];
   const renderedByCell = new Map();
+  const waterTypes = new Set();
 
   const sampleCell = (mapX, mapZ) => {
     const chunkX = Math.floor((mapX - evidence.chunkOriginX) / chunkSpan);
@@ -73,6 +74,7 @@ export async function renderTerrainTileChannels({ generation, evidence, zoom, x,
       const cell = sampleCell(mapX, mapZ);
       if (!cell) continue;
       const waterCell = cell.surface !== "ground";
+      if (waterCell) waterTypes.add(cell.surface);
       let rendered = renderedByCell.get(cell.key);
       if (!rendered) {
         const north = sampleCell(mapX, mapZ + evidence.cellSize) ?? cell;
@@ -113,5 +115,5 @@ export async function renderTerrainTileChannels({ generation, evidence, zoom, x,
     encode(waterRgba),
     Promise.all([...biomeMaskRgba].map(async ([biomeType, rgba]) => [biomeType, await encode(rgba)])),
   ]);
-  return { terrain, water, biomeMasks: new Map(encodedMasks) };
+  return { terrain, water, biomeMasks: new Map(encodedMasks), waterTypes: [...waterTypes].sort() };
 }

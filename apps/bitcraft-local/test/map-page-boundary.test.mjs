@@ -120,10 +120,10 @@ test("Native map reuses one canvas renderer and fixed marker presentations", () 
   assert.match(nativeMap, /feature\.kind === "claim"\s*\? claimMarkerPresentation\(feature\.tier, feature\.npc\)/);
   assert.match(nativeMap, /claimDisplayTier\(feature\.tier\)/);
   assert.match(nativeMap, /feature\.npc\s*\?\s*" · NPC town"/);
-  assert.match(nativeMap, /badgeCrop\s*\?\s*36/);
+  assert.match(nativeMap, /variant === "claim-tier" \|\| variant === "claim-npc" \? 32/);
   const css = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
-  assert.match(css, /native-map-marker--claim\s*\{[^}]*width:\s*36px;[^}]*height:\s*36px;/s);
-  assert.match(css, /native-map-marker-content--badge-crop\s*img\s*\{[^}]*width:\s*48px;[^}]*height:\s*48px;/s);
+  assert.match(css, /native-map-marker--claim\s*\{[^}]*width:\s*32px;[^}]*height:\s*32px;/s);
+  assert.match(css, /native-map-marker-content--badge-crop\s*img\s*\{[^}]*width:\s*43px;[^}]*height:\s*43px;/s);
   assert.match(nativeMap, /keyboard: true/);
 });
 
@@ -140,7 +140,7 @@ test("Native map gives each visible player a stable accessible colour marker", (
   assert.match(css, /native-map-marker--player[^}]*border[^}]*box-shadow/s);
   assert.match(nativeMap, /native-map-player-pulse/);
   assert.match(nativeMap, /native-map-player-dot/);
-  assert.match(nativeMap, /kind === "player" \? 24/);
+  assert.match(nativeMap, /kind === "player" \|\| variant === "watchtower" \? 24/);
   assert.match(css, /native-map-player-dot[^}]*width:\s*8px[^}]*height:\s*8px/s);
   assert.match(css, /native-map-player-pulse[^}]*animation:\s*native-map-player-pulse/s);
   assert.match(css, /prefers-reduced-motion:\s*reduce[^}]*native-map-player-pulse[^}]*animation:\s*none/s);
@@ -227,12 +227,12 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   assert.match(nativeMap, /zoomend/);
   assert.match(nativeMap, /--native-map-claim-scale/);
   const css = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
-  assert.match(css, /native-map-marker--claim[^}]*width:\s*36px[^}]*height:\s*36px/s);
+  assert.match(css, /native-map-marker--claim[^}]*width:\s*32px[^}]*height:\s*32px/s);
   assert.match(css, /badge-crop[^}]*padding:\s*0/s);
   assert.match(css, /badge-crop[^}]*box-shadow:\s*none/s);
   assert.match(css, /badge-crop[^}]*background:\s*transparent/s);
   assert.match(css, /badge-crop[^}]*clip-path:\s*polygon\(50% 0%, 93\.3% 25%, 93\.3% 75%, 50% 100%, 6\.7% 75%, 6\.7% 25%\)/s);
-  assert.match(css, /badge-crop img[^}]*inset:\s*-6px[^}]*width:\s*48px[^}]*height:\s*48px/s);
+  assert.match(css, /badge-crop img[^}]*inset:\s*-5\.5px[^}]*width:\s*43px[^}]*height:\s*43px/s);
   assert.match(nativeMap, /selectionRequired.*resourceIds\.length.*enemyTypes\.length/s);
 });
 
@@ -243,13 +243,14 @@ test("Native map places a viewport-bounded biome key beside Layers", () => {
 
   assert.match(nativeMap, /native-map-controls[\s\S]*<MapLayersControl[\s\S]*<MapBiomeKey/);
   assert.match(nativeMap, /biomes=\{terrainStatus\?\.biomes \?\? \[\]\}/);
+  assert.match(nativeMap, /waterTypes=\{terrainStatus\?\.waterTypes \?\? \[\]\}/);
   assert.match(nativeMap, /activeBiomeType=\{biomeHighlight\.active\}/);
   assert.match(nativeMap, /pinnedBiomeType=\{biomeHighlight\.pinned\}/);
   assert.match(nativeMap, /onPreview=\{biomeHighlightController\.preview\}/);
   assert.match(nativeMap, /onClear=\{biomeHighlightController\.clear\}/);
   assert.match(nativeMap, /React\.useEffect\(\(\) => \{\s*const controller = createBiomeHighlightController/);
   assert.match(nativeMap, /biomeHighlightControllerRef\.current === controller[\s\S]*biomeHighlightControllerRef\.current = null/);
-  assert.match(key, /<span>Key<\/span>/);
+  assert.match(key, /<span>Biomes<\/span>/);
   assert.match(css, /native-map-biome-key-popover[^}]*max-height:\s*min\(30rem, calc\(100dvh - 8rem\)\)[^}]*overflow:\s*auto/s);
   assert.match(css, /native-map-biome-key-grid[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/s);
   assert.match(css, /@media \(max-width: 620px\)[\s\S]*native-map-biome-key-grid[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
@@ -278,9 +279,9 @@ test("Native map uses event-driven snapshot loading without a snapshot polling t
   assert.match(snapshotEffect, /new EventSource\(request\.eventsUrl/);
   assert.match(snapshotEffect, /mapEventNeedsSnapshot\(JSON\.parse\(message\.data\)\)/);
   assert.match(snapshotEffect, /void loader\.request\(request\.eventsUrl\)/);
-  assert.match(snapshotEffect, /loadJson\(request\.snapshotUrl\)/);
-  assert.match(snapshotEffect, /request\.resourceUrl \? loadJson\(request\.resourceUrl\)/);
-  assert.match(snapshotEffect, /mergeMapResourcePayload/);
+  assert.match(snapshotEffect, /fetch\(request\.snapshotUrl/);
+  assert.match(snapshotEffect, /createMapResourcePartitionLoader/);
+  assert.match(snapshotEffect, /new EventSource\(request\.resourceEventUrl/);
   assert.doesNotMatch(snapshotEffect, /setInterval|setTimeout/);
 });
 

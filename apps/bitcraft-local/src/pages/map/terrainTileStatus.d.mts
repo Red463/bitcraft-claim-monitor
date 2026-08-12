@@ -16,6 +16,7 @@ export type TerrainTileStatus = {
   buildStage: string;
   warnings: string[];
   biomes: TerrainBiomeStatus[];
+  waterTypes: Array<"lake" | "river" | "ocean" | "ocean-biome" | "swamp">;
   channels: {
     terrain: { tileCount: number; totalBytes: number };
     water: { tileCount: number; totalBytes: number };
