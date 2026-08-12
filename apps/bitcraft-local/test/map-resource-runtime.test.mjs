@@ -408,6 +408,19 @@ test("a failed cold non-primary region retries after its first lease is created"
   await runtime.stop();
 });
 
+test("the default runtime can lease every configured Relay-ready region", async () => {
+  const regionIds = ["1", "2", "3", "4", "5"];
+  const { runtime } = runtimeFixture({ regions: regionIds });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "1", activeRegionIds: regionIds });
+
+  const leases = await Promise.all(regionIds.map((regionId) => runtime.acquire({ regionId, resourceId: "28" })));
+
+  assert.equal(leases.length, 5);
+  assert.equal(runtime.health().regionalConnectionCount, 5);
+  await Promise.all(leases.map((lease) => lease.release()));
+  await runtime.stop();
+});
+
 test("configuration, capacity, and cold-start limits reject only cold creation", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
   const clock = manualClock();

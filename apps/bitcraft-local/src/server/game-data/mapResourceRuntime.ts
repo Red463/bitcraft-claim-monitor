@@ -120,7 +120,7 @@ export class RelayMapResourceRuntime {
   readonly #clearTimer: (timer: unknown) => void;
   readonly #resourceIdleMs: number;
   readonly #regionIdleMs: number;
-  readonly #maxRegions: number;
+  readonly #maxRegions: number | null;
   readonly #maxResourceTypesPerRegion: number;
   readonly #coldStartWindowMs: number;
   readonly #maxColdStartsPerWindow: number;
@@ -142,7 +142,7 @@ export class RelayMapResourceRuntime {
     this.#clearTimer = dependencies.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>));
     this.#resourceIdleMs = dependencies.resourceIdleMs ?? 60_000;
     this.#regionIdleMs = dependencies.regionIdleMs ?? 60_000;
-    this.#maxRegions = dependencies.maxRegions ?? 4;
+    this.#maxRegions = dependencies.maxRegions ?? null;
     this.#maxResourceTypesPerRegion = dependencies.maxResourceTypesPerRegion ?? 16;
     this.#coldStartWindowMs = dependencies.coldStartWindowMs ?? 60_000;
     this.#maxColdStartsPerWindow = dependencies.maxColdStartsPerWindow ?? 64;
@@ -244,7 +244,7 @@ export class RelayMapResourceRuntime {
   }
 
   async #openRegion(regionId: string): Promise<RegionEntry> {
-    if (this.#regions.size >= this.#maxRegions) {
+    if (this.#maxRegions != null && this.#regions.size >= this.#maxRegions) {
       this.#capacityRejectionCount += 1;
       throw new Error(`Relay map resource region capacity ${this.#maxRegions} is exhausted`);
     }

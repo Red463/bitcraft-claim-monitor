@@ -102,6 +102,9 @@ export function publicGenerationEvent(event: MapGenerationEvent, changedDomains:
     ...(event.generation == null ? {} : { generation: event.generation }),
     ...(event.generatedAt === undefined ? {} : { generatedAt: event.generatedAt }),
     changedDomains,
+    ...(changedDomains.includes("map-resources") && event.mapResourceScopeKey
+      ? { mapResourceScopeKey: event.mapResourceScopeKey }
+      : {}),
   };
 }
 

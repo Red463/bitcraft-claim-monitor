@@ -169,7 +169,7 @@ test("map resource SSE changes reach only listeners for the selected keys", () =
   assert.deepEqual(routeModule.generationDomainsForListener({ changedDomains: ["map-resources"] }, listener), []);
 });
 
-test("public generation events omit internal spatial and resource scope keys", () => {
+test("public resource generation events identify only the changed resource partition", () => {
   assert.equal(typeof routeModule.publicGenerationEvent, "function");
   const serialized = JSON.stringify(routeModule.publicGenerationEvent({
     claimId: "999",
@@ -179,13 +179,14 @@ test("public generation events omit internal spatial and resource scope keys", (
     mapResourceScopeKey: "19|resource:28",
     mapSpatialScopeKey: "999|19|players:101",
   }, ["map-resources"]));
-  assert.equal(serialized.includes("mapResourceScopeKey"), false);
+  assert.equal(serialized.includes("mapResourceScopeKey"), true);
   assert.equal(serialized.includes("mapSpatialScopeKey"), false);
   assert.deepEqual(JSON.parse(serialized), {
     claimId: "999",
     generation: 7,
     generatedAt: "2026-08-12T10:00:00.000Z",
     changedDomains: ["map-resources"],
+    mapResourceScopeKey: "19|resource:28",
   });
 });
 

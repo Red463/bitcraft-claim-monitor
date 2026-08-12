@@ -36,6 +36,7 @@ import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTrans
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { mapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
+import { MapResourcePageError, buildMapResourcePartitionPayload, createMapResourceCursorCodec, parseMapResourcePartitionScope, parseMapResourceSelectionScope } from "./src/server/mapResourcePages.mjs";
 import { MapSnapshotError, authorizedMapPlayerIds, buildMapResourcePayload, buildMapSnapshot, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
 import { serveLocalMapTile } from "./src/server/mapTiles.mjs";
 import { createTerrainTileStore } from "./src/server/terrainTileStore.mjs";
@@ -637,6 +638,7 @@ const relayMapResourceRuntime = new RelayMapResourceRuntime({
     mapResourceScopeKey: mapResourceScopeKey(snapshot.regionId, snapshot.resourceId),
   }),
 });
+const mapResourceCursorCodec = createMapResourceCursorCodec(randomBytes(32));
 const relayMarketTransitionWriter = createRelayMarketTransitionWriter(db, {
   addActivity,
   processOutbox: kickDiscordNotificationOutbox,
@@ -5984,6 +5986,14 @@ function configuredRegionalMarketRegionIds(claimId) {
   );
 }
 
+function currentMapResourceRegions(claimId) {
+  return mapResourceRegionCatalog({
+    providerHealth: gameDataProviderHealth(),
+    regionSnapshot: currentStateRepository.read(claimId, "region"),
+    fallbackRegionIds: configuredRegionalMarketRegionIds(claimId),
+  });
+}
+
 function combineMapSpatialLeases(leases) {
   const snapshots = leases.map((lease) => lease.snapshot()).filter(Boolean);
   if (!snapshots.length) return null;
@@ -8060,12 +8070,95 @@ const server = createServer(async (req, res) => {
       const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
       if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
       const claimId = currentClaimId();
-      const payload = mapResourceRegionCatalog({
-        providerHealth: gameDataProviderHealth(),
-        regionSnapshot: currentStateRepository.read(claimId, "region"),
-        fallbackRegionIds: configuredRegionalMarketRegionIds(claimId),
-      });
+      const payload = currentMapResourceRegions(claimId);
       return send(res, payload.regionIds.length ? 200 : 503, payload);
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/map/resources") {
+      if (!rateLimit(req, res, "map-snapshot", RATE_LIMITS.mapSnapshot)) return;
+      const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
+      if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
+      const claimId = currentClaimId();
+      const readyRegions = currentMapResourceRegions(claimId);
+      let scope;
+      try {
+        scope = parseMapResourcePartitionScope(url.searchParams, { allowedRegionIds: readyRegions.regionIds });
+      } catch (error) {
+        return send(res, error instanceof MapResourcePageError ? error.statusCode : 422, { error: error instanceof Error ? error.message : String(error) });
+      }
+      let requestClosed = false;
+      let lease = null;
+      req.once("close", () => { requestClosed = true; });
+      const releaseLease = bindMapLeaseRelease(req, res, async () => lease?.release());
+      try {
+        lease = await acquireMapLeaseUnlessClosed(
+          () => relayMapResourceRuntime.acquire({ regionId: scope.regionId, resourceId: scope.resourceId }),
+          () => requestClosed,
+          "Map resource partition request closed during lease acquisition.",
+        );
+        await lease.waitForSnapshot(MAP_SPATIAL_INITIAL_WAIT_MS);
+        const resourceCollection = combineMapResourceLeases([lease]);
+        const payload = buildMapResourcePartitionPayload({ scope, resourceCollection, cursorCodec: mapResourceCursorCodec });
+        const statusCode = payload.layerAvailability.status === "unavailable" ? 503 : 200;
+        return send(res, statusCode, payload);
+      } catch (error) {
+        if (requestClosed) return;
+        const statusCode = error instanceof MapResourcePageError ? error.statusCode : 503;
+        return send(res, statusCode, { error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        await releaseLease();
+      }
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/map/resource-events") {
+      if (!rateLimit(req, res, "map-events", RATE_LIMITS.mapEvents)) return;
+      const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
+      if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
+      const claimId = currentClaimId();
+      const readyRegions = currentMapResourceRegions(claimId);
+      let scope;
+      try {
+        scope = parseMapResourceSelectionScope(url.searchParams, { allowedRegionIds: readyRegions.regionIds });
+      } catch (error) {
+        return send(res, error instanceof MapResourcePageError ? error.statusCode : 422, { error: error instanceof Error ? error.message : String(error) });
+      }
+      const leases = [];
+      let requestClosed = false;
+      req.once("close", () => { requestClosed = true; });
+      const releaseLeases = bindMapLeaseRelease(req, res, () => Promise.allSettled(leases.map((lease) => lease.release())));
+      try {
+        for (const regionId of scope.regionIds) for (const resourceId of scope.resourceIds) {
+          leases.push(await acquireMapLeaseUnlessClosed(
+            () => relayMapResourceRuntime.acquire({ regionId, resourceId }),
+            () => requestClosed,
+            "Map resource event request closed during lease acquisition.",
+          ));
+        }
+      } catch (error) {
+        await releaseLeases();
+        if (requestClosed) return;
+        return send(res, 503, { error: error instanceof Error ? error.message : String(error) });
+      }
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.flushHeaders?.();
+      const listener = {
+        claimId,
+        domains: new Set(["map-resources"]),
+        mapResourceScopeKeys: new Set(leases.map((lease) => lease.key)),
+        response: res,
+      };
+      gameDataGenerationListeners.add(listener);
+      res.write(`data: ${JSON.stringify({ changedDomains: ["map-resources"], scope, initial: true })}\n\n`);
+      const heartbeat = setInterval(() => { if (!res.destroyed) res.write(": keep-alive\n\n"); }, 15_000);
+      req.once("close", () => {
+        clearInterval(heartbeat);
+        gameDataGenerationListeners.delete(listener);
+        void releaseLeases();
+      });
+      return;
     }
     if (req.method === "GET" && ["/api/local/map/snapshot", "/api/local/map/resources", "/api/local/map/events"].includes(url.pathname)) {
       if (["/api/local/map/snapshot", "/api/local/map/resources"].includes(url.pathname) && !rateLimit(req, res, "map-snapshot", RATE_LIMITS.mapSnapshot)) return;
@@ -9689,13 +9782,11 @@ function startBackgroundTasks() {
         throw new Error("Relay regional sessions are waiting for a claim region");
       }
       {
-        const settings = getSettings();
+        const readyRegionIds = currentMapResourceRegions(claimId).regionIds;
         await relayMapResourceRuntime.reconcile({
           relayBaseUrl,
           primaryRegionId: regionId,
-          activeRegionIds: parseRegionIds(
-            `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
-          ).slice(0, 4),
+          activeRegionIds: parseRegionIds(`${regionId},${readyRegionIds.join(",")}`),
         });
       }
       if (terrainLiveRebuildEnabled) try {

@@ -654,6 +654,12 @@ test("server collection paginates listings and protects production mutations", a
   assert.deepEqual(mapRegions.regionIds, ["19"]);
   assert.equal(mapRegions.regions[0].regionName, "Region 19");
   assert.equal(mapRegions.regions[0].freshness, "stale");
+  const resourcePartitionUnavailable = await fetch(`${origin}/api/local/map/resources?region=19&resourceId=28`);
+  assert.equal(resourcePartitionUnavailable.status, 503);
+  assert.match((await resourcePartitionUnavailable.json()).error, /resource runtime is not configured/i);
+  const resourceEventsUnavailable = await fetch(`${origin}/api/local/map/resource-events?regions=19&resourceIds=28`);
+  assert.equal(resourceEventsUnavailable.status, 503);
+  assert.match((await resourceEventsUnavailable.json()).error, /resource runtime is not configured/i);
 
   const empireObservedAt = new Date().toISOString();
   const empireCurrentData = {
