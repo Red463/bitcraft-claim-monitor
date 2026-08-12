@@ -169,24 +169,56 @@ export class RelayMapResourceRegionSession {
     this.#startedAt = this.#now();
     this.#health.stage = "connecting";
     const bindings = await this.#loadBindings();
-    this.#connection = bindings.DbConnection.builder()
-      .withUri(config.uri)
-      .withDatabaseName(config.database)
-      .onConnect((connection) => {
-        if (this.#stopping) {
-          connection.disconnect();
-          return;
-        }
-        this.#connection = connection;
-        this.#health.connected = true;
-        this.#health.stage = "subscribed";
-      })
-      .onConnectError((_context, error) => { if (!this.#stopping) this.#recordError(error); })
-      .onDisconnect((_context, error) => {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let failed = false;
+      let builtConnection: BindingConnection | null = null;
+      const fail = (error: Error) => {
+        if (settled || this.#stopping) return;
+        settled = true;
+        failed = true;
+        this.#connection = null;
+        this.#config = null;
+        this.#startedAt = null;
         this.#health.connected = false;
-        if (!this.#stopping) this.#recordError(error ?? new Error("Relay map resource subscription disconnected."));
-      })
-      .build();
+        this.#recordError(error);
+        builtConnection?.disconnect();
+        reject(error);
+      };
+      try {
+        builtConnection = bindings.DbConnection.builder()
+          .withUri(config.uri)
+          .withDatabaseName(config.database)
+          .onConnect((connection) => {
+            if (settled) {
+              connection.disconnect();
+              return;
+            }
+            if (this.#stopping) {
+              settled = true;
+              connection.disconnect();
+              reject(new Error("Relay map resource region session stopped while connecting"));
+              return;
+            }
+            settled = true;
+            this.#connection = connection;
+            this.#health.connected = true;
+            this.#health.stage = "subscribed";
+            resolve();
+          })
+          .onConnectError((_context, error) => fail(error))
+          .onDisconnect((_context, error) => {
+            this.#health.connected = false;
+            const disconnectError = error ?? new Error("Relay map resource subscription disconnected.");
+            if (!settled) fail(disconnectError);
+            else if (!this.#stopping) this.#recordError(disconnectError);
+          })
+          .build();
+        if (failed) builtConnection.disconnect();
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
   }
 
   async subscribe(rawResourceId: string, generation: number): Promise<void> {

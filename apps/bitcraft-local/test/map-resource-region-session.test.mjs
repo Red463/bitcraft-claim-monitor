@@ -34,7 +34,7 @@ function fakeTimers() {
   };
 }
 
-function fixture({ resourceRows = [], locationRows = [] } = {}) {
+function fixture({ resourceRows = [], locationRows = [], connectOnBuild = true } = {}) {
   const db = { resourceState: table(resourceRows), locationState: table(locationRows) };
   const subscriptions = [];
   const handles = [];
@@ -67,11 +67,12 @@ function fixture({ resourceRows = [], locationRows = [] } = {}) {
       onConnect(callback) { connected = callback; return this; },
       onConnectError(callback) { connectError = callback; return this; },
       onDisconnect(callback) { disconnected = callback; return this; },
-      build() { connected(connection); return connection; },
+      build() { if (connectOnBuild) connected(connection); return connection; },
     };
   } } });
   return {
     db, subscriptions, handles, loadBindings,
+    connect: () => connected(connection),
     disconnect: (error) => disconnected(undefined, error),
     connectError: (error) => connectError(undefined, error),
     disconnectCount: () => disconnectCount,
@@ -99,6 +100,22 @@ test("resource session validates the regional schema before loading bindings", a
   });
   await assert.rejects(session.start(config({ schemaFingerprint: "wrong" })), /fingerprint mismatch/i);
   assert.equal(loaded, false);
+});
+
+test("resource session waits for asynchronous Relay connection readiness before resolving start", async () => {
+  const relay = fixture({ connectOnBuild: false });
+  const session = new RelayMapResourceRegionSession({ loadBindings: relay.loadBindings, onSnapshot() {}, onFailure() {} });
+  let started = false;
+  const starting = session.start(config()).then(() => { started = true; });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(started, false, "start must remain pending until Relay invokes onConnect");
+
+  relay.connect();
+  await starting;
+  await session.subscribe("28", 7);
+  assert.equal(relay.subscriptions.length, 1);
+  await session.stop();
 });
 
 test("resource session maintains independent applied subscriptions on one regional connection", async () => {
