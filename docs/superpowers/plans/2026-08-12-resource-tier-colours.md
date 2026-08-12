@@ -71,7 +71,7 @@ const TIER_BASE_COLOURS = {
   7: [237, 196, 88], 8: [139, 243, 243], 9: [199, 199, 199],
   10: [222, 255, 255],
 };
-const VARIATIONS = [-24, -12, 0, 12, 24];
+const VARIATIONS = [-48, -24, 0, 24, 48];
 
 function canonicalDecimal(value) {
   if (typeof value !== "string" && typeof value !== "number" && typeof value !== "bigint") return null;
@@ -84,16 +84,25 @@ function clamp(channel) {
   return Math.max(0, Math.min(255, channel));
 }
 
+function stableHash(value) {
+  let hash = 2_166_136_261;
+  for (const character of value) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16_777_619) >>> 0;
+  }
+  return hash;
+}
+
 export function resourceNodeColour(resourceId, tier) {
   const canonicalId = canonicalDecimal(resourceId);
   const base = Number.isInteger(Number(tier)) ? TIER_BASE_COLOURS[Number(tier)] : null;
   if (!canonicalId || !base) return RESOURCE_NODE_FALLBACK_COLOUR;
-  const offset = VARIATIONS[Number(BigInt(canonicalId) % BigInt(VARIATIONS.length))];
+  const offset = VARIATIONS[stableHash(canonicalId) % VARIATIONS.length];
   return `rgba(${base.map((channel) => clamp(channel + offset)).join(", ")}, 0.92)`;
 }
 ```
 
-Keep the palette, canonicalizer, variation range, and clamp private except for the public colour function and fallback constant. The `BigInt` modulus makes the assignment stable for arbitrarily large decimal IDs, and leading-zero representations resolve identically.
+Keep the palette, canonicalizer, variation range, hash, and clamp private except for the public colour function and fallback constant. Hashing the canonical decimal string keeps assignment stable for arbitrarily large IDs, distinguishes common ID families such as `28` and `1000028`, and makes leading-zero representations resolve identically.
 
 - [ ] **Step 4: Run the helper tests and verify GREEN**
 

@@ -12,6 +12,7 @@ import { assignPlayerMarkerColours } from "./playerMarkerColours.mjs";
 import { applyResourceViewport, resourceLayerStatus } from "./resourceViewport.mjs";
 import { createMapSnapshotLoader, mapEventNeedsSnapshot } from "./mapSnapshotLoader.mjs";
 import { replaceMapSnapshot } from "./mapSnapshotState.mjs";
+import { RESOURCE_NODE_FALLBACK_COLOUR, resourceFeatureColour } from "./resourceNodeColours.mjs";
 import { loadTerrainTileStatus, mapTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
 import type { MapFocus } from "./mapUtils";
 
@@ -92,18 +93,23 @@ class DensePointLayer extends L.Layer {
   #canvas: HTMLCanvasElement | null = null;
   #points: MapFeature[] = [];
   #frame = 0;
-  #color: string;
+  #colour: string | ((point: MapFeature) => string);
   #pane: string;
   #visible = true;
 
-  constructor(color: string, pane = "overlayPane") {
+  constructor(colour: string | ((point: MapFeature) => string), pane = "overlayPane") {
     super();
-    this.#color = color;
+    this.#colour = colour;
     this.#pane = pane;
   }
 
   setPoints(points: MapFeature[]) {
     this.#points = points;
+    this.#scheduleDraw();
+  }
+
+  setPointColour(colour: string | ((point: MapFeature) => string)) {
+    this.#colour = colour;
     this.#scheduleDraw();
   }
 
@@ -147,8 +153,8 @@ class DensePointLayer extends L.Layer {
     if (!context) return;
     const bounds = this.#map.getBounds().pad(0.1);
     const plan = planDensePointDraw(this.#points, (point) => bounds.contains(leafletPoint(point.point)), 25_000);
-    context.fillStyle = this.#color;
     for (const point of plan.points) {
+      context.fillStyle = typeof this.#colour === "function" ? this.#colour(point) : this.#colour;
       const pixel = this.#map.latLngToContainerPoint(leafletPoint(point.point));
       context.beginPath();
       context.arc(pixel.x, pixel.y, 3, 0, Math.PI * 2);
@@ -212,12 +218,14 @@ export function NativeMap({
   regionIds,
   playerIds,
   resourceIds,
+  resourceTiers,
   enemyTypes,
   focus,
 }: {
   regionIds: string[];
   playerIds: string[];
   resourceIds: string[];
+  resourceTiers: Readonly<Record<string, number | null>>;
   enemyTypes: string[];
   focus: MapFocus;
 }) {
@@ -274,7 +282,7 @@ export function NativeMap({
     for (const [key, group] of Object.entries(markerGroups)) if (layerVisibility[key as MapLayerKey]) group.addTo(map);
     markerGroupsRef.current = markerGroups;
     focusGroupRef.current = L.layerGroup().addTo(map);
-    resourcesRef.current = new DensePointLayer("rgba(87, 225, 151, 0.9)", "native-map-resources").addTo(map);
+    resourcesRef.current = new DensePointLayer(RESOURCE_NODE_FALLBACK_COLOUR, "native-map-resources").addTo(map);
     enemiesRef.current = new DensePointLayer("rgba(255, 112, 112, 0.92)").addTo(map);
     mapRef.current = map;
     return () => {
@@ -505,6 +513,7 @@ export function NativeMap({
       }
     }
     const resourcePoints = snapshot.layers.resources ?? [];
+    resourcesRef.current?.setPointColour((feature) => resourceFeatureColour(feature, resourceTiers));
     resourcesRef.current?.setPoints(resourcePoints);
     enemiesRef.current?.setPoints(snapshot.layers.enemies ?? []);
     const map = mapRef.current;
@@ -525,7 +534,7 @@ export function NativeMap({
         },
       });
     }
-  }, [snapshot, resourceSelectionKey, focus?.name, focus?.locationX, focus?.locationZ]);
+  }, [snapshot, resourceSelectionKey, resourceTiers, focus?.name, focus?.locationX, focus?.locationZ]);
 
   const accessibleFeatures = snapshot
     ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {

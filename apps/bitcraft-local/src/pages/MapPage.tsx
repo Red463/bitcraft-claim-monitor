@@ -22,6 +22,7 @@ import { currentMapPlayerSelection, defaultMapPlayerSelection, filterMapPlayerRo
 import { NativeMap } from "./map/NativeMap";
 import { mapRendererPolicy } from "./map/mapRendererPolicy.mjs";
 import { boundedNativeMapRegions } from "./map/nativeMapRequest.mjs";
+import { selectedResourceTierMap } from "./map/resourceNodeColours.mjs";
 import { RESOURCE_FINDER_BATCH_SIZE, nextResourceLimit, visibleResourceMatches } from "./map/resourceFinderWindow.mjs";
 
 const LOCAL_API = "/api/local";
@@ -226,6 +227,10 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
   const mapMarker = focus ?? defaultFocus;
   const mapRegionIds = React.useMemo(() => boundedNativeMapRegions(resourceRegions, regionOptions), [resourceRegions.join(","), regionOptions.join(",")]);
   const selectedResourceIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length)), [normalizedSelectedResources]);
+  const selectedResourceTiers = React.useMemo(
+    () => selectedResourceTierMap(selectedResourceIds, resourceByToken),
+    [selectedResourceIds.join(","), resourceByToken],
+  );
   const selectedEnemyIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("enemy:")).map((token) => token.slice("enemy:".length)), [normalizedSelectedResources]);
   const currentPlayerIds = React.useMemo(() => [...current].sort(), [current]);
   const currentPlayerIdsKey = currentPlayerIds.join(",");
@@ -428,7 +433,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
           </div> : null}</> : null}
         </aside>
         <div className={`map-frame-host ${nativeRenderer ? "is-native" : `is-${frameState}`}`}>
-          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} enemyTypes={selectedEnemyIds} focus={mapMarker} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
+          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
           {!nativeRenderer && frameState !== "ready" ? (
             <section className="map-frame-state" aria-live="polite">
               <strong>{frameState === "loading" ? "Loading embedded map..." : frameState === "timed-out" ? "The embedded map is taking longer than expected." : "The embedded map could not be loaded."}</strong>
