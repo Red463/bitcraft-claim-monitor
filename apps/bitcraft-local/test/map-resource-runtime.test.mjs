@@ -46,7 +46,7 @@ function snapshot(regionId, resourceId, generation, resources = []) {
   };
 }
 
-function runtimeFixture({ regions = ["19", "20"], clock = manualClock(), start = async () => {} } = {}) {
+function runtimeFixture({ regions = ["19", "20"], clock = manualClock(), start = async () => {}, onGeneration } = {}) {
   const sessions = [];
   const topology = {
     regions: new Map(regions.map((regionId) => [regionId, {
@@ -59,6 +59,7 @@ function runtimeFixture({ regions = ["19", "20"], clock = manualClock(), start =
     now: clock.now,
     setTimer: (callback, delay) => clock.setTimer(callback, delay),
     clearTimer: (timer) => clock.clearTimer(timer),
+    onGeneration,
     createSession: (options) => {
       const session = {
         options, starts: [], subscriptions: [], unsubscribed: [], stopped: false,
@@ -129,6 +130,35 @@ test("runtime health excludes disconnected retained sessions from the regional c
   });
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
   assert.equal(runtime.health().regionalConnectionCount, 0);
+  await runtime.stop();
+});
+
+test("runtime health drops active and idle retained counts after a connected session disconnects", async () => {
+  assert.ok(runtimeModule, "map-resource runtime module must exist");
+  let connected = true;
+  let fail;
+  const runtime = new runtimeModule.RelayMapResourceRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({ regions: new Map([["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }]]) }),
+    createSession: (options) => {
+      fail = () => { connected = false; options.onFailure("disconnected"); };
+      return {
+        async start() {}, async subscribe() {}, unsubscribe() {}, async stop() { connected = false; },
+        health: () => ({ connected, applied: connected, stage: connected ? "applied" : "error", lastError: connected ? null : "disconnected", lastAppliedAt: null, firstGenerationLatencyMs: null, rowCount: 0, rowsPerType: {} }),
+      };
+    },
+  });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const active = await runtime.acquire({ regionId: "19", resourceId: "28" });
+  const idle = await runtime.acquire({ regionId: "19", resourceId: "54" });
+  await idle.release();
+  assert.equal(runtime.health().activeResourceSubscriptionCount, 1);
+  assert.equal(runtime.health().idleRetainedResourceSubscriptionCount, 1);
+
+  fail();
+  assert.equal(runtime.health().activeResourceSubscriptionCount, 0);
+  assert.equal(runtime.health().idleRetainedResourceSubscriptionCount, 0);
+  await active.release();
   await runtime.stop();
 });
 
@@ -330,7 +360,8 @@ test("zero leases retain a warm resource for 60 seconds, then close only an unpi
 
 test("failed regions reconnect with bounded backoff, restore warm entries, and preserve stale snapshots", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
-  const { runtime, sessions, clock } = runtimeFixture();
+  const generations = [];
+  const { runtime, sessions, clock } = runtimeFixture({ onGeneration: (generation) => generations.push(generation) });
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
   const lease = await runtime.acquire({ regionId: "19", resourceId: "28" });
   const prior = snapshot("19", "28", 7, [{ entityId: "x" }]);
@@ -346,9 +377,14 @@ test("failed regions reconnect with bounded backoff, restore warm entries, and p
   assert.deepEqual(sessions[1].subscriptions, [{ resourceId: "28", generation: 8 }]);
 
   sessions[1].options.onFailure("schema fingerprint mismatch");
+  await Promise.resolve();
   await clock.advance(1_000);
+  assert.equal(sessions[1].stopped, true, "schema mismatch must detach and stop the active session");
   assert.equal(lease.state().status, "stale", "a schema mismatch retains last usable rows as stale");
   assert.equal(lease.state().snapshot, prior);
+  await sessions[1].options.onSnapshot(snapshot("19", "28", 8, [{ entityId: "late" }]));
+  assert.equal(lease.state().snapshot, prior, "a detached mismatched session cannot publish a late snapshot");
+  assert.deepEqual(generations, [prior], "late snapshots cannot emit a generation notification");
   await runtime.stop();
 });
 

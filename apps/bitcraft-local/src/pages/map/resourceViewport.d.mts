@@ -24,6 +24,7 @@ export function resourceLayerStatus(input: {
   snapshotSelectionKey: string;
   available: boolean | undefined;
   status?: "live" | "partial" | "stale" | "loading" | "unavailable";
+  pending?: boolean;
   reason: string | null | undefined;
   visible: boolean;
   freshness: string;

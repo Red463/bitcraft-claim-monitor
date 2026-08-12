@@ -1,6 +1,7 @@
 import { relayWebSocketUri } from "./globalCatalogRuntime.ts";
 import {
   RelayMapResourceRegionSession,
+  type MapResourceStatus,
   type MapResourceSnapshot,
 } from "./mapResourceRegionSession.ts";
 import { discoverRelayTopology, type RelayTopology } from "./topology.ts";
@@ -73,7 +74,7 @@ export type MapResourceRuntimeHealth = {
 
 type Dependencies = {
   manifest: BindingManifest;
-  onGeneration?: (snapshot: MapResourceSnapshot) => void;
+  onGeneration?: (generation: MapResourceGenerationNotice) => void;
   discoverTopology?: (baseUrl: string) => Promise<RelayTopology>;
   createSession?: RegionSessionFactory;
   now?: () => number;
@@ -87,6 +88,8 @@ type Dependencies = {
   maxColdStartsPerWindow?: number;
   reconnectDelayMs?: (attempt: number) => number;
 };
+
+export type MapResourceGenerationNotice = Pick<MapResourceSnapshot, "regionId" | "resourceId" | "generation" | "receivedAt">;
 
 function decimal(value: unknown, label: string): string {
   const normalized = String(value ?? "").trim();
@@ -109,7 +112,7 @@ export function mapResourceScopeKey(regionId: string, resourceId: string): strin
 
 export class RelayMapResourceRuntime {
   readonly #manifest: BindingManifest;
-  readonly #onGeneration: (snapshot: MapResourceSnapshot) => void;
+  readonly #onGeneration: (generation: MapResourceGenerationNotice) => void;
   readonly #discoverTopology: (baseUrl: string) => Promise<RelayTopology>;
   readonly #createSession: RegionSessionFactory;
   readonly #now: () => number;
@@ -277,6 +280,7 @@ export class RelayMapResourceRuntime {
       if (!source?.ready || !source.schemaFingerprint) throw new Error(`Relay map resource region ${entry.regionId} source is unavailable`);
       session = this.#createSession({
         onSnapshot: (snapshot) => this.#acceptSnapshot(entry, session!, snapshot),
+        onStatus: (status) => this.#acceptStatus(entry, session!, status),
         onFailure: (error) => this.#failRegion(entry, session!, error),
       });
       entry.session = session;
@@ -299,7 +303,10 @@ export class RelayMapResourceRuntime {
         return;
       }
       entry.failure = errorMessage(error);
-      if (/schema.*mismatch/i.test(entry.failure)) entry.schemaUnavailable = true;
+      if (/schema.*mismatch/i.test(entry.failure)) {
+        entry.schemaUnavailable = true;
+        await session?.stop();
+      }
       else this.#scheduleRestart(entry);
     }
   }
@@ -338,6 +345,19 @@ export class RelayMapResourceRuntime {
     this.#onGeneration(snapshot);
   }
 
+  #acceptStatus(entry: RegionEntry, session: RegionSession, status: MapResourceStatus) {
+    if (this.#stopped || this.#regions.get(entry.regionId) !== entry || entry.session !== session || status.regionId !== entry.regionId) return;
+    const resource = entry.resources.get(status.resourceId);
+    if (!resource) return;
+    resource.failure = status.warning;
+    this.#onGeneration({
+      regionId: entry.regionId,
+      resourceId: resource.resourceId,
+      generation: resource.snapshot?.generation ?? Math.max(0, resource.nextGeneration - 1),
+      receivedAt: status.receivedAt,
+    });
+  }
+
   #failRegion(entry: RegionEntry, session: RegionSession, error: string) {
     if (this.#stopped || entry.session !== session) return;
     entry.failure = error;
@@ -347,6 +367,10 @@ export class RelayMapResourceRuntime {
     }
     if (/schema.*mismatch/i.test(error)) {
       entry.schemaUnavailable = true;
+      if (entry.reconnectTimer != null) this.#clearTimer(entry.reconnectTimer);
+      entry.reconnectTimer = null;
+      entry.session = null;
+      void session.stop().catch(() => {});
       return;
     }
     this.#scheduleRestart(entry);

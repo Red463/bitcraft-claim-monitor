@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
+import { RelayMapResourceRegionSession } from "../src/server/game-data/mapResourceRegionSession.ts";
+import { RelayMapResourceRuntime } from "../src/server/game-data/mapResourceRuntime.ts";
 
 const routeModule = await import("../src/server/game-data/gameDataRoute.ts");
 
@@ -17,6 +19,18 @@ function lease(key, status, snapshot = null, warning = null) {
     state: () => ({ status, snapshot, warning }),
     waitForSnapshot: async () => snapshot,
     release: async () => {},
+  };
+}
+
+function liveTable(rows) {
+  const listeners = [];
+  return {
+    iter: () => rows.values(),
+    onInsert: (callback) => listeners.push(callback),
+    onUpdate: (callback) => listeners.push(callback),
+    onDelete: (callback) => listeners.push(callback),
+    removeOnInsert() {}, removeOnUpdate() {}, removeOnDelete() {},
+    emit: () => listeners.forEach((callback) => callback()),
   };
 }
 
@@ -62,6 +76,71 @@ test("resource lease composition retains snapshot warnings and marks usable rows
   assert.equal(combined.data.resources.length, 1);
   assert.deepEqual(combined.warnings, ["Resource 100 has incomplete optional metadata."]);
   assert.equal(combined.freshness, "partial");
+});
+
+test("incomplete Relay generations retain last-good rows, notify the scoped collection, and recover on completion", async () => {
+  const resourceRows = [{ entityId: 1n, resourceId: 28 }];
+  const locationRows = [{ entityId: 1n, x: 100, z: 200, dimension: 1 }];
+  const resourceState = liveTable(resourceRows);
+  const locationState = liveTable(locationRows);
+  let applied = () => {};
+  const connection = {
+    db: { resourceState, locationState },
+    subscriptionBuilder: () => ({
+      onApplied(callback) { applied = callback; return this; },
+      onError() { return this; },
+      subscribe() { return { unsubscribe() {} }; },
+    }),
+    disconnect() {},
+  };
+  const bindings = { DbConnection: { builder: () => ({
+    withUri() { return this; }, withDatabaseName() { return this; },
+    onConnect(callback) { this.connected = callback; return this; },
+    onConnectError() { return this; }, onDisconnect() { return this; },
+    build() { this.connected(connection); return connection; },
+  }) } };
+  const events = [];
+  const runtime = new RelayMapResourceRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({ regions: new Map([["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }]]) }),
+    createSession: (options) => new RelayMapResourceRegionSession({
+      ...options,
+      loadBindings: async () => bindings,
+      rebuildDelayMs: 1,
+      now: () => new Date("2026-08-12T10:00:00.000Z"),
+    }),
+    onGeneration: (event) => events.push(event),
+  });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const activeLease = await runtime.acquire({ regionId: "19", resourceId: "28" });
+  applied();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(activeLease.state().status, "live");
+
+  resourceRows.push({ entityId: 2n, resourceId: 28 });
+  resourceState.emit();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const degraded = routeModule.combineMapResourceLeases([activeLease]);
+  assert.equal(activeLease.state().status, "stale");
+  assert.deepEqual(degraded.data.resources.map((row) => row.entityId), ["1"]);
+  assert.equal(degraded.freshness, "stale");
+  assert.match(degraded.warnings.join(" "), /resource 2.*location/i);
+  assert.equal(events.length, 2, "the incomplete status must trigger a scoped refetch notification");
+  assert.deepEqual(events[1], {
+    regionId: "19", resourceId: "28", generation: 1,
+    receivedAt: "2026-08-12T10:00:00.000Z",
+  });
+
+  locationRows.push({ entityId: 2n, x: 101, z: 201, dimension: 1 });
+  locationState.emit();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const recovered = routeModule.combineMapResourceLeases([activeLease]);
+  assert.equal(activeLease.state().status, "live");
+  assert.equal(recovered.freshness, "live");
+  assert.deepEqual(recovered.data.resources.map((row) => row.entityId), ["1", "2"]);
+  assert.equal(events.length, 3, "the complete generation must trigger the next scoped refetch");
+  await activeLease.release();
+  await runtime.stop();
 });
 
 test("resource-only loading snapshots remain successful HTTP responses", () => {

@@ -37,6 +37,7 @@ type MapSnapshot = {
   layerAvailability?: Record<string, {
     available: boolean;
     status?: "live" | "partial" | "stale" | "loading" | "unavailable";
+    pending?: boolean;
     reason: string | null;
   }>;
 };
@@ -44,6 +45,7 @@ type MapSnapshot = {
 type LayerAvailability = {
   available: boolean;
   status?: "live" | "partial" | "stale" | "loading" | "unavailable";
+  pending?: boolean;
   reason: string | null;
 };
 
@@ -244,7 +246,7 @@ export function NativeMap({
   const resourceSelectionKey = React.useMemo(() => [...resourceIds].sort((left, right) => left.localeCompare(right)).join(","), [resourceIds.join(",")]);
   const snapshotResourceSelectionKey = [...(snapshot?.scope?.resourceIds ?? [])].sort((left, right) => left.localeCompare(right)).join(",");
   const resourceLayerLoading = snapshot?.layerAvailability?.resources?.status === "loading"
-    || snapshot?.layerAvailability?.resources?.status === "partial"
+    || snapshot?.layerAvailability?.resources?.pending === true
     || (snapshot?.layerAvailability?.resources?.status == null
       && snapshot?.layerAvailability?.resources?.available === false
       && snapshot?.layerAvailability?.resources?.reason === "Live resource positions are unavailable.");
@@ -548,6 +550,7 @@ export function NativeMap({
     snapshotSelectionKey: snapshotResourceSelectionKey,
     available: layerAvailability.resources?.available,
     status: layerAvailability.resources?.status,
+    pending: layerAvailability.resources?.pending,
     reason: layerAvailability.resources?.reason,
     visible: layerVisibility.resources,
     freshness: snapshot?.freshness ?? "unavailable",

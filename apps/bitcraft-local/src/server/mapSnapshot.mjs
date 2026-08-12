@@ -37,8 +37,9 @@ export function mapRequestAccess(config, subject) {
 }
 
 function decimalValues(value, label, limit) {
-  const values = [...new Set(String(value ?? "").split(",").map((entry) => entry.trim()).filter(Boolean))];
-  if (values.some((entry) => !/^\d+$/.test(entry))) throw new MapSnapshotError(422, `${label} must contain decimal integers`);
+  const entries = String(value ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (entries.some((entry) => !/^\d+$/.test(entry))) throw new MapSnapshotError(422, `${label} must contain decimal integers`);
+  const values = [...new Set(entries.map((entry) => BigInt(entry).toString()))];
   if (values.length > limit) throw new MapSnapshotError(413, `${label} exceeds the limit of ${limit}`);
   return values.sort((left, right) => left.length - right.length || left.localeCompare(right));
 }
@@ -46,7 +47,10 @@ function decimalValues(value, label, limit) {
 export function parseMapScope(searchParams, { allowedRegionIds = [] } = {}) {
   const regionIds = decimalValues(searchParams.get("regions"), "regions", MAP_SCOPE_LIMITS.regions);
   if (!regionIds.length) throw new MapSnapshotError(422, "At least one region is required");
-  const allowed = new Set(allowedRegionIds.map(String));
+  const allowed = new Set(allowedRegionIds.map((regionId) => {
+    const value = String(regionId).trim();
+    return /^\d+$/.test(value) ? BigInt(value).toString() : value;
+  }));
   if (regionIds.some((regionId) => !allowed.has(regionId))) throw new MapSnapshotError(422, "Region is outside the configured active-region scope");
   const requestedLayers = [...new Set(String(searchParams.get("layers") ?? "").split(",").map((entry) => entry.trim()).filter(Boolean))].sort();
   if (!requestedLayers.length) throw new MapSnapshotError(422, "At least one map layer is required");
@@ -195,9 +199,9 @@ export function buildMapSnapshot({
         const stale = resourceCollection?.freshness === "stale";
         layerAvailability.resources = { available: true, status: stale ? "stale" : "live", reason: stale ? (resourceWarning ?? "Live resource positions are stale.") : null };
       } else if (readyCount > 0) {
-        layerAvailability.resources = { available: true, status: "partial", reason: loadingCount > 0 ? "Some selected resource positions are still loading." : "Some selected resource positions are unavailable." };
+        layerAvailability.resources = { available: true, status: "partial", pending: loadingCount > 0, reason: loadingCount > 0 ? "Some selected resource positions are still loading." : "Some selected resource positions are unavailable." };
       } else if (loadingCount > 0) {
-        layerAvailability.resources = { available: false, status: "loading", reason: "Selected resource positions are loading." };
+        layerAvailability.resources = { available: false, status: "loading", pending: true, reason: "Selected resource positions are loading." };
       } else {
         layerAvailability.resources = { available: false, status: "unavailable", reason: resourceWarning ?? "Live resource positions are unavailable." };
       }

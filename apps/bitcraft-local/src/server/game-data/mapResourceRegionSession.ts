@@ -61,6 +61,13 @@ export type MapResourceSnapshot = {
   receivedAt: string;
 };
 
+export type MapResourceStatus = {
+  regionId: string;
+  resourceId: string;
+  warning: string;
+  receivedAt: string;
+};
+
 export type ResourceRegionHealth = {
   connected: boolean;
   applied: boolean;
@@ -103,6 +110,7 @@ function tableRows(table: CachedTable): unknown[] {
 export class RelayMapResourceRegionSession {
   readonly #loadBindings: () => Promise<RegionalBindingModule>;
   readonly #onSnapshot: (snapshot: MapResourceSnapshot) => void | Promise<void>;
+  readonly #onStatus: (status: MapResourceStatus) => void | Promise<void>;
   readonly #onFailure: (error: string) => void;
   readonly #now: () => Date;
   readonly #setTimer: (callback: () => void, delayMs: number) => unknown;
@@ -134,6 +142,7 @@ export class RelayMapResourceRegionSession {
   constructor({
     loadBindings = loadBundledRegionalBindings,
     onSnapshot,
+    onStatus = () => {},
     onFailure = () => {},
     now = () => new Date(),
     setTimer = (callback, delayMs) => setTimeout(callback, delayMs),
@@ -142,6 +151,7 @@ export class RelayMapResourceRegionSession {
   }: {
     loadBindings?: () => Promise<RegionalBindingModule>;
     onSnapshot: (snapshot: MapResourceSnapshot) => void | Promise<void>;
+    onStatus?: (status: MapResourceStatus) => void | Promise<void>;
     onFailure?: (error: string) => void;
     now?: () => Date;
     setTimer?: (callback: () => void, delayMs: number) => unknown;
@@ -150,6 +160,7 @@ export class RelayMapResourceRegionSession {
   }) {
     this.#loadBindings = loadBindings;
     this.#onSnapshot = onSnapshot;
+    this.#onStatus = onStatus;
     this.#onFailure = onFailure;
     this.#now = now;
     this.#setTimer = setTimer;
@@ -324,8 +335,15 @@ export class RelayMapResourceRegionSession {
       this.#health.rowCount = rowCount;
       this.#health.rowsPerType[subscription.resourceId] = { ...normalized.rowCounts };
       if (!normalized.complete) {
+        const warning = normalized.warnings.join(" ") || "Relay map resource generation is incomplete";
         this.#health.stage = "partial";
-        this.#health.lastError = normalized.warnings.join(" ") || "Relay map resource generation is incomplete";
+        this.#health.lastError = warning;
+        void Promise.resolve(this.#onStatus({
+          regionId: config.regionId,
+          resourceId: subscription.resourceId,
+          warning,
+          receivedAt,
+        })).catch((error) => this.#recordError(error));
         return;
       }
       const snapshot: MapResourceSnapshot = {

@@ -39,6 +39,17 @@ test("map scopes are canonical, bounded, and restricted to configured regions", 
   );
 });
 
+test("map scopes canonicalize decimal ids before deduplication and filtering", () => {
+  const scope = parseMapScope(new URLSearchParams({
+    regions: "019,19",
+    layers: "resources",
+    resourceIds: "028,28",
+  }), { allowedRegionIds: ["019"] });
+
+  assert.deepEqual(scope.regionIds, ["19"]);
+  assert.deepEqual(scope.resourceIds, ["28"]);
+});
+
 test("map request access follows the configured Map page rule", () => {
   const config = normalizeAccessControlConfig({ rules: { "page:map": { mode: "verified" } } });
   assert.equal(mapRequestAccess(config, { user: null }).allowed, false);
@@ -337,11 +348,33 @@ test("resource collections retain warm points while reporting cold keys as loadi
   assert.deepEqual(snapshot.layerAvailability.resources, {
     available: true,
     status: "partial",
+    pending: true,
     reason: "Some selected resource positions are still loading.",
   });
   assert.equal(snapshot.freshness, "partial");
   assert.equal("requestedKeys" in snapshot, false);
   assert.equal(JSON.stringify(snapshot).includes("19|resource:28"), false);
+});
+
+test("resource collections expose unavailable partial selections without marking them pending", () => {
+  const scope = parseMapScope(new URLSearchParams({ regions: "19,24", layers: "resources", resourceIds: "28" }), { allowedRegionIds: ["19", "24"] });
+  const snapshot = buildMapSnapshot({
+    scope,
+    resourceCoordinatesVerified: true,
+    resourceCollection: {
+      data: { resources: [{ entityId: "100", resourceId: "28", regionId: "19", locationX: 100, locationZ: 200, dimension: "1" }] },
+      generation: 7, freshness: "partial", provenance: { receivedAt: "2026-08-12T10:00:00.000Z" },
+      warnings: ["Region 24 resource subscription is unavailable."],
+      requestedKeys: ["19|resource:28", "24|resource:28"], readyKeys: ["19|resource:28"], loadingKeys: [], unavailableKeys: ["24|resource:28"],
+    },
+  });
+
+  assert.deepEqual(snapshot.layerAvailability.resources, {
+    available: true,
+    status: "partial",
+    pending: false,
+    reason: "Some selected resource positions are unavailable.",
+  });
 });
 
 test("a ready empty resource generation is live and available", () => {

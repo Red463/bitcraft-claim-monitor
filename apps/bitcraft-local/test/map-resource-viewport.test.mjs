@@ -97,6 +97,23 @@ test("explicit unavailable status beats the legacy loading reason", () => {
   }), "unavailable");
 });
 
+test("partial resource selections block framing only while pending keys remain", () => {
+  assert.equal(resourceLayerStatus({
+    selectionKey: "28,54", snapshotSelectionKey: "28,54", available: true,
+    status: "partial", pending: true, reason: "Some selected resource positions are still loading.",
+    visible: true, freshness: "partial",
+  }), "loading");
+  assert.equal(resourceLayerStatus({
+    selectionKey: "28,54", snapshotSelectionKey: "28,54", available: true,
+    status: "partial", pending: false, reason: "Some selected resource positions are unavailable.",
+    visible: true, freshness: "partial",
+  }), "partial");
+  assert.equal(resourceViewportDecision({
+    selectionKey: "28,54", snapshotSelectionKey: "28,54", consumedSelectionKey: "",
+    loading: false, points: [point(10, 20)], isVisible: () => false,
+  }), "frame");
+});
+
 test("warm resource points remain visible while the next selection loads", () => {
   assert.equal(resourceLayerStatus({
     selectionKey: "28",
