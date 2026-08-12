@@ -35,6 +35,7 @@ import {
 import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
+import { mapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
 import { MapSnapshotError, authorizedMapPlayerIds, buildMapResourcePayload, buildMapSnapshot, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
 import { serveLocalMapTile } from "./src/server/mapTiles.mjs";
 import { createTerrainTileStore } from "./src/server/terrainTileStore.mjs";
@@ -8053,6 +8054,18 @@ const server = createServer(async (req, res) => {
         creatures: providerCatalogRepository.listDescriptions("enemy"),
       };
       return send(res, status.freshness === "unavailable" ? 503 : 200, payload);
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/map/regions") {
+      if (!rateLimit(req, res, "map-regions", RATE_LIMITS.expensiveLocal)) return;
+      const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
+      if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
+      const claimId = currentClaimId();
+      const payload = mapResourceRegionCatalog({
+        providerHealth: gameDataProviderHealth(),
+        regionSnapshot: currentStateRepository.read(claimId, "region"),
+        fallbackRegionIds: configuredRegionalMarketRegionIds(claimId),
+      });
+      return send(res, payload.regionIds.length ? 200 : 503, payload);
     }
     if (req.method === "GET" && ["/api/local/map/snapshot", "/api/local/map/resources", "/api/local/map/events"].includes(url.pathname)) {
       if (["/api/local/map/snapshot", "/api/local/map/resources"].includes(url.pathname) && !rateLimit(req, res, "map-snapshot", RATE_LIMITS.mapSnapshot)) return;

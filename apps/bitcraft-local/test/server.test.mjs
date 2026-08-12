@@ -648,6 +648,12 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(activeRegions.regions[0].freshness, "unavailable");
   assert.equal(regionStatusRequests, 0);
   assert.equal(regionListRequests, 0);
+  const mapRegionsResponse = await fetch(`${origin}/api/local/map/regions`);
+  assert.equal(mapRegionsResponse.status, 200);
+  const mapRegions = await mapRegionsResponse.json();
+  assert.deepEqual(mapRegions.regionIds, ["19"]);
+  assert.equal(mapRegions.regions[0].regionName, "Region 19");
+  assert.equal(mapRegions.regions[0].freshness, "stale");
 
   const empireObservedAt = new Date().toISOString();
   const empireCurrentData = {
