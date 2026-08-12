@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { boundedNativeMapRegions, nativeMapRequest } from "../src/pages/map/nativeMapRequest.mjs";
+import { boundedNativeMapRegions, nativeMapRequest, nativeMapResourceRegions } from "../src/pages/map/nativeMapRequest.mjs";
 
 test("native map requests are same-origin, canonical, and omit empty bounded layers", () => {
   const request = nativeMapRequest({
-    regionIds: ["24", "19", "19"],
+    operationalRegionIds: ["24", "19", "19"],
+    resourceRegionIds: ["24", "19"],
     playerIds: ["216172782115643288"],
     resourceIds: [],
     enemyTypes: ["8", "1"],
@@ -21,17 +22,24 @@ test("native map requests are same-origin, canonical, and omit empty bounded lay
 });
 
 test("native map request keeps resource and enemy namespaces separate", () => {
-  const request = nativeMapRequest({ regionIds: ["24", "19"], playerIds: [], resourceIds: ["456", "123"], enemyTypes: ["123"] });
+  const request = nativeMapRequest({ operationalRegionIds: ["19"], resourceRegionIds: ["24", "19"], playerIds: [], resourceIds: ["456", "123"], enemyTypes: ["123"] });
   assert.equal(new URL(request.snapshotUrl, "http://local").searchParams.has("resourceIds"), false);
   assert.equal(new URL(request.snapshotUrl, "http://local").searchParams.get("layers").includes("resources"), false);
-  assert.equal(new URL(request.resourceUrl, "http://local").searchParams.get("regions"), "19,24");
-  assert.equal(new URL(request.resourceUrl, "http://local").searchParams.get("resourceIds"), "123,456");
-  assert.equal(new URL(request.resourceUrl, "http://local").searchParams.get("layers"), "resources");
-  assert.equal(new URL(request.eventsUrl, "http://local").searchParams.get("resourceIds"), "123,456");
+  assert.deepEqual(request.resourcePartitions.map(({ key, url }) => [key, url]), [
+    ["19|resource:123", "/api/local/map/resources?region=19&resourceId=123"],
+    ["19|resource:456", "/api/local/map/resources?region=19&resourceId=456"],
+    ["24|resource:123", "/api/local/map/resources?region=24&resourceId=123"],
+    ["24|resource:456", "/api/local/map/resources?region=24&resourceId=456"],
+  ]);
+  assert.equal(new URL(request.resourceEventUrl, "http://local").searchParams.get("regions"), "19,24");
+  assert.equal(new URL(request.resourceEventUrl, "http://local").searchParams.get("resourceIds"), "123,456");
+  assert.equal(new URL(request.eventsUrl, "http://local").searchParams.has("resourceIds"), false);
   assert.equal(new URL(request.snapshotUrl, "http://local").searchParams.get("enemyTypes"), "123");
 });
 
 test("native map regions discard stale persisted ids and respect the API region budget", () => {
   assert.deepEqual(boundedNativeMapRegions(["99", "19"], ["19", "24"]), ["19"]);
   assert.deepEqual(boundedNativeMapRegions([], ["1", "2", "3", "4", "5"]), ["1", "2", "3", "4"]);
+  assert.deepEqual(nativeMapResourceRegions([], ["1", "2", "3", "4", "5"]), ["1", "2", "3", "4", "5"]);
+  assert.deepEqual(nativeMapResourceRegions(["99", "24"], ["19", "24"]), ["24"]);
 });

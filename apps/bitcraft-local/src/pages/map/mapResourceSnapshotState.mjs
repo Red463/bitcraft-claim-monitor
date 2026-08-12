@@ -18,6 +18,10 @@ function resourceFeature(row) {
   };
 }
 
+export function mapResourceFeatures(rows) {
+  return (Array.isArray(rows) ? rows : []).map(resourceFeature).filter(Boolean);
+}
+
 function combinedFreshness(base, resources) {
   if (base === "live" && resources === "live") return "live";
   if (base === "stale" && resources === "stale") return "stale";
@@ -26,7 +30,7 @@ function combinedFreshness(base, resources) {
 }
 
 export function mergeMapResourcePayload(snapshot, payload) {
-  const resources = (Array.isArray(payload?.resources) ? payload.resources : []).map(resourceFeature).filter(Boolean);
+  const resources = mapResourceFeatures(payload?.resources);
   return {
     ...snapshot,
     generation: generationMax(snapshot?.generation, payload?.generation),

@@ -12,7 +12,9 @@ import { MAP_MARKER_PRESENTATIONS, claimDisplayTier, claimMarkerPresentation, ma
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { assignPlayerMarkerColours } from "./playerMarkerColours.mjs";
 import { applyResourceViewport, resourceLayerStatus } from "./resourceViewport.mjs";
-import { mergeMapResourcePayload } from "./mapResourceSnapshotState.mjs";
+import { createMapResourcePartitionLoader } from "./mapResourcePartitionLoader.mjs";
+import { replaceResourcePartition, resourceRowsFromPartitions, retainResourcePartitions, type ResourcePartition } from "./mapResourcePartitionState.mjs";
+import { mapResourceFeatures } from "./mapResourceSnapshotState.mjs";
 import { createMapSnapshotLoader, mapEventNeedsSnapshot } from "./mapSnapshotLoader.mjs";
 import { replaceMapSnapshot } from "./mapSnapshotState.mjs";
 import { RESOURCE_NODE_FALLBACK_COLOUR, resourceFeatureColour } from "./resourceNodeColours.mjs";
@@ -26,6 +28,7 @@ type MapFeature = {
   regionId?: string;
   name?: string;
   identity?: string;
+  resourceId?: string;
   playerEntityId?: string;
   tier?: number | null;
   npc?: boolean;
@@ -220,6 +223,7 @@ function displayedPoint(feature: MapFeature) {
 
 export function NativeMap({
   regionIds,
+  resourceRegionIds,
   playerIds,
   resourceIds,
   resourceTiers,
@@ -227,6 +231,7 @@ export function NativeMap({
   focus,
 }: {
   regionIds: string[];
+  resourceRegionIds: string[];
   playerIds: string[];
   resourceIds: string[];
   resourceTiers: Readonly<Record<string, number | null>>;
@@ -246,6 +251,9 @@ export function NativeMap({
   const roadTilesRef = React.useRef<L.TileLayer | null>(null);
   const resourceFrameSelectionRef = React.useRef("");
   const [snapshot, setSnapshot] = React.useState<MapSnapshot | null>(null);
+  const [resourcePartitions, setResourcePartitions] = React.useState<Map<string, ResourcePartition>>(() => new Map());
+  const [resourcePartitionStatuses, setResourcePartitionStatuses] = React.useState<Map<string, { status: string; warning?: string | null; pending?: boolean }>>(() => new Map());
+  const [resourceStreamError, setResourceStreamError] = React.useState("");
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [terrainStatus, setTerrainStatus] = React.useState<TerrainTileStatus | null>(null);
@@ -261,16 +269,19 @@ export function NativeMap({
   const [layerVisibility, setLayerVisibility] = React.useState(() => typeof window === "undefined"
     ? defaultMapLayerVisibility()
     : loadMapLayerVisibility(() => window.localStorage));
-  const request = React.useMemo(() => nativeMapRequest({ regionIds, playerIds, resourceIds, enemyTypes }), [regionIds.join(","), playerIds.join(","), resourceIds.join(","), enemyTypes.join(",")]);
+  const request = React.useMemo(() => nativeMapRequest({ operationalRegionIds: regionIds, resourceRegionIds, playerIds, resourceIds, enemyTypes }), [regionIds.join(","), resourceRegionIds.join(","), playerIds.join(","), resourceIds.join(","), enemyTypes.join(",")]);
   const snapshotRequestKeyRef = React.useRef(request.eventsUrl);
   snapshotRequestKeyRef.current = request.eventsUrl;
-  const resourceSelectionKey = React.useMemo(() => [...resourceIds].sort((left, right) => left.localeCompare(right)).join(","), [resourceIds.join(",")]);
-  const snapshotResourceSelectionKey = [...(snapshot?.scope?.resourceIds ?? [])].sort((left, right) => left.localeCompare(right)).join(",");
-  const resourceLayerLoading = snapshot?.layerAvailability?.resources?.status === "loading"
-    || snapshot?.layerAvailability?.resources?.pending === true
-    || (snapshot?.layerAvailability?.resources?.status == null
-      && snapshot?.layerAvailability?.resources?.available === false
-      && snapshot?.layerAvailability?.resources?.reason === "Live resource positions are unavailable.");
+  const resourceSelectionKey = React.useMemo(() => request.resourcePartitions.map((partition) => partition.key).join(","), [request.resourcePartitions]);
+  const wantedResourceKeys = React.useMemo(() => request.resourcePartitions.map((partition) => partition.key), [resourceSelectionKey]);
+  const resourceRows = React.useMemo(() => resourceRowsFromPartitions(resourcePartitions), [resourcePartitions]);
+  const resourcePoints = React.useMemo(() => mapResourceFeatures(resourceRows) as MapFeature[], [resourceRows]);
+  const resourceStatuses = wantedResourceKeys.map((key) => resourcePartitionStatuses.get(key));
+  const loadedResourcePartitionCount = wantedResourceKeys.filter((key) => resourcePartitions.has(key)).length;
+  const pendingResourcePartitionCount = resourceStatuses.filter((status) => status == null || status.status === "loading" || status.pending === true).length;
+  const unavailableResourcePartitionCount = resourceStatuses.filter((status) => status?.status === "unavailable").length;
+  const resourceLayerLoading = wantedResourceKeys.length > 0 && pendingResourcePartitionCount > 0;
+  const snapshotResourceSelectionKey = resourceLayerLoading ? "" : resourceSelectionKey;
 
   React.useEffect(() => {
     const controller = createBiomeHighlightController({ onChange: setBiomeHighlight });
@@ -479,17 +490,10 @@ export function NativeMap({
       currentRequestKey: () => snapshotRequestKeyRef.current,
       onLoading: setLoading,
       load: async () => {
-        const loadJson = async (url: string) => {
-          const response = await fetch(url, { signal: controller.signal, credentials: "same-origin" });
-          const payload = await response.json();
-          if (!response.ok && !payload?.provider) throw new Error(payload.error || `Native map HTTP ${response.status}`);
-          return payload;
-        };
-        const [baseSnapshot, resourcePayload] = await Promise.all([
-          loadJson(request.snapshotUrl),
-          request.resourceUrl ? loadJson(request.resourceUrl) : Promise.resolve(null),
-        ]);
-        return resourcePayload ? mergeMapResourcePayload(baseSnapshot, resourcePayload) : baseSnapshot;
+        const response = await fetch(request.snapshotUrl, { signal: controller.signal, credentials: "same-origin" });
+        const payload = await response.json();
+        if (!response.ok && !payload?.provider) throw new Error(payload.error || `Native map HTTP ${response.status}`);
+        return payload;
       },
       onValue: ({ requestKey, value }) => {
         const nextSnapshot = replaceMapSnapshot({ currentRequestKey: snapshotRequestKeyRef.current, requested: { requestKey, value } });
@@ -532,7 +536,68 @@ export function NativeMap({
       events?.close();
       document.removeEventListener("visibilitychange", visibility);
     };
-  }, [request.snapshotUrl, request.resourceUrl, request.eventsUrl]);
+  }, [request.snapshotUrl, request.eventsUrl]);
+
+  React.useEffect(() => {
+    const wanted = new Set(wantedResourceKeys);
+    setResourcePartitions((current) => retainResourcePartitions(current, wantedResourceKeys));
+    setResourcePartitionStatuses((current) => new Map([...current].filter(([key]) => wanted.has(key))));
+    setResourceStreamError("");
+    const loader = createMapResourcePartitionLoader({
+      concurrency: 4,
+      fetchPage: async ({ partition, cursor, signal }) => {
+        const url = new URL(request.resourcePartitions.find((entry) => entry.key === partition.key)?.url ?? "", window.location.origin);
+        if (cursor) url.searchParams.set("cursor", cursor);
+        const response = await fetch(`${url.pathname}${url.search}`, { signal, credentials: "same-origin" });
+        const payload = await response.json();
+        if (!response.ok && !payload?.provider) {
+          const requestError = new Error(payload?.error || `Map resource partition HTTP ${response.status}`) as Error & { staleCursor?: boolean };
+          if (response.status === 422 && cursor) requestError.staleCursor = true;
+          throw requestError;
+        }
+        return payload;
+      },
+      onPartition: (partition) => setResourcePartitions((current) => replaceResourcePartition(current, partition)),
+      onStatus: (status) => setResourcePartitionStatuses((current) => {
+        const next = new Map(current);
+        next.set(status.key, { status: status.status, warning: status.warning, pending: status.pending });
+        return next;
+      }),
+    });
+    loader.setScope(request.resourcePartitions);
+    let events: EventSource | null = null;
+    const connect = () => {
+      if (!request.resourceEventUrl || document.hidden) return;
+      events?.close();
+      events = new EventSource(request.resourceEventUrl, { withCredentials: true });
+      events.onmessage = (message) => {
+        try {
+          const payload = JSON.parse(message.data);
+          if (typeof payload?.mapResourceScopeKey === "string") loader.refresh([payload.mapResourceScopeKey]);
+        } catch {
+          setResourceStreamError("A resource update was malformed; reconnecting.");
+        }
+      };
+      events.onerror = () => setResourceStreamError((current) => current || "Live resource updates are reconnecting.");
+      events.onopen = () => setResourceStreamError("");
+    };
+    const visibility = () => {
+      if (document.hidden) {
+        loader.pause();
+        events?.close();
+      } else {
+        loader.resume();
+        connect();
+      }
+    };
+    connect();
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      loader.stop();
+      events?.close();
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, [resourceSelectionKey, request.resourceEventUrl]);
 
   React.useEffect(() => {
     const markerGroups = markerGroupsRef.current;
@@ -547,6 +612,8 @@ export function NativeMap({
       focusMarker.bindTooltip(`${focus.name} · N ${readable.north}, E ${readable.east}`, { permanent: true, direction: "top" });
       focusMarker.addTo(focusGroup);
     }
+    resourcesRef.current?.setPointColour((feature) => resourceFeatureColour(feature, resourceTiers));
+    resourcesRef.current?.setPoints(resourcePoints);
     if (!snapshot) return;
     const playerColours = assignPlayerMarkerColours((snapshot.layers.players ?? []).map((feature) => String(feature.playerEntityId ?? feature.entityId)));
     for (const [layer, features] of Object.entries(snapshot.layers)) {
@@ -586,9 +653,6 @@ export function NativeMap({
         marker.addTo(markerGroup);
       }
     }
-    const resourcePoints = snapshot.layers.resources ?? [];
-    resourcesRef.current?.setPointColour((feature) => resourceFeatureColour(feature, resourceTiers));
-    resourcesRef.current?.setPoints(resourcePoints);
     enemiesRef.current?.setPoints(snapshot.layers.enemies ?? []);
     const map = mapRef.current;
     if (!resourceSelectionKey) resourceFrameSelectionRef.current = "";
@@ -608,7 +672,7 @@ export function NativeMap({
         },
       });
     }
-  }, [snapshot, resourceSelectionKey, resourceTiers, focus?.name, focus?.locationX, focus?.locationZ]);
+  }, [snapshot, resourcePoints, resourceSelectionKey, resourceTiers, resourceLayerLoading, focus?.name, focus?.locationX, focus?.locationZ]);
 
   const accessibleFeatures = snapshot
     ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {
@@ -616,7 +680,7 @@ export function NativeMap({
         if (layer === "empire-territory") return [];
         if (layer === "resources" || layer === "enemies") return features;
         return features.filter((feature) => (feature.kind === "claim" ? claimMarkerPresentation(feature.tier, feature.npc) : mapMarkerPresentation(feature.kind)).mode === "canvas");
-      })
+      }).concat(layerVisibility.resources ? resourcePoints : [])
     : [];
   const layerAvailability: Record<string, LayerAvailability> = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, available, unavailableReason, selectionRequired }) => {
     const hasSelection = !selectionRequired || (key === "resources" ? resourceIds.length > 0 : enemyTypes.length > 0);
@@ -624,10 +688,28 @@ export function NativeMap({
     return [key, { available: available && hasSelection, reason: available && !hasSelection ? selectionReason : unavailableReason as string | null }];
   }));
   Object.assign(layerAvailability, snapshot?.layerAvailability ?? {});
+  const resourceWarnings = [...new Set([
+    ...[...resourcePartitions.values()].flatMap((partition) => [...partition.warnings]),
+    ...resourceStatuses.map((status) => status?.warning).filter((warning): warning is string => Boolean(warning)),
+  ])];
+  layerAvailability.resources = !wantedResourceKeys.length
+    ? { available: false, status: "unavailable", pending: false, reason: "Select at least one resource to enable this layer." }
+    : loadedResourcePartitionCount === wantedResourceKeys.length
+      ? {
+          available: true,
+          status: [...resourcePartitions.values()].some((partition) => partition.freshness === "stale") ? "stale" : "live",
+          pending: false,
+          reason: resourceWarnings[0] ?? null,
+        }
+      : loadedResourcePartitionCount > 0
+        ? { available: true, status: "partial", pending: pendingResourcePartitionCount > 0, reason: resourceWarnings[0] ?? "Some selected resource regions are still loading." }
+        : pendingResourcePartitionCount > 0
+          ? { available: false, status: "loading", pending: true, reason: "Selected resource regions are loading." }
+          : { available: false, status: "unavailable", pending: false, reason: resourceWarnings[0] ?? `${unavailableResourcePartitionCount} resource partition${unavailableResourcePartitionCount === 1 ? " is" : "s are"} unavailable.` };
   layerAvailability.roads = terrainStatus?.roads?.available
     ? { available: true, reason: null }
     : { available: false, reason: "Road tiles have not been generated for this server yet." };
-  const layerCounts = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, dataLayer }) => [key, dataLayer ? snapshot?.layers[dataLayer]?.length ?? 0 : null]));
+  const layerCounts = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, dataLayer }) => [key, key === "resources" ? resourcePoints.length : dataLayer ? snapshot?.layers[dataLayer]?.length ?? 0 : null]));
   const resourceStatus = resourceLayerStatus({
     selectionKey: resourceSelectionKey,
     snapshotSelectionKey: snapshotResourceSelectionKey,
@@ -659,6 +741,8 @@ export function NativeMap({
         {snapshot?.ageMs != null ? <span>{Math.round(snapshot.ageMs / 1000)}s old</span> : null}
         {error ? <span className="error">{error}</span> : null}
         {resourceStatus === "loading" ? <span>Loading selected resource positions from Relay...</span> : null}
+        {wantedResourceKeys.length ? <span>Resources {loadedResourcePartitionCount}/{wantedResourceKeys.length} region/type partitions loaded</span> : null}
+        {resourceStreamError ? <span className="error">{resourceStreamError}</span> : null}
         {terrainStatus?.available ? <span>Terrain {terrainStatus.freshness} · generation {terrainStatus.generation}</span> : null}
         {terrainStatus?.roads?.available ? <span>Roads · generation {terrainStatus.roads.generation} · {terrainStatus.roads.featureCount.toLocaleString()} paving points</span> : null}
         {terrainStatus && !terrainStatus.available ? <span>{terrainStatus.buildStage === "building"
@@ -666,8 +750,9 @@ export function NativeMap({
           : "Terrain/water tiles are not installed on this server; showing the coordinate fallback."}</span> : null}
         {terrainStatusError ? <span className="error">{terrainStatusError}</span> : null}
         {terrainStatus?.warnings?.map((warning) => <span key={warning}>{warning}</span>)}
-        {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{layer === "resources" ? resourceStatus : layerAvailability[layer]?.available === false ? "unavailable" : layerVisibility[layer as MapLayerKey] ? snapshot.freshness : "hidden"}</small></li>)}</ul> : null}
+        {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{layerAvailability[layer]?.available === false ? "unavailable" : layerVisibility[layer as MapLayerKey] ? snapshot.freshness : "hidden"}</small></li>)}{wantedResourceKeys.length ? <li><span>resources</span><strong>{resourcePoints.length}</strong><small>{resourceStatus}</small></li> : null}</ul> : null}
         {snapshot?.warnings?.length ? <details><summary>{snapshot.warnings.length} data warning{snapshot.warnings.length === 1 ? "" : "s"}</summary><ul>{snapshot.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
+        {resourceWarnings.length ? <details><summary>{resourceWarnings.length} resource warning{resourceWarnings.length === 1 ? "" : "s"}</summary><ul>{resourceWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
       </div>
       {accessibleFeatures.length ? <details className="native-map-accessible-points"><summary>{accessibleFeatures.length} canvas map points</summary><ul>{accessibleFeatures.slice(0, 250).map((feature) => <li key={`${feature.kind}:${feature.regionId}:${feature.entityId}`}>{featureLabel(feature)} at {displayedPoint(feature)}</li>)}</ul></details> : null}
     </section>

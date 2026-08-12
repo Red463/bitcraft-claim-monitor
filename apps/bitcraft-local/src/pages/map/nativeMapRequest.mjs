@@ -16,8 +16,16 @@ export function boundedNativeMapRegions(selectedRegionIds = [], availableRegionI
   return (selected.length ? selected : available).slice(0, limit);
 }
 
-export function nativeMapRequest({ regionIds = [], playerIds = [], resourceIds = [], enemyTypes = [] }) {
-  const regions = decimalSort(regionIds);
+export function nativeMapResourceRegions(selectedRegionIds = [], availableRegionIds = []) {
+  const available = decimalSort(availableRegionIds);
+  const allowed = new Set(available);
+  const selected = decimalSort(selectedRegionIds).filter((regionId) => allowed.has(regionId));
+  return selected.length ? selected : available;
+}
+
+export function nativeMapRequest({ operationalRegionIds = [], resourceRegionIds = [], playerIds = [], resourceIds = [], enemyTypes = [] }) {
+  const regions = decimalSort(operationalRegionIds);
+  const resourceRegions = decimalSort(resourceRegionIds);
   const players = decimalSort(playerIds);
   const resources = decimalSort(resourceIds);
   const enemies = decimalSort(enemyTypes);
@@ -31,18 +39,19 @@ export function nativeMapRequest({ regionIds = [], playerIds = [], resourceIds =
   const snapshotParams = new URLSearchParams({ regions: regions.join(","), layers: snapshotLayers.join(",") });
   if (players.length) snapshotParams.set("playerIds", players.join(","));
   if (enemies.length) snapshotParams.set("enemyTypes", enemies.join(","));
-  const eventParams = new URLSearchParams(snapshotParams);
-  if (resources.length) {
-    eventParams.set("layers", layers.join(","));
-    eventParams.set("resourceIds", resources.join(","));
-  }
-  const resourceParams = resources.length
-    ? new URLSearchParams({ regions: regions.join(","), layers: "resources", resourceIds: resources.join(",") })
+  const resourcePartitions = resourcePartitionPlan(resourceRegions, resources).map((partition) => ({
+    ...partition,
+    url: `/api/local/map/resources?${new URLSearchParams({ region: partition.regionId, resourceId: partition.resourceId })}`,
+  }));
+  const resourceEventUrl = resourcePartitions.length
+    ? `/api/local/map/resource-events?${new URLSearchParams({ regions: resourceRegions.join(","), resourceIds: resources.join(",") })}`
     : null;
   return {
     layers,
     snapshotUrl: `/api/local/map/snapshot?${snapshotParams}`,
-    resourceUrl: resourceParams ? `/api/local/map/resources?${resourceParams}` : null,
-    eventsUrl: `/api/local/map/events?${eventParams}`,
+    eventsUrl: `/api/local/map/events?${snapshotParams}`,
+    resourcePartitions,
+    resourceEventUrl,
   };
 }
+import { resourcePartitionPlan } from "./mapResourcePartitionState.mjs";

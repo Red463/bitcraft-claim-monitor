@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mergeMapResourcePayload } from "../src/pages/map/mapResourceSnapshotState.mjs";
+import { mapResourceFeatures, mergeMapResourcePayload } from "../src/pages/map/mapResourceSnapshotState.mjs";
+
+test("partition rows convert to typed resource features without losing entity ids", () => {
+  assert.deepEqual(mapResourceFeatures([
+    ["90071992547409930", "19", "28", 123, 456],
+    ["bad"],
+  ]), [{
+    kind: "resource",
+    entityId: "90071992547409930",
+    regionId: "19",
+    resourceId: "28",
+    identity: "resource:28",
+    point: { x: 123, z: 456, dimension: "1", coordinateSpace: "map-xz" },
+  }]);
+});
 
 test("compact resource payload merges typed points without replacing operational layers", () => {
   const snapshot = {

@@ -21,7 +21,7 @@ import { bitcraftMapUrl, mapEmbedSignature, mapResourceCategory, mapResourceToke
 import { currentMapPlayerSelection, defaultMapPlayerSelection, filterMapPlayerRows, mapPlayerTrackingId, mapPlayerTrackingSummary, sortedMapPlayerRows, type MapPlayerFilter } from "./map/playerTracking";
 import { NativeMap } from "./map/NativeMap";
 import { mapRendererPolicy } from "./map/mapRendererPolicy.mjs";
-import { boundedNativeMapRegions } from "./map/nativeMapRequest.mjs";
+import { boundedNativeMapRegions, nativeMapResourceRegions } from "./map/nativeMapRequest.mjs";
 import { selectedResourceTierMap } from "./map/resourceNodeColours.mjs";
 import { RESOURCE_FINDER_BATCH_SIZE, nextResourceLimit, visibleResourceMatches } from "./map/resourceFinderWindow.mjs";
 
@@ -135,6 +135,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
   const [resourceError, setResourceError] = React.useState("");
   const [resourceNotice, setResourceNotice] = React.useState("");
   const [resourceCatalogLoaded, setResourceCatalogLoaded] = React.useState(false);
+  const [mapResourceRegions, setMapResourceRegions] = React.useState<AnyRecord[]>([]);
   const [, setMapUrlLog] = usePersistedState<AnyRecord[]>("diagnostics.mapUrlLog", []);
   React.useEffect(() => {
     if (!urlSelectionsApplied.current) {
@@ -209,6 +210,25 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
       });
     return () => controller.abort();
   }, [catalogGeneration, trackPromise]);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const refresh = fetch(`${LOCAL_API}/map/regions`, {
+      headers: cycle ? pageRefreshHeaders(cycle, "map") : {},
+      signal: controller.signal,
+    }).then((response) => response.ok ? response.json() : Promise.reject(new Error(`map regions HTTP ${response.status}`)));
+    void trackPromise("map-regions", refresh)
+      .then((payload) => {
+        const rows = Array.isArray(payload?.regions) ? payload.regions : [];
+        setMapResourceRegions(rows.map((region: AnyRecord) => ({
+          ...region,
+          regionId: String(region.regionId ?? ""),
+        })).filter((region: AnyRecord) => /^\d+$/.test(region.regionId) && region.relayReady === true));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setMapResourceRegions([]);
+      });
+    return () => controller.abort();
+  }, [cycle?.sequence, trackPromise]);
   const current = React.useMemo(() => currentMapPlayerSelection(selectedIds, roster), [selectedIds, roster]);
   const defaultFocus = data.claim.locationX != null && data.claim.locationZ != null ? {
     name: data.claim.name ?? "Monitored settlement",
@@ -219,13 +239,18 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
   const resourceByToken = React.useMemo(() => new Map(resources.map((resource) => [mapResourceToken(resource), resource])), [resources]);
   const resourceCategories = React.useMemo(() => unique(resources.map(mapResourceCategory).filter(Boolean)).sort((a, b) => a.localeCompare(b)), [resources]);
   const resourceTiers = React.useMemo(() => unique(resources.map((resource) => String(resource.tier ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [resources]);
-  const regionOptions = React.useMemo(() => unique([
+  const operationalRegionOptions = React.useMemo(() => unique([
     ...activeRegions.map((region) => String(region.regionId ?? "")),
     String(data.claim.regionId ?? ""),
     ...data.regionStatus.map((region) => String(region.regionId ?? "")),
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [activeRegions, data.claim.regionId, data.regionStatus]);
+  const regionOptions = React.useMemo(() => unique([
+    ...mapResourceRegions.map((region) => String(region.regionId ?? "")),
+    ...operationalRegionOptions,
+  ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [mapResourceRegions, operationalRegionOptions]);
   const mapMarker = focus ?? defaultFocus;
-  const mapRegionIds = React.useMemo(() => boundedNativeMapRegions(resourceRegions, regionOptions), [resourceRegions.join(","), regionOptions.join(",")]);
+  const mapRegionIds = React.useMemo(() => boundedNativeMapRegions([], operationalRegionOptions), [operationalRegionOptions.join(",")]);
+  const resourceMapRegionIds = React.useMemo(() => nativeMapResourceRegions(resourceRegions, regionOptions), [resourceRegions.join(","), regionOptions.join(",")]);
   const selectedResourceIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length)), [normalizedSelectedResources]);
   const selectedResourceTiers = React.useMemo(
     () => selectedResourceTierMap(selectedResourceIds, resourceByToken),
@@ -239,10 +264,10 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
     mapMarker,
     flyTo: Boolean(focus),
     resourceIds: selectedResourceIds,
-    regionIds: mapRegionIds,
+    regionIds: resourceMapRegionIds,
     enemyIds: selectedEnemyIds,
-  }), [currentPlayerIdsKey, focus, mapMarker, selectedResourceIds.join(","), selectedEnemyIds.join(","), mapRegionIds.join(",")]);
-  const mapUrl = React.useMemo(() => bitcraftMapUrl(currentPlayerIds, mapMarker, Boolean(focus), selectedResourceIds, mapRegionIds, selectedEnemyIds), [mapSignature]);
+  }), [currentPlayerIdsKey, focus, mapMarker, selectedResourceIds.join(","), selectedEnemyIds.join(","), resourceMapRegionIds.join(",")]);
+  const mapUrl = React.useMemo(() => bitcraftMapUrl(currentPlayerIds, mapMarker, Boolean(focus), selectedResourceIds, resourceMapRegionIds, selectedEnemyIds), [mapSignature]);
   const renderer = React.useMemo(() => mapRendererPolicy(rendererMode, mapUrl), [rendererMode, mapUrl]);
   const nativeRenderer = renderer.native;
   const [currentFrameUrl, setCurrentFrameUrl] = React.useState(mapUrl);
@@ -387,8 +412,8 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
             </button>
           </div>
           {!resourcePanelCollapsed ? <><div className="map-resource-controls">
-            <label className="field"><span>Region</span><select className="select-control map-region-select" value={mapRegionIds.length === 1 ? mapRegionIds[0] : "All"} onChange={(event) => setResourceRegion(event.target.value)}><option value="All">All regions</option>{regionOptions.map((id) => {
-              const region = activeRegions.find((entry) => String(entry.regionId) === String(id)) ?? data.regionStatus.find((entry) => String(entry.regionId) === String(id)) ?? { regionId: id };
+            <label className="field"><span>Region</span><select className="select-control map-region-select" value={resourceRegions.length === 1 && regionOptions.includes(resourceRegions[0]) ? resourceRegions[0] : "All"} onChange={(event) => setResourceRegion(event.target.value)}><option value="All">All regions</option>{regionOptions.map((id) => {
+              const region = mapResourceRegions.find((entry) => String(entry.regionId) === String(id)) ?? activeRegions.find((entry) => String(entry.regionId) === String(id)) ?? data.regionStatus.find((entry) => String(entry.regionId) === String(id)) ?? { regionId: id };
               return <option key={id} value={id}>{activeRegionLabel({ ...region, regionId: String(region.regionId ?? id) }, String(data.claim.regionId ?? ""))}</option>;
             })}</select></label>
             <label className="field"><span>Tier</span><select className="select-control" value={resourceTier} onChange={(event) => setResourceTier(event.target.value)}><option>All</option>{resourceTiers.map((tier) => <option key={tier}>{tier}</option>)}</select></label>
@@ -433,7 +458,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
           </div> : null}</> : null}
         </aside>
         <div className={`map-frame-host ${nativeRenderer ? "is-native" : `is-${frameState}`}`}>
-          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
+          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
           {!nativeRenderer && frameState !== "ready" ? (
             <section className="map-frame-state" aria-live="polite">
               <strong>{frameState === "loading" ? "Loading embedded map..." : frameState === "timed-out" ? "The embedded map is taking longer than expected." : "The embedded map could not be loaded."}</strong>
