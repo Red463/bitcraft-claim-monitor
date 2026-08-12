@@ -89,6 +89,14 @@ Road verification in configured region `19` proved the indexed join `paved_tile_
 
 `enemy_state.enemy_type` is the generated tagged `EnemyType` enum. Its ordinal matches `enemy_desc.id`: `PracticeDummy -> 1`, `DeerMale -> 8`, and `CrystalizedHexiteCrab -> 43`. Schema fingerprint validation protects this mapping; an unknown tag makes the affected row unavailable rather than inventing an ID.
 
+## Verified live player coordinates
+
+A bounded operator-only capture on 2026-08-12 selected two currently online monitored members in configured region `19`. Both selected decimal-string player IDs directly matched `mobile_entity_state.entity_id`, both rows used overworld dimension `1`, and both normalized points stayed within the verified `0..38400` map bounds after exact division by `1000`. The complete generation arrived in 420 ms after topology discovery and normalized to 380 bytes with no warnings. Private player IDs, usernames, raw fixed-point values, and exact coordinates are intentionally not recorded here.
+
+The two scaled points were independently compared with BitCraftMap using the same canonical two-player selection. Its two Leaflet marker deltas matched the expected app projection: X follows map X, projected Y follows `-Z / (2 / sqrt(3))`, and the observed fractional zoom scale accounted for the pixel delta. The remaining few pixels were consistent with player motion between the independent external fetch and the Relay capture. This verifies the direct identity, dimension, `/1000`, axis-order, and projection contract without making BitCraftMap a runtime dependency.
+
+Selection removal is fail-closed: an empty player selection produces no `mobile_entity_state` query and normalization returns zero player rows. The public snapshot additionally rechecks the current selected, monitored, online, and non-excluded identity set before emitting any player feature.
+
 ## Required live acceptance still pending
 
 ### Regional Relay health evidence
@@ -138,7 +146,7 @@ Acceptance requires a complete generation proving:
 
 The provider implementation now avoids the dense per-entity resource fan-out: selected resources and `location_state` are materialized with an indexed two-table subscription join. Enemy mobile subscriptions are derived only from locally selected enemy identities and split into batches of at most 100 entity IDs; player queries use the same limit. Normalization rejects missing/non-overworld dimensions and coordinates outside the verified `0..38400` world bounds (mobile fixed-point `0..38400000`).
 
-Production starts a bounded `map-spatial` session only when a request contains selected resource IDs. Resources are enabled from the verified join; player, enemy, and waystone layers still return explicit unavailable warnings rather than inferred coordinates. A schema mismatch or unverified source must remain unavailable and retain only independently verified last-good data.
+Production starts a bounded `map-spatial` session only when a request contains selected dense or live identities. Resources and selected online monitored players are enabled from their verified joins; enemy and waystone layers still return explicit unavailable warnings rather than inferred coordinates. A schema mismatch or unverified source must remain unavailable. Player features are volatile and must never be served from an unavailable or stale last-good position generation.
 
 ## First-party renderer and BitCraftMap parity target
 

@@ -59,13 +59,22 @@ test("map spatial normalization joins resources and enemies without losing entit
     mobileRows: [
       { entityId: 200n, locationX: 70_000, locationZ: 80_000, dimension: 1 },
       { entityId: 216172782115643288n, locationX: 90_000, locationZ: 100_000, dimension: 1 },
+      { entityId: 999n, locationX: 110_000, locationZ: 120_000, dimension: 1 },
     ],
     observedAt: "2026-08-11T12:00:00.000Z",
   });
 
   assert.deepEqual(normalized.data.resources[0], { entityId: "100", resourceId: "2", regionId: "19", locationX: 50, locationZ: 60, dimension: "1", observedAt: "2026-08-11T12:00:00.000Z" });
   assert.deepEqual(normalized.data.enemies[0], { entityId: "200", enemyType: "8", regionId: "19", locationX: 70000, locationZ: 80000, dimension: "1", observedAt: "2026-08-11T12:00:00.000Z" });
-  assert.equal(normalized.data.players[0].playerEntityId, "216172782115643288");
+  assert.deepEqual(normalized.data.players[0], {
+    playerEntityId: "216172782115643288",
+    regionId: "19",
+    locationX: 90_000,
+    locationZ: 100_000,
+    dimension: "1",
+    observedAt: "2026-08-11T12:00:00.000Z",
+  });
+  assert.equal(normalized.data.players.some(({ playerEntityId }) => playerEntityId === "999"), false);
   assert.equal("banks" in normalized.data, false);
   assert.equal(normalized.data.waystones[0].entityId, "301");
   assert.deepEqual(normalized.warnings, []);

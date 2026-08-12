@@ -5,6 +5,7 @@ import {
   RelayMapSpatialSession,
   relayWebSocketUri,
 } from "../dist-server/game-data/index.js";
+import { summarizeMapPlayerEvidence } from "./map-player-live-evidence.mjs";
 
 const relayBaseUrl = String(process.env.BITCRAFT_RELAY_ORIGIN ?? "https://relay.bitcraftsync.app").replace(/\/+$/, "");
 const claimId = String(process.env.BITCRAFT_CLAIM_ID ?? "1369094286777412590");
@@ -46,6 +47,7 @@ try {
     .toSorted((left, right) => left.entityId.length - right.entityId.length || left.entityId.localeCompare(right.entityId))
     .slice(0, 3)
     .map(({ entityId, resourceId, locationX, locationZ, dimension }) => ({ entityId, resourceId, locationX, locationZ, dimension }));
+  const playerEvidence = summarizeMapPlayerEvidence({ requestedPlayerIds: playerIds, players: snapshot.data.players });
   console.log(JSON.stringify({
     ok: true,
     claimId,
@@ -56,6 +58,7 @@ try {
     counts: Object.fromEntries(Object.entries(snapshot.data).filter(([, value]) => Array.isArray(value)).map(([key, value]) => [key, value.length])),
     resourceBounds: coordinateBounds(snapshot.data.resources),
     resourceFixtures,
+    playerEvidence,
     warnings: snapshot.warnings,
   }, null, 2));
 } finally {
