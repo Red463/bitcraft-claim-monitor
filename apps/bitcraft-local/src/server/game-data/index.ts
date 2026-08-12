@@ -18,6 +18,7 @@ export * from "./inventoryProjection.ts";
 export * from "./marketProjection.ts";
 export * from "./mapResourceProjection.ts";
 export * from "./mapResourceRegionSession.ts";
+export * from "./mapResourceRuntime.ts";
 export * from "./mapSpatialProjection.ts";
 export * from "./mapSpatialSession.ts";
 export * from "./mapSpatialScopeManager.ts";
