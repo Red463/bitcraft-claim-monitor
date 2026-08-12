@@ -284,14 +284,18 @@ test("resource session health counts rows for each selected resource independent
   await session.stop();
 });
 
-test("resource session budgets only actively selected resource rows", async () => {
+test("resource session budgets unique normalized nodes instead of reciprocal join rows", async () => {
   const relay = fixture({
     resourceRows: [
       { entityId: 1n, resourceId: 28 },
+      { entityId: 2n, resourceId: 28 },
+      { entityId: 3n, resourceId: 28 },
       ...Array.from({ length: 10 }, (_, index) => ({ entityId: BigInt(index + 100), resourceId: 999 })),
     ],
     locationRows: [
       { entityId: 1n, x: 100, z: 200, dimension: 1 },
+      { entityId: 2n, x: 101, z: 201, dimension: 1 },
+      { entityId: 3n, x: 102, z: 202, dimension: 1 },
       ...Array.from({ length: 10 }, (_, index) => ({ entityId: BigInt(index + 100), x: index, z: index, dimension: 1 })),
     ],
   });
@@ -302,16 +306,72 @@ test("resource session budgets only actively selected resource rows", async () =
     onSnapshot: (snapshot) => snapshots.push(snapshot),
     onFailure: (warning) => failures.push(warning),
   });
-  await session.start(config({ maxRows: 4 }));
+  await session.start(config({ maxNodes: 3 }));
   await session.subscribe("28", 7);
 
   relay.subscriptions[0].apply();
   await drainMicrotasks();
 
   assert.equal(snapshots.length, 1);
-  assert.equal(snapshots[0].data.resources.length, 1);
-  assert.deepEqual(session.health().rowsPerType, { "28": { resourceState: 1, locationState: 1 } });
-  assert.equal(session.health().rowCount, 2);
+  assert.equal(snapshots[0].data.resources.length, 3);
+  assert.deepEqual(session.health().rowsPerType, { "28": { resourceState: 3, locationState: 3 } });
+  assert.equal(session.health().rowCount, 6, "health retains raw join evidence for diagnostics");
+  assert.deepEqual(failures, []);
+  await session.stop();
+});
+
+test("resource session rejects a genuinely oversized normalized partition", async () => {
+  const relay = fixture({
+    resourceRows: [
+      { entityId: 1n, resourceId: 28 },
+      { entityId: 2n, resourceId: 28 },
+      { entityId: 3n, resourceId: 28 },
+    ],
+    locationRows: [
+      { entityId: 1n, x: 100, z: 200, dimension: 1 },
+      { entityId: 2n, x: 101, z: 201, dimension: 1 },
+      { entityId: 3n, x: 102, z: 202, dimension: 1 },
+    ],
+  });
+  const snapshots = [];
+  const failures = [];
+  const session = new RelayMapResourceRegionSession({
+    loadBindings: relay.loadBindings,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+    onFailure: (warning) => failures.push(warning),
+  });
+  await session.start(config({ maxNodes: 2 }));
+  await session.subscribe("28", 7);
+
+  relay.subscriptions[0].apply();
+  await drainMicrotasks();
+
+  assert.equal(snapshots.length, 0);
+  assert.match(failures[0], /node budget 2 exceeded by 3 nodes/);
+  assert.match(session.health().lastError, /node budget 2 exceeded by 3 nodes/);
+  await session.stop();
+});
+
+test("resource session accepts more than fifty thousand reciprocal join rows when unique nodes fit", async () => {
+  const resourceRows = Array.from({ length: 25_001 }, (_, index) => ({ entityId: BigInt(index + 1), resourceId: 28 }));
+  const locationRows = Array.from({ length: 25_001 }, (_, index) => ({ entityId: BigInt(index + 1), x: index % 38_401, z: index % 38_401, dimension: 1 }));
+  const relay = fixture({ resourceRows, locationRows });
+  const snapshots = [];
+  const failures = [];
+  const session = new RelayMapResourceRegionSession({
+    loadBindings: relay.loadBindings,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+    onFailure: (warning) => failures.push(warning),
+  });
+  await session.start(config());
+  await session.subscribe("28", 7);
+
+  relay.subscriptions[0].apply();
+  await drainMicrotasks();
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].data.resources.length, 25_001);
+  assert.equal(session.health().rowCount, 50_002);
   assert.deepEqual(failures, []);
   await session.stop();
 });

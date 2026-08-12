@@ -37,7 +37,7 @@ type ConnectionBuilder = {
 export type RegionalBindingModule = { DbConnection: { builder(): ConnectionBuilder } };
 
 const MAX_RESOURCE_IDS = 16;
-const DEFAULT_MAX_ROWS = 50_000;
+const DEFAULT_MAX_NODES = 250_000;
 const DEFAULT_REBUILD_DELAY_MS = 300;
 
 export type RegionSessionConfig = {
@@ -47,7 +47,7 @@ export type RegionSessionConfig = {
   manifest: BindingManifest;
   generation: number;
   regionId: string;
-  maxRows?: number;
+  maxNodes?: number;
 };
 
 export type MapResourceSnapshot = {
@@ -119,7 +119,7 @@ export class RelayMapResourceRegionSession {
   #connection: BindingConnection | null = null;
   #pendingConnection: BindingConnection | null = null;
   #abortStart: (() => void) | null = null;
-  #config: (Omit<RegionSessionConfig, "regionId" | "generation" | "maxRows"> & { regionId: string; generation: number; maxRows: number }) | null = null;
+  #config: (Omit<RegionSessionConfig, "regionId" | "generation" | "maxNodes"> & { regionId: string; generation: number; maxNodes: number }) | null = null;
   #subscriptions = new Map<string, ResourceSubscription>();
   #listenersAttached = false;
   #rebuildTimer: unknown | null = null;
@@ -176,7 +176,7 @@ export class RelayMapResourceRegionSession {
       ...config,
       regionId: decimal(config.regionId, "Relay map resource region id"),
       generation: positiveInteger(config.generation, "Relay map resource generation"),
-      maxRows: positiveInteger(config.maxRows ?? DEFAULT_MAX_ROWS, "Relay map resource row budget"),
+      maxNodes: positiveInteger(config.maxNodes ?? DEFAULT_MAX_NODES, "Relay map resource node budget"),
     };
     this.#stopping = false;
     this.#startedAt = this.#now();
@@ -335,13 +335,11 @@ export class RelayMapResourceRegionSession {
         observedAt: receivedAt,
       });
       this.#health.rowsPerType[subscription.resourceId] = { ...normalized.rowCounts };
-      const subscriptionRowCount = normalized.rowCounts.resourceState + normalized.rowCounts.locationState;
       const rowCount = Object.values(this.#health.rowsPerType).reduce(
         (total, counts) => total + counts.resourceState + counts.locationState,
         0,
       );
       this.#health.rowCount = rowCount;
-      if (subscriptionRowCount > config.maxRows) throw new Error(`Relay map resource row budget ${config.maxRows} exceeded by ${subscriptionRowCount} rows`);
       if (!normalized.complete) {
         const warning = normalized.warnings.join(" ") || "Relay map resource generation is incomplete";
         this.#health.stage = "partial";
@@ -353,6 +351,9 @@ export class RelayMapResourceRegionSession {
           receivedAt,
         })).catch((error) => this.#recordError(error));
         return;
+      }
+      if (normalized.resources.length > config.maxNodes) {
+        throw new Error(`Relay map resource node budget ${config.maxNodes} exceeded by ${normalized.resources.length} nodes`);
       }
       const snapshot: MapResourceSnapshot = {
         data: { regionId: config.regionId, resourceId: subscription.resourceId, resources: normalized.resources },
