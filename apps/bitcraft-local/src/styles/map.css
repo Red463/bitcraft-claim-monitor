@@ -210,20 +210,22 @@
   box-sizing: border-box;
   width: 40px;
   height: 40px;
-  padding: 3px;
+  padding: 0;
   overflow: visible;
   border: 0;
   border-radius: 0;
   background: transparent;
-  box-shadow: 0 2px 6px rgba(0,0,0,.78);
+  box-shadow: none;
+  clip-path: polygon(50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%, 6.7% 25%);
   transform: scale(var(--native-map-claim-scale, .9));
   transition: transform 120ms ease-out;
 }
 .native-map-marker--claim .native-map-marker-content--badge-crop img {
   position: absolute;
+  inset: 0;
   z-index: 1;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   max-width: none;
   object-fit: fill;
   transform: none;

@@ -200,7 +200,11 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   assert.match(nativeMap, /--native-map-claim-scale/);
   const css = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
   assert.match(css, /native-map-marker--claim[^}]*width:\s*40px[^}]*height:\s*40px/s);
-  assert.match(css, /badge-crop[^}]*padding:\s*3px/s);
+  assert.match(css, /badge-crop[^}]*padding:\s*0/s);
+  assert.match(css, /badge-crop[^}]*box-shadow:\s*none/s);
+  assert.match(css, /badge-crop[^}]*background:\s*transparent/s);
+  assert.match(css, /badge-crop[^}]*clip-path:\s*polygon\(50% 0%, 93\.3% 25%, 93\.3% 75%, 50% 100%, 6\.7% 75%, 6\.7% 25%\)/s);
+  assert.match(css, /badge-crop img[^}]*width:\s*40px[^}]*height:\s*40px/s);
   assert.match(nativeMap, /selectionRequired.*resourceIds\.length.*enemyTypes\.length/s);
 });
 
