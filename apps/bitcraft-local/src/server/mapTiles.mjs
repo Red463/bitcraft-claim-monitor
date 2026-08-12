@@ -1,10 +1,34 @@
 import { securityHeaders } from "./httpRoutes.mjs";
 
 const TILE_PREFIX = "/api/local/map/tiles/";
-const TILE_PATH = /^\/api\/local\/map\/tiles\/(terrain|water|game|roads)\/(-?\d+)\/(-?\d+)\/(-?\d+)\.webp$/;
+const TILE_PATH = /^\/api\/local\/map\/tiles\/(terrain|water|game|roads|biome-(\d{1,3}))\/(-?\d+)\/(-?\d+)\/(-?\d+)\.webp$/;
 const MIN_ZOOM = -5;
 const MAX_ZOOM = 0;
 const MAX_TILE_INDEX = 1_000_000;
+const EMPTY_CHANNELS = Object.freeze({
+  terrain: Object.freeze({ tileCount: 0, totalBytes: 0 }),
+  water: Object.freeze({ tileCount: 0, totalBytes: 0 }),
+  biomeMasks: Object.freeze({ tileCount: 0, totalBytes: 0 }),
+});
+
+function publicBiomes(manifest) {
+  return [...(manifest?.biomes ?? [])].map((biome) => ({
+    biomeType: Number(biome.biomeType),
+    name: String(biome.name),
+    description: String(biome.description ?? ""),
+    hazardLevel: String(biome.hazardLevel ?? ""),
+    disallowPlayerBuild: Boolean(biome.disallowPlayerBuild),
+    present: Boolean(biome.present),
+  })).filter(({ biomeType, name }) => Number.isInteger(biomeType) && biomeType >= 0 && biomeType <= 255 && name.trim())
+    .sort((left, right) => left.biomeType - right.biomeType);
+}
+
+function publicChannels(manifest) {
+  return Object.fromEntries(["terrain", "water", "biomeMasks"].map((key) => [key, {
+    tileCount: Number(manifest?.channels?.[key]?.tileCount ?? 0),
+    totalBytes: Number(manifest?.channels?.[key]?.totalBytes ?? 0),
+  }]));
+}
 
 function finish(res, status, body = null, headers = {}) {
   res.writeHead(status, securityHeaders(headers));
@@ -30,6 +54,7 @@ async function terrainStatus(tileStore, now, runtimeHealth, roadTileStore) {
     provider: "relay", available: false, generation: null, generatedAt: null, observedAt: null,
     freshness: "unavailable", ageMs: null, regionIds: [], dimension: "1", bounds: null,
     zoomRange: { min: MIN_ZOOM, max: MAX_ZOOM }, paletteVersion: null, tileCount: 0, totalBytes: 0,
+    biomes: [], channels: EMPTY_CHANNELS,
     buildStage,
     warnings: [buildStage === "building"
       ? "Relay terrain is building its first complete tile bundle."
@@ -46,6 +71,7 @@ async function terrainStatus(tileStore, now, runtimeHealth, roadTileStore) {
     freshness, ageMs, regionIds: Array.isArray(manifest.regionIds) ? manifest.regionIds.map(String) : [],
     dimension: "1", bounds: manifest.bounds ?? null, zoomRange: manifest.zoomRange ?? { min: MIN_ZOOM, max: MAX_ZOOM },
     paletteVersion: manifest.paletteVersion ?? null, tileCount: Number(manifest.tileCount ?? 0), totalBytes: Number(manifest.totalBytes ?? 0), buildStage,
+    biomes: publicBiomes(manifest), channels: publicChannels(manifest),
     warnings: freshness === "stale" ? ["Relay terrain is stale; showing the last-good installed generation."] : [], ...roadStatus,
   };
 }
@@ -64,11 +90,12 @@ export async function serveLocalMapTile(pathname, res, tileStore, now = () => ne
     finish(res, 400, null, { "cache-control": "no-store" });
     return true;
   }
-  const [, style, rawZoom, rawX, rawY] = match;
+  const [, style, rawBiomeType, rawZoom, rawX, rawY] = match;
+  const biomeType = rawBiomeType == null ? null : Number(rawBiomeType);
   const zoom = Number(rawZoom);
   const x = Number(rawX);
   const y = Number(rawY);
-  if (zoom < MIN_ZOOM || zoom > MAX_ZOOM || Math.abs(x) > MAX_TILE_INDEX || Math.abs(y) > MAX_TILE_INDEX) {
+  if ((biomeType != null && (biomeType < 0 || biomeType > 255)) || zoom < MIN_ZOOM || zoom > MAX_ZOOM || Math.abs(x) > MAX_TILE_INDEX || Math.abs(y) > MAX_TILE_INDEX) {
     finish(res, 400, null, { "cache-control": "no-store" });
     return true;
   }

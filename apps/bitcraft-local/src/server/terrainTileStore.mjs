@@ -46,8 +46,7 @@ function enumerateTiles(generation, limits) {
     const minTileY = Math.floor((minProjectedY * scale) / limits.tileSize);
     const maxTileY = Math.floor(((maxProjectedY * scale) - Number.EPSILON) / limits.tileSize);
     for (let x = minTileX; x <= maxTileX; x += 1) for (let y = minTileY; y <= maxTileY; y += 1) {
-      tiles.push({ style: "terrain", zoom, x, y });
-      tiles.push({ style: "water", zoom, x, y });
+      tiles.push({ zoom, x, y });
     }
   }
   return { tiles, bounds: { minX, minZ, maxX, maxZ } };
@@ -127,24 +126,54 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
     if (!within(versionsRoot, staging) || !within(versionsRoot, installed)) throw new TypeError("Terrain bundle version path escapes store");
     const started = Date.now();
     let totalBytes = 0;
-    const channelBytes = { terrain: 0, water: 0 };
-    const channelTileCounts = { terrain: 0, water: 0 };
+    let tileCount = 0;
+    const channelBytes = { terrain: 0, water: 0, biomeMasks: 0 };
+    const channelTileCounts = { terrain: 0, water: 0, biomeMasks: 0 };
+    const presentBiomeIds = new Set();
     activeStaging.add(stagingName);
     try {
       await mkdir(staging, { recursive: false });
       for (const tile of tiles) {
         if (Date.now() - started > limits.deadlineMs) throw new Error(`Terrain bundle exceeded ${limits.deadlineMs}ms deadline`);
-        const bytes = Buffer.from(await encoder({ generation, style: tile.style, zoom: tile.zoom, x: tile.x, y: tile.y, tileSize: limits.tileSize }));
-        if (bytes.byteLength > limits.maxTileBytes) throw new RangeError(`Terrain tile exceeded ${limits.maxTileBytes} tile byte budget`);
-        totalBytes += bytes.byteLength;
-        channelBytes[tile.style] += bytes.byteLength;
-        channelTileCounts[tile.style] += 1;
-        if (totalBytes > limits.maxBytes) throw new RangeError(`Terrain bundle exceeded ${limits.maxBytes} byte budget`);
-        const directory = path.join(staging, "tiles", tile.style, String(tile.zoom), String(tile.x));
-        await mkdir(directory, { recursive: true });
-        const handle = await open(path.join(directory, `${tile.y}.webp`), "wx");
-        try { await handle.writeFile(bytes); } finally { await handle.close(); }
+        const channels = await encoder({ generation, zoom: tile.zoom, x: tile.x, y: tile.y, tileSize: limits.tileSize });
+        const outputs = [
+          { style: "terrain", group: "terrain", value: channels?.terrain },
+          { style: "water", group: "water", value: channels?.water },
+          ...[...(channels?.biomeMasks instanceof Map ? channels.biomeMasks : [])].map(([biomeType, value]) => ({
+            style: `biome-${biomeType}`,
+            group: "biomeMasks",
+            biomeType: Number(biomeType),
+            value,
+          })),
+        ];
+        for (const output of outputs) {
+          if (output.group === "biomeMasks" && (!Number.isInteger(output.biomeType) || output.biomeType < 0 || output.biomeType > 255)) throw new TypeError("Terrain biome mask type must be between 0 and 255");
+          const bytes = Buffer.from(output.value ?? []);
+          if (!bytes.byteLength && output.group === "biomeMasks") continue;
+          if (!bytes.byteLength) throw new TypeError(`Terrain ${output.style} channel must not be empty`);
+          if (bytes.byteLength > limits.maxTileBytes) throw new RangeError(`Terrain tile exceeded ${limits.maxTileBytes} tile byte budget`);
+          tileCount += 1;
+          totalBytes += bytes.byteLength;
+          channelBytes[output.group] += bytes.byteLength;
+          channelTileCounts[output.group] += 1;
+          if (tileCount > limits.maxTiles) throw new RangeError(`Terrain bundle exceeded ${limits.maxTiles} tile budget`);
+          if (totalBytes > limits.maxBytes) throw new RangeError(`Terrain bundle exceeded ${limits.maxBytes} byte budget`);
+          if (output.group === "biomeMasks") presentBiomeIds.add(output.biomeType);
+          const directory = path.join(staging, "tiles", output.style, String(tile.zoom), String(tile.x));
+          await mkdir(directory, { recursive: true });
+          const handle = await open(path.join(directory, `${tile.y}.webp`), "wx");
+          try { await handle.writeFile(bytes); } finally { await handle.close(); }
+        }
       }
+      const biomes = [...(generation.biomes ?? [])].map((biome) => ({
+        biomeType: Number(biome.biomeType),
+        name: String(biome.name),
+        description: String(biome.description ?? ""),
+        hazardLevel: String(biome.hazardLevel ?? ""),
+        disallowPlayerBuild: Boolean(biome.disallowPlayerBuild),
+        present: presentBiomeIds.has(Number(biome.biomeType)),
+      })).filter(({ biomeType }) => Number.isInteger(biomeType) && biomeType >= 0 && biomeType <= 255)
+        .sort((left, right) => left.biomeType - right.biomeType);
       const manifest = {
         provider: "relay",
         generation: generationId,
@@ -155,11 +184,13 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
         bounds,
         zoomRange: { min: limits.minZoom, max: limits.maxZoom },
         paletteVersion: TERRAIN_PALETTE_VERSION,
-        tileCount: tiles.length,
+        tileCount,
         totalBytes,
+        biomes,
         channels: {
           terrain: { tileCount: channelTileCounts.terrain, totalBytes: channelBytes.terrain },
           water: { tileCount: channelTileCounts.water, totalBytes: channelBytes.water },
+          biomeMasks: { tileCount: channelTileCounts.biomeMasks, totalBytes: channelBytes.biomeMasks },
         },
         evidenceHash: generation.evidence.evidenceHash,
       };
@@ -193,7 +224,7 @@ export function createTerrainTileStore({ dataDir, encoder, now = () => new Date(
       return pointer ? { ...pointer.manifest } : null;
     },
     async readTile({ style, z, x, y }) {
-      if ((style !== "terrain" && style !== "water") || !Number.isSafeInteger(z) || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return null;
+      if ((style !== "terrain" && style !== "water" && !/^biome-(?:\d|\d\d|1\d\d|2[0-4]\d|25[0-5])$/.test(style)) || !Number.isSafeInteger(z) || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return null;
       const pointer = await loadCurrent();
       if (!pointer) return null;
       leases.set(pointer.version, (leases.get(pointer.version) ?? 0) + 1);

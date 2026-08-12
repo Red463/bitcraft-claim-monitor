@@ -48,6 +48,20 @@ test("map tile route serves the aligned same-origin water channel", async () => 
   assert.deepEqual(res.body, expected);
 });
 
+test("map tile route serves a bounded same-origin biome mask channel", async () => {
+  const expected = Buffer.from("biome-mask");
+  const requests = [];
+  const store = { readTile: async (request) => {
+    requests.push(request);
+    return request.style === "biome-2" ? { bytes: expected, contentType: "image/webp", generation: "1" } : null;
+  } };
+  const res = responseRecorder();
+  assert.equal(await tileModule.serveLocalMapTile("/api/local/map/tiles/biome-2/-5/0/-2.webp", res, store), true);
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, expected);
+  assert.deepEqual(requests, [{ style: "biome-2", z: -5, x: 0, y: -2 }]);
+});
+
 test("map tile route serves installed roads from the independent durable store", async () => {
   const expected = Buffer.from("roads");
   const res = responseRecorder();
@@ -65,6 +79,9 @@ test("map tile route rejects unsupported styles and coordinates without filesyst
     "/api/local/map/tiles/external/-5/0/-2.webp",
     "/api/local/map/tiles/terrain/-6/0/-2.webp",
     "/api/local/map/tiles/terrain/-5/0/../../secret.webp",
+    "/api/local/map/tiles/biome-256/-5/0/-2.webp",
+    "/api/local/map/tiles/biome-x/-5/0/-2.webp",
+    "/api/local/map/tiles/biome-2/-5/0/../../secret.webp",
   ]) {
     const res = responseRecorder();
     assert.equal(await tileModule.serveLocalMapTile(pathname, res, store), true);
@@ -96,6 +113,7 @@ test("map tile status returns unavailable or a public installed manifest", async
     provider: "relay", available: false, generation: null, generatedAt: null, observedAt: null,
     freshness: "unavailable", ageMs: null, regionIds: [], dimension: "1", bounds: null,
     zoomRange: { min: -5, max: 0 }, paletteVersion: null, tileCount: 0, totalBytes: 0,
+    biomes: [], channels: { terrain: { tileCount: 0, totalBytes: 0 }, water: { tileCount: 0, totalBytes: 0 }, biomeMasks: { tileCount: 0, totalBytes: 0 } },
     buildStage: "building", warnings: ["Relay terrain is building its first complete tile bundle."],
   });
 
@@ -114,6 +132,8 @@ test("map tile status returns unavailable or a public installed manifest", async
     generation: "42", generatedAt: "2026-08-11T16:00:00.000Z", observedAt: "2026-08-11T15:59:59.000Z",
     regionIds: ["19"], dimension: "1", bounds: { minX: 1, minZ: 2, maxX: 3, maxZ: 4 },
     zoomRange: { min: -5, max: 0 }, paletteVersion: 1, tileCount: 12, totalBytes: 345,
+    channels: { terrain: { tileCount: 4, totalBytes: 100 }, water: { tileCount: 4, totalBytes: 100 }, biomeMasks: { tileCount: 4, totalBytes: 145 } },
+    biomes: [{ biomeType: 1, name: "Calm Forest", description: "Calm", hazardLevel: "Safe", disallowPlayerBuild: false, present: true, iconAddress: "must-not-leak" }],
   };
   await tileModule.serveLocalMapTile("/api/local/map/tiles/status", available, { readManifest: async () => manifest }, () => new Date("2026-08-11T16:00:00.000Z"));
   const payload = JSON.parse(available.body);
@@ -122,6 +142,9 @@ test("map tile status returns unavailable or a public installed manifest", async
   assert.equal(payload.freshness, "live");
   assert.equal(payload.ageMs, 1000);
   assert.equal(payload.dataDir, undefined);
+  assert.deepEqual(payload.biomes, [{ biomeType: 1, name: "Calm Forest", description: "Calm", hazardLevel: "Safe", disallowPlayerBuild: false, present: true }]);
+  assert.equal(payload.biomes[0].iconAddress, undefined);
+  assert.deepEqual(payload.channels.biomeMasks, { tileCount: 4, totalBytes: 145 });
 
   const withRoads = responseRecorder();
   await tileModule.serveLocalMapTile("/api/local/map/tiles/status", withRoads, { readManifest: async () => manifest }, () => new Date("2026-08-11T16:00:00.000Z"), null, {

@@ -13,6 +13,26 @@ function unionBounds(manifests) {
   } : null;
 }
 
+function mergeBiomes(manifests) {
+  const merged = new Map();
+  for (const manifest of manifests) for (const biome of manifest?.biomes ?? []) {
+    const biomeType = Number(biome.biomeType);
+    if (!Number.isInteger(biomeType) || biomeType < 0 || biomeType > 255) continue;
+    const previous = merged.get(biomeType);
+    merged.set(biomeType, { ...(previous ?? {}), ...biome, biomeType, present: Boolean(previous?.present || biome.present) });
+  }
+  return [...merged.values()].sort((left, right) => left.biomeType - right.biomeType);
+}
+
+function mergeChannels(manifests) {
+  const result = {};
+  for (const key of ["terrain", "water", "biomeMasks"]) result[key] = {
+    tileCount: manifests.reduce((total, manifest) => total + Number(manifest?.channels?.[key]?.tileCount ?? 0), 0),
+    totalBytes: manifests.reduce((total, manifest) => total + Number(manifest?.channels?.[key]?.totalBytes ?? 0), 0),
+  };
+  return result;
+}
+
 async function compositeTiles(tiles) {
   if (!tiles.length) return null;
   if (tiles.length === 1) return tiles[0];
@@ -67,6 +87,8 @@ export function createTerrainOverviewStore({ dataDir }) {
         paletteVersion: manifests[0].paletteVersion ?? null,
         tileCount: manifests.reduce((total, value) => total + Number(value.tileCount ?? 0), 0),
         totalBytes: manifests.reduce((total, value) => total + Number(value.totalBytes ?? 0), 0),
+        biomes: mergeBiomes(manifests),
+        channels: mergeChannels(manifests),
       };
     },
     async readTile(request) {
@@ -95,6 +117,8 @@ export function createLayeredTerrainTileStore({ detailStore, overviewStore }) {
         bounds: overview?.bounds ?? detail?.bounds ?? null,
         tileCount: manifests.reduce((total, value) => total + Number(value.tileCount ?? 0), 0),
         totalBytes: manifests.reduce((total, value) => total + Number(value.totalBytes ?? 0), 0),
+        biomes: mergeBiomes(manifests),
+        channels: mergeChannels(manifests),
         overviewAvailable: Boolean(overview),
       };
     },

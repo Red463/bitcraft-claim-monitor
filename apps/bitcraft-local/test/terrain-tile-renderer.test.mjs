@@ -101,9 +101,11 @@ test("terrain palette gives water semantic priority and deterministic elevation 
 test("terrain renderer is deterministic, bounded, clips world edges, and accepts negative tile Y", async () => {
   assert.ok(rendererModule, "terrain renderer module must exist");
   const request = fixtureRequest();
-  const first = await rendererModule.renderTerrainTile(request);
-  const second = await rendererModule.renderTerrainTile(request);
-  const water = await rendererModule.renderTerrainTile({ ...request, style: "water" });
+  const firstChannels = await rendererModule.renderTerrainTileChannels(request);
+  const secondChannels = await rendererModule.renderTerrainTileChannels(request);
+  const first = firstChannels.terrain;
+  const second = secondChannels.terrain;
+  const water = firstChannels.water;
   assert.deepEqual(createHash("sha256").update(first).digest("hex"), createHash("sha256").update(second).digest("hex"));
   assert.ok(first.byteLength <= 2_097_152);
 
@@ -121,8 +123,9 @@ test("terrain renderer is deterministic, bounded, clips world edges, and accepts
 test("terrain renderer emits aligned ground and water channels", async () => {
   assert.ok(rendererModule, "terrain renderer module must exist");
   const request = fixtureRequest();
-  const ground = await rendererModule.renderTerrainTile({ ...request, style: "terrain" });
-  const water = await rendererModule.renderTerrainTile({ ...request, style: "water" });
+  const channels = await rendererModule.renderTerrainTileChannels(request);
+  const ground = channels.terrain;
+  const water = channels.water;
   const groundPixels = await sharp(ground).ensureAlpha().raw().toBuffer();
   const waterPixels = await sharp(water).ensureAlpha().raw().toBuffer();
   const alphaAt = (bytes, x, y) => bytes[(y * 256 + x) * 4 + 3];

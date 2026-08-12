@@ -7,7 +7,6 @@ const APOTHEM = 2 / Math.sqrt(3);
 const DEFAULT_TILE_SIZE = 256;
 const MAX_TILE_SIZE = 512;
 const TERRAIN_CONTEXTS = new WeakMap();
-const TERRAIN_CHANNEL_PAIRS = new WeakMap();
 
 function requireInteger(value, label) {
   if (!Number.isSafeInteger(value)) throw new TypeError(`${label} must be a safe integer`);
@@ -115,30 +114,4 @@ export async function renderTerrainTileChannels({ generation, evidence, zoom, x,
     Promise.all([...biomeMaskRgba].map(async ([biomeType, rgba]) => [biomeType, await encode(rgba)])),
   ]);
   return { terrain, water, biomeMasks: new Map(encodedMasks) };
-}
-
-export async function renderTerrainTile({ generation, evidence, style = "terrain", zoom, x, y, tileSize = DEFAULT_TILE_SIZE, context = null }) {
-  if (style !== "terrain" && style !== "water") throw new TypeError("Terrain tile style must be terrain or water");
-  let pairs = TERRAIN_CHANNEL_PAIRS.get(generation);
-  if (!pairs) {
-    pairs = new Map();
-    TERRAIN_CHANNEL_PAIRS.set(generation, pairs);
-  }
-  const key = `${evidence?.evidenceHash ?? ""}:${zoom}:${x}:${y}:${tileSize}`;
-  let entry = pairs.get(key);
-  if (!entry) {
-    if (pairs.size >= 8) pairs.delete(pairs.keys().next().value);
-    entry = {
-      promise: renderTerrainTileChannels({ generation, evidence, zoom, x, y, tileSize, context }),
-      remaining: new Set(["terrain", "water"]),
-    };
-    pairs.set(key, entry);
-  }
-  try {
-    const channels = await entry.promise;
-    return channels[style];
-  } finally {
-    entry.remaining.delete(style);
-    if (!entry.remaining.size) pairs.delete(key);
-  }
 }
