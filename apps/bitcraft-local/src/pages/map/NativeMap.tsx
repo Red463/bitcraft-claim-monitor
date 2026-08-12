@@ -78,11 +78,13 @@ class DensePointLayer extends L.Layer {
   #points: MapFeature[] = [];
   #frame = 0;
   #color: string;
+  #pane: string;
   #visible = true;
 
-  constructor(color: string) {
+  constructor(color: string, pane = "overlayPane") {
     super();
     this.#color = color;
+    this.#pane = pane;
   }
 
   setPoints(points: MapFeature[]) {
@@ -99,7 +101,7 @@ class DensePointLayer extends L.Layer {
   onAdd(map: L.Map) {
     this.#map = map;
     this.#canvas = L.DomUtil.create("canvas", "leaflet-zoom-animated native-map-dense-canvas") as HTMLCanvasElement;
-    map.getPanes().overlayPane.appendChild(this.#canvas);
+    (map.getPane(this.#pane) ?? map.getPanes().overlayPane).appendChild(this.#canvas);
     map.on("move zoom resize", this.#scheduleDraw, this);
     this.#scheduleDraw();
     return this;
@@ -219,6 +221,11 @@ export function NativeMap({
   React.useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
     const map = L.map(hostRef.current, { crs: NATIVE_CRS, minZoom: -6, maxZoom: 5, zoomControl: true, preferCanvas: true, attributionControl: false });
+    const resourcePane = map.createPane("native-map-resources");
+    resourcePane.style.zIndex = "650";
+    resourcePane.style.pointerEvents = "none";
+    const playerPane = map.createPane("native-map-players");
+    playerPane.style.zIndex = "700";
     const bounds = L.latLngBounds([MAP_WORLD_BOUNDS.minZ, MAP_WORLD_BOUNDS.minX], [MAP_WORLD_BOUNDS.maxZ, MAP_WORLD_BOUNDS.maxX]);
     const updateClaimScale = () => {
       const scale = Math.max(0.72, Math.min(1.1, 0.72 + (map.getZoom() + 5) * 0.038));
@@ -230,11 +237,11 @@ export function NativeMap({
     updateClaimScale();
     new CoordinateGridLayer({ tileSize: 256, noWrap: false }).addTo(map);
     ordinaryRendererRef.current = L.canvas({ padding: 0.25 });
-    const markerGroups = Object.fromEntries(MARKER_LAYER_KEYS.map((key) => [key, L.layerGroup()]));
+    const markerGroups = Object.fromEntries(MARKER_LAYER_KEYS.map((key) => [key, key === "players" ? L.layerGroup([], { pane: "native-map-players" }) : L.layerGroup()]));
     for (const [key, group] of Object.entries(markerGroups)) if (layerVisibility[key as MapLayerKey]) group.addTo(map);
     markerGroupsRef.current = markerGroups;
     focusGroupRef.current = L.layerGroup().addTo(map);
-    resourcesRef.current = new DensePointLayer("rgba(87, 225, 151, 0.9)").addTo(map);
+    resourcesRef.current = new DensePointLayer("rgba(87, 225, 151, 0.9)", "native-map-resources").addTo(map);
     enemiesRef.current = new DensePointLayer("rgba(255, 112, 112, 0.92)").addTo(map);
     mapRef.current = map;
     return () => {
@@ -450,7 +457,7 @@ export function NativeMap({
               fillOpacity: 0.85,
               renderer: ordinaryRendererRef.current,
             })
-          : L.marker(leafletPoint(feature.point), { icon: markerIcon(feature.kind, presentation, playerColours[String(feature.playerEntityId ?? feature.entityId)]), keyboard: true, alt: accessibleLabel, title: accessibleLabel });
+          : L.marker(leafletPoint(feature.point), { icon: markerIcon(feature.kind, presentation, playerColours[String(feature.playerEntityId ?? feature.entityId)]), pane: feature.kind === "player" ? "native-map-players" : undefined, keyboard: true, alt: accessibleLabel, title: accessibleLabel });
         marker.bindTooltip(accessibleLabel);
         marker.on("add", () => marker.getElement()?.setAttribute("aria-label", accessibleLabel));
         marker.addTo(markerGroup);

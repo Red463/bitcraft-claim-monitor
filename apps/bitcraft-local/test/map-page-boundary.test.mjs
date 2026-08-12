@@ -134,6 +134,17 @@ test("Native map gives each visible player a stable accessible colour marker", (
   assert.match(css, /native-map-marker--player[^}]*border[^}]*box-shadow/s);
 });
 
+test("Native map keeps resource canvases and player markers above ordinary features", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  assert.match(nativeMap, /createPane\("native-map-resources"\)/);
+  assert.match(nativeMap, /createPane\("native-map-players"\)/);
+  assert.match(nativeMap, /resourcePane\.style\.zIndex\s*=\s*"650"/);
+  assert.match(nativeMap, /playerPane\.style\.zIndex\s*=\s*"700"/);
+  assert.match(nativeMap, /new DensePointLayer\([^\n]+"native-map-resources"\)/);
+  assert.match(nativeMap, /L\.layerGroup\(\[\], \{ pane: "native-map-players" \}\)/);
+  assert.match(nativeMap, /pane: feature\.kind === "player" \? "native-map-players" : undefined/);
+});
+
 test("Native map requests only same-origin locally provisioned terrain tiles", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   assert.match(nativeMap, /mapTileUrl\("terrain", terrainStatus\.generation\)/);
