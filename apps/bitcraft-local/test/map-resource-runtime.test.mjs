@@ -11,15 +11,19 @@ try {
 function manualClock() {
   let now = 0;
   const timers = new Map();
+  const callbacks = new Map();
   let nextTimer = 1;
   return {
     now: () => now,
     setTimer(callback, delay) {
       const timer = nextTimer++;
       timers.set(timer, { callback, dueAt: now + delay });
+      callbacks.set(timer, callback);
       return timer;
     },
     clearTimer(timer) { timers.delete(timer); },
+    pendingTimers: () => [...timers.keys()],
+    async fire(timer) { await callbacks.get(timer)?.(); },
     async advance(ms) {
       now += ms;
       while (true) {
@@ -112,6 +116,24 @@ test("reconcile starts the normal idle close window when an empty primary region
   await clock.advance(1);
   assert.equal(sessions[0].stopped, true, "the demoted empty region must close after its normal idle window");
   assert.equal(sessions[1].stopped, false, "the new primary region remains pinned");
+  await runtime.stop();
+});
+
+test("promoting an idle region cancels its old close timer and allows a later demotion to reschedule", async () => {
+  assert.ok(runtimeModule, "map-resource runtime module must exist");
+  const { runtime, sessions, clock } = runtimeFixture();
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "20", activeRegionIds: ["19", "20"] });
+  const oldIdleTimer = clock.pendingTimers()[0];
+  await clock.advance(30_000);
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
+  await clock.fire(oldIdleTimer);
+  assert.equal(sessions[0].stopped, false, "a stale close callback must not close the promoted region");
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "20", activeRegionIds: ["19", "20"] });
+  await clock.advance(30_000);
+  assert.equal(sessions[0].stopped, false, "the old timer must not shorten the second idle window");
+  await clock.advance(60_000);
+  assert.equal(sessions[0].stopped, true, "the second demotion must receive a fresh idle close timer");
   await runtime.stop();
 });
 

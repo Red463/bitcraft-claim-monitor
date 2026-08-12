@@ -143,6 +143,7 @@ export class RelayMapResourceRuntime {
       const wasPinned = entry.pinned;
       entry.configured = activeRegionIds.includes(entry.regionId);
       entry.pinned = entry.regionId === primaryRegionId;
+      if (!wasPinned && entry.pinned) this.#cancelRegionIdleClose(entry);
       if (!entry.configured && this.#leaseCount(entry) === 0) await this.#closeRegion(entry);
       else if (wasPinned && !entry.pinned && entry.resources.size === 0 && this.#leaseCount(entry) === 0) this.#scheduleRegionIdleClose(entry);
     }
@@ -336,7 +337,19 @@ export class RelayMapResourceRuntime {
 
   #scheduleRegionIdleClose(entry: RegionEntry) {
     if (entry.idleTimer != null) return;
-    entry.idleTimer = this.#setTimer(() => { void this.#closeRegion(entry); }, this.#regionIdleMs);
+    let timer: unknown = null;
+    timer = this.#setTimer(() => {
+      if (entry.idleTimer !== timer) return;
+      entry.idleTimer = null;
+      void this.#closeRegion(entry);
+    }, this.#regionIdleMs);
+    entry.idleTimer = timer;
+  }
+
+  #cancelRegionIdleClose(entry: RegionEntry) {
+    if (entry.idleTimer == null) return;
+    this.#clearTimer(entry.idleTimer);
+    entry.idleTimer = null;
   }
 
   async #closeRegion(entry: RegionEntry) {
