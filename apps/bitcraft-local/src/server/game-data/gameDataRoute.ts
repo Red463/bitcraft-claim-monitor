@@ -15,6 +15,9 @@ type MapScopeSelection = {
 };
 
 type MapGenerationEvent = {
+  claimId?: string;
+  generation?: number;
+  generatedAt?: string | null;
   changedDomains: DomainKey[];
   mapSpatialScopeKey?: string;
   mapResourceScopeKey?: string;
@@ -46,11 +49,14 @@ export function combineMapResourceLeases(leases: MapResourceLease[]) {
   const ready = states.filter((state) => state.snapshot != null);
   const snapshots = ready.map((state) => state.snapshot!);
   const receivedAt = snapshots.map((snapshot) => String(snapshot.receivedAt ?? "")).filter(Boolean).sort().at(0) ?? null;
-  const warnings = [...new Set(states.map((state) => state.warning).filter((warning): warning is string => Boolean(warning)))];
+  const warnings = [...new Set([
+    ...states.map((state) => state.warning),
+    ...snapshots.flatMap((snapshot) => snapshot.warnings ?? []),
+  ].filter((warning): warning is string => Boolean(warning)))];
   return {
     data: { resources: snapshots.flatMap((snapshot) => snapshot.data?.resources ?? []) },
     generation: Math.max(0, ...snapshots.map((snapshot) => Number(snapshot.generation) || 0)),
-    freshness: ready.some((state) => state.status === "stale") ? "stale" : "live",
+    freshness: ready.some((state) => state.status === "stale") ? "stale" : warnings.length ? "partial" : "live",
     provenance: { receivedAt },
     warnings,
     requestedKeys: states.map((state) => state.lease.key),
@@ -60,15 +66,26 @@ export function combineMapResourceLeases(leases: MapResourceLease[]) {
   };
 }
 
-export function mapSnapshotStatusCode({ regionClaims, market, empires, spatial, resourceCollection }: {
+export function mapSnapshotStatusCode({ scope, layerAvailability, regionClaims, market, empires, spatial, resourceCollection }: {
+  scope: { layers: string[] };
+  layerAvailability: Record<string, { status: string }>;
   regionClaims: unknown;
   market: unknown;
   empires: unknown;
   spatial: unknown;
   resourceCollection: { readyKeys?: string[]; loadingKeys?: string[] } | null;
 }): 200 | 503 {
-  return regionClaims || market || empires || spatial
-    || resourceCollection?.readyKeys?.length || resourceCollection?.loadingKeys?.length ? 200 : 503;
+  const hasRelevantSource = scope.layers.some((layer) => {
+    if (layerAvailability[layer]?.status === "unavailable") return false;
+    if (layer === "resources") return Boolean(resourceCollection?.readyKeys?.length || resourceCollection?.loadingKeys?.length);
+    if (layer === "claims") return Boolean(regionClaims);
+    if (layer === "markets") return Boolean(market);
+    if (layer === "waystones") return Boolean(regionClaims || spatial);
+    if (["empire-settlements", "empire-territory", "watchtowers"].includes(layer)) return Boolean(empires);
+    if (["players", "enemies"].includes(layer)) return Boolean(spatial);
+    return false;
+  });
+  return hasRelevantSource ? 200 : 503;
 }
 
 export function generationDomainsForListener(event: MapGenerationEvent, listener: MapGenerationListener): DomainKey[] {
@@ -77,6 +94,15 @@ export function generationDomainsForListener(event: MapGenerationEvent, listener
     && (domain !== "map-spatial" || !event.mapSpatialScopeKey || listener.mapSpatialScopeKeys?.has(event.mapSpatialScopeKey))
     && (domain !== "map-resources" || Boolean(event.mapResourceScopeKey && listener.mapResourceScopeKeys?.has(event.mapResourceScopeKey)))
   ));
+}
+
+export function publicGenerationEvent(event: MapGenerationEvent, changedDomains: DomainKey[]) {
+  return {
+    ...(event.claimId == null ? {} : { claimId: event.claimId }),
+    ...(event.generation == null ? {} : { generation: event.generation }),
+    ...(event.generatedAt === undefined ? {} : { generatedAt: event.generatedAt }),
+    changedDomains,
+  };
 }
 
 export function bindMapLeaseRelease(

@@ -191,6 +191,47 @@ test("accepted resource generations notify the runtime owner", async () => {
   await runtime.stop();
 });
 
+test("stop during a regional session open rejects the acquisition and stops the late session", async () => {
+  assert.ok(runtimeModule, "map-resource runtime module must exist");
+  let resolveRegion20Start;
+  const region20Start = new Promise((resolve) => { resolveRegion20Start = resolve; });
+  const sessions = [];
+  const generations = [];
+  const topology = (regionId) => ({ regions: new Map([[regionId, {
+    ready: true,
+    port: 4000 + Number(regionId),
+    database: `relay-region-${regionId}`,
+    schemaFingerprint: "regional-v1",
+  }]]) });
+  const runtime = new runtimeModule.RelayMapResourceRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(sessions.length === 0 ? "19" : "20"),
+    createSession: (options) => {
+      const session = {
+        options, stopped: false,
+        async start(config) { if (config.regionId === "20") await region20Start; }, async subscribe() {}, unsubscribe() {},
+        health: () => ({ connected: !session.stopped, applied: false, stage: session.stopped ? "stopped" : "subscribed", rowCount: 0, firstGenerationLatencyMs: null, lastAppliedAt: null, lastError: null }),
+        async stop() { session.stopped = true; },
+      };
+      sessions.push(session);
+      return session;
+    },
+    onGeneration: (snapshot) => generations.push(snapshot),
+  });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
+  const acquiring = runtime.acquire({ regionId: "20", resourceId: "28" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const stopping = runtime.stop();
+  resolveRegion20Start();
+  await assert.rejects(acquiring, /stopped|configuration|ownership/i);
+  await stopping;
+  assert.equal(sessions.length, 2);
+  assert.equal(sessions[1].stopped, true);
+  await sessions[1].options.onSnapshot(snapshot("20", "28", 1, [{ entityId: "late" }]));
+  assert.deepEqual(generations, []);
+  assert.deepEqual(runtime.health().regions, []);
+});
+
 test("zero leases retain a warm resource for 60 seconds, then close only an unpinned idle region", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
   const { runtime, sessions, clock } = runtimeFixture();

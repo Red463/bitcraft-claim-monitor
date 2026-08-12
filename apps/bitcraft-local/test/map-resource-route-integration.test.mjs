@@ -48,14 +48,34 @@ test("resource lease composition preserves warm rows and loading readiness", () 
   assert.deepEqual(combined.unavailableKeys, []);
 });
 
+test("resource lease composition retains snapshot warnings and marks usable rows partial", () => {
+  const warned = resourceSnapshot(
+    "19",
+    "28",
+    8,
+    [{ entityId: "100", resourceId: "28", regionId: "19" }],
+    ["Resource 100 has incomplete optional metadata."],
+  );
+  const combined = routeModule.combineMapResourceLeases([
+    lease("19|resource:28", "live", warned, null),
+  ]);
+  assert.equal(combined.data.resources.length, 1);
+  assert.deepEqual(combined.warnings, ["Resource 100 has incomplete optional metadata."]);
+  assert.equal(combined.freshness, "partial");
+});
+
 test("resource-only loading snapshots remain successful HTTP responses", () => {
   assert.equal(typeof routeModule.mapSnapshotStatusCode, "function");
   assert.equal(routeModule.mapSnapshotStatusCode({
+    scope: { layers: ["resources"] },
+    layerAvailability: { resources: { available: false, status: "loading", reason: "Loading." } },
     regionClaims: null, market: null, empires: null, spatial: null,
     resourceCollection: { requestedKeys: ["19|resource:28"], readyKeys: [], loadingKeys: ["19|resource:28"], unavailableKeys: [] },
   }), 200);
   assert.equal(routeModule.mapSnapshotStatusCode({
-    regionClaims: null, market: null, empires: null, spatial: null,
+    scope: { layers: ["resources"] },
+    layerAvailability: { resources: { available: false, status: "unavailable", reason: "Unavailable." } },
+    regionClaims: { data: { claims: [] } }, market: { data: { marketplaces: [] } }, empires: { data: { settlements: [] } }, spatial: null,
     resourceCollection: { requestedKeys: ["19|resource:28"], readyKeys: [], loadingKeys: [], unavailableKeys: ["19|resource:28"] },
   }), 503);
 });
@@ -68,6 +88,26 @@ test("map resource SSE changes reach only listeners for the selected keys", () =
   assert.deepEqual(routeModule.generationDomainsForListener(event, { ...listener, mapResourceScopeKeys: new Set(["19|resource:54"]) }), []);
   assert.deepEqual(routeModule.generationDomainsForListener({ ...event, mapResourceScopeKey: "24|resource:28" }, listener), []);
   assert.deepEqual(routeModule.generationDomainsForListener({ changedDomains: ["map-resources"] }, listener), []);
+});
+
+test("public generation events omit internal spatial and resource scope keys", () => {
+  assert.equal(typeof routeModule.publicGenerationEvent, "function");
+  const serialized = JSON.stringify(routeModule.publicGenerationEvent({
+    claimId: "999",
+    generation: 7,
+    generatedAt: "2026-08-12T10:00:00.000Z",
+    changedDomains: ["map-resources"],
+    mapResourceScopeKey: "19|resource:28",
+    mapSpatialScopeKey: "999|19|players:101",
+  }, ["map-resources"]));
+  assert.equal(serialized.includes("mapResourceScopeKey"), false);
+  assert.equal(serialized.includes("mapSpatialScopeKey"), false);
+  assert.deepEqual(JSON.parse(serialized), {
+    claimId: "999",
+    generation: 7,
+    generatedAt: "2026-08-12T10:00:00.000Z",
+    changedDomains: ["map-resources"],
+  });
 });
 
 test("map leases release once on request close, response completion, or event-stream close", async () => {

@@ -157,6 +157,7 @@ import {
   mapResourceLeaseInputs,
   mapRequestLogTarget,
   mapSnapshotStatusCode,
+  publicGenerationEvent,
   mergeClaimInventoryWithBanks,
   normalizeClaimInventory,
   parseDomainKeys,
@@ -500,7 +501,7 @@ function notifyGameDataGenerationListeners(event) {
     const changedDomains = generationDomainsForListener(event, listener);
     if (!changedDomains.length) continue;
     try {
-      listener.response.write(`data: ${JSON.stringify({ ...event, changedDomains })}\n\n`);
+      listener.response.write(`data: ${JSON.stringify(publicGenerationEvent(event, changedDomains))}\n\n`);
     } catch {
       gameDataGenerationListeners.delete(listener);
     }
@@ -8093,25 +8094,32 @@ const server = createServer(async (req, res) => {
         requestClosed = true;
       });
       try {
-        for (const regionId of spatialRegionIds) {
-          if (requestClosed) throw new Error("Map request closed during spatial scope acquisition.");
-          spatialLeases.push(await acquireMapLeaseUnlessClosed(
-            () => relayMapSpatialScopeManager.acquire({
-              relayBaseUrl,
-              claimId,
-              scope: { claimId, regionId, playerIds: permittedPlayerIds, resourceIds: [], enemyTypes: permittedEnemyTypes },
-            }),
-            () => requestClosed,
-            "Map request closed during spatial scope acquisition.",
-          ));
-        }
-        for (const resourceInput of mapResourceLeaseInputs(scope)) {
-          if (requestClosed) throw new Error("Map request closed during resource scope acquisition.");
-          resourceLeases.push(await acquireMapLeaseUnlessClosed(
-            () => relayMapResourceRuntime.acquire(resourceInput),
-            () => requestClosed,
-            "Map request closed during resource scope acquisition.",
-          ));
+        const acquiredForCurrentClaim = await relayClaimScopeFence.run(claimId, async () => {
+          for (const regionId of spatialRegionIds) {
+            if (requestClosed) throw new Error("Map request closed during spatial scope acquisition.");
+            spatialLeases.push(await acquireMapLeaseUnlessClosed(
+              () => relayMapSpatialScopeManager.acquire({
+                relayBaseUrl,
+                claimId,
+                scope: { claimId, regionId, playerIds: permittedPlayerIds, resourceIds: [], enemyTypes: permittedEnemyTypes },
+              }),
+              () => requestClosed,
+              "Map request closed during spatial scope acquisition.",
+            ));
+          }
+          for (const resourceInput of mapResourceLeaseInputs(scope)) {
+            if (requestClosed) throw new Error("Map request closed during resource scope acquisition.");
+            resourceLeases.push(await acquireMapLeaseUnlessClosed(
+              () => relayMapResourceRuntime.acquire(resourceInput),
+              () => requestClosed,
+              "Map request closed during resource scope acquisition.",
+            ));
+          }
+        });
+        if (!acquiredForCurrentClaim || currentClaimId() !== claimId) {
+          await releaseMapLeases();
+          if (requestClosed) return;
+          return send(res, 409, { error: "Map scope changed during lease acquisition." });
         }
       } catch (error) {
         await releaseMapLeases();
@@ -8177,7 +8185,15 @@ const server = createServer(async (req, res) => {
           resourceCoordinatesVerified: MAP_RESOURCE_COORDINATES_VERIFIED,
           waystoneCoordinatesVerified: MAP_WAYSTONE_COORDINATES_VERIFIED,
         });
-        const statusCode = mapSnapshotStatusCode({ regionClaims, market, empires, spatial, resourceCollection });
+        const statusCode = mapSnapshotStatusCode({
+          scope,
+          layerAvailability: payload.layerAvailability,
+          regionClaims,
+          market,
+          empires,
+          spatial,
+          resourceCollection,
+        });
         return send(res, statusCode, statusCode === 200 ? payload : { ...payload, freshness: "unavailable" });
       } catch (error) {
         const statusCode = error instanceof MapSnapshotError ? error.statusCode : 500;
@@ -9969,6 +9985,7 @@ assertCanonicalDiscordGatewayReady(deploymentRuntime, {
   webSocketAvailable: typeof WebSocket === "function",
 });
 replayCurrentPrivacyDeletionLedger();
+await relayClaimScopeFence.reconcile(currentClaimId());
 
 if (processRoleConfig.serveHttp) {
   server.listen(port, host, () => {

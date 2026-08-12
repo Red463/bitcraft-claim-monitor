@@ -161,6 +161,9 @@ export class RelayMapResourceRuntime {
     const resourceId = decimal(input.resourceId, "Map resource id");
     if (!config.activeRegionIds.includes(regionId)) throw new Error(`Relay map resource region ${regionId} is not configured`);
     const region = await this.#ensureRegion(regionId);
+    if (this.#stopped || this.#config !== config || this.#regions.get(regionId) !== region) {
+      throw new Error("Relay map resource runtime stopped or changed configuration during acquisition");
+    }
     if (region.idleTimer != null) {
       this.#clearTimer(region.idleTimer);
       region.idleTimer = null;
@@ -236,6 +239,14 @@ export class RelayMapResourceRuntime {
     };
     this.#regions.set(regionId, entry);
     await this.#startSession(entry);
+    if (this.#stopped || this.#regions.get(regionId) !== entry || !this.#config?.activeRegionIds.includes(regionId)) {
+      if (entry.session) {
+        const session = entry.session;
+        entry.session = null;
+        await session.stop();
+      }
+      throw new Error("Relay map resource runtime stopped or changed configuration during region open");
+    }
     return entry;
   }
 
@@ -245,6 +256,9 @@ export class RelayMapResourceRuntime {
     let session: RegionSession | null = null;
     try {
       const topology = await this.#discoverTopology(config.relayBaseUrl);
+      if (this.#stopped || this.#config !== config || this.#regions.get(entry.regionId) !== entry) {
+        throw new Error("Relay map resource runtime stopped or changed configuration during topology discovery");
+      }
       const source = topology.regions.get(entry.regionId);
       if (!source?.ready || !source.schemaFingerprint) throw new Error(`Relay map resource region ${entry.regionId} source is unavailable`);
       session = this.#createSession({
@@ -257,9 +271,18 @@ export class RelayMapResourceRuntime {
         schemaFingerprint: source.schemaFingerprint, manifest: this.#manifest,
         generation: this.#nextRegionGeneration(entry), regionId: entry.regionId,
       });
+      if (this.#stopped || this.#config !== config || this.#regions.get(entry.regionId) !== entry) {
+        if (entry.session === session) entry.session = null;
+        await session.stop();
+        throw new Error("Relay map resource runtime stopped or changed configuration during session open");
+      }
       for (const resource of entry.resources.values()) await this.#subscribe(entry, resource);
     } catch (error) {
       if (entry.session === session) entry.session = null;
+      if (this.#stopped || this.#config !== config || this.#regions.get(entry.regionId) !== entry) {
+        await session?.stop();
+        return;
+      }
       entry.failure = errorMessage(error);
       if (/schema.*mismatch/i.test(entry.failure)) entry.schemaUnavailable = true;
       else this.#scheduleRestart(entry);
@@ -281,7 +304,7 @@ export class RelayMapResourceRuntime {
   }
 
   #acceptSnapshot(entry: RegionEntry, session: RegionSession, snapshot: MapResourceSnapshot) {
-    if (this.#stopped || entry.session !== session || snapshot.regionId !== entry.regionId) return;
+    if (this.#stopped || this.#regions.get(entry.regionId) !== entry || entry.session !== session || snapshot.regionId !== entry.regionId) return;
     const resource = entry.resources.get(snapshot.resourceId);
     if (!resource) return;
     resource.snapshot = snapshot;

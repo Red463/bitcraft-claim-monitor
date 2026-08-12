@@ -244,3 +244,9 @@ test("configured-region resource and verified player tracking are enabled withou
   assert.match(server, /relayClaimScopeFence[\s\S]*relayMapResourceRuntime\.stop\(\)/);
 });
 
+test("map lease acquisition is serialized through the active claim fence", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /const acquiredForCurrentClaim = await relayClaimScopeFence\.run\(claimId, async \(\) => \{[\s\S]*relayMapResourceRuntime\.acquire/);
+  assert.match(server, /if \(!acquiredForCurrentClaim \|\| currentClaimId\(\) !== claimId\)/);
+});
+
