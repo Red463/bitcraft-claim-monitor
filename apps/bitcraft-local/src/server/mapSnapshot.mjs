@@ -111,11 +111,21 @@ export function buildMapSnapshot({
   members = [],
   players = [],
   spatial = null,
+  resourceCollection = {
+    data: { resources: [] },
+    generation: 0,
+    provenance: { receivedAt: null },
+    warnings: [],
+    requestedKeys: [],
+    readyKeys: [],
+    loadingKeys: [],
+    unavailableKeys: [],
+  },
 } = {}) {
   const layers = Object.fromEntries(scope.layers.map((layer) => [layer, []]));
-  const layerAvailability = Object.fromEntries(scope.layers.map((layer) => [layer, { available: true, reason: null }]));
+  const layerAvailability = Object.fromEntries(scope.layers.map((layer) => [layer, { available: true, status: "live", reason: null }]));
   const warnings = [...new Set(
-    [regionClaims, market, empires, spatial]
+    [regionClaims, market, empires, spatial, layers.resources ? resourceCollection : null]
       .flatMap((snapshot) => Array.isArray(snapshot?.warnings) ? snapshot.warnings : [])
       .map(String),
   )];
@@ -140,7 +150,7 @@ export function buildMapSnapshot({
   if (layers.waystones) {
     if (!waystoneCoordinatesVerified) {
       if (!warnings.includes(waystoneWarning)) warnings.push(waystoneWarning);
-      layerAvailability.waystones = { available: false, reason: waystoneWarning };
+      layerAvailability.waystones = { available: false, status: "unavailable", reason: waystoneWarning };
     }
     else if (waystoneCoordinatesVerified) layers.waystones = [...regionalWaystoneRows, ...(Array.isArray(spatialRows.waystones) ? spatialRows.waystones : [])].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId ?? candidate.buildingEntityId) === String(row.entityId ?? row.buildingEntityId)) === index && inScope(row, scope)).map((row) => feature(row, "waystone", row.entityId ?? row.buildingEntityId, recordPoint(row), { regionId: String(row.regionId), claimEntityId: String(row.claimEntityId) }));
   }
@@ -160,26 +170,36 @@ export function buildMapSnapshot({
     if (!mobileIdentityVerified) {
       const reason = "Player positions are unavailable until player-to-mobile entity identity is live-verified.";
       warnings.push(reason);
-      layerAvailability.players = { available: false, reason };
+      layerAvailability.players = { available: false, status: "unavailable", reason };
     } else if (!spatial) {
       const reason = "Live player positions are unavailable.";
       warnings.push(reason);
-      layerAvailability.players = { available: false, reason };
+      layerAvailability.players = { available: false, status: "unavailable", reason };
     }
   }
   if (layers.resources) {
     const unavailableWarning = "Resource positions are unavailable until the Relay resource/location join is live-verified.";
     if (!resourceCoordinatesVerified) {
       if (!warnings.includes(unavailableWarning)) warnings.push(unavailableWarning);
-      layerAvailability.resources = { available: false, reason: unavailableWarning };
+      layerAvailability.resources = { available: false, status: "unavailable", reason: unavailableWarning };
     }
     else {
       const selected = new Set(scope.resourceIds);
-      layers.resources = (Array.isArray(spatialRows.resources) ? spatialRows.resources : []).filter((row) => selected.has(String(row.resourceId)) && inScope(row, scope)).map((row) => feature(row, "resource", row.entityId, recordPoint(row), { regionId: String(row.regionId), resourceId: String(row.resourceId), identity: `resource:${row.resourceId}` }));
-      if (!spatial) {
-        const reason = "Live resource positions are unavailable.";
-        warnings.push(reason);
-        layerAvailability.resources = { available: false, reason };
+      const resourceRows = Array.isArray(resourceCollection?.data?.resources) ? resourceCollection.data.resources : [];
+      layers.resources = resourceRows.filter((row) => selected.has(String(row.resourceId)) && inScope(row, scope)).map((row) => feature(row, "resource", row.entityId, recordPoint(row), { regionId: String(row.regionId), resourceId: String(row.resourceId), identity: `resource:${row.resourceId}` }));
+      const requestedCount = resourceCollection?.requestedKeys?.length ?? 0;
+      const readyCount = resourceCollection?.readyKeys?.length ?? 0;
+      const loadingCount = resourceCollection?.loadingKeys?.length ?? 0;
+      const resourceWarning = resourceCollection?.warnings?.[0] ?? null;
+      if (requestedCount > 0 && readyCount === requestedCount) {
+        const stale = resourceCollection?.freshness === "stale";
+        layerAvailability.resources = { available: true, status: stale ? "stale" : "live", reason: stale ? (resourceWarning ?? "Live resource positions are stale.") : null };
+      } else if (readyCount > 0) {
+        layerAvailability.resources = { available: true, status: "partial", reason: loadingCount > 0 ? "Some selected resource positions are still loading." : "Some selected resource positions are unavailable." };
+      } else if (loadingCount > 0) {
+        layerAvailability.resources = { available: false, status: "loading", reason: "Selected resource positions are loading." };
+      } else {
+        layerAvailability.resources = { available: false, status: "unavailable", reason: resourceWarning ?? "Live resource positions are unavailable." };
       }
     }
   }
@@ -187,7 +207,7 @@ export function buildMapSnapshot({
     const unavailableWarning = "Enemy positions are unavailable until the Relay EnemyType to catalog mapping is live-verified.";
     if (!enemyIdentityVerified) {
       if (!warnings.includes(unavailableWarning)) warnings.push(unavailableWarning);
-      layerAvailability.enemies = { available: false, reason: unavailableWarning };
+      layerAvailability.enemies = { available: false, status: "unavailable", reason: unavailableWarning };
     }
     else {
       const selected = new Set(scope.enemyTypes);
@@ -195,27 +215,27 @@ export function buildMapSnapshot({
       if (!spatial) {
         const reason = "Live enemy positions are unavailable.";
         warnings.push(reason);
-        layerAvailability.enemies = { available: false, reason };
+        layerAvailability.enemies = { available: false, status: "unavailable", reason };
       }
     }
   }
   if (waystoneCoordinatesVerified && layers.waystones && !Array.isArray(regionClaims?.data?.waystones) && !Array.isArray(spatialRows.waystones)) {
     const reason = "Waystone map data is unavailable.";
     warnings.push(reason);
-    layerAvailability.waystones = { available: false, reason };
+    layerAvailability.waystones = { available: false, status: "unavailable", reason };
   }
   if (layers["empire-territory"]) {
     const reason = "Empire territory is unavailable until the chunk-to-map polygon transform is live-verified.";
     warnings.push(reason);
-    layerAvailability["empire-territory"] = { available: false, reason };
+    layerAvailability["empire-territory"] = { available: false, status: "unavailable", reason };
   }
   const unverifiedGeometryReason = "Unavailable — awaiting verified Relay coordinates";
   if (layers.roads) {
-    layerAvailability.roads = { available: false, reason: unverifiedGeometryReason };
+    layerAvailability.roads = { available: false, status: "unavailable", reason: unverifiedGeometryReason };
     warnings.push("Roads are unavailable — awaiting verified Relay coordinates.");
   }
   if (layers["claim-areas"]) {
-    layerAvailability["claim-areas"] = { available: false, reason: unverifiedGeometryReason };
+    layerAvailability["claim-areas"] = { available: false, status: "unavailable", reason: unverifiedGeometryReason };
     warnings.push("Claim areas are unavailable — awaiting verified Relay coordinates.");
   }
 
@@ -225,13 +245,15 @@ export function buildMapSnapshot({
     (layers.claims || layers.waystones) ? regionClaims : null,
     layers.markets ? market : null,
     (layers["empire-settlements"] || layers["empire-territory"] || layers.watchtowers) ? empires : null,
-    (layers.players || layers.resources || layers.enemies || (layers.waystones && spatial)) ? spatial : null,
+    (layers.players || layers.enemies || (layers.waystones && spatial)) ? spatial : null,
+    layers.resources ? resourceCollection : null,
   ].filter(Boolean);
   const generatedAt = oldestReceivedAt(snapshots) ?? now.toISOString();
   const ageMs = Math.max(0, now.getTime() - Date.parse(generatedAt));
   const sourceFreshness = snapshots.map((snapshot) => String(snapshot.freshness ?? "live"));
   const allStale = sourceFreshness.length > 0 && sourceFreshness.every((value) => value === "stale");
-  const degraded = sourceFreshness.some((value) => value === "stale" || value === "partial" || value === "unavailable");
+  const degraded = sourceFreshness.some((value) => value === "stale" || value === "partial" || value === "unavailable")
+    || Object.values(layerAvailability).some((availability) => availability.status === "partial" || availability.status === "loading" || availability.status === "unavailable");
   const result = {
     provider: "relay",
     generation: String(Math.max(0, ...snapshots.map((snapshot) => Number(snapshot.generation) || 0))),

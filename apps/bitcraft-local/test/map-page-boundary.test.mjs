@@ -227,7 +227,7 @@ test("Native map separates event and snapshot limits and ignores the initial str
   assert.match(server, /"map-events", RATE_LIMITS\.mapEvents/);
   assert.match(server, /initial: true/);
   assert.match(server, /MAP_SPATIAL_INITIAL_WAIT_MS\s*=\s*2_000/);
-  assert.match(server, /waitForSnapshot\(MAP_SPATIAL_INITIAL_WAIT_MS\).*combineMapSpatialLeases/s);
+  assert.match(server, /waitForSnapshot\(MAP_SPATIAL_INITIAL_WAIT_MS\).*combineMapResourceLeases/s);
 });
 
 test("configured-region resource and verified player tracking are enabled without enabling unverified enemy identities", () => {
@@ -236,6 +236,11 @@ test("configured-region resource and verified player tracking are enabled withou
   assert.match(server, /const MAP_SPATIAL_COLLECTION_VERIFIED = true/);
   assert.match(server, /const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = true/);
   assert.match(server, /const MAP_ENEMY_IDENTITY_VERIFIED = false/);
-  assert.match(server, /const spatialCollectionRequested = .*permittedPlayerIds\.length.*scope\.resourceIds\.length/s);
+  assert.match(server, /RelayMapResourceRuntime/);
+  assert.match(server, /resourceIds:\s*\[\]/);
+  assert.match(server, /mapResourceLeaseInputs\(scope\)/);
+  assert.match(server, /mapResourceScopeKeys/);
+  assert.match(server, /relayMapResourceRuntime\.reconcile\(\{[\s\S]*activeRegionIds:[\s\S]*slice\(0, 4\)/);
+  assert.match(server, /relayClaimScopeFence[\s\S]*relayMapResourceRuntime\.stop\(\)/);
 });
 

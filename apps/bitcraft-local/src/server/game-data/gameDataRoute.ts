@@ -6,6 +6,133 @@ import {
   type DomainKey,
   type EntityId,
 } from "./contracts.ts";
+import type { MapResourceLease, MapResourceRuntimeHealth } from "./mapResourceRuntime.ts";
+
+type MapScopeSelection = {
+  regionIds: string[];
+  layers: string[];
+  resourceIds: string[];
+};
+
+type MapGenerationEvent = {
+  changedDomains: DomainKey[];
+  mapSpatialScopeKey?: string;
+  mapResourceScopeKey?: string;
+};
+
+type MapGenerationListener = {
+  domains: Set<DomainKey>;
+  mapSpatialScopeKeys?: Set<string>;
+  mapResourceScopeKeys?: Set<string>;
+};
+
+export function mapResourceLeaseInputs(scope: MapScopeSelection): Array<{ regionId: string; resourceId: string }> {
+  if (!scope.layers.includes("resources")) return [];
+  return scope.regionIds.flatMap((regionId) => scope.resourceIds.map((resourceId) => ({ regionId, resourceId })));
+}
+
+export function mapRequestLogTarget(requestTarget: URL | string): string {
+  let url: URL;
+  try {
+    url = requestTarget instanceof URL ? requestTarget : new URL(requestTarget, "http://localhost");
+  } catch {
+    return "/";
+  }
+  return url.pathname.startsWith("/api/local/map/") ? url.pathname : `${url.pathname}${url.search}`;
+}
+
+export function combineMapResourceLeases(leases: MapResourceLease[]) {
+  const states = leases.map((lease) => ({ lease, ...lease.state() }));
+  const ready = states.filter((state) => state.snapshot != null);
+  const snapshots = ready.map((state) => state.snapshot!);
+  const receivedAt = snapshots.map((snapshot) => String(snapshot.receivedAt ?? "")).filter(Boolean).sort().at(0) ?? null;
+  const warnings = [...new Set(states.map((state) => state.warning).filter((warning): warning is string => Boolean(warning)))];
+  return {
+    data: { resources: snapshots.flatMap((snapshot) => snapshot.data?.resources ?? []) },
+    generation: Math.max(0, ...snapshots.map((snapshot) => Number(snapshot.generation) || 0)),
+    freshness: ready.some((state) => state.status === "stale") ? "stale" : "live",
+    provenance: { receivedAt },
+    warnings,
+    requestedKeys: states.map((state) => state.lease.key),
+    readyKeys: ready.map((state) => state.lease.key),
+    loadingKeys: states.filter((state) => state.snapshot == null && state.status === "loading").map((state) => state.lease.key),
+    unavailableKeys: states.filter((state) => state.snapshot == null && state.status === "unavailable").map((state) => state.lease.key),
+  };
+}
+
+export function mapSnapshotStatusCode({ regionClaims, market, empires, spatial, resourceCollection }: {
+  regionClaims: unknown;
+  market: unknown;
+  empires: unknown;
+  spatial: unknown;
+  resourceCollection: { readyKeys?: string[]; loadingKeys?: string[] } | null;
+}): 200 | 503 {
+  return regionClaims || market || empires || spatial
+    || resourceCollection?.readyKeys?.length || resourceCollection?.loadingKeys?.length ? 200 : 503;
+}
+
+export function generationDomainsForListener(event: MapGenerationEvent, listener: MapGenerationListener): DomainKey[] {
+  return browserVisibleChangedDomains(event.changedDomains).filter((domain) => (
+    listener.domains.has(domain)
+    && (domain !== "map-spatial" || !event.mapSpatialScopeKey || listener.mapSpatialScopeKeys?.has(event.mapSpatialScopeKey))
+    && (domain !== "map-resources" || Boolean(event.mapResourceScopeKey && listener.mapResourceScopeKeys?.has(event.mapResourceScopeKey)))
+  ));
+}
+
+export function bindMapLeaseRelease(
+  request: { once(event: string, listener: () => void): unknown },
+  response: { once(event: string, listener: () => void): unknown },
+  release: () => Promise<unknown>,
+) {
+  let releasePromise: Promise<unknown> | null = null;
+  const releaseOnce = () => {
+    releasePromise ??= Promise.resolve().then(release);
+    return releasePromise;
+  };
+  request.once("close", () => { void releaseOnce(); });
+  response.once("finish", () => { void releaseOnce(); });
+  response.once("close", () => { void releaseOnce(); });
+  return releaseOnce;
+}
+
+export async function acquireMapLeaseUnlessClosed<T extends { release(): Promise<unknown> }>(
+  acquire: () => Promise<T>,
+  requestClosed: () => boolean,
+  closedMessage: string,
+): Promise<T> {
+  const lease = await acquire();
+  if (!requestClosed()) return lease;
+  await lease.release();
+  throw new Error(closedMessage);
+}
+
+export function sanitizedMapResourceHealth(health: MapResourceRuntimeHealth) {
+  const regions = health.regions.map((region) => ({
+    regionId: region.regionId,
+    pinned: region.pinned,
+    resourceCount: region.resourceCount,
+    leaseCount: region.leaseCount,
+    failure: region.failure,
+    subscription: region.subscription ? {
+      connected: region.subscription.connected,
+      applied: region.subscription.applied,
+      stage: region.subscription.stage,
+      rowCount: region.subscription.rowCount,
+      firstGenerationLatencyMs: region.subscription.firstGenerationLatencyMs,
+      lastAppliedAt: region.subscription.lastAppliedAt,
+      lastError: region.subscription.lastError,
+    } : null,
+  }));
+  return {
+    configuredRegionCount: health.configuredRegionIds.length,
+    pinnedRegionCount: health.pinnedRegionIds.length,
+    coldStartsInWindow: health.coldStartsInWindow,
+    regionCount: regions.length,
+    resourceCount: regions.reduce((total, region) => total + region.resourceCount, 0),
+    leaseCount: regions.reduce((total, region) => total + region.leaseCount, 0),
+    regions,
+  };
+}
 
 export function parseDomainKeys(value: string | null): DomainKey[] {
   if (!value) return [];

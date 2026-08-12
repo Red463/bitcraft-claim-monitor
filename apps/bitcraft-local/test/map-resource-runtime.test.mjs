@@ -165,6 +165,32 @@ test("leases share canonical resource entries, snapshots, and the owning regiona
   await runtime.stop();
 });
 
+test("accepted resource generations notify the runtime owner", async () => {
+  assert.ok(runtimeModule, "map-resource runtime module must exist");
+  const events = [];
+  const sessions = [];
+  const runtime = new runtimeModule.RelayMapResourceRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({ regions: new Map([["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }]]) }),
+    createSession: (options) => {
+      const session = {
+        options,
+        async start() {}, async subscribe() {}, unsubscribe() {}, async stop() {},
+        health: () => ({ connected: true, applied: true, stage: "applied", rowCount: 0, firstGenerationLatencyMs: 1, lastAppliedAt: null, lastError: null }),
+      };
+      sessions.push(session);
+      return session;
+    },
+    onGeneration: (generation) => events.push(generation),
+  });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  await runtime.acquire({ regionId: "19", resourceId: "28" });
+  const accepted = snapshot("19", "28", 1);
+  await sessions[0].options.onSnapshot(accepted);
+  assert.deepEqual(events, [accepted]);
+  await runtime.stop();
+});
+
 test("zero leases retain a warm resource for 60 seconds, then close only an unpinned idle region", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
   const { runtime, sessions, clock } = runtimeFixture();

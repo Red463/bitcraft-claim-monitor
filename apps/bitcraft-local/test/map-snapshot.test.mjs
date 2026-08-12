@@ -57,6 +57,7 @@ test("roads and claim areas are accepted but fail closed until coordinates are v
   assert.deepEqual(snapshot.layers["claim-areas"], []);
   assert.deepEqual(snapshot.layerAvailability.roads, {
     available: false,
+    status: "unavailable",
     reason: "Unavailable — awaiting verified Relay coordinates",
   });
   assert.equal(snapshot.layerAvailability["claim-areas"].available, false);
@@ -307,4 +308,115 @@ test("map snapshot freshness uses the oldest requested source and cannot be mask
   assert.equal(snapshot.generatedAt, "2026-08-11T12:00:00.000Z");
   assert.equal(snapshot.ageMs, 600_000);
   assert.equal(snapshot.freshness, "partial");
+});
+
+test("resource collections retain warm points while reporting cold keys as loading", () => {
+  const scope = parseMapScope(new URLSearchParams({
+    regions: "19,24",
+    layers: "resources",
+    resourceIds: "28",
+  }), { allowedRegionIds: ["19", "24"] });
+  const snapshot = buildMapSnapshot({
+    scope,
+    now: new Date("2026-08-12T10:00:05.000Z"),
+    resourceCoordinatesVerified: true,
+    resourceCollection: {
+      data: { resources: [{ entityId: "100", resourceId: "28", regionId: "19", locationX: 100, locationZ: 200, dimension: "1" }] },
+      generation: 7,
+      freshness: "live",
+      provenance: { receivedAt: "2026-08-12T10:00:00.000Z" },
+      warnings: [],
+      requestedKeys: ["19|resource:28", "24|resource:28"],
+      readyKeys: ["19|resource:28"],
+      loadingKeys: ["24|resource:28"],
+      unavailableKeys: [],
+    },
+  });
+
+  assert.deepEqual(snapshot.layers.resources.map((row) => row.entityId), ["100"]);
+  assert.deepEqual(snapshot.layerAvailability.resources, {
+    available: true,
+    status: "partial",
+    reason: "Some selected resource positions are still loading.",
+  });
+  assert.equal(snapshot.freshness, "partial");
+  assert.equal("requestedKeys" in snapshot, false);
+  assert.equal(JSON.stringify(snapshot).includes("19|resource:28"), false);
+});
+
+test("a ready empty resource generation is live and available", () => {
+  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "resources", resourceIds: "28" }), { allowedRegionIds: ["19"] });
+  const snapshot = buildMapSnapshot({
+    scope,
+    resourceCoordinatesVerified: true,
+    resourceCollection: {
+      data: { resources: [] },
+      generation: 3,
+      freshness: "live",
+      provenance: { receivedAt: "2026-08-12T10:00:00.000Z" },
+      warnings: [],
+      requestedKeys: ["19|resource:28"],
+      readyKeys: ["19|resource:28"],
+      loadingKeys: [],
+      unavailableKeys: [],
+    },
+  });
+
+  assert.deepEqual(snapshot.layers.resources, []);
+  assert.deepEqual(snapshot.layerAvailability.resources, { available: true, status: "live", reason: null });
+  assert.equal(snapshot.freshness, "live");
+});
+
+test("stale resource warnings degrade freshness without clearing usable points", () => {
+  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "resources", resourceIds: "28" }), { allowedRegionIds: ["19"] });
+  const snapshot = buildMapSnapshot({
+    scope,
+    resourceCoordinatesVerified: true,
+    resourceCollection: {
+      data: { resources: [{ entityId: "100", resourceId: "28", regionId: "19", locationX: 100, locationZ: 200, dimension: "1" }] },
+      generation: 9,
+      freshness: "stale",
+      provenance: { receivedAt: "2026-08-12T09:59:00.000Z" },
+      warnings: ["Relay map resource subscription disconnected."],
+      requestedKeys: ["19|resource:28"],
+      readyKeys: ["19|resource:28"],
+      loadingKeys: [],
+      unavailableKeys: [],
+    },
+  });
+
+  assert.equal(snapshot.layers.resources.length, 1);
+  assert.deepEqual(snapshot.layerAvailability.resources, {
+    available: true,
+    status: "stale",
+    reason: "Relay map resource subscription disconnected.",
+  });
+  assert.equal(snapshot.freshness, "stale");
+  assert.deepEqual(snapshot.warnings, ["Relay map resource subscription disconnected."]);
+});
+
+test("map resource requests retain region, resource, feature, and byte limits", () => {
+  assert.throws(
+    () => parseMapScope(new URLSearchParams({ regions: "1,2,3,4,5", layers: "claims" }), { allowedRegionIds: ["1", "2", "3", "4", "5"] }),
+    (error) => error instanceof MapSnapshotError && error.statusCode === 413,
+  );
+  assert.throws(
+    () => parseMapScope(new URLSearchParams({ regions: "1", layers: "resources", resourceIds: Array.from({ length: 17 }, (_, index) => index + 1).join(",") }), { allowedRegionIds: ["1"] }),
+    (error) => error instanceof MapSnapshotError && error.statusCode === 413,
+  );
+  const scope = parseMapScope(new URLSearchParams({ regions: "1", layers: "resources", resourceIds: "1" }), { allowedRegionIds: ["1"] });
+  const collection = (resources) => ({
+    data: { resources }, generation: 1, freshness: "live",
+    provenance: { receivedAt: "2026-08-12T10:00:00.000Z" }, warnings: [],
+    requestedKeys: ["1|resource:1"], readyKeys: ["1|resource:1"], loadingKeys: [], unavailableKeys: [],
+  });
+  const point = (entityId) => ({ entityId, resourceId: "1", regionId: "1", locationX: 1, locationZ: 1, dimension: "1" });
+  assert.throws(
+    () => buildMapSnapshot({ scope, resourceCoordinatesVerified: true, resourceCollection: collection(Array.from({ length: 50_001 }, (_, index) => point(String(index)))) }),
+    (error) => error instanceof MapSnapshotError && error.statusCode === 413 && /feature limit/.test(error.message),
+  );
+  assert.throws(
+    () => buildMapSnapshot({ scope, resourceCoordinatesVerified: true, resourceCollection: collection([point("x".repeat(8 * 1024 * 1024))]) }),
+    (error) => error instanceof MapSnapshotError && error.statusCode === 413 && /byte limit/.test(error.message),
+  );
 });

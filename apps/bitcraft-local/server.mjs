@@ -137,7 +137,6 @@ import {
   createCurrentStateRepository,
   buildCatalogItemDetail,
   buildResearchTierPresets,
-  browserVisibleChangedDomains,
   canonicalF32Decimal,
   canonicalNonNegativeDecimal,
   enrichConstructionWithCatalog,
@@ -150,7 +149,14 @@ import {
   enrichRecruitmentWithCatalog,
   enrichResearchWithCatalog,
   gameDataResponse,
+  generationDomainsForListener,
   generationSourceDomains,
+  acquireMapLeaseUnlessClosed,
+  bindMapLeaseRelease,
+  combineMapResourceLeases,
+  mapResourceLeaseInputs,
+  mapRequestLogTarget,
+  mapSnapshotStatusCode,
   mergeClaimInventoryWithBanks,
   normalizeClaimInventory,
   parseDomainKeys,
@@ -166,6 +172,9 @@ import {
   RelayRegionClaimsRuntime,
   RelayMapSpatialScopeManager,
   mapSpatialScopeKey,
+  RelayMapResourceRuntime,
+  mapResourceScopeKey,
+  sanitizedMapResourceHealth,
   RelayStorageActivityService,
   RelayTerrainRuntime,
   runtimeHealthWithPersistedSnapshot,
@@ -486,13 +495,9 @@ const gameDataGenerationListeners = new Set();
 let productionRelayLifecycleCoordinator = null;
 let settlementRelayTransitionCoordinator = null;
 function notifyGameDataGenerationListeners(event) {
-  const publicChangedDomains = browserVisibleChangedDomains(event.changedDomains);
   for (const listener of gameDataGenerationListeners) {
     if (listener.claimId !== event.claimId) continue;
-    const changedDomains = publicChangedDomains.filter((domain) => (
-      listener.domains.has(domain)
-      && (domain !== "map-spatial" || !event.mapSpatialScopeKey || listener.mapSpatialScopeKeys?.has(event.mapSpatialScopeKey))
-    ));
+    const changedDomains = generationDomainsForListener(event, listener);
     if (!changedDomains.length) continue;
     try {
       listener.response.write(`data: ${JSON.stringify({ ...event, changedDomains })}\n\n`);
@@ -618,6 +623,16 @@ const relayMapSpatialScopeManager = new RelayMapSpatialScopeManager({
     generatedAt: snapshot.receivedAt,
     changedDomains: ["map-spatial"],
     mapSpatialScopeKey: mapSpatialScopeKey(scope),
+  }),
+});
+const relayMapResourceRuntime = new RelayMapResourceRuntime({
+  manifest: relayBindingManifest,
+  onGeneration: (snapshot) => notifyGameDataGenerationListeners({
+    claimId: currentClaimId(),
+    generation: snapshot.generation,
+    generatedAt: snapshot.receivedAt,
+    changedDomains: ["map-resources"],
+    mapResourceScopeKey: mapResourceScopeKey(snapshot.regionId, snapshot.resourceId),
   }),
 });
 const relayMarketTransitionWriter = createRelayMarketTransitionWriter(db, {
@@ -754,6 +769,7 @@ const relayClaimScopeFence = createRelayClaimScopeFence([
     },
   },
   { stop: async () => relayMapSpatialScopeManager.stop() },
+  { stop: async () => relayMapResourceRuntime.stop() },
   {
     stop: async () => {
       try { await relayPrimaryRegionRuntime.stop(); } finally { relayPrimaryRegionStarted = false; }
@@ -807,6 +823,7 @@ function gameDataProviderHealth() {
     regionalMarket,
     regionClaims,
     empires,
+    mapResources: sanitizedMapResourceHealth(relayMapResourceRuntime.health()),
   };
 }
 function globalRegionSubscriptionHealth() {
@@ -5972,7 +5989,6 @@ function combineMapSpatialLeases(leases) {
   return {
     data: {
       players: snapshots.flatMap((snapshot) => snapshot.data?.players ?? []),
-      resources: snapshots.flatMap((snapshot) => snapshot.data?.resources ?? []),
       enemies: snapshots.flatMap((snapshot) => snapshot.data?.enemies ?? []),
       banks: snapshots.flatMap((snapshot) => snapshot.data?.banks ?? []),
       waystones: snapshots.flatMap((snapshot) => snapshot.data?.waystones ?? []),
@@ -7339,6 +7355,7 @@ const server = createServer(async (req, res) => {
     // before authenticated admin routes, while static frontend fallback stays at
     // the end so API typos do not accidentally return index.html.
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    const requestLogTarget = mapRequestLogTarget(url);
     const requestStartedAt = Date.now();
     const slowRequestLogPolicy = requestLogPolicy(url.pathname, "slow");
     const closedRequestLogPolicy = requestLogPolicy(url.pathname, "closed");
@@ -7349,13 +7366,13 @@ const server = createServer(async (req, res) => {
       requestTelemetry.push({ at: Date.now(), path: url.pathname, status: res.statusCode, durationMs });
       if (requestTelemetry.length > 10_000) requestTelemetry.splice(0, requestTelemetry.length - 10_000);
       if (!isTestRuntime && slowRequestLogPolicy.logGeneric && durationMs >= SLOW_REQUEST_LOG_MS) {
-        console.warn(`Slow request completed: ${req.method} ${url.pathname}${url.search} status=${res.statusCode} durationMs=${durationMs}`);
+        console.warn(`Slow request completed: ${req.method} ${requestLogTarget} status=${res.statusCode} durationMs=${durationMs}`);
       }
     });
     res.once("close", () => {
       if (requestFinished || isTestRuntime || !closedRequestLogPolicy.logGeneric) return;
       const durationMs = Date.now() - requestStartedAt;
-      console.warn(`Request connection closed before completion: ${req.method} ${url.pathname}${url.search} durationMs=${durationMs}`);
+      console.warn(`Request connection closed before completion: ${req.method} ${requestLogTarget} durationMs=${durationMs}`);
     });
     if (shouldLogVisitor(url.pathname)) {
       res.once("finish", () => {
@@ -8062,32 +8079,47 @@ const server = createServer(async (req, res) => {
       });
       const permittedEnemyTypes = MAP_ENEMY_IDENTITY_VERIFIED ? scope.enemyTypes : [];
       const spatialCollectionRequested = MAP_SPATIAL_COLLECTION_VERIFIED && (
-        permittedPlayerIds.length > 0 || scope.resourceIds.length > 0 || permittedEnemyTypes.length > 0
+        permittedPlayerIds.length > 0 || permittedEnemyTypes.length > 0
       );
       const spatialRegionIds = spatialCollectionRequested ? scope.regionIds : [];
       const spatialLeases = [];
+      const resourceLeases = [];
       let requestClosed = false;
-      const releaseSpatialLeases = () => Promise.allSettled(spatialLeases.map((lease) => lease.release()));
+      const releaseMapLeases = bindMapLeaseRelease(req, res, () => Promise.allSettled([
+        ...spatialLeases.map((lease) => lease.release()),
+        ...resourceLeases.map((lease) => lease.release()),
+      ]));
       req.once("close", () => {
         requestClosed = true;
-        void releaseSpatialLeases();
       });
       try {
         for (const regionId of spatialRegionIds) {
           if (requestClosed) throw new Error("Map request closed during spatial scope acquisition.");
-          spatialLeases.push(await relayMapSpatialScopeManager.acquire({
-            relayBaseUrl,
-            claimId,
-            scope: { claimId, regionId, playerIds: permittedPlayerIds, resourceIds: scope.resourceIds, enemyTypes: permittedEnemyTypes },
-          }));
+          spatialLeases.push(await acquireMapLeaseUnlessClosed(
+            () => relayMapSpatialScopeManager.acquire({
+              relayBaseUrl,
+              claimId,
+              scope: { claimId, regionId, playerIds: permittedPlayerIds, resourceIds: [], enemyTypes: permittedEnemyTypes },
+            }),
+            () => requestClosed,
+            "Map request closed during spatial scope acquisition.",
+          ));
+        }
+        for (const resourceInput of mapResourceLeaseInputs(scope)) {
+          if (requestClosed) throw new Error("Map request closed during resource scope acquisition.");
+          resourceLeases.push(await acquireMapLeaseUnlessClosed(
+            () => relayMapResourceRuntime.acquire(resourceInput),
+            () => requestClosed,
+            "Map request closed during resource scope acquisition.",
+          ));
         }
       } catch (error) {
-        await releaseSpatialLeases();
+        await releaseMapLeases();
         if (requestClosed) return;
         return send(res, 503, { error: error instanceof Error ? error.message : String(error) });
       }
       if (url.pathname === "/api/local/map/events") {
-        const domains = ["region-claims", "market", "empires", "members", "players", "map-static", "map-spatial"];
+        const domains = ["region-claims", "market", "empires", "members", "players", "map-static", "map-spatial", "map-resources"];
         res.writeHead(200, {
           "Content-Type": "text/event-stream; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
@@ -8102,9 +8134,10 @@ const server = createServer(async (req, res) => {
             claimId,
             regionId,
             playerIds: permittedPlayerIds,
-            resourceIds: scope.resourceIds,
+            resourceIds: [],
             enemyTypes: permittedEnemyTypes,
           }))),
+          mapResourceScopeKeys: new Set(resourceLeases.map((lease) => lease.key)),
           response: res,
         };
         gameDataGenerationListeners.add(listener);
@@ -8115,16 +8148,20 @@ const server = createServer(async (req, res) => {
         req.once("close", () => {
           clearInterval(heartbeat);
           gameDataGenerationListeners.delete(listener);
-          void releaseSpatialLeases();
+          void releaseMapLeases();
         });
         return;
       }
       await Promise.all(spatialLeases.map((lease) => lease.waitForSnapshot(MAP_SPATIAL_INITIAL_WAIT_MS)));
+      await Promise.all(resourceLeases
+        .filter((lease) => lease.state().snapshot == null)
+        .map((lease) => lease.waitForSnapshot(MAP_SPATIAL_INITIAL_WAIT_MS)));
       try {
         const regionClaims = currentStateRepository.read(claimId, "region-claims");
         const market = currentStateRepository.read(claimId, "market");
         const empires = currentStateRepository.read(claimId, "empires");
         const spatial = combineMapSpatialLeases(spatialLeases);
+        const resourceCollection = combineMapResourceLeases(resourceLeases);
         const payload = buildMapSnapshot({
           scope,
           excludedMemberIds: getSettings().excludedMemberIds,
@@ -8134,18 +8171,19 @@ const server = createServer(async (req, res) => {
           members: memberRows,
           players: playerRows,
           spatial,
+          resourceCollection,
           mobileIdentityVerified: MAP_PLAYER_MOBILE_IDENTITY_VERIFIED,
           enemyIdentityVerified: MAP_ENEMY_IDENTITY_VERIFIED,
           resourceCoordinatesVerified: MAP_RESOURCE_COORDINATES_VERIFIED,
           waystoneCoordinatesVerified: MAP_WAYSTONE_COORDINATES_VERIFIED,
         });
-        const hasUsableSource = Boolean(regionClaims || market || empires || spatial);
-        return send(res, hasUsableSource ? 200 : 503, hasUsableSource ? payload : { ...payload, freshness: "unavailable" });
+        const statusCode = mapSnapshotStatusCode({ regionClaims, market, empires, spatial, resourceCollection });
+        return send(res, statusCode, statusCode === 200 ? payload : { ...payload, freshness: "unavailable" });
       } catch (error) {
         const statusCode = error instanceof MapSnapshotError ? error.statusCode : 500;
         return send(res, statusCode, { error: error instanceof Error ? error.message : String(error) });
       } finally {
-        await releaseSpatialLeases();
+        await releaseMapLeases();
       }
     }
     if (req.method === "GET" && url.pathname.startsWith("/api/local/branding/")) {
@@ -9470,7 +9508,7 @@ const server = createServer(async (req, res) => {
         logDiscordOAuthDiagnostic(logPolicy.discordDiagnostic);
       } else if (logPolicy.logGeneric) {
         const detail = error instanceof Error && error.stack ? error.stack : errorMessage(error);
-        console.warn(`Request failed: ${req.method} ${req.url ?? "/"} status=${status} ${detail}`);
+        console.warn(`Request failed: ${req.method} ${mapRequestLogTarget(req.url ?? "/")} status=${status} ${detail}`);
       }
     }
     if (logPolicy.discordDiagnostic) {
@@ -9609,6 +9647,16 @@ function startBackgroundTasks() {
       const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();
       if (!regionId) {
         throw new Error("Relay regional sessions are waiting for a claim region");
+      }
+      {
+        const settings = getSettings();
+        await relayMapResourceRuntime.reconcile({
+          relayBaseUrl,
+          primaryRegionId: regionId,
+          activeRegionIds: parseRegionIds(
+            `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+          ).slice(0, 4),
+        });
       }
       if (terrainLiveRebuildEnabled) try {
         const settings = getSettings();

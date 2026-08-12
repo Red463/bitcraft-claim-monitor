@@ -64,6 +64,7 @@ export type MapResourceRuntimeHealth = {
 
 type Dependencies = {
   manifest: BindingManifest;
+  onGeneration?: (snapshot: MapResourceSnapshot) => void;
   discoverTopology?: (baseUrl: string) => Promise<RelayTopology>;
   createSession?: RegionSessionFactory;
   now?: () => number;
@@ -99,6 +100,7 @@ export function mapResourceScopeKey(regionId: string, resourceId: string): strin
 
 export class RelayMapResourceRuntime {
   readonly #manifest: BindingManifest;
+  readonly #onGeneration: (snapshot: MapResourceSnapshot) => void;
   readonly #discoverTopology: (baseUrl: string) => Promise<RelayTopology>;
   readonly #createSession: RegionSessionFactory;
   readonly #now: () => number;
@@ -119,6 +121,7 @@ export class RelayMapResourceRuntime {
 
   constructor(dependencies: Dependencies) {
     this.#manifest = dependencies.manifest;
+    this.#onGeneration = dependencies.onGeneration ?? (() => {});
     this.#discoverTopology = dependencies.discoverTopology ?? discoverRelayTopology;
     this.#createSession = dependencies.createSession ?? ((options) => new RelayMapResourceRegionSession(options));
     this.#now = dependencies.now ?? Date.now;
@@ -292,6 +295,7 @@ export class RelayMapResourceRuntime {
       waiter.resolve(snapshot);
     }
     resource.waiters.clear();
+    this.#onGeneration(snapshot);
   }
 
   #failRegion(entry: RegionEntry, session: RegionSession, error: string) {
