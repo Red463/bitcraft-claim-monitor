@@ -6,12 +6,9 @@ Improve native-map claim presentation by slightly reducing badge size, presentin
 
 ## Data classification
 
-The existing regional `claim_state` subscription is authoritative for both player and neutral claims. A claim is an NPC/starter town when either:
+The existing regional `claim_state` and `claim_local_state` subscription is authoritative for player claims and map POIs. NPC/starter towns are identified by the verified `claim_local_state.building_description_id` value `292245080`, matching BitCraftMap's ruined-town layer. Ownership and the generic `neutral` flag are insufficient because caves and other POIs share those values.
 
-- `neutral === true`; or
-- `owner_player_entity_id` normalizes to decimal string `"0"`.
-
-Neutral claims must no longer be discarded during regional-claim normalization. They are emitted with `npc: true`. Ordinary claims are emitted with `npc: false`. Missing owner usernames are not warnings for NPC claims.
+Typed NPC/starter towns are retained and emitted with `npc: true`. Other neutral/owner-zero POIs remain excluded. Ordinary player claims are emitted with `npc: false`. Missing owner usernames are not warnings for NPC claims.
 
 No manual town list, direct browser Relay access, or new subscription is introduced. Existing region, dimension, generation, schema, and claim-count safeguards continue to apply.
 
@@ -38,7 +35,7 @@ NPC towns remain part of the existing Claims layer and count. No separate layer 
 
 ## Testing
 
-- Normalizer tests prove neutral and owner-zero claims are retained and classified without false missing-owner warnings.
+- Normalizer tests prove typed starter towns are retained, neutral caves remain excluded, and NPC towns do not create false missing-owner warnings.
 - Snapshot tests prove `npc` reaches the provider-neutral claim feature.
 - Marker presentation tests prove NPC precedence and T0-to-T1 mapping.
 - Map boundary/CSS tests lock the 36px badge size and proportional crop.

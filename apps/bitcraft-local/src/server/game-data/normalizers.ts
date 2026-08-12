@@ -17,6 +17,8 @@ export type CatalogDescriptionKind =
   | "buff"
   | "claim_tech";
 
+const NPC_STARTER_TOWN_BUILDING_DESCRIPTION_ID = 292245080;
+
 function record(value: unknown, label: string): WireRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object.`);
@@ -511,8 +513,9 @@ export function normalizeRegionalClaims(options: {
         row.ownerBuildingEntityId ?? row.owner_building_entity_id,
         `Regional claim ${entityId} owner building id`,
       );
-      const npc = ownerPlayerEntityId === "0" || row.neutral === true;
       const local = localById.get(entityId);
+      const npc = (local?.buildingDescriptionId ?? local?.building_description_id) === NPC_STARTER_TOWN_BUILDING_DESCRIPTION_ID;
+      if ((ownerPlayerEntityId === "0" || row.neutral === true) && !npc) continue;
       if (!local) warnings.push(`Regional claim ${entityId} has no claim_local_state row.`);
       const ownerPlayerUsername = usernameById.get(ownerPlayerEntityId) || null;
       if (!npc && !ownerPlayerUsername) {

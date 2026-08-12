@@ -493,7 +493,7 @@ test("regional empires fail closed when a current siege node has no owner identi
   }), /Regional empire node 300 empire id must be a non-negative decimal integer string/);
 });
 
-test("regional claims rank only player settlements by their exact learned Relay technology", () => {
+test("regional claims retain typed NPC starter towns while excluding other neutral POIs", () => {
   assert.deepEqual(normalizeRegionalClaims({
     regionId: "19",
     claimRows: [{
@@ -533,12 +533,14 @@ test("regional claims rank only player settlements by their exact learned Relay 
       supplies: 0,
       numTiles: 0,
       treasury: 0,
+      buildingDescriptionId: 292245080,
       location: { x: 120, z: 240, dimension: 1n },
     }, {
       entityId: 1369094286777412593n,
       supplies: 1,
       numTiles: 1,
       treasury: 2,
+      buildingDescriptionId: 790011334,
       location: { x: 121, z: 241, dimension: 1n },
     }],
     claimTypeRows: [{ buildingId: 6020, tier: 6, radius: 7, claimType: { tag: "Settlement" } }],
@@ -601,21 +603,6 @@ test("regional claims rank only player settlements by their exact learned Relay 
         tier: null,
         locationX: 120,
         locationZ: 240,
-        locationDimension: "1",
-      }, {
-        entityId: "1369094286777412593",
-        ownerPlayerEntityId: "1224979098736429553",
-        ownerBuildingEntityId: "1369094286778488970",
-        ownerPlayerUsername: null,
-        name: "Amberfall",
-        neutral: true,
-        npc: true,
-        supplies: 1,
-        treasury: "2",
-        numTiles: 1,
-        tier: null,
-        locationX: 121,
-        locationZ: 241,
         locationDimension: "1",
       }],
       banks: [],

@@ -2,15 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Retain neutral Relay claims as NPC towns, render them with the supplied NPC badge, display player claim tier zero as Tier 1, and reduce claim badges to 36px.
+**Goal:** Retain typed Relay NPC starter towns, render them with the supplied NPC badge, display player claim tier zero as Tier 1, and reduce claim badges to 36px.
 
-**Architecture:** Extend the existing regional-claim normalizer and provider-neutral map feature with an explicit `npc` boolean derived from Relay ownership fields. Keep tier conversion in a pure presentation helper, then reuse the existing claim marker path and Claims layer with a locally hosted NPC image.
+**Architecture:** Extend the existing regional-claim normalizer and provider-neutral map feature with an explicit `npc` boolean derived from the verified Relay `claim_local_state.building_description_id` for starter towns (`292245080`). Keep tier conversion in a pure presentation helper, then reuse the existing claim marker path and Claims layer with a locally hosted NPC image.
 
 **Tech Stack:** TypeScript, JavaScript ESM helpers, React, Leaflet, plain CSS, Node test runner, typed SpacetimeDB Relay sessions.
 
 ## Global Constraints
 
-- Classify a claim as NPC when `neutral === true` or canonical owner player ID is `"0"`.
+- Classify a claim as NPC only when `claim_local_state.building_description_id` is `292245080`; retain existing filtering for all other neutral or owner-zero POIs.
 - Preserve the underlying Relay tier; convert `0` to display tier `1` only in map presentation.
 - NPC presentation takes precedence over tier presentation and uses `/map-icons/claims/claim_npc.png`.
 - NPC claims remain in the existing Claims layer; do not add another toggle or subscription.
@@ -28,12 +28,12 @@
 - Modify: `apps/bitcraft-local/src/server/mapSnapshot.mjs`
 
 **Interfaces:**
-- Consumes: `claim_state.neutral`, `claim_state.owner_player_entity_id`, and existing claim locations.
+- Consumes: `claim_state.neutral`, `claim_state.owner_player_entity_id`, `claim_local_state.building_description_id`, and existing claim locations.
 - Produces: normalized and map-feature field `npc: boolean`.
 
 - [ ] **Step 1: Write failing normalizer expectations**
 
-Extend the existing `regional claims rank only player settlements...` fixture with local rows for `Fernwick` and `Amberfall`. Change the expected claims to include both rows:
+Extend the regional-claims fixture with a typed starter town (`Fernwick`, building description `292245080`) and a neutral cave (`Amberfall`, building description `790011334`). Expect only the starter town to be added:
 
 ```js
 {
@@ -62,38 +62,19 @@ Use these literal local fixtures:
   supplies: 0,
   numTiles: 0,
   treasury: 0,
+  buildingDescriptionId: 292245080,
   location: { x: 120, z: 240, dimension: 1n },
 }, {
   entityId: 1369094286777412593n,
   supplies: 1,
   numTiles: 1,
   treasury: 2,
+  buildingDescriptionId: 790011334,
   location: { x: 121, z: 241, dimension: 1n },
 }
 ```
 
-Add this exact `Amberfall` expectation:
-
-```js
-{
-  entityId: "1369094286777412593",
-  ownerPlayerEntityId: "1224979098736429553",
-  ownerBuildingEntityId: "1369094286778488970",
-  ownerPlayerUsername: null,
-  name: "Amberfall",
-  neutral: true,
-  npc: true,
-  supplies: 1,
-  treasury: "2",
-  numTiles: 1,
-  tier: null,
-  locationX: 121,
-  locationZ: 241,
-  locationDimension: "1",
-}
-```
-
-Add `npc: false` to ordinary claim expectations. Keep `coverage.missingOwnerUsernameCount` at `1`, proving NPC claims do not count as missing owner enrichment.
+Add `npc: false` to ordinary claim expectations. Do not add an `Amberfall` expectation. Keep `coverage.missingOwnerUsernameCount` at `1`, proving NPC claims do not count as missing owner enrichment and neutral caves are not exposed as claims.
 
 - [ ] **Step 2: Run the normalizer test and verify RED**
 
@@ -103,14 +84,15 @@ Run:
 node --experimental-strip-types --test apps/bitcraft-local/test/relay-game-data-normalizers.test.mjs
 ```
 
-Expected: FAIL because neutral/owner-zero claims are still discarded and `npc` is absent.
+Expected: FAIL because the current ownership-based classifier exposes the neutral cave as an NPC town.
 
 - [ ] **Step 3: Implement NPC classification in `normalizeRegionalClaims`**
 
-Replace the early neutral/owner-zero skip with:
+Classify by the verified local building description before applying the existing neutral/owner-zero filter:
 
 ```ts
-const npc = ownerPlayerEntityId === "0" || row.neutral === true;
+const npc = (local?.buildingDescriptionId ?? local?.building_description_id) === 292245080;
+if ((ownerPlayerEntityId === "0" || row.neutral === true) && !npc) continue;
 ```
 
 Only increment `missingOwnerUsernameCount` when `!npc && !ownerPlayerUsername`. Include `npc` on every normalized claim. Keep location, tier, ownership, sorting, and warnings unchanged.
