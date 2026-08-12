@@ -230,6 +230,16 @@ test("Native map separates event and snapshot limits and ignores the initial str
   assert.match(server, /waitForSnapshot\(MAP_SPATIAL_INITIAL_WAIT_MS\).*combineMapResourceLeases/s);
 });
 
+test("Native map uses event-driven snapshot loading without a snapshot polling timer", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  const snapshotEffect = nativeMap.slice(nativeMap.indexOf("const loader = createMapSnapshotLoader"), nativeMap.indexOf("React.useEffect(() => {\n    const markerGroups"));
+
+  assert.match(snapshotEffect, /new EventSource\(request\.eventsUrl/);
+  assert.match(snapshotEffect, /mapEventNeedsSnapshot\(JSON\.parse\(message\.data\)\)/);
+  assert.match(snapshotEffect, /void loader\.request\(request\.snapshotUrl\)/);
+  assert.doesNotMatch(snapshotEffect, /setInterval|setTimeout/);
+});
+
 test("configured-region resource and verified player tracking are enabled without enabling unverified enemy identities", () => {
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(server, /const MAP_RESOURCE_COORDINATES_VERIFIED = true/);

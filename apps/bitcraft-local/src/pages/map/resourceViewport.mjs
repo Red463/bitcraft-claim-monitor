@@ -1,6 +1,7 @@
-export function resourceViewportDecision({ selectionKey, snapshotSelectionKey, consumedSelectionKey, points, isVisible }) {
+export function resourceViewportDecision({ selectionKey, snapshotSelectionKey, consumedSelectionKey, loading = false, points, isVisible }) {
   if (!selectionKey) return "preserve";
   if (selectionKey !== snapshotSelectionKey) return "wait";
+  if (loading) return "wait";
   if (selectionKey === consumedSelectionKey) return "preserve";
   if (!Array.isArray(points) || points.length === 0) return "wait";
   return points.some(isVisible) ? "preserve" : "frame";
@@ -11,4 +12,12 @@ export function applyResourceViewport(input) {
   if (decision === "wait") return input.consumedSelectionKey;
   if (decision === "frame") input.frame(input.points);
   return input.selectionKey || "";
+}
+
+export function resourceLayerStatus({ selectionKey, snapshotSelectionKey, available, status, reason, visible, freshness }) {
+  if (selectionKey && selectionKey !== snapshotSelectionKey) return "loading";
+  if (status === "loading" || status === "partial") return "loading";
+  if (selectionKey && selectionKey === snapshotSelectionKey && available === false && reason === "Live resource positions are unavailable.") return "loading";
+  if (available === false) return "unavailable";
+  return visible ? freshness : "hidden";
 }

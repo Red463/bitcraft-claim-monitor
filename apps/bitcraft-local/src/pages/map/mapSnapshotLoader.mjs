@@ -8,6 +8,7 @@ export function createMapSnapshotLoader({
   onError = () => {},
   onLoading = () => {},
   isHidden = () => false,
+  currentRequestKey = () => "",
   minIntervalMs = 2_000,
   now = () => Date.now(),
   schedule = (callback, delay) => setTimeout(callback, delay),
@@ -19,36 +20,44 @@ export function createMapSnapshotLoader({
   let scheduled = null;
   let scheduledTimer = null;
   let lastStartedAt = Number.NEGATIVE_INFINITY;
+  let queuedRequestKey = "";
 
-  const request = () => {
+  const request = (requestedKey = currentRequestKey()) => {
     if (stopped || isHidden()) return active ?? scheduled ?? Promise.resolve();
     if (active) {
       queued = true;
+      queuedRequestKey = requestedKey;
       return active;
     }
     const waitMs = Math.max(0, minIntervalMs - (now() - lastStartedAt));
     if (waitMs > 0) {
       queued = true;
+      queuedRequestKey = requestedKey;
       if (!scheduled) scheduled = new Promise((resolve) => {
         scheduledTimer = schedule(() => {
           scheduled = null;
           scheduledTimer = null;
           queued = false;
-          Promise.resolve(request()).finally(resolve);
+          const queuedKey = queuedRequestKey;
+          queuedRequestKey = "";
+          Promise.resolve(request(queuedKey)).finally(resolve);
         }, waitMs);
       });
       return scheduled;
     }
     lastStartedAt = now();
     onLoading(true);
+    const requestKey = requestedKey;
     let loaded;
     try {
-      loaded = load();
+      loaded = load(requestKey);
     } catch (error) {
       loaded = Promise.reject(error);
     }
     active = Promise.resolve(loaded)
-      .then(onValue)
+      .then((value) => {
+        if (requestKey === currentRequestKey()) onValue({ requestKey, value });
+      })
       .catch((error) => {
         if (error?.name !== "AbortError") onError(error);
       })
@@ -57,7 +66,9 @@ export function createMapSnapshotLoader({
         onLoading(false);
         if (queued && !stopped) {
           queued = false;
-          void request();
+          const queuedKey = queuedRequestKey;
+          queuedRequestKey = "";
+          void request(queuedKey);
         }
       });
     return active;
@@ -68,6 +79,7 @@ export function createMapSnapshotLoader({
     stop() {
       stopped = true;
       queued = false;
+      queuedRequestKey = "";
       if (scheduledTimer != null) cancelSchedule(scheduledTimer);
       scheduledTimer = null;
       scheduled = null;

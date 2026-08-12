@@ -28,7 +28,55 @@ test("map snapshot loader coalesces concurrent notifications into one follow-up 
   assert.equal(resolvers.length, 1, "notifications received in flight become one follow-up request");
   resolvers.shift()({ generation: "2" });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(values.map(({ generation }) => generation), ["1", "2"]);
+  assert.deepEqual(values.map(({ value }) => value.generation), ["1", "2"]);
+});
+
+test("map snapshot loader retains warm values until the matching request completes", async () => {
+  assert.ok(loaderModule);
+  const resolvers = [];
+  const values = [];
+  let currentRequestKey = "A";
+  const loader = loaderModule.createMapSnapshotLoader({
+    currentRequestKey: () => currentRequestKey,
+    load: (requestKey) => new Promise((resolve) => resolvers.push({ requestKey, resolve })),
+    onValue: (requested) => values.push(requested),
+    minIntervalMs: 0,
+  });
+
+  const initial = loader.request("A");
+  resolvers.shift().resolve({ generation: "A" });
+  await initial;
+  currentRequestKey = "B";
+  const next = loader.request("B");
+  assert.deepEqual(values.map(({ value }) => value.generation), ["A"]);
+  resolvers.shift().resolve({ generation: "B" });
+  await next;
+  assert.deepEqual(values.map(({ value }) => value.generation), ["A", "B"]);
+});
+
+test("map snapshot loader never commits A after B becomes current", async () => {
+  assert.ok(loaderModule);
+  const resolvers = [];
+  const values = [];
+  let currentRequestKey = "A";
+  const loader = loaderModule.createMapSnapshotLoader({
+    currentRequestKey: () => currentRequestKey,
+    load: (requestKey) => new Promise((resolve) => resolvers.push({ requestKey, resolve })),
+    onValue: (requested) => values.push(requested),
+    minIntervalMs: 0,
+  });
+
+  const first = loader.request("A");
+  currentRequestKey = "B";
+  loader.request("B");
+  resolvers.shift().resolve({ generation: "A" });
+  await first;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(values, []);
+  assert.equal(resolvers.length, 1);
+  resolvers.shift().resolve({ generation: "B" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(values, [{ requestKey: "B", value: { generation: "B" } }]);
 });
 
 test("map snapshot loader throttles continuous generation events", async () => {
@@ -51,6 +99,28 @@ test("map snapshot loader throttles continuous generation events", async () => {
   scheduled[0].callback();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(loads, 2);
+});
+
+test("map snapshot loader retains the latest request key through throttling", async () => {
+  let currentTime = 1_000;
+  let currentRequestKey = "A";
+  const scheduled = [];
+  const loadKeys = [];
+  const loader = loaderModule.createMapSnapshotLoader({
+    currentRequestKey: () => currentRequestKey,
+    load: async (requestKey) => { loadKeys.push(requestKey); },
+    minIntervalMs: 2_000,
+    now: () => currentTime,
+    schedule: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; },
+  });
+
+  await loader.request("A");
+  currentRequestKey = "B";
+  loader.request("B");
+  currentTime += 2_000;
+  scheduled[0].callback();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(loadKeys, ["A", "B"]);
 });
 
 test("initial stream events do not duplicate the initial snapshot", () => {
