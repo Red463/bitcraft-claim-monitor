@@ -187,7 +187,7 @@ export class RelayMapResourceRegionSession {
     };
     this.#abortStart = abort;
     try {
-      const bindings = await this.#loadBindings();
+      const bindings = await Promise.race([this.#loadBindings(), cancellation]);
       await Promise.race([new Promise<void>((resolve, reject) => {
         let settled = false;
         let failed = false;

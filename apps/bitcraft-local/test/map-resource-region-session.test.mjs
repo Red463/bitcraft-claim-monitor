@@ -34,6 +34,10 @@ function fakeTimers() {
   };
 }
 
+async function drainMicrotasks() {
+  for (let index = 0; index < 4; index += 1) await Promise.resolve();
+}
+
 function fixture({ resourceRows = [], locationRows = [], connectOnBuild = true } = {}) {
   const db = { resourceState: table(resourceRows), locationState: table(locationRows) };
   const subscriptions = [];
@@ -42,6 +46,7 @@ function fixture({ resourceRows = [], locationRows = [], connectOnBuild = true }
   let connectError = () => {};
   let disconnected = () => {};
   let disconnectCount = 0;
+  let buildCount = 0;
   const connection = {
     db,
     subscriptionBuilder() {
@@ -67,7 +72,7 @@ function fixture({ resourceRows = [], locationRows = [], connectOnBuild = true }
       onConnect(callback) { connected = callback; return this; },
       onConnectError(callback) { connectError = callback; return this; },
       onDisconnect(callback) { disconnected = callback; return this; },
-      build() { if (connectOnBuild) connected(connection); return connection; },
+      build() { buildCount += 1; if (connectOnBuild) connected(connection); return connection; },
     };
   } } };
   const loadBindings = async () => bindings;
@@ -76,6 +81,7 @@ function fixture({ resourceRows = [], locationRows = [], connectOnBuild = true }
     connect: () => connected(connection),
     disconnect: (error) => disconnected(undefined, error),
     connectError: (error) => connectError(undefined, error),
+    buildCount: () => buildCount,
     disconnectCount: () => disconnectCount,
   };
 }
@@ -162,7 +168,36 @@ test("resource session cancels startup stopped before bindings finish loading", 
   await session.stop();
   resolveBindings(relay.bindings);
   await assert.rejects(starting, /stopped while connecting/i);
-  assert.equal(relay.disconnectCount(), 1);
+  assert.equal(relay.buildCount(), 0);
+  assert.equal(relay.disconnectCount(), 0);
+});
+
+test("resource session rejects start before unresolved bindings finish and never builds a late connection", async () => {
+  const relay = fixture({ connectOnBuild: false });
+  let resolveBindings;
+  let outcome = null;
+  const session = new RelayMapResourceRegionSession({
+    loadBindings: () => new Promise((resolve) => { resolveBindings = resolve; }),
+    onSnapshot() {},
+    onFailure() {},
+  });
+  const starting = session.start(config()).then(
+    () => { outcome = { status: "resolved" }; },
+    (error) => { outcome = { status: "rejected", error }; },
+  );
+  await Promise.resolve();
+
+  await session.stop();
+  await drainMicrotasks();
+  const settledBeforeBindings = outcome !== null;
+  resolveBindings(relay.bindings);
+  await starting;
+
+  assert.equal(settledBeforeBindings, true, "stop must settle start without waiting for bindings");
+  assert.equal(outcome.status, "rejected");
+  assert.match(outcome.error.message, /stopped while connecting/i);
+  assert.equal(relay.buildCount(), 0, "late bindings must not build a connection after stop");
+  assert.equal(relay.disconnectCount(), 0);
 });
 
 test("resource session maintains independent applied subscriptions on one regional connection", async () => {
