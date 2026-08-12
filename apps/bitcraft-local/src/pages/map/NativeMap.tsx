@@ -2,6 +2,7 @@ import React from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
+import { MapBiomeKey } from "./MapBiomeKey";
 import { MapLayersControl } from "./MapLayersControl";
 import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, leafletPoint } from "./mapCoordinates.mjs";
 import { planDensePointDraw } from "./mapDensePointPlan.mjs";
@@ -584,7 +585,10 @@ export function NativeMap({
   return (
     <section className="native-map-shell" aria-label="Native BitCraft map">
       <div ref={hostRef} className="native-map-canvas" role="application" aria-label="Interactive BitCraft coordinate map" tabIndex={0} />
-      <MapLayersControl visibility={layerVisibility} availability={layerAvailability} counts={layerCounts} onToggle={toggleLayer} />
+      <div className="native-map-controls">
+        <MapLayersControl visibility={layerVisibility} availability={layerAvailability} counts={layerCounts} onToggle={toggleLayer} />
+        <MapBiomeKey />
+      </div>
       <div className="native-map-status" aria-live="polite">
         <strong>{loading && !snapshot ? "Loading native map…" : snapshot ? `${snapshot.freshness} · generation ${snapshot.generation}` : "Native map unavailable"}</strong>
         {snapshot?.ageMs != null ? <span>{Math.round(snapshot.ageMs / 1000)}s old</span> : null}

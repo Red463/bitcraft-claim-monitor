@@ -224,6 +224,18 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   assert.match(nativeMap, /selectionRequired.*resourceIds\.length.*enemyTypes\.length/s);
 });
 
+test("Native map places a viewport-bounded biome key beside Layers", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  const key = readFileSync(new URL("../src/pages/map/MapBiomeKey.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+
+  assert.match(nativeMap, /native-map-controls[\s\S]*<MapLayersControl[\s\S]*<MapBiomeKey \/>/);
+  assert.match(key, /<span>Key<\/span>/);
+  assert.match(css, /native-map-biome-key-popover[^}]*max-height:\s*min\(30rem, calc\(100dvh - 8rem\)\)[^}]*overflow:\s*auto/s);
+  assert.match(css, /native-map-biome-key-grid[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/s);
+  assert.match(css, /@media \(max-width: 620px\)[\s\S]*native-map-biome-key-grid[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+});
+
 test("Native map separates event and snapshot limits and ignores the initial stream event", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");

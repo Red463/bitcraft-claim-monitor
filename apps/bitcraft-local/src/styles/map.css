@@ -271,12 +271,17 @@
   pointer-events: none;
 }
 
-.native-map-layers-control {
+.native-map-controls {
   position: absolute;
   z-index: 600;
   top: 0.75rem;
   left: 3.25rem;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.4rem;
 }
+.native-map-layers-control,
+.native-map-biome-key { display: contents; }
 .native-map-layers-button {
   min-height: 34px;
   display: inline-flex;
@@ -291,10 +296,12 @@
   cursor: pointer;
 }
 .native-map-layers-popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
   width: min(18rem, calc(100vw - 2rem));
   max-height: min(30rem, calc(100dvh - 8rem));
   overflow: auto;
-  margin-top: 0.4rem;
   padding: 0.45rem;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
@@ -319,6 +326,52 @@
 .native-map-layer-copy strong { font-size: 0.78rem; }
 .native-map-layer-copy small { color: var(--muted); font-size: 0.66rem; line-height: 1.2; }
 .native-map-layer-count { color: var(--muted); font: 0.7rem "JetBrains Mono", monospace; }
+
+.native-map-biome-key-popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: min(30rem, calc(100dvh - 8rem));
+  overflow: auto;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
+  box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 48%);
+}
+.native-map-biome-key-popover section + section { margin-top: 0.75rem; }
+.native-map-biome-key-popover h3 {
+  margin: 0 0 0.4rem;
+  color: var(--text);
+  font-size: 0.76rem;
+}
+.native-map-biome-key-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 0.65rem;
+}
+.native-map-biome-key-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text);
+  font-size: 0.72rem;
+}
+.native-map-biome-key-swatch {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+  border: 1px solid rgb(255 255 255 / 28%);
+  border-radius: 0.2rem;
+}
+.native-map-biome-key-popover p {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
 
 .native-map-status {
   position: absolute;
@@ -405,5 +458,6 @@
     right: 0.5rem;
     top: 0.5rem;
   }
-  .native-map-layers-control { left: 3.1rem; top: 0.5rem; }
+  .native-map-controls { left: 3.1rem; top: 0.5rem; }
+  .native-map-biome-key-grid { grid-template-columns: minmax(0, 1fr); }
 }
