@@ -1,21 +1,13 @@
 import {
-  TERRAIN_BIOME_COLOURS,
   TERRAIN_PALETTE_VERSION,
-  TERRAIN_UNKNOWN_GROUND_COLOUR,
   TERRAIN_WATER_COLOURS,
 } from "../shared/terrainPaletteDefinition.mjs";
+import { blendTerrainBiomeColours } from "../shared/terrainBiomes.mjs";
 
 export { TERRAIN_PALETTE_VERSION };
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
-}
-
-function biomeBase(name) {
-  const normalized = String(name ?? "").trim().toLowerCase();
-  if (TERRAIN_BIOME_COLOURS[normalized]) return TERRAIN_BIOME_COLOURS[normalized];
-  for (const [token, rgba] of Object.entries(TERRAIN_BIOME_COLOURS)) if (normalized.includes(token)) return rgba;
-  return null;
 }
 
 function textureShade(mapX, mapZ) {
@@ -26,10 +18,9 @@ function textureShade(mapX, mapZ) {
 
 export function terrainCellRgba({
   surface,
-  biomeName,
+  biomeContributions,
   elevation,
   originalElevation = elevation,
-  biomeDensity = 50,
   relief = 0,
   depth = 0,
   shoreline = false,
@@ -50,12 +41,8 @@ export function terrainCellRgba({
       255,
     ];
   }
-  const known = biomeBase(biomeName);
-  const base = known ?? TERRAIN_UNKNOWN_GROUND_COLOUR;
-  if (!known && Array.isArray(warnings)) {
-    const warning = `Unknown terrain biome: ${String(biomeName ?? "") || "(empty)"}`;
-    if (!warnings.includes(warning)) warnings.push(warning);
-  }
+  const base = blendTerrainBiomeColours(biomeContributions, warnings);
+  const biomeDensity = Math.max(0, ...(biomeContributions ?? []).map(({ density }) => Number(density) || 0));
   const meanElevation = ((Number(elevation) || 0) + (Number(originalElevation) || 0)) / 2;
   const elevationShade = Math.trunc(clamp(meanElevation, -24, 24) / 2.5);
   const densityShade = Math.trunc((clamp(Number(biomeDensity) || 0, 0, 100) - 50) / 12);

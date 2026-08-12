@@ -1,5 +1,6 @@
 import sharp from "sharp";
 
+import { decodeTerrainBiomeBlend, terrainBiomeMaskAlpha } from "../shared/terrainBiomes.mjs";
 import { terrainCellRgba } from "./terrainPalette.mjs";
 
 const APOTHEM = 2 / Math.sqrt(3);
@@ -18,7 +19,6 @@ export function prepareTerrainRenderContext(generation) {
   if (cached) return cached;
   const context = {
     chunks: new Map(generation.chunks.map((chunk) => [`${chunk.chunkX}:${chunk.chunkZ}`, chunk])),
-    biomeNames: new Map((generation.biomes ?? []).map((biome) => [biome.biomeType, biome.name])),
   };
   TERRAIN_CONTEXTS.set(generation, context);
   return context;
@@ -36,11 +36,12 @@ export async function renderTerrainTileChannels({ generation, evidence, zoom, x,
 
   const chunkSpan = evidence.side * evidence.cellSize;
   const prepared = context ?? prepareTerrainRenderContext(generation);
-  const { chunks, biomeNames } = prepared;
+  const { chunks } = prepared;
   const terrainRgba = Buffer.alloc(tileSize * tileSize * 4);
   const waterRgba = Buffer.alloc(tileSize * tileSize * 4);
+  const biomeMaskRgba = new Map();
   const warnings = [];
-  const colourByCell = new Map();
+  const renderedByCell = new Map();
 
   const sampleCell = (mapX, mapZ) => {
     const chunkX = Math.floor((mapX - evidence.chunkOriginX) / chunkSpan);
@@ -58,10 +59,9 @@ export async function renderTerrainTileChannels({ generation, evidence, zoom, x,
       mapX: chunkX * evidence.side + localX,
       mapZ: chunkZ * evidence.side + sourceLocalZ,
       surface: evidence.surfaceTypes[chunk.waterBodyTypes[cellIndex]] ?? "ground",
-      biomeName: biomeNames.get(chunk.biomes[cellIndex]) ?? "",
+      biomeContributions: decodeTerrainBiomeBlend(chunk.biomes[cellIndex], chunk.biomeDensity[cellIndex]),
       elevation,
       originalElevation: Number(chunk.originalElevations?.[cellIndex] ?? elevation) || 0,
-      biomeDensity: Number(chunk.biomeDensity?.[cellIndex] ?? 50) || 0,
       waterLevel: Number(chunk.waterLevels?.[cellIndex] ?? elevation) || 0,
     };
   };
@@ -74,8 +74,8 @@ export async function renderTerrainTileChannels({ generation, evidence, zoom, x,
       const cell = sampleCell(mapX, mapZ);
       if (!cell) continue;
       const waterCell = cell.surface !== "ground";
-      let colour = colourByCell.get(cell.key);
-      if (!colour) {
+      let rendered = renderedByCell.get(cell.key);
+      if (!rendered) {
         const north = sampleCell(mapX, mapZ + evidence.cellSize) ?? cell;
         const east = sampleCell(mapX + evidence.cellSize, mapZ) ?? cell;
         const south = sampleCell(mapX, mapZ - evidence.cellSize) ?? cell;
@@ -84,18 +84,37 @@ export async function renderTerrainTileChannels({ generation, evidence, zoom, x,
         const relief = (west.originalElevation - east.originalElevation) + (north.originalElevation - south.originalElevation);
         const depth = Math.max(0, cell.waterLevel - cell.elevation);
         const shoreline = neighbors.some((neighbor) => neighbor.surface !== cell.surface && (neighbor.surface === "ground" || cell.surface === "ground"));
-        colour = terrainCellRgba({ ...cell, relief, depth, shoreline, warnings });
-        colourByCell.set(cell.key, colour);
+        rendered = {
+          colour: terrainCellRgba({ ...cell, relief, depth, shoreline, warnings }),
+          strongestDensity: Math.max(1, ...cell.biomeContributions.map(({ density }) => density)),
+        };
+        renderedByCell.set(cell.key, rendered);
       }
-      (waterCell ? waterRgba : terrainRgba).set(colour, (pixelY * tileSize + pixelX) * 4);
+      const offset = (pixelY * tileSize + pixelX) * 4;
+      (waterCell ? waterRgba : terrainRgba).set(rendered.colour, offset);
+      for (const contributor of cell.biomeContributions) {
+        let mask = biomeMaskRgba.get(contributor.biomeType);
+        if (!mask) {
+          mask = Buffer.alloc(tileSize * tileSize * 4);
+          biomeMaskRgba.set(contributor.biomeType, mask);
+        }
+        mask[offset] = rendered.colour[0];
+        mask[offset + 1] = rendered.colour[1];
+        mask[offset + 2] = rendered.colour[2];
+        mask[offset + 3] = terrainBiomeMaskAlpha(contributor.density, rendered.strongestDensity);
+      }
     }
   }
 
   const encode = (rgba) => sharp(rgba, { raw: { width: tileSize, height: tileSize, channels: 4 } })
     .webp({ quality: 82, alphaQuality: 100, smartSubsample: false, effort: 1 })
     .toBuffer();
-  const [terrain, water] = await Promise.all([encode(terrainRgba), encode(waterRgba)]);
-  return { terrain, water };
+  const [terrain, water, encodedMasks] = await Promise.all([
+    encode(terrainRgba),
+    encode(waterRgba),
+    Promise.all([...biomeMaskRgba].map(async ([biomeType, rgba]) => [biomeType, await encode(rgba)])),
+  ]);
+  return { terrain, water, biomeMasks: new Map(encodedMasks) };
 }
 
 export async function renderTerrainTile({ generation, evidence, style = "terrain", zoom, x, y, tileSize = DEFAULT_TILE_SIZE, context = null }) {

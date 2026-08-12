@@ -13,7 +13,7 @@ try {
   // RED: renderer modules do not exist yet.
 }
 
-function fixtureRequest() {
+function fixtureRequest({ packedBiomes = 4, packedDensity = 128 } = {}) {
   const side = 32;
   const length = side * side;
   const waterBodyTypes = new Uint8Array(length);
@@ -24,11 +24,15 @@ function fixtureRequest() {
       regionId: "19",
       dimension: "1",
       regionBounds: { minChunkX: 0, minChunkZ: 0, maxChunkX: 0, maxChunkZ: 0 },
-      biomes: [{ biomeType: 7, name: "Grasslands" }],
+      biomes: [
+        { biomeType: 1, name: "Calm Forest" },
+        { biomeType: 2, name: "Pine Woods" },
+        { biomeType: 4, name: "Breezy Grasslands" },
+      ],
       chunks: [{
         chunkIndex: "0", chunkX: 0, chunkZ: 0, dimension: "1", side,
-        biomes: new Uint32Array(length).fill(7),
-        biomeDensity: new Uint32Array(length).fill(100),
+        biomes: new Uint32Array(length).fill(packedBiomes),
+        biomeDensity: new Uint32Array(length).fill(packedDensity),
         elevations: Int16Array.from({ length }, (_, index) => (index % side) - 16),
         waterLevels: new Int16Array(length).fill(-1),
         waterBodyTypes,
@@ -56,40 +60,39 @@ test("terrain render context indexes each immutable generation once", () => {
   const second = rendererModule.prepareTerrainRenderContext(request.generation);
   assert.strictEqual(first, second);
   assert.equal(first.chunks.get("0:0"), request.generation.chunks[0]);
-  assert.equal(first.biomeNames.get(7), "Grasslands");
 });
 
 test("terrain palette gives water semantic priority and deterministic elevation shading", () => {
   assert.ok(paletteModule, "terrain palette module must exist");
-  assert.equal(paletteModule.TERRAIN_PALETTE_VERSION, 3);
-  const ocean = paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Uncharted Ocean", elevation: -20, mapX: 10, mapZ: 20 });
-  const river = paletteModule.terrainCellRgba({ surface: "river", biomeName: "Grasslands", elevation: 0, mapX: 10, mapZ: 20 });
+  assert.equal(paletteModule.TERRAIN_PALETTE_VERSION, 4);
+  const ocean = paletteModule.terrainCellRgba({ surface: "ocean", biomeContributions: [{ biomeType: 18, density: 128 }], elevation: -20, mapX: 10, mapZ: 20 });
+  const river = paletteModule.terrainCellRgba({ surface: "river", biomeContributions: [{ biomeType: 4, density: 128 }], elevation: 0, mapX: 10, mapZ: 20 });
   assert.ok(ocean[2] > ocean[1] && ocean[1] > ocean[0], "ocean must read as deep navy blue");
   assert.ok(river[1] > ocean[1], "rivers must remain lighter than open ocean");
   assert.deepEqual(
-    paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Grasslands", elevation: 50, mapX: 10, mapZ: 20 }),
-    paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Uncharted Ocean", elevation: -20, mapX: 10, mapZ: 20 }),
+    paletteModule.terrainCellRgba({ surface: "ocean", biomeContributions: [{ biomeType: 4, density: 128 }], elevation: 50, mapX: 10, mapZ: 20 }),
+    paletteModule.terrainCellRgba({ surface: "ocean", biomeContributions: [{ biomeType: 18, density: 128 }], elevation: -20, mapX: 10, mapZ: 20 }),
   );
   assert.notDeepEqual(
-    paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: -10 }),
-    paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 10 }),
+    paletteModule.terrainCellRgba({ surface: "ground", biomeContributions: [{ biomeType: 4, density: 128 }], elevation: -10 }),
+    paletteModule.terrainCellRgba({ surface: "ground", biomeContributions: [{ biomeType: 4, density: 128 }], elevation: 10 }),
   );
   const warnings = [];
-  assert.equal(paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Unknown Future Biome", elevation: 0, mapX: 0, mapZ: 0, warnings })[3], 255);
-  assert.deepEqual(warnings, ["Unknown terrain biome: Unknown Future Biome"]);
+  assert.equal(paletteModule.terrainCellRgba({ surface: "ground", biomeContributions: [{ biomeType: 255, density: 128 }], elevation: 0, mapX: 0, mapZ: 0, warnings })[3], 255);
+  assert.deepEqual(warnings, ["Unknown terrain biome type: 255"]);
 
-  const flat = paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 0, originalElevation: 0, biomeDensity: 50, relief: 0, depth: 0, shoreline: false });
-  const raised = paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 8, originalElevation: 8, biomeDensity: 80, relief: 12, depth: 0, shoreline: false });
+  const flat = paletteModule.terrainCellRgba({ surface: "ground", biomeContributions: [{ biomeType: 4, density: 50 }], elevation: 0, originalElevation: 0, relief: 0, depth: 0, shoreline: false });
+  const raised = paletteModule.terrainCellRgba({ surface: "ground", biomeContributions: [{ biomeType: 4, density: 80 }], elevation: 8, originalElevation: 8, relief: 12, depth: 0, shoreline: false });
   assert.notDeepEqual(raised, flat);
-  const deepOcean = paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Grasslands", elevation: -10, originalElevation: -10, biomeDensity: 50, relief: 0, depth: 12, shoreline: false });
-  const coastOcean = paletteModule.terrainCellRgba({ surface: "ocean", biomeName: "Grasslands", elevation: -2, originalElevation: -2, biomeDensity: 50, relief: 0, depth: 2, shoreline: true });
+  const deepOcean = paletteModule.terrainCellRgba({ surface: "ocean", biomeContributions: [{ biomeType: 4, density: 50 }], elevation: -10, originalElevation: -10, relief: 0, depth: 12, shoreline: false });
+  const coastOcean = paletteModule.terrainCellRgba({ surface: "ocean", biomeContributions: [{ biomeType: 4, density: 50 }], elevation: -2, originalElevation: -2, relief: 0, depth: 2, shoreline: true });
   assert.notDeepEqual(deepOcean, coastOcean);
   assert.ok(coastOcean[0] - deepOcean[0] >= 10, "shoreline water must be visibly brighter than deep water");
   assert.equal(deepOcean[2] > deepOcean[0], true);
 
-  const texturedA = paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 0, mapX: 310, mapZ: -87 });
-  const texturedARepeat = paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 0, mapX: 310, mapZ: -87 });
-  const texturedB = paletteModule.terrainCellRgba({ surface: "ground", biomeName: "Grasslands", elevation: 0, mapX: 311, mapZ: -87 });
+  const texturedA = paletteModule.terrainCellRgba({ surface: "ground", biomeContributions: [{ biomeType: 4, density: 128 }], elevation: 0, mapX: 310, mapZ: -87 });
+  const texturedARepeat = paletteModule.terrainCellRgba({ surface: "ground", biomeContributions: [{ biomeType: 4, density: 128 }], elevation: 0, mapX: 310, mapZ: -87 });
+  const texturedB = paletteModule.terrainCellRgba({ surface: "ground", biomeContributions: [{ biomeType: 4, density: 128 }], elevation: 0, mapX: 311, mapZ: -87 });
   assert.deepEqual(texturedARepeat, texturedA, "texture must be deterministic for the same map cell");
   assert.notDeepEqual(texturedB, texturedA, "adjacent map cells should receive fine deterministic texture variation");
   assert.ok(Math.max(...texturedA.slice(0, 3).map((value, index) => Math.abs(value - texturedB[index]))) <= 6, "texture must remain subtle");
@@ -144,4 +147,20 @@ test("terrain renderer produces both aligned channels in one paired render", asy
   assert.equal(alphaAt(waterPixels, 10, 240), 0);
   assert.equal(alphaAt(terrainPixels, 10, 200), 0);
   assert.equal(alphaAt(waterPixels, 10, 200), 255);
+});
+
+test("terrain renderer blends packed biomes and emits sparse masks for ground and water", async () => {
+  assert.ok(rendererModule, "terrain renderer module must exist");
+  const request = fixtureRequest({ packedBiomes: 0x00000201, packedDensity: 0x00004080 });
+  const channels = await rendererModule.renderTerrainTileChannels(request);
+  assert.ok(channels.terrain.byteLength > 0);
+  assert.ok(channels.biomeMasks.get(1)?.byteLength > 0);
+  assert.ok(channels.biomeMasks.get(2)?.byteLength > 0);
+  assert.equal(channels.biomeMasks.has(3), false);
+
+  const primary = await sharp(channels.biomeMasks.get(1)).ensureAlpha().raw().toBuffer();
+  const secondary = await sharp(channels.biomeMasks.get(2)).ensureAlpha().raw().toBuffer();
+  const alphaAt = (bytes, x, y) => bytes[(y * 256 + x) * 4 + 3];
+  assert.ok(alphaAt(primary, 10, 240) > alphaAt(secondary, 10, 240), "primary biome mask must be stronger than a secondary blend");
+  assert.ok(alphaAt(primary, 10, 200) > 0, "water cells must retain their underlying biome mask");
 });
