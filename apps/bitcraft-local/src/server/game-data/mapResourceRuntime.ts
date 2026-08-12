@@ -153,8 +153,16 @@ export class RelayMapResourceRuntime {
   async reconcile(input: { relayBaseUrl: string; primaryRegionId: string; activeRegionIds: string[] }): Promise<void> {
     const primaryRegionId = decimal(input.primaryRegionId, "Map resource primary region id");
     const activeRegionIds = sortedRegions([...input.activeRegionIds, primaryRegionId]);
+    const relayBaseUrl = String(input.relayBaseUrl).replace(/\/+$/, "");
     this.#stopped = false;
-    this.#config = { relayBaseUrl: String(input.relayBaseUrl).replace(/\/+$/, ""), primaryRegionId, activeRegionIds };
+    const currentConfig = this.#config;
+    if (!currentConfig
+      || currentConfig.relayBaseUrl !== relayBaseUrl
+      || currentConfig.primaryRegionId !== primaryRegionId
+      || currentConfig.activeRegionIds.length !== activeRegionIds.length
+      || currentConfig.activeRegionIds.some((regionId, index) => regionId !== activeRegionIds[index])) {
+      this.#config = { relayBaseUrl, primaryRegionId, activeRegionIds };
+    }
     for (const entry of this.#regions.values()) {
       const wasPinned = entry.pinned;
       entry.configured = activeRegionIds.includes(entry.regionId);

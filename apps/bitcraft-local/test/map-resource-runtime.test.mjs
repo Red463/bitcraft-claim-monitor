@@ -87,6 +87,26 @@ test("reconcile pins only the primary regional connection without resource subsc
   await runtime.stop();
 });
 
+test("an equivalent reconcile does not invalidate an in-flight cold region acquisition", async () => {
+  let openRegion;
+  const regionOpening = new Promise((resolve) => { openRegion = resolve; });
+  const { runtime, sessions } = runtimeFixture({
+    start: async (config) => { if (config.regionId === "20") await regionOpening; },
+  });
+  const config = { relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] };
+  await runtime.reconcile(config);
+  const acquisition = runtime.acquire({ regionId: "20", resourceId: "28" });
+  while (sessions.length < 2) await Promise.resolve();
+
+  await runtime.reconcile({ ...config, activeRegionIds: ["20", "19"] });
+  openRegion();
+
+  const lease = await acquisition;
+  assert.equal(lease.key, "20|resource:28");
+  await lease.release();
+  await runtime.stop();
+});
+
 test("runtime health aggregates active, idle, row, and latency diagnostics without resource identities", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
   const runtime = new runtimeModule.RelayMapResourceRuntime({
