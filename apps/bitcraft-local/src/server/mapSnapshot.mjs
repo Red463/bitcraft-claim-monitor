@@ -154,7 +154,8 @@ export function buildMapSnapshot({
       })
       .map((row) => {
         const playerEntityId = String(row.playerEntityId ?? row.entityId);
-        return feature(row, "player", playerEntityId, recordPoint(row, true), { playerEntityId, regionId: String(row.regionId), name: monitored.get(playerEntityId)?.username ?? "Player" });
+        const member = monitored.get(playerEntityId);
+        return feature(row, "player", playerEntityId, recordPoint(row, true), { playerEntityId, regionId: String(row.regionId), name: member?.userName ?? member?.username ?? "Player" });
       });
     if (!mobileIdentityVerified) {
       const reason = "Player positions are unavailable until player-to-mobile entity identity is live-verified.";

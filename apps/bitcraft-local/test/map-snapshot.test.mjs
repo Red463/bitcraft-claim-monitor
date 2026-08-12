@@ -121,7 +121,7 @@ test("player positions require selected online monitored non-excluded members", 
     excludedMemberIds: ["103"],
     mobileIdentityVerified: true,
     members: [
-      { playerEntityId: "101", username: "Online" },
+      { playerEntityId: "101", userName: "Online" },
       { playerEntityId: "102", username: "Offline" },
       { playerEntityId: "103", username: "Excluded" },
     ],
@@ -143,6 +143,7 @@ test("player positions require selected online monitored non-excluded members", 
   });
 
   assert.deepEqual(snapshot.layers.players.map((row) => row.playerEntityId), ["101"]);
+  assert.equal(snapshot.layers.players[0].name, "Online");
   assert.deepEqual(snapshot.layers.players[0].point, {
     x: 12,
     z: 24,
