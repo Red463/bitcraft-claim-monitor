@@ -108,10 +108,14 @@ export function createLayeredTerrainTileStore({ detailStore, overviewStore }) {
       const [detail, overview] = await Promise.all([detailStore.readManifest(), overviewStore.readManifest()]);
       if (!detail && !overview) return null;
       const manifests = [detail, overview].filter(Boolean);
+      const generatedAt = manifests.map(({ generatedAt: value }) => value).filter(Boolean).sort().at(-1) ?? null;
+      const generatedAtMs = Date.parse(generatedAt ?? "");
       return {
         ...(detail ?? overview),
-        generation: String(Math.max(...manifests.map(({ generation }) => Number(generation) || 0), 1)),
-        generatedAt: manifests.map(({ generatedAt }) => generatedAt).filter(Boolean).sort().at(-1) ?? null,
+        generation: Number.isFinite(generatedAtMs)
+          ? String(generatedAtMs)
+          : String(Math.max(...manifests.map(({ generation }) => Number(generation) || 0), 1)),
+        generatedAt,
         observedAt: manifests.map(({ observedAt }) => observedAt).filter(Boolean).sort().at(0) ?? null,
         regionIds: [...new Set(manifests.flatMap(({ regionIds }) => regionIds.map(String)))].sort((a, b) => Number(a) - Number(b)),
         bounds: overview?.bounds ?? detail?.bounds ?? null,

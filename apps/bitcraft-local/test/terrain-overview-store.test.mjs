@@ -31,3 +31,22 @@ test("layered terrain store exposes whole-world overview coverage and detail fal
   assert.equal(detailReads, 2);
   assert.equal(overviewReads, 2);
 });
+
+test("layered terrain generation changes when a newer detail bundle replaces an older high-number overview", async () => {
+  let detailGeneratedAt = "2026-08-12T22:00:00.000Z";
+  const detailStore = {
+    readManifest: async () => ({ generation: "1", generatedAt: detailGeneratedAt, regionIds: ["19"], tileCount: 1, totalBytes: 1 }),
+    readTile: async () => null,
+  };
+  const overviewStore = {
+    readManifest: async () => ({ generation: "1786488998418", generatedAt: "2026-08-11T22:56:38.418Z", regionIds: ["3"], tileCount: 1, totalBytes: 1 }),
+    readTile: async () => null,
+  };
+  const store = createLayeredTerrainTileStore({ detailStore, overviewStore });
+  const first = await store.readManifest();
+  assert.equal(first.generation, String(Date.parse(detailGeneratedAt)));
+  detailGeneratedAt = "2026-08-12T22:05:00.000Z";
+  const second = await store.readManifest();
+  assert.equal(second.generation, String(Date.parse(detailGeneratedAt)));
+  assert.notEqual(second.generation, first.generation, "a replaced immutable tile bundle needs a new browser cache key");
+});
