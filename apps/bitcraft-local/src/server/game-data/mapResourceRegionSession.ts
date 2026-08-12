@@ -109,6 +109,8 @@ export class RelayMapResourceRegionSession {
   readonly #clearTimer: (timer: unknown) => void;
   readonly #rebuildDelayMs: number;
   #connection: BindingConnection | null = null;
+  #pendingConnection: BindingConnection | null = null;
+  #abortStart: (() => void) | null = null;
   #config: (Omit<RegionSessionConfig, "regionId" | "generation" | "maxRows"> & { regionId: string; generation: number; maxRows: number }) | null = null;
   #subscriptions = new Map<string, ResourceSubscription>();
   #listenersAttached = false;
@@ -178,6 +180,8 @@ export class RelayMapResourceRegionSession {
         settled = true;
         failed = true;
         this.#connection = null;
+        this.#pendingConnection = null;
+        this.#abortStart = null;
         this.#config = null;
         this.#startedAt = null;
         this.#health.connected = false;
@@ -185,6 +189,19 @@ export class RelayMapResourceRegionSession {
         builtConnection?.disconnect();
         reject(error);
       };
+      const abort = () => {
+        if (settled) return;
+        settled = true;
+        this.#connection = null;
+        this.#pendingConnection = null;
+        this.#abortStart = null;
+        this.#config = null;
+        this.#startedAt = null;
+        this.#health.connected = false;
+        builtConnection?.disconnect();
+        reject(new Error("Relay map resource region session stopped while connecting"));
+      };
+      this.#abortStart = abort;
       try {
         builtConnection = bindings.DbConnection.builder()
           .withUri(config.uri)
@@ -195,13 +212,14 @@ export class RelayMapResourceRegionSession {
               return;
             }
             if (this.#stopping) {
-              settled = true;
               connection.disconnect();
-              reject(new Error("Relay map resource region session stopped while connecting"));
+              abort();
               return;
             }
             settled = true;
             this.#connection = connection;
+            this.#pendingConnection = null;
+            this.#abortStart = null;
             this.#health.connected = true;
             this.#health.stage = "subscribed";
             resolve();
@@ -215,6 +233,7 @@ export class RelayMapResourceRegionSession {
           })
           .build();
         if (failed) builtConnection.disconnect();
+        else if (!settled) this.#pendingConnection = builtConnection;
       } catch (error) {
         fail(error instanceof Error ? error : new Error(String(error)));
       }
@@ -368,8 +387,11 @@ export class RelayMapResourceRegionSession {
     this.#removeListeners();
     for (const subscription of this.#subscriptions.values()) subscription.handle.unsubscribe();
     this.#subscriptions.clear();
+    this.#abortStart?.();
     this.#connection?.disconnect();
     this.#connection = null;
+    this.#pendingConnection = null;
+    this.#abortStart = null;
     this.#config = null;
     this.#health.connected = false;
     this.#health.appliedResourceIds = [];

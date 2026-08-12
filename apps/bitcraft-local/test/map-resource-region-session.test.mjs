@@ -118,6 +118,21 @@ test("resource session waits for asynchronous Relay connection readiness before 
   await session.stop();
 });
 
+test("resource session rejects pending start and disconnects when stopped before Relay connects", async () => {
+  const relay = fixture({ connectOnBuild: false });
+  const session = new RelayMapResourceRegionSession({ loadBindings: relay.loadBindings, onSnapshot() {}, onFailure() {} });
+  let startError = null;
+  void session.start(config()).catch((error) => { startError = error; });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  await session.stop();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.match(startError?.message ?? "", /stopped while connecting/i);
+  assert.equal(relay.disconnectCount(), 1);
+});
+
 test("resource session maintains independent applied subscriptions on one regional connection", async () => {
   const relay = fixture();
   const timers = fakeTimers();
