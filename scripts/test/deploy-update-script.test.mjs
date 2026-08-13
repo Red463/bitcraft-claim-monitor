@@ -61,6 +61,18 @@ test("Relay updater builds an immutable release before cutover", () => {
   assert.doesNotMatch(script, /log "Stopping services"[\s\S]*Fetching latest code/);
 });
 
+test("Relay updater installs the verified native map bundle before service cutover", () => {
+  assert.match(script, /install_native_map_bundle\(\)/);
+  assert.match(script, /deploy\/native-map-static-bundle\.tar\.gz/);
+  assert.match(script, /tar --no-same-owner -xzf "\$bundle" -C "\$DATA_DIR"/);
+  assert.match(script, /chown -R "\$RUN_USER:\$RUN_USER"/);
+  assert.match(script, /chmod -R u=rwX,g=rX,o= /);
+  assert.match(
+    script,
+    /install_release_config "\$release_dir"[\s\S]*install_native_map_bundle "\$release_dir"[\s\S]*atomic_switch "\$release_dir"/,
+  );
+});
+
 test("Relay updater validates cutover and restores the previous release on failure", () => {
   assert.match(script, /expected_version/);
   assert.match(script, /rollback_deployment_transaction\(\)/);
