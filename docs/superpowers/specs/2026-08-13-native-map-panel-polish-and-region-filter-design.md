@@ -8,7 +8,9 @@ Polish the native map tool panels and move region selection into the map toolbar
 
 A compact Region select will appear directly after the existing Layers, Biomes, Players, and Resources buttons. It will use the same height, border, background, typography, focus treatment, and responsive density as those buttons. Its visible value will be `All regions` or the selected Relay region label.
 
-The selector is the single map-region scope. Choosing a region filters every region-scoped map source, including claims, claim areas, roads, watchtowers, terrain detail, resources, and later region-scoped layers. `All regions` restores the complete configured world scope. Tracked player positions remain independent of this filter so a tracked player does not disappear merely by crossing a region boundary.
+The selector is the single map-region scope. Choosing a region filters region-tagged operational features, including claims, claim areas, watchtowers, resources, and later region-tagged layers. `All regions` restores the complete configured world scope. Tracked player positions remain independent of this filter so a tracked player does not disappear merely by crossing a region boundary.
+
+The installed terrain and road layers are pre-generated whole-world tile bundles rather than per-region live feature collections. They remain visible and are not regenerated, refetched, or clipped when the region selection changes. This preserves the intended fast static-map behavior and avoids pretending that those tiles carry a verified region boundary contract.
 
 The existing persisted `map.regions` preference remains authoritative. No migration is required. Invalid or no-longer-ready stored regions fall back to `All regions` rather than producing an empty map.
 
