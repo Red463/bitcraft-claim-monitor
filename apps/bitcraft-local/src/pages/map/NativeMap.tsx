@@ -11,6 +11,7 @@ import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, lea
 import { planDensePointDraw } from "./mapDensePointPlan.mjs";
 import { MAP_LAYER_DEFINITIONS, defaultMapLayerVisibility, loadMapLayerVisibility, saveMapLayerVisibility, type MapLayerKey } from "./mapLayerPreferences.mjs";
 import { MAP_MARKER_PRESENTATIONS, claimDisplayTier, claimMarkerPresentation, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
+import { mapFeatureInRegionScope } from "./mapRegionVisibility.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { assignPlayerMarkerColours } from "./playerMarkerColours.mjs";
 import { applyResourceViewport, resourceLayerStatus } from "./resourceViewport.mjs";
@@ -246,6 +247,7 @@ function displayedPoint(feature: MapFeature) {
 
 export function NativeMap({
   regionIds,
+  visibleRegionIds = [],
   resourceRegionIds,
   playerIds,
   resourceIds,
@@ -256,6 +258,7 @@ export function NativeMap({
   resourceTool,
 }: {
   regionIds: string[];
+  visibleRegionIds?: string[];
   resourceRegionIds: string[];
   playerIds: string[];
   resourceIds: string[];
@@ -648,6 +651,7 @@ export function NativeMap({
       const markerGroup = markerGroups[layer];
       if (!markerGroup) continue;
       for (const feature of features) {
+        if (!mapFeatureInRegionScope(feature, visibleRegionIds)) continue;
         const presentation = feature.kind === "claim"
           ? claimMarkerPresentation(feature.tier, feature.npc)
           : mapMarkerPresentation(feature.kind);
@@ -699,15 +703,15 @@ export function NativeMap({
         },
       });
     }
-  }, [snapshot, resourcePoints, resourceSelectionKey, resourceTiers, resourceLayerLoading, focus?.name, focus?.locationX, focus?.locationZ]);
+  }, [snapshot, resourcePoints, resourceSelectionKey, resourceTiers, resourceLayerLoading, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
 
   const accessibleFeatures = snapshot
     ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {
         if (!layerVisibility[layer as MapLayerKey]) return [];
         if (layer === "empire-territory") return [];
-        if (layer === "resources" || layer === "enemies") return features;
-        return features.filter((feature) => (feature.kind === "claim" ? claimMarkerPresentation(feature.tier, feature.npc) : mapMarkerPresentation(feature.kind)).mode === "canvas");
-      }).concat(layerVisibility.resources ? resourcePoints : [])
+        if (layer === "resources" || layer === "enemies") return features.filter((feature) => mapFeatureInRegionScope(feature, visibleRegionIds));
+        return features.filter((feature) => mapFeatureInRegionScope(feature, visibleRegionIds) && (feature.kind === "claim" ? claimMarkerPresentation(feature.tier, feature.npc) : mapMarkerPresentation(feature.kind)).mode === "canvas");
+      }).concat(layerVisibility.resources ? resourcePoints.filter((feature) => mapFeatureInRegionScope(feature, visibleRegionIds)) : [])
     : [];
   const layerAvailability: Record<string, LayerAvailability> = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, available, unavailableReason, selectionRequired }) => {
     const hasSelection = !selectionRequired || (key === "resources" ? resourceIds.length > 0 : enemyTypes.length > 0);
