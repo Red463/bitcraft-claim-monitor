@@ -27,3 +27,11 @@ test("player panel retains explicit external identities while positions are unav
   assert.match(source, /onRemoveExternal\(player\.playerId\)/);
   assert.match(source, /Global player search is unavailable until Relay identity and coordinate verification completes/);
 });
+
+test("settlement player rows expose independent toggle, colour, and copy placement hooks", async () => {
+  const source = await readFile(new URL("../src/pages/map/MapPlayerTrackingPanel.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /map-player-toggle/);
+  assert.match(source, /map-player-row-colour/);
+  assert.match(source, /map-player-row-copy/);
+});

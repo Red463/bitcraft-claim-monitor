@@ -63,6 +63,18 @@ test("Native map tools use a full-width desktop workspace and mobile bottom shee
   assert.match(mapCss, /@media \(max-width:\s*620px\)[\s\S]*\.native-map-tool-panel\s*\{[^}]*position:\s*fixed;[^}]*bottom:\s*[^;]+;[^}]*max-height:\s*66dvh;[^}]*overflow:\s*auto/s);
 });
 
+test("Native map tool panels keep close controls compact and resource results as the desktop scroll region", () => {
+  const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+
+  assert.match(mapCss, /\.native-map-tool-panel-header \.icon-button\s*\{[^}]*width:\s*28px;[^}]*height:\s*28px;/s);
+  assert.match(mapCss, /\.native-map-tool-panel--resources\s*\{[^}]*overflow:\s*hidden;/s);
+  assert.match(mapCss, /\.native-map-tool-panel--resources \.map-resource-list\s*\{[^}]*overflow-y:\s*auto;/s);
+  assert.match(mapCss, /\.native-map-tool-panel--resources \.map-resource-list\s*\{[^}]*min-height:\s*0;/s);
+  assert.match(mapCss, /\.map-player-list label\s*\{[^}]*grid-template-columns:\s*[^;]+;/s);
+  assert.match(mapCss, /\.map-player-row-colour\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*1;/s);
+  assert.match(mapCss, /\.map-resource-filters\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s);
+});
+
 test("Map Resource Finder uses the shared icon fallback for compound item identities", () => {
   const finder = readFileSync(new URL("../src/pages/map/MapResourceFinderPanel.tsx", import.meta.url), "utf8");
 

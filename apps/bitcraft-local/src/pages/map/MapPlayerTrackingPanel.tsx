@@ -77,9 +77,9 @@ export function MapPlayerTrackingPanel({
         </div>
         <div className="map-player-list">
           {visibleRows.map((row) => <label key={row.id} className={row.tracked ? "active" : ""}>
-            <input type="checkbox" checked={row.tracked} onChange={(event) => onTogglePlayer(row.id, event.target.checked)} />
-            <PlayerColour colour={colours[row.id]} />
-            <span><strong>{row.name}</strong><small>{row.signedIn ? `Online${formatCurrentSession(row.sessionSeconds) ? ` - ${formatCurrentSession(row.sessionSeconds)}` : ""}` : "Offline"}</small></span>
+            <span className="map-player-toggle"><input type="checkbox" checked={row.tracked} onChange={(event) => onTogglePlayer(row.id, event.target.checked)} /></span>
+            <span className="map-player-row-colour"><PlayerColour colour={colours[row.id]} /></span>
+            <span className="map-player-row-copy"><strong>{row.name}</strong><small>{row.signedIn ? `Online${formatCurrentSession(row.sessionSeconds) ? ` - ${formatCurrentSession(row.sessionSeconds)}` : ""}` : "Offline"}</small></span>
           </label>)}
           {!visibleRows.length ? <p className="legend">No settlement members match these filters.</p> : null}
         </div>
