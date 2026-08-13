@@ -115,11 +115,12 @@ test("Map page owns the region selector and supplies its selected scope to the n
 
   assert.match(mapPage, /<MapRegionSelect/);
   assert.match(mapPage, /const normalizedRegionSelection = React\.useMemo/);
-  assert.match(mapPage, /boundedNativeMapRegions\(normalizedRegionSelection, operationalRegionOptions\)/);
   assert.match(mapPage, /boundedNativeMapRegions\(\[\], readyResourceRegionIds, 16\)/);
   assert.match(mapPage, /nativeMapResourceRegions\(normalizedRegionSelection, readyResourceRegionIds\)/);
   assert.match(mapPage, /playerRegionIds=\{readyPlayerRegionIds\}/);
   assert.match(mapPage, /visibleRegionIds=\{normalizedRegionSelection\}/);
+  assert.match(mapPage, /boundedNativeMapRegions\(normalizedRegionSelection, regionOptions\)/);
+  assert.doesNotMatch(mapPage, /boundedNativeMapRegions\(normalizedRegionSelection, operationalRegionOptions\)/);
   assert.doesNotMatch(mapPage, /visibleRegionIds=\{resourceRegions\}/);
   assert.match(nativeMap, /trailingControl=\{regionControl\}/);
   assert.doesNotMatch(dock, /regionControl/);

@@ -49,9 +49,9 @@ test("native map resource planning stays within the public 64-partition contract
   assert.equal(new URL(request.resourceEventUrl, "http://local").searchParams.get("resourceIds"), resourceIds.slice(0, 12).join(","));
 });
 
-test("native map regions discard stale persisted ids and respect the API region budget", () => {
+test("native map regions discard stale persisted ids and request every ready world region", () => {
   assert.deepEqual(boundedNativeMapRegions(["99", "19"], ["19", "24"]), ["19"]);
-  assert.deepEqual(boundedNativeMapRegions([], ["1", "2", "3", "4", "5"]), ["1", "2", "3", "4"]);
+  assert.deepEqual(boundedNativeMapRegions([], Array.from({ length: 13 }, (_, index) => String(index + 1))), Array.from({ length: 13 }, (_, index) => String(index + 1)));
   assert.deepEqual(nativeMapResourceRegions([], ["1", "2", "3", "4", "5"]), ["1", "2", "3", "4", "5"]);
   assert.deepEqual(nativeMapResourceRegions(["99", "24"], ["19", "24"]), ["24"]);
   assert.deepEqual(nativeMapResourceRegions([], ["19", "24"]), ["19", "24"], "All requests every ready resource region");

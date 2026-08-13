@@ -57,8 +57,17 @@ test("spatial lease inputs collect players across their live regions while enemi
     enemyTypes: ["8"],
     playerIds: ["101"],
   }, { playerIds: ["101"], enemyTypes: ["8"] }), [
-    { regionId: "19", playerIds: ["101"], enemyTypes: ["8"] },
-    { regionId: "24", playerIds: ["101"], enemyTypes: [] },
+    { regionId: "19", playerIds: ["101"], enemyTypes: ["8"], includeClaims: false },
+    { regionId: "24", playerIds: ["101"], enemyTypes: [], includeClaims: false },
+  ]);
+});
+
+test("spatial lease inputs collect claims in every selected operational region", () => {
+  assert.deepEqual(routeModule.mapSpatialLeaseInputs({
+    regionIds: ["17", "19"], playerRegionIds: [], layers: ["claims"], resourceIds: [], enemyTypes: [], playerIds: [],
+  }, { playerIds: [], enemyTypes: [] }), [
+    { regionId: "17", playerIds: [], enemyTypes: [], includeClaims: true },
+    { regionId: "19", playerIds: [], enemyTypes: [], includeClaims: true },
   ]);
 });
 
@@ -173,6 +182,18 @@ test("resource-only loading snapshots remain successful HTTP responses", () => {
     regionClaims: { data: { claims: [] } }, market: { data: { marketplaces: [] } }, empires: { data: { settlements: [] } }, spatial: null,
     resourceCollection: { requestedKeys: ["19|resource:28"], readyKeys: [], loadingKeys: [], unavailableKeys: ["19|resource:28"] },
   }), 503);
+});
+
+test("claims-only snapshots accept the selected region spatial source", () => {
+  assert.equal(routeModule.mapSnapshotStatusCode({
+    scope: { layers: ["claims"] },
+    layerAvailability: { claims: { available: true, status: "live", reason: null } },
+    regionClaims: null,
+    market: null,
+    empires: null,
+    spatial: { data: { claims: [{ entityId: "1", regionId: "17" }] } },
+    resourceCollection: null,
+  }), 200);
 });
 
 test("map resource SSE changes reach only listeners for the selected keys", () => {

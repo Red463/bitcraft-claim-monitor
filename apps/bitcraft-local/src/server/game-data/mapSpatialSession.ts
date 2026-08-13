@@ -18,7 +18,7 @@ type SubscriptionBuilder = {
   subscribe(queries: string[]): SubscriptionHandle;
 };
 type BindingConnection = {
-  db: { waystoneState: CachedTable; enemyState: CachedTable; mobileEntityState: CachedTable };
+  db: { waystoneState: CachedTable; enemyState: CachedTable; mobileEntityState: CachedTable; claimState: CachedTable; claimLocalState: CachedTable; claimTechState: CachedTable; claimTechDesc: CachedTable };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
 };
@@ -31,7 +31,7 @@ type ConnectionBuilder = {
   build(): BindingConnection;
 };
 type RegionalBindingModule = { DbConnection: { builder(): ConnectionBuilder } };
-type MapSpatialScope = { claimId: string; regionId: string; playerIds: string[]; resourceIds: string[]; enemyTypes: string[] };
+type MapSpatialScope = { claimId: string; regionId: string; playerIds: string[]; resourceIds: string[]; enemyTypes: string[]; includeClaims?: boolean };
 type SessionConfig = { uri: string; database: string; schemaFingerprint: string; manifest: BindingManifest; generation: number; scope: MapSpatialScope; maxRows?: number };
 export type MapSpatialSnapshot = { data: ReturnType<typeof normalizeMapSpatial>["data"]; warnings: string[]; database: string; regionId: string; schemaFingerprint: string; generation: number; receivedAt: string; freshness?: "live" | "partial" | "stale" };
 
@@ -161,13 +161,17 @@ export class RelayMapSpatialSession {
     if (!config) return;
     try {
       const waystoneRows = tableRows(connection.db.waystoneState);
+      const claimRows = config.scope.includeClaims ? tableRows(connection.db.claimState) : [];
+      const claimLocalRows = config.scope.includeClaims ? tableRows(connection.db.claimLocalState) : [];
+      const claimTechRows = config.scope.includeClaims ? tableRows(connection.db.claimTechState) : [];
+      const claimTechDescriptionRows = config.scope.includeClaims ? tableRows(connection.db.claimTechDesc) : [];
       const enemyRows = tableRows(connection.db.enemyState);
       const mobileRows = tableRows(connection.db.mobileEntityState);
-      const rowCount = waystoneRows.length + enemyRows.length + mobileRows.length;
+      const rowCount = waystoneRows.length + claimRows.length + claimLocalRows.length + claimTechRows.length + claimTechDescriptionRows.length + enemyRows.length + mobileRows.length;
       if (rowCount > config.maxRows) throw new Error(`Relay map-spatial row budget ${config.maxRows} exceeded by ${rowCount} rows`);
       const receivedAt = this.#now().toISOString();
       this.#health.enemyRowCount = selectedMapEnemyRows(enemyRows, config.scope.enemyTypes).length;
-      const normalized = normalizeMapSpatial({ scope: config.scope, waystoneRows, enemyRows, mobileRows, observedAt: receivedAt });
+      const normalized = normalizeMapSpatial({ scope: config.scope, waystoneRows, claimRows, claimLocalRows, claimTechRows, claimTechDescriptionRows, enemyRows, mobileRows, observedAt: receivedAt });
       const generation = this.#nextGeneration++;
       this.#health.rowCount = rowCount;
       Promise.resolve(this.#onSnapshot({ data: normalized.data, warnings: normalized.warnings, database: config.database, regionId: config.scope.regionId, schemaFingerprint: config.schemaFingerprint, generation, receivedAt }))
@@ -203,7 +207,8 @@ export class RelayMapSpatialSession {
 
   #attachListeners(connection: BindingConnection) {
     if (this.#listenersAttached) return;
-    for (const table of [connection.db.waystoneState, connection.db.mobileEntityState]) {
+    const tables = [connection.db.waystoneState, connection.db.mobileEntityState, ...(this.#config?.scope.includeClaims ? [connection.db.claimState, connection.db.claimLocalState, connection.db.claimTechState, connection.db.claimTechDesc] : [])];
+    for (const table of tables) {
       table.onInsert?.(this.#changed); table.onUpdate?.(this.#changed); table.onDelete?.(this.#changed);
     }
     connection.db.enemyState.onInsert?.(this.#enemyChanged); connection.db.enemyState.onUpdate?.(this.#enemyChanged); connection.db.enemyState.onDelete?.(this.#enemyChanged);
@@ -212,7 +217,8 @@ export class RelayMapSpatialSession {
 
   #removeListeners() {
     if (!this.#connection) return;
-    if (this.#listenersAttached) for (const table of [this.#connection.db.waystoneState, this.#connection.db.mobileEntityState]) {
+    const tables = [this.#connection.db.waystoneState, this.#connection.db.mobileEntityState, ...(this.#config?.scope.includeClaims ? [this.#connection.db.claimState, this.#connection.db.claimLocalState, this.#connection.db.claimTechState, this.#connection.db.claimTechDesc] : [])];
+    if (this.#listenersAttached) for (const table of tables) {
       table.removeOnInsert?.(this.#changed); table.removeOnUpdate?.(this.#changed); table.removeOnDelete?.(this.#changed);
     }
     if (this.#listenersAttached) {

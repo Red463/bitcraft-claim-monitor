@@ -8160,7 +8160,7 @@ const server = createServer(async (req, res) => {
       let scope;
       try {
         scope = parseMapScope(url.searchParams, {
-          allowedRegionIds: configuredRegionalMarketRegionIds(claimId),
+          allowedRegionIds: [...new Set([...configuredRegionalMarketRegionIds(claimId), ...readyMapRegionIds])],
           allowedPlayerRegionIds: readyMapRegionIds,
           allowedResourceIds: currentMapResourceIds(),
         });
@@ -8204,7 +8204,7 @@ const server = createServer(async (req, res) => {
               () => relayMapSpatialScopeManager.acquire({
                 relayBaseUrl,
                 claimId,
-                scope: { claimId, regionId: spatialInput.regionId, playerIds: spatialInput.playerIds, resourceIds: [], enemyTypes: spatialInput.enemyTypes },
+                scope: { claimId, regionId: spatialInput.regionId, playerIds: spatialInput.playerIds, resourceIds: [], enemyTypes: spatialInput.enemyTypes, includeClaims: spatialInput.includeClaims },
               }),
               () => requestClosed,
               "Map request closed during spatial scope acquisition.",
@@ -8247,6 +8247,7 @@ const server = createServer(async (req, res) => {
             playerIds: spatialInput.playerIds,
             resourceIds: [],
             enemyTypes: spatialInput.enemyTypes,
+            includeClaims: spatialInput.includeClaims,
           }))),
           mapResourceScopeKeys: new Set(resourceLeases.map((lease) => lease.key)),
           response: res,

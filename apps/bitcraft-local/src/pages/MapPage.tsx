@@ -166,7 +166,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
     [resourceRegions.join(","), regionOptions.join(",")],
   );
   const mapMarker = focus ?? defaultFocus;
-  const mapRegionIds = React.useMemo(() => boundedNativeMapRegions(normalizedRegionSelection, operationalRegionOptions), [normalizedRegionSelection.join(","), operationalRegionOptions.join(",")]);
+  const mapRegionIds = React.useMemo(() => boundedNativeMapRegions(normalizedRegionSelection, regionOptions), [normalizedRegionSelection.join(","), regionOptions.join(",")]);
   const readyPlayerRegionIds = React.useMemo(() => boundedNativeMapRegions([], readyResourceRegionIds, 16), [readyResourceRegionIds.join(",")]);
   const resourceMapRegionIds = React.useMemo(() => nativeMapResourceRegions(normalizedRegionSelection, readyResourceRegionIds), [normalizedRegionSelection.join(","), readyResourceRegionIds.join(",")]);
   const maxNativeResourceSelections = React.useMemo(() => nativeMapResourceSelectionLimit(resourceMapRegionIds), [resourceMapRegionIds.join(",")]);

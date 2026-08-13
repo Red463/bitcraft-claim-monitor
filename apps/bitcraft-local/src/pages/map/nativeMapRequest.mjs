@@ -14,7 +14,7 @@ export function normalizeNativeMapRegionSelection(selectedRegionIds = [], availa
   return decimalSort(selectedRegionIds).filter((regionId) => allowed.has(regionId));
 }
 
-export function boundedNativeMapRegions(selectedRegionIds = [], availableRegionIds = [], limit = 4) {
+export function boundedNativeMapRegions(selectedRegionIds = [], availableRegionIds = [], limit = 16) {
   const available = decimalSort(availableRegionIds);
   const allowed = new Set(available);
   const selected = decimalSort(selectedRegionIds).filter((regionId) => allowed.has(regionId));

@@ -14,7 +14,17 @@ const scope = {
   playerIds: ["216172782115643288"],
   resourceIds: ["2", "30"],
   enemyTypes: ["1", "8"],
+  includeClaims: false,
 };
+
+test("map spatial subscriptions collect claim centres for the selected region", () => {
+  assert.deepEqual(mapSpatialQueries({ ...scope, includeClaims: true, playerIds: [], enemyTypes: [] }), [
+    "SELECT * FROM claim_state",
+    "SELECT * FROM claim_local_state",
+    "SELECT * FROM claim_tech_state",
+    "SELECT * FROM claim_tech_desc",
+  ]);
+});
 
 test("map spatial subscriptions are bounded by selected players and enemies", () => {
   assert.deepEqual(mapSpatialQueries(scope), [
@@ -74,6 +84,28 @@ test("map spatial normalization retains an empty resource list while joining ene
   assert.equal("banks" in normalized.data, false);
   assert.equal(normalized.data.waystones[0].entityId, "301");
   assert.deepEqual(normalized.warnings, []);
+});
+
+test("map spatial normalization projects claim centres with tier and NPC identity", () => {
+  const normalized = normalizeMapSpatial({
+    scope: { ...scope, includeClaims: true, playerIds: [], enemyTypes: [] },
+    claimRows: [
+      { entityId: 501n, ownerPlayerEntityId: 601n, ownerBuildingEntityId: 701n, name: "Pinewatch", neutral: false },
+      { entityId: 502n, ownerPlayerEntityId: 0n, ownerBuildingEntityId: 702n, name: "Starter Town", neutral: true },
+    ],
+    claimLocalRows: [
+      { entityId: 501n, buildingDescriptionId: 1, supplies: 0, treasury: 0n, numTiles: 1, location: { x: 123, z: 456, dimension: 1n } },
+      { entityId: 502n, buildingDescriptionId: 292245080, supplies: 0, treasury: 0n, numTiles: 1, location: { x: 321, z: 654, dimension: 1n } },
+    ],
+    claimTechRows: [{ entityId: 501n, learned: [801n] }],
+    claimTechDescriptionRows: [{ id: 801n, tier: 4 }],
+    observedAt: "2026-08-13T12:00:00.000Z",
+  });
+
+  assert.deepEqual(normalized.data.claims, [
+    { entityId: "501", regionId: "19", name: "Pinewatch", tier: 4, npc: false, locationX: 123, locationZ: 456, dimension: "1", observedAt: "2026-08-13T12:00:00.000Z" },
+    { entityId: "502", regionId: "19", name: "Starter Town", tier: null, npc: true, locationX: 321, locationZ: 654, dimension: "1", observedAt: "2026-08-13T12:00:00.000Z" },
+  ]);
 });
 
 test("map spatial normalization reports missing operational joins instead of inventing positions", () => {

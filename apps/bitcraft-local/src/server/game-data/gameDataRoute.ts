@@ -40,17 +40,19 @@ export function mapResourceLeaseInputs(scope: MapScopeSelection): Array<{ region
 export function mapSpatialLeaseInputs(
   scope: MapScopeSelection,
   permitted: { playerIds: string[]; enemyTypes: string[] },
-): Array<{ regionId: string; playerIds: string[]; enemyTypes: string[] }> {
+): Array<{ regionId: string; playerIds: string[]; enemyTypes: string[]; includeClaims: boolean }> {
   const playerIds = scope.layers.includes("players") ? permitted.playerIds : [];
   const enemyTypes = scope.layers.includes("enemies") ? permitted.enemyTypes : [];
+  const claimRegions = new Set(scope.layers.includes("claims") ? scope.regionIds : []);
   const playerRegions = new Set(playerIds.length ? scope.playerRegionIds : []);
   const enemyRegions = new Set(enemyTypes.length ? scope.regionIds : []);
-  const regionIds = [...new Set([...playerRegions, ...enemyRegions])]
+  const regionIds = [...new Set([...claimRegions, ...playerRegions, ...enemyRegions])]
     .sort((left, right) => left.length - right.length || left.localeCompare(right));
   return regionIds.map((regionId) => ({
     regionId,
     playerIds: playerRegions.has(regionId) ? playerIds : [],
     enemyTypes: enemyRegions.has(regionId) ? enemyTypes : [],
+    includeClaims: claimRegions.has(regionId),
   }));
 }
 
@@ -98,7 +100,7 @@ export function mapSnapshotStatusCode({ scope, layerAvailability, regionClaims, 
   const hasRelevantSource = scope.layers.some((layer) => {
     if (layerAvailability[layer]?.status === "unavailable") return false;
     if (layer === "resources") return Boolean(resourceCollection?.readyKeys?.length || resourceCollection?.loadingKeys?.length);
-    if (layer === "claims") return Boolean(regionClaims);
+    if (layer === "claims") return Boolean(regionClaims || spatial);
     if (layer === "markets") return Boolean(market);
     if (layer === "waystones") return Boolean(regionClaims || spatial);
     if (["empire-settlements", "empire-territory", "watchtowers"].includes(layer)) return Boolean(empires);

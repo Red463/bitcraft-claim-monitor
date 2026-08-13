@@ -16,7 +16,7 @@ export const MAP_LAYER_KEYS = [
 ];
 
 export const MAP_SCOPE_LIMITS = Object.freeze({
-  regions: 4,
+  regions: 16,
   playerRegions: 16,
   resourceIds: 16,
   enemyTypes: 16,
@@ -142,6 +142,7 @@ export function combineMapSpatialSnapshots(input = []) {
     .at(0) ?? null;
   return {
     data: {
+      claims: snapshots.flatMap((snapshot) => snapshot.data?.claims ?? []),
       players: snapshots.flatMap((snapshot) => snapshot.data?.players ?? []),
       enemies: snapshots.flatMap((snapshot) => snapshot.data?.enemies ?? []),
       banks: snapshots.flatMap((snapshot) => snapshot.data?.banks ?? []),
@@ -249,7 +250,10 @@ export function buildMapSnapshot({
       .flatMap((snapshot) => Array.isArray(snapshot?.warnings) ? snapshot.warnings : [])
       .map(String),
   )];
-  const regionClaimRows = snapshotRows(regionClaims, "claims").map((row) => ({ ...row, regionId: row.regionId ?? regionClaims?.data?.regionId }));
+  const regionClaimRows = [
+    ...snapshotRows(regionClaims, "claims").map((row) => ({ ...row, regionId: row.regionId ?? regionClaims?.data?.regionId })),
+    ...snapshotRows(spatial, "claims"),
+  ].filter((row, index, values) => values.findIndex((candidate) => String(candidate.entityId) === String(row.entityId)) === index);
   const regionalWaystoneRows = snapshotRows(regionClaims, "waystones").map((row) => ({ ...row, regionId: row.regionId ?? regionClaims?.data?.regionId }));
   const marketRows = snapshotRows(market, "marketplaces").map((row) => ({ ...row, regionId: row.regionId ?? market?.data?.regionId }));
   const settlementRows = snapshotRows(empires, "settlements");
@@ -257,7 +261,7 @@ export function buildMapSnapshot({
 
   const claimRegionId = String(regionClaims?.data?.regionId ?? "");
   const marketRegionId = String(market?.data?.regionId ?? "");
-  if (layers.claims && scope.regionIds.some((regionId) => regionId !== claimRegionId)) warnings.push("Claim centres are only available for the collected claim region.");
+  if (layers.claims && !spatial && scope.regionIds.some((regionId) => regionId !== claimRegionId)) warnings.push("Claim centres are only available for the collected claim region.");
   if (layers.markets && scope.regionIds.some((regionId) => regionId !== marketRegionId)) warnings.push("Markets are only available for the monitored claim region.");
 
   if (layers.claims) layers.claims = regionClaimRows.filter((row) => inScope(row, scope) && row.locationX != null && row.locationZ != null).map((row) => feature(row, "claim", row.entityId, recordPoint(row), { regionId: String(row.regionId), name: row.name ?? "Claim", tier: row.tier ?? null, npc: row.npc === true }));

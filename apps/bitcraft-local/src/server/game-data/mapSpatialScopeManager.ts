@@ -2,7 +2,7 @@ import { relayWebSocketUri } from "./globalCatalogRuntime.ts";
 import { RelayMapSpatialSession, type MapSpatialSnapshot } from "./mapSpatialSession.ts";
 import { discoverRelayTopology, type RelayTopology } from "./topology.ts";
 
-type Scope = { claimId: string; regionId: string; playerIds: string[]; resourceIds: string[]; enemyTypes: string[] };
+type Scope = { claimId: string; regionId: string; playerIds: string[]; resourceIds: string[]; enemyTypes: string[]; includeClaims?: boolean };
 type Session = { start(config: Parameters<RelayMapSpatialSession["start"]>[0]): Promise<void>; health(): unknown; stop(): Promise<void> };
 type SnapshotWaiter = { timer: unknown; resolve(snapshot: MapSpatialSnapshot | null): void };
 type Entry = { key: string; relayBaseUrl: string; scope: Scope; session: Session | null; leases: number; snapshot: MapSpatialSnapshot | null; snapshotWaiters: Set<SnapshotWaiter>; closeTimer: unknown; restartTimer: unknown; restartAttempts: number; openedAt: number };
@@ -30,12 +30,12 @@ function sorted(values: string[]): string[] {
 }
 
 function normalizedScope(scope: Scope): Scope {
-  return { claimId: decimal(scope.claimId, "Map spatial claim id"), regionId: decimal(scope.regionId, "Map spatial region id"), playerIds: sorted(scope.playerIds), resourceIds: sorted(scope.resourceIds), enemyTypes: sorted(scope.enemyTypes) };
+  return { claimId: decimal(scope.claimId, "Map spatial claim id"), regionId: decimal(scope.regionId, "Map spatial region id"), playerIds: sorted(scope.playerIds), resourceIds: sorted(scope.resourceIds), enemyTypes: sorted(scope.enemyTypes), includeClaims: scope.includeClaims === true };
 }
 
 export function mapSpatialScopeKey(rawScope: Scope): string {
   const scope = normalizedScope(rawScope);
-  return `${scope.claimId}|${scope.regionId}|p:${scope.playerIds.join(",")}|r:${scope.resourceIds.join(",")}|e:${scope.enemyTypes.join(",")}`;
+  return `${scope.claimId}|${scope.regionId}|p:${scope.playerIds.join(",")}|r:${scope.resourceIds.join(",")}|e:${scope.enemyTypes.join(",")}|c:${scope.includeClaims ? "1" : "0"}`;
 }
 
 export class RelayMapSpatialScopeManager {

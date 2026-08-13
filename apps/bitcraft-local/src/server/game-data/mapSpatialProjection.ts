@@ -1,9 +1,12 @@
+import { normalizeRegionalClaims } from "./normalizers.ts";
+
 type MapSpatialScope = {
   claimId: string;
   regionId: string;
   playerIds: string[];
   resourceIds: string[];
   enemyTypes: string[];
+  includeClaims?: boolean;
 };
 
 type WireRecord = Record<string, unknown>;
@@ -76,6 +79,12 @@ function equalityQueries(table: string, column: string, values: string[], extraP
 
 export function mapSpatialQueries(scope: MapSpatialScope): string[] {
   return [
+    ...(scope.includeClaims ? [
+      "SELECT * FROM claim_state",
+      "SELECT * FROM claim_local_state",
+      "SELECT * FROM claim_tech_state",
+      "SELECT * FROM claim_tech_desc",
+    ] : []),
     scope.enemyTypes.length ? "SELECT * FROM enemy_state" : null,
     ...equalityQueries("mobile_entity_state", "entity_id", scope.playerIds, `dimension = ${MAP_OVERWORLD_DIMENSION}`),
   ].filter((query): query is string => Boolean(query));
@@ -115,18 +124,51 @@ function coordinateFields(value: unknown, label: string) {
 export function normalizeMapSpatial({
   scope,
   waystoneRows = [],
+  claimRows = [],
+  claimLocalRows = [],
+  claimTechRows = [],
+  claimTechDescriptionRows = [],
   enemyRows = [],
   mobileRows = [],
   observedAt = new Date().toISOString(),
 }: {
   scope: MapSpatialScope;
   waystoneRows?: unknown[];
+  claimRows?: unknown[];
+  claimLocalRows?: unknown[];
+  claimTechRows?: unknown[];
+  claimTechDescriptionRows?: unknown[];
   enemyRows?: unknown[];
   mobileRows?: unknown[];
   observedAt?: string;
 }) {
   const regionId = decimal(scope.regionId, "Map spatial region id");
   const warnings: string[] = [];
+  const claimProjection = scope.includeClaims
+    ? normalizeRegionalClaims({
+        regionId,
+        claimRows,
+        localRows: claimLocalRows,
+        claimTypeRows: [],
+        claimTechRows,
+        claimTechDescriptionRows,
+        usernameRows: [],
+      })
+    : { data: { claims: [] }, warnings: [] };
+  warnings.push(...claimProjection.warnings);
+  const claims = claimProjection.data.claims
+      .filter((claim) => claim.locationX != null && claim.locationZ != null && claim.locationDimension === MAP_OVERWORLD_DIMENSION)
+      .map((claim) => ({
+        entityId: String(claim.entityId),
+        regionId,
+        name: String(claim.name ?? "Claim"),
+        tier: claim.tier == null ? null : Number(claim.tier),
+        npc: claim.npc === true,
+        locationX: Number(claim.locationX),
+        locationZ: Number(claim.locationZ),
+        dimension: String(claim.locationDimension),
+        observedAt,
+      }));
   if (scope.enemyTypes.length && !enemyRows.length) warnings.push("No enemies matched the selected types in this region.");
   const mobile = new Map<string, WireRecord>();
   for (const [index, row] of rows(mobileRows).entries()) {
@@ -167,5 +209,5 @@ export function normalizeMapSpatial({
       return [];
     }
   });
-  return { data: { regionId, players, resources: [], enemies, waystones }, warnings };
+  return { data: { regionId, claims, players, resources: [], enemies, waystones }, warnings };
 }

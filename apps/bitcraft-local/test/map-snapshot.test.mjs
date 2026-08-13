@@ -183,6 +183,25 @@ test("map snapshot projects available operations and reports uncollected layers"
   assert.match(snapshot.warnings.join(" "), /resource positions.*unavailable/i);
 });
 
+test("map snapshot projects dynamically collected claim centres outside the monitored region", () => {
+  const scope = parseMapScope(new URLSearchParams({ regions: "17", layers: "claims" }), { allowedRegionIds: ["17", "19"] });
+  const snapshot = buildMapSnapshot({
+    scope,
+    spatial: {
+      data: { claims: [{ entityId: "501", regionId: "17", name: "Pinewatch", tier: 4, npc: false, locationX: 123, locationZ: 456, dimension: "1", observedAt: "2026-08-13T12:00:00.000Z" }] },
+      generation: 2,
+      freshness: "live",
+      provenance: { receivedAt: "2026-08-13T12:00:00.000Z" },
+      warnings: [],
+    },
+  });
+
+  assert.deepEqual(snapshot.layers.claims.map(({ entityId, regionId, name }) => ({ entityId, regionId, name })), [
+    { entityId: "501", regionId: "17", name: "Pinewatch" },
+  ]);
+  assert.doesNotMatch(snapshot.warnings.join(" "), /only available for the collected claim region/i);
+});
+
 test("player positions require selected online monitored non-excluded members", () => {
   const scope = parseMapScope(new URLSearchParams({
     regions: "19",
@@ -580,7 +599,7 @@ test("stale resource warnings degrade freshness without clearing usable points",
 
 test("map resource requests retain region, resource, feature, and byte limits", () => {
   assert.throws(
-    () => parseMapScope(new URLSearchParams({ regions: "1,2,3,4,5", layers: "claims" }), { allowedRegionIds: ["1", "2", "3", "4", "5"] }),
+    () => parseMapScope(new URLSearchParams({ regions: Array.from({ length: 17 }, (_, index) => index + 1).join(","), layers: "claims" }), { allowedRegionIds: Array.from({ length: 17 }, (_, index) => String(index + 1)) }),
     (error) => error instanceof MapSnapshotError && error.statusCode === 413,
   );
   assert.throws(
