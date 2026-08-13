@@ -114,7 +114,7 @@ test("runtime health aggregates active, idle, row, and latency diagnostics witho
     discoverTopology: async () => ({ regions: new Map([["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }]]) }),
     createSession: () => ({
       async start() {}, async subscribe() {}, unsubscribe() {}, async stop() {},
-      health: () => ({ connected: true, applied: true, stage: "applied", lastError: null, lastAppliedAt: "2026-08-12T10:00:00.000Z", firstGenerationLatencyMs: 8, rowCount: 10, rowsPerType: { "54": { resourceState: 3, locationState: 2 }, "28": { resourceState: 1, locationState: 1 } }, appliedResourceIds: ["28", "54"], points: [{ x: 101, z: 202 }] }),
+      health: () => ({ connected: true, applied: true, stage: "applied", lastError: null, lastAppliedAt: "2026-08-12T10:00:00.000Z", firstGenerationLatencyMs: 8, normalizationDurationMs: 4, rowCount: 10, rowsPerType: { "54": { resourceState: 3, locationState: 2 }, "28": { resourceState: 1, locationState: 1 } }, appliedResourceIds: ["28", "54"], points: [{ x: 101, z: 202 }] }),
     }),
   });
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
@@ -129,12 +129,34 @@ test("runtime health aggregates active, idle, row, and latency diagnostics witho
   assert.equal(runtime.health().idleRetainedResourceSubscriptionCount, 1);
   assert.deepEqual(runtime.health().rowsPerSubscription, [2, 5]);
   assert.deepEqual(runtime.health().firstGenerationLatencyMs, { sampleCount: 1, min: 8, max: 8, average: 8 });
+  assert.deepEqual(runtime.health().normalizationDurationMs, { sampleCount: 1, min: 4, max: 4, average: 4 });
   assert.equal(runtime.health().reconnectAttemptCount, 0);
   assert.equal(runtime.health().capacityRejectionCount, 0);
   assert.deepEqual(runtime.health().regions[0].subscription, {
-    connected: true, applied: true, stage: "applied", lastError: null, lastAppliedAt: "2026-08-12T10:00:00.000Z", firstGenerationLatencyMs: 8, rowCount: 10, rowsPerSubscription: [2, 5],
+    connected: true, applied: true, stage: "applied", lastError: null, lastAppliedAt: "2026-08-12T10:00:00.000Z", firstGenerationLatencyMs: 8, normalizationDurationMs: 4, rowCount: 10, rowsPerSubscription: [2, 5],
   });
   await active.release();
+  await runtime.stop();
+});
+
+test("runtime health reports aggregate partition states, bytes, and queued cold work", async () => {
+  const { runtime, sessions } = runtimeFixture({ regions: ["19"] });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const lease = await runtime.acquire({ regionId: "19", resourceId: "28" });
+  assert.deepEqual(runtime.health().partitionCounts, { live: 0, loading: 1, stale: 0, unavailable: 0 });
+  assert.equal(runtime.health().queueDepth, 1);
+
+  sessions[0].options.onSnapshot(snapshot("19", "28", 1, [
+    { entityId: "100", regionId: "19", resourceId: "28", locationX: 10, locationZ: 20, dimension: "1" },
+  ]));
+  assert.deepEqual(runtime.health().partitionCounts, { live: 1, loading: 0, stale: 0, unavailable: 0 });
+  assert.equal(runtime.health().queueDepth, 0);
+  assert.equal(runtime.health().bytesPerSubscription.length, 1);
+  assert.ok(runtime.health().bytesPerSubscription[0] > 0);
+
+  sessions[0].options.onFailure("temporary disconnect");
+  assert.deepEqual(runtime.health().partitionCounts, { live: 0, loading: 0, stale: 1, unavailable: 0 });
+  await lease.release();
   await runtime.stop();
 });
 
@@ -470,6 +492,7 @@ test("configuration, capacity, and cold-start limits reject only cold creation",
     createSession: (options) => rate.sessions.push({ options, async start() {}, async subscribe() {}, unsubscribe() {}, health() { return {}; }, async stop() {} }) && rate.sessions.at(-1),
     now: clock.now, setTimer: (callback, delay) => clock.setTimer(callback, delay), clearTimer: (timer) => clock.clearTimer(timer),
     maxResourceTypesPerRegion: 128,
+    maxColdStartsPerWindow: 64,
   });
   await limited.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
   const leases = [];
@@ -479,4 +502,42 @@ test("configuration, capacity, and cold-start limits reject only cold creation",
   await leases[0].release();
   await limited.acquire({ regionId: "19", resourceId: "1" });
   await limited.stop();
+});
+
+test("accepted runtime snapshots expose one sorted compact partition for zero-copy paging", async () => {
+  const { runtime, sessions } = runtimeFixture({ regions: ["19"] });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const lease = await runtime.acquire({ regionId: "19", resourceId: "130" });
+  sessions[0].options.onSnapshot(snapshot("19", "130", 1, [
+    { entityId: "1", regionId: "19", resourceId: "130", locationX: 10, locationZ: 20, dimension: "1" },
+    { entityId: "2", regionId: "19", resourceId: "130", locationX: 30, locationZ: 40, dimension: "1" },
+  ]));
+
+  assert.deepEqual(lease.state().snapshot.compactResources, [
+    ["1", "19", "130", 10, 20],
+    ["2", "19", "130", 30, 40],
+  ]);
+  await lease.release();
+  await runtime.stop();
+});
+
+test("cold admission overloads identify a retry delay instead of permanent unavailability", async () => {
+  const clock = manualClock();
+  const fixture = runtimeFixture({ regions: ["19"], clock });
+  const runtime = new runtimeModule.RelayMapResourceRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => fixture.topology,
+    createSession: (options) => ({ options, async start() {}, async subscribe() {}, unsubscribe() {}, health() { return {}; }, async stop() {} }),
+    now: clock.now,
+    setTimer: (callback, delay) => clock.setTimer(callback, delay),
+    clearTimer: (timer) => clock.clearTimer(timer),
+    maxResourceTypesPerRegion: 16,
+    maxColdStartsPerWindow: 1,
+  });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  await runtime.acquire({ regionId: "19", resourceId: "1" });
+  await assert.rejects(runtime.acquire({ regionId: "19", resourceId: "2" }), (error) => (
+    error?.statusCode === 429 && error?.retryAfterSeconds === 60 && /cold-start/i.test(error.message)
+  ));
+  await runtime.stop();
 });

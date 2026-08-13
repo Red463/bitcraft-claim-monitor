@@ -73,7 +73,7 @@ test("spatial lease inputs collect claims in every selected operational region",
 
 test("resource lease composition preserves warm rows and loading readiness", () => {
   assert.equal(typeof routeModule.combineMapResourceLeases, "function");
-  const warm = resourceSnapshot("19", "28", 7, [{ entityId: "100", resourceId: "28", regionId: "19" }]);
+  const warm = resourceSnapshot("19", "28", 7, [{ entityId: "100", resourceId: "28", regionId: "19", locationX: 10, locationZ: 20, dimension: "1" }]);
   const combined = routeModule.combineMapResourceLeases([
     lease("19|resource:28", "live", warm),
     lease("24|resource:28", "loading"),
@@ -85,6 +85,14 @@ test("resource lease composition preserves warm rows and loading readiness", () 
   assert.deepEqual(combined.readyKeys, ["19|resource:28"]);
   assert.deepEqual(combined.loadingKeys, ["24|resource:28"]);
   assert.deepEqual(combined.unavailableKeys, []);
+  assert.deepEqual(combined.compactPartitions.get("19|resource:28"), [["100", "19", "28", 10, 20]]);
+});
+
+test("resource route maps transient admission pressure to retryable HTTP 429", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /mapResourceAdmissionResponse/);
+  assert.match(server, /"Retry-After"/);
+  assert.match(server, /statusCode:\s*429/);
 });
 
 test("resource lease composition retains snapshot warnings and marks usable rows partial", () => {
@@ -307,6 +315,28 @@ test("server resource routes derive catalog validation before acquiring leases w
   assert.match(server, /parseMapResourcePartitionScope\(url\.searchParams, \{[^}]*allowedRegionIds:[^}]*allowedResourceIds:\s*currentMapResourceIds\(\)/s);
   assert.match(server, /parseMapResourceSelectionScope\(url\.searchParams, \{[^}]*allowedRegionIds:[^}]*allowedResourceIds:\s*currentMapResourceIds\(\)/s);
   assert.ok(server.indexOf("parseMapResourceSelectionScope") < server.indexOf("relayMapResourceRuntime.acquire({ regionId, resourceId })"));
+});
+
+test("every resource route authorizes before web readiness discovery or lease acquisition", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const routeMarkers = [
+    'url.pathname === "/api/local/map/regions"',
+    'url.pathname === "/api/local/map/resources"',
+    'url.pathname === "/api/local/map/resource-events"',
+    '["/api/local/map/snapshot", "/api/local/map/resources", "/api/local/map/events"].includes(url.pathname)',
+  ];
+  for (const marker of routeMarkers) {
+    const start = server.indexOf(marker);
+    assert.ok(start >= 0, marker);
+    const nextRoute = server.indexOf("if (req.method ===", start + marker.length);
+    const route = server.slice(start, nextRoute === -1 ? undefined : nextRoute);
+    const denied = route.indexOf("if (!access.allowed)");
+    const readiness = route.indexOf("ensureCurrentMapResourceRegions(claimId)");
+    assert.ok(denied >= 0, `${marker} must enforce Map access`);
+    assert.ok(readiness > denied, `${marker} must authorize before readiness discovery`);
+    const acquisition = route.indexOf("relayMapResourceRuntime.acquire");
+    if (acquisition >= 0) assert.ok(acquisition > readiness, `${marker} must ensure readiness before acquiring a lease`);
+  }
 });
 
 test("server preserves requested spatial regions when combining lease snapshots", () => {
