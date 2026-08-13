@@ -58,7 +58,7 @@ export class RelayMapSpatialScopeManager {
     this.#createSession = dependencies.createSession ?? ((options) => new RelayMapSpatialSession(options));
     this.#onGeneration = dependencies.onGeneration ?? (() => {});
     this.#idleCloseMs = dependencies.idleCloseMs ?? 60_000;
-    this.#maxSessions = dependencies.maxSessions ?? 16;
+    this.#maxSessions = dependencies.maxSessions ?? 64;
     this.#now = dependencies.now ?? Date.now;
     this.#setTimer = dependencies.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs));
     this.#clearTimer = dependencies.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>));
@@ -79,10 +79,13 @@ export class RelayMapSpatialScopeManager {
       snapshot: () => {
         if (!entry.snapshot) return null;
         const health = entry.session?.health() as { connected?: boolean; applied?: boolean; lastError?: string | null } | undefined;
-        if (health?.connected && health.applied && !health.lastError) return entry.snapshot;
+        if (health?.connected && health.applied && !health.lastError) {
+          return { ...entry.snapshot, freshness: entry.snapshot.warnings.length ? "partial" as const : "live" as const };
+        }
         return {
           ...entry.snapshot,
           data: { ...entry.snapshot.data, players: [] },
+          freshness: "stale" as const,
           warnings: [...entry.snapshot.warnings, "Live player positions are unavailable; last-known player positions were withheld."],
         };
       },

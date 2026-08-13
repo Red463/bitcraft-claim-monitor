@@ -248,6 +248,7 @@ function displayedPoint(feature: MapFeature) {
 export function NativeMap({
   regionIds,
   visibleRegionIds = [],
+  playerRegionIds,
   resourceRegionIds,
   playerIds,
   resourceIds,
@@ -260,6 +261,7 @@ export function NativeMap({
 }: {
   regionIds: string[];
   visibleRegionIds?: string[];
+  playerRegionIds: string[];
   resourceRegionIds: string[];
   playerIds: string[];
   resourceIds: string[];
@@ -301,7 +303,7 @@ export function NativeMap({
   const [layerVisibility, setLayerVisibility] = React.useState(() => typeof window === "undefined"
     ? defaultMapLayerVisibility()
     : loadMapLayerVisibility(() => window.localStorage));
-  const request = React.useMemo(() => nativeMapRequest({ operationalRegionIds: regionIds, resourceRegionIds, playerIds, resourceIds, enemyTypes }), [regionIds.join(","), resourceRegionIds.join(","), playerIds.join(","), resourceIds.join(","), enemyTypes.join(",")]);
+  const request = React.useMemo(() => nativeMapRequest({ operationalRegionIds: regionIds, playerRegionIds, resourceRegionIds, playerIds, resourceIds, enemyTypes }), [regionIds.join(","), playerRegionIds.join(","), resourceRegionIds.join(","), playerIds.join(","), resourceIds.join(","), enemyTypes.join(",")]);
   const snapshotRequestKeyRef = React.useRef(request.eventsUrl);
   snapshotRequestKeyRef.current = request.eventsUrl;
   const resourceSelectionKey = React.useMemo(() => request.resourcePartitions.map((partition) => partition.key).join(","), [request.resourcePartitions]);

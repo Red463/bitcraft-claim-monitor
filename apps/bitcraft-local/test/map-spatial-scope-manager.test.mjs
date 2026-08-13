@@ -3,6 +3,21 @@ import test from "node:test";
 
 import { RelayMapSpatialScopeManager } from "../src/server/game-data/mapSpatialScopeManager.ts";
 
+test("default spatial capacity leaves headroom beyond one maximum player-region request", async () => {
+  let sessions = 0;
+  const manager = new RelayMapSpatialScopeManager({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({ regions: new Map([["19", { ready: true, port: 4019, database: "relay-region-19", schemaFingerprint: "regional-v1" }]]) }),
+    createSession: () => ({ async start() { sessions += 1; }, health() { return {}; }, async stop() {} }),
+  });
+
+  for (let index = 0; index < 17; index += 1) {
+    await manager.acquire({ relayBaseUrl: "https://relay.example", claimId: "99999999", scope: { claimId: "99999999", regionId: "19", playerIds: [String(index + 1)], resourceIds: [], enemyTypes: [] } });
+  }
+  assert.equal(sessions, 17);
+  await manager.stop();
+});
+
 test("identical map scopes share one session and retain last-good until idle close", async () => {
   const sessions = [];
   const timers = [];
@@ -103,6 +118,7 @@ test("disconnected scopes retain static last-good rows but withhold player posit
   connected = false;
   assert.deepEqual(lease.snapshot().data.players, []);
   assert.equal(lease.snapshot().data.resources[0].entityId, "100");
+  assert.equal(lease.snapshot().freshness, "stale");
   assert.match(lease.snapshot().warnings.join(" "), /player positions.*withheld/i);
   await manager.stop();
 });

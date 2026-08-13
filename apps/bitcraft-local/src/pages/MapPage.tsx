@@ -20,7 +20,7 @@ import { MapPlayerTrackingPanel } from "./map/MapPlayerTrackingPanel";
 import { MapRegionSelect } from "./map/MapRegionSelect";
 import { MapResourceFinderPanel } from "./map/MapResourceFinderPanel";
 import { mapRendererPolicy } from "./map/mapRendererPolicy.mjs";
-import { boundedNativeMapRegions, nativeMapResourceRegions, normalizeNativeMapRegionSelection } from "./map/nativeMapRequest.mjs";
+import { boundedNativeMapRegions, nativeMapResourceRegions, nativeMapResourceSelectionLimit, normalizeNativeMapRegionSelection } from "./map/nativeMapRequest.mjs";
 import { selectedResourceTierMap } from "./map/resourceNodeColours.mjs";
 import { RESOURCE_FINDER_BATCH_SIZE, nextResourceLimit, visibleResourceMatches } from "./map/resourceFinderWindow.mjs";
 
@@ -30,6 +30,7 @@ type FrameState = "loading" | "ready" | "timed-out" | "failed";
 
 export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rendererMode = "external" }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void; activeRegionScopeKey?: string; rendererMode?: "external" | "native-beta" | "native" }) {
   const { cycle, trackPromise } = usePageRefresh();
+  const nativeRenderer = rendererMode !== "external";
   const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
   const [externalPlayers, setExternalPlayers] = usePersistedState<MapTrackedExternalPlayer[]>("map.external-players", []);
   const [selectedResources, setSelectedResources] = usePersistedState<string[]>("map.resources", []);
@@ -152,18 +153,27 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
     String(data.claim.regionId ?? ""),
     ...data.regionStatus.map((region) => String(region.regionId ?? "")),
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [activeRegions, data.claim.regionId, data.regionStatus]);
+  const readyResourceRegionIds = React.useMemo(
+    () => unique(mapResourceRegions.map((region) => String(region.regionId ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)),
+    [mapResourceRegions],
+  );
   const regionOptions = React.useMemo(() => unique([
-    ...mapResourceRegions.map((region) => String(region.regionId ?? "")),
+    ...readyResourceRegionIds,
     ...operationalRegionOptions,
-  ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [mapResourceRegions, operationalRegionOptions]);
+  ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [readyResourceRegionIds, operationalRegionOptions]);
   const normalizedRegionSelection = React.useMemo(
     () => normalizeNativeMapRegionSelection(resourceRegions, regionOptions),
     [resourceRegions.join(","), regionOptions.join(",")],
   );
   const mapMarker = focus ?? defaultFocus;
   const mapRegionIds = React.useMemo(() => boundedNativeMapRegions(normalizedRegionSelection, operationalRegionOptions), [normalizedRegionSelection.join(","), operationalRegionOptions.join(",")]);
-  const resourceMapRegionIds = React.useMemo(() => nativeMapResourceRegions(normalizedRegionSelection, regionOptions), [normalizedRegionSelection.join(","), regionOptions.join(",")]);
-  const selectedResourceIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length)), [normalizedSelectedResources]);
+  const readyPlayerRegionIds = React.useMemo(() => boundedNativeMapRegions([], readyResourceRegionIds, 16), [readyResourceRegionIds.join(",")]);
+  const resourceMapRegionIds = React.useMemo(() => nativeMapResourceRegions(normalizedRegionSelection, readyResourceRegionIds), [normalizedRegionSelection.join(","), readyResourceRegionIds.join(",")]);
+  const maxNativeResourceSelections = React.useMemo(() => nativeMapResourceSelectionLimit(resourceMapRegionIds), [resourceMapRegionIds.join(",")]);
+  const selectedResourceIds = React.useMemo(() => {
+    const resourceIds = normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length));
+    return nativeRenderer ? resourceIds.slice(0, maxNativeResourceSelections) : resourceIds;
+  }, [nativeRenderer, maxNativeResourceSelections, normalizedSelectedResources]);
   const selectedResourceTiers = React.useMemo(
     () => selectedResourceTierMap(selectedResourceIds, resourceByToken),
     [selectedResourceIds.join(","), resourceByToken],
@@ -181,7 +191,6 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
   }), [currentPlayerIdsKey, focus, mapMarker, selectedResourceIds.join(","), selectedEnemyIds.join(","), resourceMapRegionIds.join(",")]);
   const mapUrl = React.useMemo(() => bitcraftMapUrl(currentPlayerIds, mapMarker, Boolean(focus), selectedResourceIds, resourceMapRegionIds, selectedEnemyIds), [mapSignature]);
   const renderer = React.useMemo(() => mapRendererPolicy(rendererMode, mapUrl), [rendererMode, mapUrl]);
-  const nativeRenderer = renderer.native;
   const [currentFrameUrl, setCurrentFrameUrl] = React.useState(mapUrl);
   const [frameState, setFrameState] = React.useState<FrameState>("loading");
   const [frameAttempt, setFrameAttempt] = React.useState(0);
@@ -271,7 +280,9 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
     const normalizedToken = normalizeMapResourceToken(token);
     setSelectedResources((prev) => {
       const next = new Set(prev.map(normalizeMapResourceToken).filter(Boolean));
+      const selectedResourceCount = [...next].filter((value) => value.startsWith("resource:")).length;
       if (next.has(normalizedToken)) next.delete(normalizedToken);
+      else if (nativeRenderer && normalizedToken.startsWith("resource:") && !next.has(normalizedToken) && selectedResourceCount >= maxNativeResourceSelections) return [...next];
       else next.add(normalizedToken);
       return [...next].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     });
@@ -322,6 +333,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
           <p>{nativeRenderer ? "Same-origin Relay map with explicit data freshness" : "Live player and resource tracking via bitcraftmap.com"}</p>
         </div>
         <div className="dashboard-top-meta">
+          {!nativeRenderer ? <div className="map-external-region-control">{regionControl}</div> : null}
           <div className="dashboard-meta-cluster">
             <span><Users size={14} /> {formatNumber(onlineCount)} online</span>
             <span>{formatNumber(roster.length)} members total</span>
@@ -340,7 +352,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
       <div className={`map-workspace ${nativeRenderer ? "native-tools" : ""}`}>
         {!nativeRenderer ? <aside className="map-resource-panel">{resourceFinder}</aside> : null}
         <div className={`map-frame-host ${nativeRenderer ? "is-native" : `is-${frameState}`}`}>
-          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} visibleRegionIds={normalizedRegionSelection} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} playerTool={{ label: "Players", count: trackedPlayerCount, content: playerPanel, primaryFocusSelector: "input[placeholder='Find settlement members']" }} resourceTool={{ label: "Resources", count: normalizedSelectedResources.length, content: resourceFinder, primaryFocusSelector: ".map-resource-finder-search input" }} regionControl={regionControl} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
+          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} visibleRegionIds={normalizedRegionSelection} playerRegionIds={readyPlayerRegionIds} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} playerTool={{ label: "Players", count: trackedPlayerCount, content: playerPanel, primaryFocusSelector: "input[placeholder='Find settlement members']" }} resourceTool={{ label: "Resources", count: normalizedSelectedResources.length, content: resourceFinder, primaryFocusSelector: ".map-resource-finder-search input" }} regionControl={regionControl} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
           {!nativeRenderer && frameState !== "ready" ? (
             <section className="map-frame-state" aria-live="polite">
               <strong>{frameState === "loading" ? "Loading embedded map..." : frameState === "timed-out" ? "The embedded map is taking longer than expected." : "The embedded map could not be loaded."}</strong>

@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { boundedNativeMapRegions, nativeMapRequest, nativeMapResourceRegions, normalizeNativeMapRegionSelection } from "../src/pages/map/nativeMapRequest.mjs";
+import { boundedNativeMapRegions, nativeMapRequest, nativeMapResourceRegions, nativeMapResourceSelectionLimit, normalizeNativeMapRegionSelection } from "../src/pages/map/nativeMapRequest.mjs";
 
 test("native map requests are same-origin, canonical, and omit empty bounded layers", () => {
   const request = nativeMapRequest({
     operationalRegionIds: ["24", "19", "19"],
+    playerRegionIds: ["31", "24", "31"],
     resourceRegionIds: ["24", "19"],
     playerIds: ["216172782115643288"],
     resourceIds: [],
     enemyTypes: ["8", "1"],
   });
-  assert.equal(request.snapshotUrl, "/api/local/map/snapshot?regions=19%2C24&layers=claim-areas%2Cclaims%2Cenemies%2Cplayers%2Cwatchtowers&playerIds=216172782115643288&enemyTypes=1%2C8");
+  assert.equal(request.snapshotUrl, "/api/local/map/snapshot?regions=19%2C24&layers=claim-areas%2Cclaims%2Cenemies%2Cplayers%2Cwatchtowers&playerRegions=24%2C31&playerIds=216172782115643288&enemyTypes=1%2C8");
   assert.equal(request.eventsUrl, request.snapshotUrl.replace("/snapshot?", "/events?"));
   assert.equal(request.layers.includes("resources"), false);
   assert.equal(request.layers.includes("banks"), false);
@@ -37,11 +38,40 @@ test("native map request keeps resource and enemy namespaces separate", () => {
   assert.equal(new URL(request.snapshotUrl, "http://local").searchParams.get("enemyTypes"), "123");
 });
 
+test("native map resource planning stays within the public 64-partition contract", () => {
+  const regionIds = ["1", "2", "3", "4", "5"];
+  const resourceIds = Array.from({ length: 13 }, (_, index) => String(index + 1));
+  const request = nativeMapRequest({ operationalRegionIds: ["1"], resourceRegionIds: regionIds, resourceIds });
+
+  assert.equal(nativeMapResourceSelectionLimit(regionIds), 12);
+  assert.equal(request.resourcePartitions.length, 60);
+  assert.deepEqual([...new Set(request.resourcePartitions.map((partition) => partition.resourceId))], resourceIds.slice(0, 12));
+  assert.equal(new URL(request.resourceEventUrl, "http://local").searchParams.get("resourceIds"), resourceIds.slice(0, 12).join(","));
+});
+
 test("native map regions discard stale persisted ids and respect the API region budget", () => {
   assert.deepEqual(boundedNativeMapRegions(["99", "19"], ["19", "24"]), ["19"]);
   assert.deepEqual(boundedNativeMapRegions([], ["1", "2", "3", "4", "5"]), ["1", "2", "3", "4"]);
   assert.deepEqual(nativeMapResourceRegions([], ["1", "2", "3", "4", "5"]), ["1", "2", "3", "4", "5"]);
   assert.deepEqual(nativeMapResourceRegions(["99", "24"], ["19", "24"]), ["24"]);
+  assert.deepEqual(nativeMapResourceRegions([], ["19", "24"]), ["19", "24"], "All requests every ready resource region");
+  assert.deepEqual(nativeMapResourceRegions(["24"], ["19"]), ["19"], "a configured but unready selection falls back within the ready set");
+  assert.deepEqual(nativeMapResourceRegions(["24", "19"], ["19"]), ["19"], "mixed selections intersect the ready set");
+});
+
+test("player collection regions are independent of selected operational and resource regions", () => {
+  const request = nativeMapRequest({
+    operationalRegionIds: ["19"],
+    playerRegionIds: ["19", "24"],
+    resourceRegionIds: ["19"],
+    playerIds: ["101"],
+    resourceIds: ["28"],
+  });
+
+  const snapshot = new URL(request.snapshotUrl, "http://local");
+  assert.equal(snapshot.searchParams.get("regions"), "19");
+  assert.equal(snapshot.searchParams.get("playerRegions"), "19,24");
+  assert.deepEqual(request.resourcePartitions.map((partition) => partition.regionId), ["19"]);
 });
 
 test("stale persisted region selection becomes All without mutating persistence", () => {

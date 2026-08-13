@@ -37,7 +37,7 @@ import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { mapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
 import { MapResourcePageError, buildMapResourcePartitionPayload, createMapResourceCursorCodec, parseMapResourcePartitionScope, parseMapResourceSelectionScope } from "./src/server/mapResourcePages.mjs";
-import { MapSnapshotError, authorizedMapPlayerIds, buildMapResourcePayload, buildMapSnapshot, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
+import { MapSnapshotError, authorizedMapPlayerIds, buildMapResourcePayload, buildMapSnapshot, combineMapSpatialSnapshots, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
 import { serveLocalMapTile } from "./src/server/mapTiles.mjs";
 import { createTerrainTileStore } from "./src/server/terrainTileStore.mjs";
 import { createRoadTileStore } from "./src/server/roadTileStore.mjs";
@@ -157,6 +157,7 @@ import {
   bindMapLeaseRelease,
   combineMapResourceLeases,
   mapResourceLeaseInputs,
+  mapSpatialLeaseInputs,
   mapRequestLogTarget,
   mapSnapshotStatusCode,
   publicGenerationEvent,
@@ -5994,21 +5995,10 @@ function currentMapResourceRegions(claimId) {
   });
 }
 
-function combineMapSpatialLeases(leases) {
-  const snapshots = leases.map((lease) => lease.snapshot()).filter(Boolean);
-  if (!snapshots.length) return null;
-  const receivedAt = snapshots.map((snapshot) => String(snapshot.receivedAt ?? "")).sort().at(-1) || null;
-  return {
-    data: {
-      players: snapshots.flatMap((snapshot) => snapshot.data?.players ?? []),
-      enemies: snapshots.flatMap((snapshot) => snapshot.data?.enemies ?? []),
-      banks: snapshots.flatMap((snapshot) => snapshot.data?.banks ?? []),
-      waystones: snapshots.flatMap((snapshot) => snapshot.data?.waystones ?? []),
-    },
-    generation: Math.max(...snapshots.map((snapshot) => Number(snapshot.generation) || 0)),
-    provenance: { receivedAt },
-    warnings: snapshots.flatMap((snapshot) => snapshot.warnings ?? []),
-  };
+function currentMapResourceIds() {
+  return providerCatalogRepository.listDescriptions("resource")
+    .map((resource) => String(resource?.id ?? resource?.resourceId ?? "").trim())
+    .filter((resourceId) => /^\d+$/.test(resourceId));
 }
 
 function regionalMarketReadScope(claimId) {
@@ -8081,7 +8071,7 @@ const server = createServer(async (req, res) => {
       const readyRegions = currentMapResourceRegions(claimId);
       let scope;
       try {
-        scope = parseMapResourcePartitionScope(url.searchParams, { allowedRegionIds: readyRegions.regionIds });
+        scope = parseMapResourcePartitionScope(url.searchParams, { allowedRegionIds: readyRegions.regionIds, allowedResourceIds: currentMapResourceIds() });
       } catch (error) {
         return send(res, error instanceof MapResourcePageError ? error.statusCode : 422, { error: error instanceof Error ? error.message : String(error) });
       }
@@ -8116,7 +8106,7 @@ const server = createServer(async (req, res) => {
       const readyRegions = currentMapResourceRegions(claimId);
       let scope;
       try {
-        scope = parseMapResourceSelectionScope(url.searchParams, { allowedRegionIds: readyRegions.regionIds });
+        scope = parseMapResourceSelectionScope(url.searchParams, { allowedRegionIds: readyRegions.regionIds, allowedResourceIds: currentMapResourceIds() });
       } catch (error) {
         return send(res, error instanceof MapResourcePageError ? error.statusCode : 422, { error: error instanceof Error ? error.message : String(error) });
       }
@@ -8166,9 +8156,14 @@ const server = createServer(async (req, res) => {
       const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
       if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
       const claimId = currentClaimId();
+      const readyMapRegionIds = currentMapResourceRegions(claimId).regionIds;
       let scope;
       try {
-        scope = parseMapScope(url.searchParams, { allowedRegionIds: configuredRegionalMarketRegionIds(claimId) });
+        scope = parseMapScope(url.searchParams, {
+          allowedRegionIds: configuredRegionalMarketRegionIds(claimId),
+          allowedPlayerRegionIds: readyMapRegionIds,
+          allowedResourceIds: currentMapResourceIds(),
+        });
         if (url.pathname === "/api/local/map/resources" && (scope.layers.length !== 1 || scope.layers[0] !== "resources")) {
           throw new MapSnapshotError(422, "Compact map resource requests require only the resources layer");
         }
@@ -8188,10 +8183,9 @@ const server = createServer(async (req, res) => {
         mobileIdentityVerified: MAP_PLAYER_MOBILE_IDENTITY_VERIFIED,
       });
       const permittedEnemyTypes = MAP_ENEMY_IDENTITY_VERIFIED ? scope.enemyTypes : [];
-      const spatialCollectionRequested = MAP_SPATIAL_COLLECTION_VERIFIED && (
-        permittedPlayerIds.length > 0 || permittedEnemyTypes.length > 0
-      );
-      const spatialRegionIds = spatialCollectionRequested ? scope.regionIds : [];
+      const spatialInputs = MAP_SPATIAL_COLLECTION_VERIFIED
+        ? mapSpatialLeaseInputs(scope, { playerIds: permittedPlayerIds, enemyTypes: permittedEnemyTypes })
+        : [];
       const spatialLeases = [];
       const resourceLeases = [];
       let requestClosed = false;
@@ -8204,13 +8198,13 @@ const server = createServer(async (req, res) => {
       });
       try {
         const acquiredForCurrentClaim = await relayClaimScopeFence.run(claimId, async () => {
-          for (const regionId of spatialRegionIds) {
+          for (const spatialInput of spatialInputs) {
             if (requestClosed) throw new Error("Map request closed during spatial scope acquisition.");
             spatialLeases.push(await acquireMapLeaseUnlessClosed(
               () => relayMapSpatialScopeManager.acquire({
                 relayBaseUrl,
                 claimId,
-                scope: { claimId, regionId, playerIds: permittedPlayerIds, resourceIds: [], enemyTypes: permittedEnemyTypes },
+                scope: { claimId, regionId: spatialInput.regionId, playerIds: spatialInput.playerIds, resourceIds: [], enemyTypes: spatialInput.enemyTypes },
               }),
               () => requestClosed,
               "Map request closed during spatial scope acquisition.",
@@ -8247,12 +8241,12 @@ const server = createServer(async (req, res) => {
         const listener = {
           claimId,
           domains: new Set(domains),
-          mapSpatialScopeKeys: new Set(spatialRegionIds.map((regionId) => mapSpatialScopeKey({
+          mapSpatialScopeKeys: new Set(spatialInputs.map((spatialInput) => mapSpatialScopeKey({
             claimId,
-            regionId,
-            playerIds: permittedPlayerIds,
+            regionId: spatialInput.regionId,
+            playerIds: spatialInput.playerIds,
             resourceIds: [],
-            enemyTypes: permittedEnemyTypes,
+            enemyTypes: spatialInput.enemyTypes,
           }))),
           mapResourceScopeKeys: new Set(resourceLeases.map((lease) => lease.key)),
           response: res,
@@ -8277,7 +8271,7 @@ const server = createServer(async (req, res) => {
         const regionClaims = currentStateRepository.read(claimId, "region-claims");
         const market = currentStateRepository.read(claimId, "market");
         const empires = currentStateRepository.read(claimId, "empires");
-        const spatial = combineMapSpatialLeases(spatialLeases);
+        const spatial = combineMapSpatialSnapshots(spatialLeases.map((lease, index) => ({ regionId: spatialInputs[index].regionId, snapshot: lease.snapshot() })));
         const resourceCollection = combineMapResourceLeases(resourceLeases);
         if (url.pathname === "/api/local/map/resources") {
           const payload = buildMapResourcePayload({

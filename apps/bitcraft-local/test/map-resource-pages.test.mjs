@@ -40,26 +40,57 @@ function collection(resources) {
 
 test("resource partition scope accepts exactly one authorized canonical region and resource", () => {
   const params = new URLSearchParams({ region: "019", resourceId: "00028" });
-  assert.deepEqual(parseMapResourcePartitionScope(params, { allowedRegionIds: ["19", "24"] }), {
+  assert.deepEqual(parseMapResourcePartitionScope(params, { allowedRegionIds: ["19", "24"], allowedResourceIds: ["28", "54"] }), {
     regionId: "19",
     resourceId: "28",
     cursor: null,
   });
   assert.throws(
-    () => parseMapResourcePartitionScope(new URLSearchParams({ region: "99", resourceId: "28" }), { allowedRegionIds: ["19"] }),
+    () => parseMapResourcePartitionScope(new URLSearchParams({ region: "99", resourceId: "28" }), { allowedRegionIds: ["19"], allowedResourceIds: ["28"] }),
     (error) => error instanceof MapResourcePageError && error.statusCode === 422,
+  );
+  assert.throws(
+    () => parseMapResourcePartitionScope(new URLSearchParams({ region: "19", resourceId: "999" }), { allowedRegionIds: ["19"], allowedResourceIds: ["28", "54"] }),
+    (error) => error instanceof MapResourcePageError
+      && error.statusCode === 422
+      && /catalog/.test(error.message)
+      && !error.message.includes("28")
+      && !error.message.includes("54"),
   );
 });
 
 test("resource selection scope accepts every ready region without the operational four-region cap", () => {
   const params = new URLSearchParams({ regions: "5,1,4,2,3", resourceIds: "1000028,28" });
-  assert.deepEqual(parseMapResourceSelectionScope(params, { allowedRegionIds: ["1", "2", "3", "4", "5"] }), {
+  assert.deepEqual(parseMapResourceSelectionScope(params, { allowedRegionIds: ["1", "2", "3", "4", "5"], allowedResourceIds: ["28", "1000028"] }), {
     regionIds: ["1", "2", "3", "4", "5"],
     resourceIds: ["28", "1000028"],
   });
   assert.throws(
-    () => parseMapResourceSelectionScope(new URLSearchParams({ regions: "1", resourceIds: "" }), { allowedRegionIds: ["1"] }),
+    () => parseMapResourceSelectionScope(new URLSearchParams({ regions: "1", resourceIds: "" }), { allowedRegionIds: ["1"], allowedResourceIds: ["28"] }),
     (error) => error instanceof MapResourcePageError && error.statusCode === 422,
+  );
+});
+
+test("resource selection rejects unknown catalog identities and an oversized Cartesian scope before leases", () => {
+  const resourceIds = Array.from({ length: 16 }, (_, index) => String(index + 1));
+  const options = {
+    allowedRegionIds: ["1", "2", "3", "4", "5"],
+    allowedResourceIds: resourceIds,
+    maxResourceIds: 16,
+    maxPartitions: 64,
+  };
+
+  assert.deepEqual(parseMapResourceSelectionScope(new URLSearchParams({
+    regions: "1,2,3,4",
+    resourceIds: resourceIds.join(","),
+  }), options).regionIds, ["1", "2", "3", "4"]);
+  assert.throws(
+    () => parseMapResourceSelectionScope(new URLSearchParams({ regions: "1", resourceIds: "999" }), options),
+    (error) => error instanceof MapResourcePageError && error.statusCode === 422 && !error.message.includes(resourceIds.join(",")),
+  );
+  assert.throws(
+    () => parseMapResourceSelectionScope(new URLSearchParams({ regions: "1,2,3,4,5", resourceIds: resourceIds.join(",") }), options),
+    (error) => error instanceof MapResourcePageError && error.statusCode === 413 && /partition/.test(error.message),
   );
 });
 

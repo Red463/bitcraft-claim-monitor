@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { RelayMapResourceRegionSession } from "../src/server/game-data/mapResourceRegionSession.ts";
 import { RelayMapResourceRuntime } from "../src/server/game-data/mapResourceRuntime.ts";
@@ -44,6 +45,21 @@ test("resource lease inputs are Cartesian and independent of player selections",
     { regionId: "24", resourceId: "54" },
   ]);
   assert.deepEqual(routeModule.mapResourceLeaseInputs({ ...base, playerIds: ["202", "303"] }), routeModule.mapResourceLeaseInputs(base));
+});
+
+test("spatial lease inputs collect players across their live regions while enemies stay operationally scoped", () => {
+  assert.equal(typeof routeModule.mapSpatialLeaseInputs, "function");
+  assert.deepEqual(routeModule.mapSpatialLeaseInputs({
+    regionIds: ["19"],
+    playerRegionIds: ["19", "24"],
+    layers: ["enemies", "players"],
+    resourceIds: [],
+    enemyTypes: ["8"],
+    playerIds: ["101"],
+  }, { playerIds: ["101"], enemyTypes: ["8"] }), [
+    { regionId: "19", playerIds: ["101"], enemyTypes: ["8"] },
+    { regionId: "24", playerIds: ["101"], enemyTypes: [] },
+  ]);
 });
 
 test("resource lease composition preserves warm rows and loading readiness", () => {
@@ -262,4 +278,18 @@ test("map request logging omits complete resource and player selections", () => 
     routeModule.mapRequestLogTarget(new URL("http://localhost/api/local/health?probe=1")),
     "/api/local/health?probe=1",
   );
+});
+
+test("server resource routes derive catalog validation before acquiring leases without exposing the catalog", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /function currentMapResourceIds\(\)/);
+  assert.match(server, /parseMapResourcePartitionScope\(url\.searchParams, \{[^}]*allowedRegionIds:[^}]*allowedResourceIds:\s*currentMapResourceIds\(\)/s);
+  assert.match(server, /parseMapResourceSelectionScope\(url\.searchParams, \{[^}]*allowedRegionIds:[^}]*allowedResourceIds:\s*currentMapResourceIds\(\)/s);
+  assert.ok(server.indexOf("parseMapResourceSelectionScope") < server.indexOf("relayMapResourceRuntime.acquire({ regionId, resourceId })"));
+});
+
+test("server preserves requested spatial regions when combining lease snapshots", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+
+  assert.match(server, /combineMapSpatialSnapshots\(spatialLeases\.map\(\(lease, index\) => \(\{ regionId: spatialInputs\[index\]\.regionId, snapshot: lease\.snapshot\(\) \}\)\)\)/);
 });

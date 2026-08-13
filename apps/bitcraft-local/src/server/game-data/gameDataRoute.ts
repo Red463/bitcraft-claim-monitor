@@ -10,8 +10,11 @@ import type { MapResourceLease, MapResourceRuntimeHealth } from "./mapResourceRu
 
 type MapScopeSelection = {
   regionIds: string[];
+  playerRegionIds: string[];
   layers: string[];
   resourceIds: string[];
+  enemyTypes: string[];
+  playerIds: string[];
 };
 
 type MapGenerationEvent = {
@@ -32,6 +35,23 @@ type MapGenerationListener = {
 export function mapResourceLeaseInputs(scope: MapScopeSelection): Array<{ regionId: string; resourceId: string }> {
   if (!scope.layers.includes("resources")) return [];
   return scope.regionIds.flatMap((regionId) => scope.resourceIds.map((resourceId) => ({ regionId, resourceId })));
+}
+
+export function mapSpatialLeaseInputs(
+  scope: MapScopeSelection,
+  permitted: { playerIds: string[]; enemyTypes: string[] },
+): Array<{ regionId: string; playerIds: string[]; enemyTypes: string[] }> {
+  const playerIds = scope.layers.includes("players") ? permitted.playerIds : [];
+  const enemyTypes = scope.layers.includes("enemies") ? permitted.enemyTypes : [];
+  const playerRegions = new Set(playerIds.length ? scope.playerRegionIds : []);
+  const enemyRegions = new Set(enemyTypes.length ? scope.regionIds : []);
+  const regionIds = [...new Set([...playerRegions, ...enemyRegions])]
+    .sort((left, right) => left.length - right.length || left.localeCompare(right));
+  return regionIds.map((regionId) => ({
+    regionId,
+    playerIds: playerRegions.has(regionId) ? playerIds : [],
+    enemyTypes: enemyRegions.has(regionId) ? enemyTypes : [],
+  }));
 }
 
 export function mapRequestLogTarget(requestTarget: URL | string): string {

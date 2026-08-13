@@ -1,49 +1,32 @@
-export const PLAYER_MARKER_PALETTE = Object.freeze([
-  "#38bdf8",
-  "#fb7185",
-  "#4ade80",
-  "#fbbf24",
-  "#c084fc",
-  "#2dd4bf",
-  "#f97316",
-  "#a3e635",
-  "#e879f9",
-  "#60a5fa",
-  "#f472b6",
-  "#facc15",
-]);
-
 function decimalId(value) {
   const id = String(value ?? "").trim();
   if (!/^\d+$/.test(id)) throw new TypeError("Player marker identity must be a decimal integer");
-  return id;
+  const canonical = BigInt(id);
+  if (canonical > 0xffffffffffffffffn) throw new TypeError("Player marker identity must fit an unsigned 64-bit integer");
+  return canonical.toString();
 }
 
 function compareDecimalStrings(left, right) {
   return left.length - right.length || left.localeCompare(right);
 }
 
-function hashPlayerId(id) {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < id.length; index += 1) {
-    hash ^= id.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
+function mixPlayerId(id) {
+  const mask = 0xffffffffffffffffn;
+  let mixed = (BigInt(id) + 0x9e3779b97f4a7c15n) & mask;
+  mixed = ((mixed ^ (mixed >> 30n)) * 0xbf58476d1ce4e5b9n) & mask;
+  mixed = ((mixed ^ (mixed >> 27n)) * 0x94d049bb133111ebn) & mask;
+  return mixed ^ (mixed >> 31n);
 }
 
 export function assignPlayerMarkerColours(playerIds = []) {
   const ids = [...new Set(playerIds.map(decimalId))].sort(compareDecimalStrings);
-  const used = new Set();
   const result = {};
   for (const id of ids) {
-    const preferred = hashPlayerId(id) % PLAYER_MARKER_PALETTE.length;
-    let slot = preferred;
-    if (used.size < PLAYER_MARKER_PALETTE.length) {
-      while (used.has(slot)) slot = (slot + 1) % PLAYER_MARKER_PALETTE.length;
-      used.add(slot);
-    }
-    result[id] = PLAYER_MARKER_PALETTE[slot];
+    const mixed = mixPlayerId(id);
+    const hue = (Number(mixed & 0xffffffn) * 360 / 0x1000000).toFixed(6);
+    const saturation = (70 + Number((mixed >> 24n) & 0xfffffn) * 14 / 0xfffff).toFixed(6);
+    const lightness = (56 + Number((mixed >> 44n) & 0xfffffn) * 12 / 0xfffff).toFixed(6);
+    result[id] = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
   }
   return result;
 }

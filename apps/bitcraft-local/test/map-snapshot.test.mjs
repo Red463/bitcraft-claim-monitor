@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   MapSnapshotError,
   authorizedMapPlayerIds,
+  combineMapSpatialSnapshots,
   buildMapResourcePayload,
   buildMapSnapshot,
   mapRequestAccess,
@@ -21,6 +22,7 @@ test("map scopes are canonical, bounded, and restricted to configured regions", 
 
   assert.deepEqual(scope, {
     regionIds: ["19", "24"],
+    playerRegionIds: ["19", "24"],
     layers: ["claims", "players", "resources"],
     resourceIds: ["2", "30"],
     enemyTypes: [],
@@ -37,6 +39,64 @@ test("map scopes are canonical, bounded, and restricted to configured regions", 
   assert.throws(
     () => parseMapScope(new URLSearchParams({ regions: "19", layers: "banks" }), { allowedRegionIds: ["19"] }),
     (error) => error instanceof MapSnapshotError && error.statusCode === 422 && /Unknown map layer/.test(error.message),
+  );
+});
+
+test("map scopes validate an independent bounded Relay-ready player region scope", () => {
+  const scope = parseMapScope(new URLSearchParams({
+    regions: "19",
+    playerRegions: "24,31",
+    layers: "players",
+    playerIds: "101",
+  }), { allowedRegionIds: ["19"], allowedPlayerRegionIds: ["19", "24", "31"] });
+
+  assert.deepEqual(scope.regionIds, ["19"]);
+  assert.deepEqual(scope.playerRegionIds, ["24", "31"]);
+  const broadPlayerScope = parseMapScope(new URLSearchParams({
+    regions: "19",
+    playerRegions: "19,24,31,37,42",
+    layers: "players",
+    playerIds: "101",
+  }), { allowedRegionIds: ["19"], allowedPlayerRegionIds: ["19", "24", "31", "37", "42"] });
+  assert.deepEqual(broadPlayerScope.playerRegionIds, ["19", "24", "31", "37", "42"]);
+  assert.throws(
+    () => parseMapScope(new URLSearchParams({
+      regions: "19",
+      playerRegions: Array.from({ length: 17 }, (_, index) => String(index + 1)).join(","),
+      layers: "players",
+      playerIds: "101",
+    }), {
+      allowedRegionIds: ["19"],
+      allowedPlayerRegionIds: Array.from({ length: 17 }, (_, index) => String(index + 1)),
+    }),
+    (error) => error instanceof MapSnapshotError && error.statusCode === 413 && /playerRegions/.test(error.message),
+  );
+  assert.throws(
+    () => parseMapScope(new URLSearchParams({ regions: "19", playerRegions: "99", layers: "players", playerIds: "101" }), {
+      allowedRegionIds: ["19"],
+      allowedPlayerRegionIds: ["19", "24"],
+    }),
+    (error) => error instanceof MapSnapshotError && error.statusCode === 422 && /player region/i.test(error.message),
+  );
+});
+
+test("operational-only map scopes do not require the selected region to be player-ready", () => {
+  const scope = parseMapScope(new URLSearchParams({
+    regions: "24",
+    layers: "claims",
+  }), { allowedRegionIds: ["24"], allowedPlayerRegionIds: ["19"] });
+
+  assert.deepEqual(scope.regionIds, ["24"]);
+  assert.deepEqual(scope.playerRegionIds, []);
+});
+
+test("map snapshot resource scope rejects identities outside the current catalog", () => {
+  assert.throws(
+    () => parseMapScope(new URLSearchParams({ regions: "19", layers: "resources", resourceIds: "999" }), {
+      allowedRegionIds: ["19"],
+      allowedResourceIds: ["28", "54"],
+    }),
+    (error) => error instanceof MapSnapshotError && error.statusCode === 422 && /catalog/i.test(error.message) && !error.message.includes("28"),
   );
 });
 
@@ -186,6 +246,94 @@ test("player positions require selected online monitored non-excluded members", 
     players: [{ entityId: "101", signedIn: true }],
     spatial: previouslyLiveSpatial,
   }).layers.players, []);
+});
+
+test("player positions remain collectible outside the selected operational region", () => {
+  const scope = parseMapScope(new URLSearchParams({
+    regions: "19",
+    playerRegions: "19,24",
+    layers: "players",
+    playerIds: "101",
+  }), { allowedRegionIds: ["19"], allowedPlayerRegionIds: ["19", "24"] });
+  const snapshot = buildMapSnapshot({
+    scope,
+    mobileIdentityVerified: true,
+    members: [{ playerEntityId: "101", username: "Traveller" }],
+    players: [{ entityId: "101", signedIn: true }],
+    spatial: {
+      data: { players: [{ playerEntityId: "101", regionId: "24", locationX: 12_000, locationZ: 24_000, dimension: "1" }] },
+      generation: 10,
+      provenance: { receivedAt: "2026-08-11T11:59:59.000Z" },
+    },
+  });
+
+  assert.deepEqual(snapshot.layers.players.map((row) => [row.playerEntityId, row.regionId]), [["101", "24"]]);
+});
+
+test("multi-region spatial aggregation keeps the oldest observation and worst freshness with last-good rows", () => {
+  const combined = combineMapSpatialSnapshots([
+    {
+      data: { players: [{ playerEntityId: "101", regionId: "19" }], enemies: [], banks: [], waystones: [] },
+      generation: 7,
+      receivedAt: "2026-08-11T12:09:00.000Z",
+      freshness: "live",
+      warnings: [],
+    },
+    {
+      data: { players: [{ playerEntityId: "102", regionId: "24" }], enemies: [], banks: [], waystones: [] },
+      generation: 8,
+      receivedAt: "2026-08-11T12:00:00.000Z",
+      freshness: "stale",
+      warnings: ["Region 24 spatial subscription is reconnecting."],
+    },
+  ]);
+
+  assert.equal(combined.provenance.receivedAt, "2026-08-11T12:00:00.000Z");
+  assert.equal(combined.freshness, "stale");
+  assert.equal(combined.generation, 8);
+  assert.deepEqual(combined.data.players.map((row) => row.playerEntityId), ["101", "102"]);
+  assert.deepEqual(combined.warnings, ["Region 24 spatial subscription is reconnecting."]);
+});
+
+test("multi-region spatial aggregation reports a missing requested region as partial", () => {
+  const combined = combineMapSpatialSnapshots([
+    {
+      regionId: "19",
+      snapshot: {
+        data: { players: [{ playerEntityId: "101", regionId: "19", locationX: 12_000, locationZ: 24_000, dimension: "1" }], enemies: [], banks: [], waystones: [] },
+        generation: 7,
+        receivedAt: "2026-08-11T12:09:00.000Z",
+        freshness: "live",
+        warnings: [],
+      },
+    },
+    { regionId: "24", snapshot: null },
+  ]);
+
+  assert.equal(combined.freshness, "partial");
+  assert.deepEqual(combined.data.players.map((row) => row.playerEntityId), ["101"]);
+  assert.deepEqual(combined.warnings, ["Live spatial data is unavailable for 1 of 2 requested regions."]);
+
+  const scope = parseMapScope(new URLSearchParams({ regions: "19", playerRegions: "19,24", layers: "players", playerIds: "101" }), {
+    allowedRegionIds: ["19"],
+    allowedPlayerRegionIds: ["19", "24"],
+  });
+  const payload = buildMapSnapshot({
+    scope,
+    mobileIdentityVerified: true,
+    members: [{ playerEntityId: "101" }],
+    players: [{ entityId: "101", signedIn: true }],
+    spatial: combined,
+  });
+  assert.equal(payload.layerAvailability.players.status, "partial");
+  assert.equal(payload.layerAvailability.players.available, true);
+});
+
+test("multi-region spatial aggregation returns unavailable when every requested region is missing", () => {
+  assert.equal(combineMapSpatialSnapshots([
+    { regionId: "19", snapshot: null },
+    { regionId: "24", snapshot: null },
+  ]), null);
 });
 
 test("map player subscriptions receive only selected online monitored non-excluded ids", () => {

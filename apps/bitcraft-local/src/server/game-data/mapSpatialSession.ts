@@ -33,7 +33,7 @@ type ConnectionBuilder = {
 type RegionalBindingModule = { DbConnection: { builder(): ConnectionBuilder } };
 type MapSpatialScope = { claimId: string; regionId: string; playerIds: string[]; resourceIds: string[]; enemyTypes: string[] };
 type SessionConfig = { uri: string; database: string; schemaFingerprint: string; manifest: BindingManifest; generation: number; scope: MapSpatialScope; maxRows?: number };
-export type MapSpatialSnapshot = { data: ReturnType<typeof normalizeMapSpatial>["data"]; warnings: string[]; database: string; regionId: string; schemaFingerprint: string; generation: number; receivedAt: string };
+export type MapSpatialSnapshot = { data: ReturnType<typeof normalizeMapSpatial>["data"]; warnings: string[]; database: string; regionId: string; schemaFingerprint: string; generation: number; receivedAt: string; freshness?: "live" | "partial" | "stale" };
 
 async function loadBundledRegionalBindings(): Promise<RegionalBindingModule> {
   return await import(new URL("./bindings/regional.js", import.meta.url).href) as unknown as RegionalBindingModule;

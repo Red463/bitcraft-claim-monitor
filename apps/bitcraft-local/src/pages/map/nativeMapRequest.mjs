@@ -28,11 +28,17 @@ export function nativeMapResourceRegions(selectedRegionIds = [], availableRegion
   return selected.length ? selected : available;
 }
 
-export function nativeMapRequest({ operationalRegionIds = [], resourceRegionIds = [], playerIds = [], resourceIds = [], enemyTypes = [] }) {
+export function nativeMapResourceSelectionLimit(regionIds = []) {
+  const regionCount = decimalSort(regionIds).length;
+  return regionCount ? Math.min(16, Math.floor(64 / regionCount)) : 0;
+}
+
+export function nativeMapRequest({ operationalRegionIds = [], playerRegionIds = [], resourceRegionIds = [], playerIds = [], resourceIds = [], enemyTypes = [] }) {
   const regions = decimalSort(operationalRegionIds);
+  const playerRegions = decimalSort(playerRegionIds);
   const resourceRegions = decimalSort(resourceRegionIds);
   const players = decimalSort(playerIds);
-  const resources = decimalSort(resourceIds);
+  const resources = decimalSort(resourceIds).slice(0, nativeMapResourceSelectionLimit(resourceRegions));
   const enemies = decimalSort(enemyTypes);
   const layers = [
     ...OPERATIONAL_LAYERS,
@@ -42,7 +48,10 @@ export function nativeMapRequest({ operationalRegionIds = [], resourceRegionIds 
   ].sort();
   const snapshotLayers = layers.filter((layer) => layer !== "resources");
   const snapshotParams = new URLSearchParams({ regions: regions.join(","), layers: snapshotLayers.join(",") });
-  if (players.length) snapshotParams.set("playerIds", players.join(","));
+  if (players.length) {
+    snapshotParams.set("playerRegions", playerRegions.join(","));
+    snapshotParams.set("playerIds", players.join(","));
+  }
   if (enemies.length) snapshotParams.set("enemyTypes", enemies.join(","));
   const resourcePartitions = resourcePartitionPlan(resourceRegions, resources).map((partition) => ({
     ...partition,

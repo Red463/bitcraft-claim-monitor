@@ -17,6 +17,7 @@ export const MAP_LAYER_KEYS = [
 
 export const MAP_SCOPE_LIMITS = Object.freeze({
   regions: 4,
+  playerRegions: 16,
   resourceIds: 16,
   enemyTypes: 16,
   playerIds: 250,
@@ -44,24 +45,45 @@ function decimalValues(value, label, limit) {
   return values.sort((left, right) => left.length - right.length || left.localeCompare(right));
 }
 
-export function parseMapScope(searchParams, { allowedRegionIds = [] } = {}) {
+export function parseMapScope(searchParams, { allowedRegionIds = [], allowedPlayerRegionIds = allowedRegionIds, allowedResourceIds = null } = {}) {
   const regionIds = decimalValues(searchParams.get("regions"), "regions", MAP_SCOPE_LIMITS.regions);
   if (!regionIds.length) throw new MapSnapshotError(422, "At least one region is required");
+  const requestedLayers = [...new Set(String(searchParams.get("layers") ?? "").split(",").map((entry) => entry.trim()).filter(Boolean))].sort();
+  if (!requestedLayers.length) throw new MapSnapshotError(422, "At least one map layer is required");
+  if (requestedLayers.some((layer) => !MAP_LAYER_KEYS.includes(layer))) throw new MapSnapshotError(422, "Unknown map layer requested");
   const allowed = new Set(allowedRegionIds.map((regionId) => {
     const value = String(regionId).trim();
     return /^\d+$/.test(value) ? BigInt(value).toString() : value;
   }));
   if (regionIds.some((regionId) => !allowed.has(regionId))) throw new MapSnapshotError(422, "Region is outside the configured active-region scope");
-  const requestedLayers = [...new Set(String(searchParams.get("layers") ?? "").split(",").map((entry) => entry.trim()).filter(Boolean))].sort();
-  if (!requestedLayers.length) throw new MapSnapshotError(422, "At least one map layer is required");
-  if (requestedLayers.some((layer) => !MAP_LAYER_KEYS.includes(layer))) throw new MapSnapshotError(422, "Unknown map layer requested");
+  const playerRegionIds = requestedLayers.includes("players")
+    ? (searchParams.has("playerRegions")
+        ? decimalValues(searchParams.get("playerRegions"), "playerRegions", MAP_SCOPE_LIMITS.playerRegions)
+        : regionIds)
+    : [];
+  const allowedPlayerRegions = new Set(allowedPlayerRegionIds.map((regionId) => {
+    const value = String(regionId).trim();
+    return /^\d+$/.test(value) ? BigInt(value).toString() : value;
+  }));
+  if (playerRegionIds.some((regionId) => !allowedPlayerRegions.has(regionId))) {
+    throw new MapSnapshotError(422, "Player region is outside the Relay-ready map scope");
+  }
   const resourceIds = decimalValues(searchParams.get("resourceIds"), "resourceIds", MAP_SCOPE_LIMITS.resourceIds);
   const enemyTypes = decimalValues(searchParams.get("enemyTypes"), "enemyTypes", MAP_SCOPE_LIMITS.enemyTypes);
   const playerIds = decimalValues(searchParams.get("playerIds"), "playerIds", MAP_SCOPE_LIMITS.playerIds);
   if (requestedLayers.includes("resources") && !resourceIds.length) throw new MapSnapshotError(422, "resourceIds are required for the resources layer");
+  if (allowedResourceIds != null && resourceIds.length) {
+    const allowedResources = new Set(allowedResourceIds.map((resourceId) => {
+      const value = String(resourceId).trim();
+      return /^\d+$/.test(value) ? BigInt(value).toString() : value;
+    }));
+    if (resourceIds.some((resourceId) => !allowedResources.has(resourceId))) {
+      throw new MapSnapshotError(422, "Map resource id is not in the available catalog");
+    }
+  }
   if (requestedLayers.includes("enemies") && !enemyTypes.length) throw new MapSnapshotError(422, "enemyTypes are required for the enemies layer");
   if (requestedLayers.includes("players") && !playerIds.length) throw new MapSnapshotError(422, "playerIds are required for the players layer");
-  return { regionIds, layers: requestedLayers, resourceIds, enemyTypes, playerIds };
+  return { regionIds, playerRegionIds, layers: requestedLayers, resourceIds, enemyTypes, playerIds };
 }
 
 function recordPoint(row, mobile = false) {
@@ -75,6 +97,10 @@ function inScope(row, scope) {
   return scope.regionIds.includes(String(row.regionId ?? row.region_id ?? "")) && String(row.locationDimension ?? row.dimension ?? MAP_OVERWORLD_DIMENSION) === MAP_OVERWORLD_DIMENSION;
 }
 
+function inPlayerScope(row, scope) {
+  return scope.playerRegionIds.includes(String(row.regionId ?? row.region_id ?? "")) && String(row.locationDimension ?? row.dimension ?? MAP_OVERWORLD_DIMENSION) === MAP_OVERWORLD_DIMENSION;
+}
+
 function feature(row, kind, entityId, point, extra = {}) {
   return { kind, entityId: String(entityId), point, observedAt: row.observedAt ?? null, ...extra };
 }
@@ -86,6 +112,46 @@ function snapshotRows(snapshot, key) {
 
 function oldestReceivedAt(snapshots) {
   return snapshots.map((snapshot) => snapshot?.provenance?.receivedAt).filter(Boolean).sort().at(0) ?? null;
+}
+
+export function combineMapSpatialSnapshots(input = []) {
+  const requested = input.map((entry) => (
+    entry && Object.prototype.hasOwnProperty.call(entry, "snapshot")
+      ? entry
+      : { regionId: entry?.regionId ?? null, snapshot: entry }
+  ));
+  const snapshots = requested.map((entry) => entry.snapshot).filter(Boolean);
+  if (!snapshots.length) return null;
+  const missingCount = requested.length - snapshots.length;
+  const warnings = [...new Set([
+    ...snapshots.flatMap((snapshot) => snapshot.warnings ?? []).map(String),
+    ...(missingCount ? [`Live spatial data is unavailable for ${missingCount} of ${requested.length} requested regions.`] : []),
+  ])];
+  const freshnessRank = new Map([["live", 0], ["fresh", 1], ["partial", 2], ["stale", 3], ["unavailable", 4]]);
+  const observedFreshness = snapshots.reduce((worst, snapshot) => {
+    const value = freshnessRank.has(String(snapshot.freshness))
+      ? String(snapshot.freshness)
+      : (snapshot.warnings?.length ? "partial" : "live");
+    return (freshnessRank.get(value) ?? 2) > (freshnessRank.get(worst) ?? 0) ? value : worst;
+  }, "live");
+  const freshness = missingCount && !["stale", "unavailable"].includes(observedFreshness) ? "partial" : observedFreshness;
+  const receivedAt = snapshots
+    .map((snapshot) => String(snapshot.receivedAt ?? snapshot.provenance?.receivedAt ?? ""))
+    .filter(Boolean)
+    .sort()
+    .at(0) ?? null;
+  return {
+    data: {
+      players: snapshots.flatMap((snapshot) => snapshot.data?.players ?? []),
+      enemies: snapshots.flatMap((snapshot) => snapshot.data?.enemies ?? []),
+      banks: snapshots.flatMap((snapshot) => snapshot.data?.banks ?? []),
+      waystones: snapshots.flatMap((snapshot) => snapshot.data?.waystones ?? []),
+    },
+    generation: Math.max(0, ...snapshots.map((snapshot) => Number(snapshot.generation) || 0)),
+    freshness,
+    provenance: { receivedAt },
+    warnings,
+  };
 }
 
 export function authorizedMapPlayerIds({ selectedPlayerIds = [], excludedMemberIds = [], members = [], players = [], mobileIdentityVerified = false } = {}) {
@@ -214,7 +280,7 @@ export function buildMapSnapshot({
     layers.players = (Array.isArray(spatialRows.players) ? spatialRows.players : [])
       .filter((row) => {
         const id = String(row.playerEntityId ?? row.entityId);
-        return allowedPlayers.has(id) && inScope(row, scope);
+        return allowedPlayers.has(id) && inPlayerScope(row, scope);
       })
       .map((row) => {
         const playerEntityId = String(row.playerEntityId ?? row.entityId);
@@ -229,6 +295,12 @@ export function buildMapSnapshot({
       const reason = "Live player positions are unavailable.";
       warnings.push(reason);
       layerAvailability.players = { available: false, status: "unavailable", reason };
+    } else if (["partial", "stale"].includes(String(spatial.freshness))) {
+      layerAvailability.players = {
+        available: true,
+        status: String(spatial.freshness),
+        reason: spatial.warnings?.[0] ?? "Live player positions are degraded.",
+      };
     }
   }
   if (layers.resources) {

@@ -116,7 +116,9 @@ test("Map page owns the region selector and supplies its selected scope to the n
   assert.match(mapPage, /<MapRegionSelect/);
   assert.match(mapPage, /const normalizedRegionSelection = React\.useMemo/);
   assert.match(mapPage, /boundedNativeMapRegions\(normalizedRegionSelection, operationalRegionOptions\)/);
-  assert.match(mapPage, /nativeMapResourceRegions\(normalizedRegionSelection, regionOptions\)/);
+  assert.match(mapPage, /boundedNativeMapRegions\(\[\], readyResourceRegionIds, 16\)/);
+  assert.match(mapPage, /nativeMapResourceRegions\(normalizedRegionSelection, readyResourceRegionIds\)/);
+  assert.match(mapPage, /playerRegionIds=\{readyPlayerRegionIds\}/);
   assert.match(mapPage, /visibleRegionIds=\{normalizedRegionSelection\}/);
   assert.doesNotMatch(mapPage, /visibleRegionIds=\{resourceRegions\}/);
   assert.match(nativeMap, /trailingControl=\{regionControl\}/);
@@ -124,6 +126,31 @@ test("Map page owns the region selector and supplies its selected scope to the n
   assert.match(mapCss, /\.native-map-region-select\s*\{[^}]*min-height:\s*34px;[^}]*border:\s*1px solid var\(--border\);[^}]*background:[^;]+;[^}]*font-size:[^;]+;/s);
   assert.match(mapCss, /\.native-map-region-select:(?:hover|focus-within)[^}]*border-color:/s);
   assert.match(mapCss, /@media \(max-width:\s*620px\)[\s\S]*\.native-map-region-select\s*\{[^}]*min-width:\s*0;[^}]*max-width:[^;]+;/s);
+});
+
+test("external map mode retains one global Region selector without duplicating the native toolbar control", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+
+  assert.match(mapPage, /!nativeRenderer \? <div className="map-external-region-control">\{regionControl\}<\/div> : null/);
+  assert.match(mapPage, /regionIds:\s*resourceMapRegionIds/);
+  assert.match(mapPage, /bitcraftMapUrl\(currentPlayerIds, mapMarker, Boolean\(focus\), selectedResourceIds, resourceMapRegionIds,/);
+  assert.equal((mapPage.match(/\{regionControl\}/g) ?? []).length, 2, "one external render and one NativeMap prop are expected");
+});
+
+test("native resource interactions stop at the server partition budget while external mode stays unchanged", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+
+  assert.match(mapPage, /const maxNativeResourceSelections = React\.useMemo\(\(\) => nativeMapResourceSelectionLimit\(resourceMapRegionIds\)/);
+  assert.match(mapPage, /if \(nativeRenderer && normalizedToken\.startsWith\("resource:"\) && !next\.has\(normalizedToken\) && selectedResourceCount >= maxNativeResourceSelections\)/);
+  assert.match(mapPage, /nativeRenderer \? resourceIds\.slice\(0, maxNativeResourceSelections\) : resourceIds/);
+});
+
+test("phone toolbar gives all four tools and Region a bounded five-column layout", () => {
+  const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+
+  assert.match(mapCss, /@media \(max-width:\s*620px\)[\s\S]*\.native-map-tool-dock\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;/s);
+  assert.match(mapCss, /@media \(max-width:\s*620px\)[\s\S]*\.native-map-tool-triggers\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(4,\s*34px\)\s+minmax\(0,\s*1fr\);/s);
+  assert.match(mapCss, /@media \(max-width:\s*620px\)[\s\S]*\.native-map-region-select\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*none;/s);
 });
 
 test("Native map projection preserves X and squishes only Leaflet Y", () => {

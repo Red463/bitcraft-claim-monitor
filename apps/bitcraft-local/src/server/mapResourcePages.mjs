@@ -27,6 +27,14 @@ function resourceKey(regionId, resourceId) {
   return `${regionId}|resource:${resourceId}`;
 }
 
+function validateResourceCatalog(resourceIds, allowedResourceIds) {
+  if (allowedResourceIds == null) return;
+  const allowed = new Set(allowedResourceIds.map((value) => decimal(value, "Available map resource id")));
+  if (resourceIds.some((resourceId) => !allowed.has(resourceId))) {
+    throw new MapResourcePageError(422, "Map resource id is not in the available catalog");
+  }
+}
+
 function signature(secret, body) {
   return createHmac("sha256", secret).update(body).digest();
 }
@@ -63,11 +71,12 @@ export function createMapResourceCursorCodec(secret) {
   });
 }
 
-export function parseMapResourcePartitionScope(searchParams, { allowedRegionIds = [] } = {}) {
+export function parseMapResourcePartitionScope(searchParams, { allowedRegionIds = [], allowedResourceIds = null } = {}) {
   const regionId = decimal(searchParams.get("region"), "Map resource region");
   const resourceId = decimal(searchParams.get("resourceId"), "Map resource id");
   const allowed = new Set(allowedRegionIds.map((value) => decimal(value, "Allowed map resource region")));
   if (!allowed.has(regionId)) throw new MapResourcePageError(422, "Map resource region is outside the Relay-ready scope");
+  validateResourceCatalog([resourceId], allowedResourceIds);
   const cursor = String(searchParams.get("cursor") ?? "").trim() || null;
   return { regionId, resourceId, cursor };
 }
@@ -79,7 +88,7 @@ function decimalValues(value, label) {
     .sort((left, right) => left.length - right.length || left.localeCompare(right));
 }
 
-export function parseMapResourceSelectionScope(searchParams, { allowedRegionIds = [], maxResourceIds = 16 } = {}) {
+export function parseMapResourceSelectionScope(searchParams, { allowedRegionIds = [], allowedResourceIds = null, maxResourceIds = 16, maxPartitions = 64 } = {}) {
   const regionIds = decimalValues(searchParams.get("regions"), "Map resource regions");
   const resourceIds = decimalValues(searchParams.get("resourceIds"), "Map resource ids");
   const allowed = new Set(allowedRegionIds.map((value) => decimal(value, "Allowed map resource region")));
@@ -88,6 +97,11 @@ export function parseMapResourceSelectionScope(searchParams, { allowedRegionIds 
   }
   const resourceLimit = positiveInteger(maxResourceIds, "Map resource selection type limit");
   if (resourceIds.length > resourceLimit) throw new MapResourcePageError(413, `Map resource ids exceed the limit of ${resourceLimit}`);
+  validateResourceCatalog(resourceIds, allowedResourceIds);
+  const partitionLimit = positiveInteger(maxPartitions, "Map resource selection partition limit");
+  if (regionIds.length * resourceIds.length > partitionLimit) {
+    throw new MapResourcePageError(413, `Map resource partition scope exceeds the limit of ${partitionLimit}`);
+  }
   return { regionIds, resourceIds };
 }
 
