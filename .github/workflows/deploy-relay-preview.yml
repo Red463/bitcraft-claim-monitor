@@ -69,6 +69,8 @@ jobs:
     timeout-minutes: 75
     environment: relay-preview
     steps:
+      - name: Check out verified revision for deployment artifacts
+        uses: actions/checkout@v4
       - name: Configure pinned SSH identity
         env:
           RELAY_VPS_SSH_PRIVATE_KEY: ${{ secrets.RELAY_VPS_SSH_PRIVATE_KEY }}
@@ -115,8 +117,20 @@ jobs:
           RELAY_VPS_HOST: ${{ secrets.RELAY_VPS_HOST }}
           RELAY_VPS_DEPLOY_USER: ${{ secrets.RELAY_VPS_DEPLOY_USER }}
         run: |
+          REMOTE_MAP_BUNDLE="/tmp/native-map-static-bundle-${GITHUB_SHA}.tar.gz"
           set +e
-          MAP_INSTALL_OUTPUT="$(ssh -i "$HOME/.ssh/id_ed25519" \
+          scp -i "$HOME/.ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -- deploy/native-map-static-bundle.tar.gz \
+            "$RELAY_VPS_DEPLOY_USER@$RELAY_VPS_HOST:$REMOTE_MAP_BUNDLE"
+          MAP_COPY_STATUS=$?
+          if [[ "$MAP_COPY_STATUS" -eq 0 ]]; then
+            MAP_INSTALL_OUTPUT="$(ssh -i "$HOME/.ssh/id_ed25519" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o ServerAliveInterval=30 \
@@ -124,8 +138,11 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -- "$RELAY_VPS_DEPLOY_USER@$RELAY_VPS_HOST" \
-            "sudo -u bitcraft tar -xzf /opt/bitcraft-claim-monitor-relay/current/deploy/native-map-static-bundle.tar.gz -C /var/lib/bitcraft-claim-monitor-relay && sudo systemctl restart bitcraft-claim-monitor-relay.service" 2>&1)"
-          MAP_INSTALL_STATUS=$?
+            "sudo tar --no-same-owner -xzf /tmp/native-map-static-bundle-${GITHUB_SHA}.tar.gz -C /var/lib/bitcraft-claim-monitor-relay && sudo chown -R bitcraft:bitcraft /var/lib/bitcraft-claim-monitor-relay/map-overview /var/lib/bitcraft-claim-monitor-relay/map-tiles /var/lib/bitcraft-claim-monitor-relay/map-road-tiles && sudo rm -f /tmp/native-map-static-bundle-${GITHUB_SHA}.tar.gz && sudo systemctl restart bitcraft-claim-monitor-relay.service" 2>&1)"
+            MAP_INSTALL_STATUS=$?
+          else
+            MAP_INSTALL_STATUS=$MAP_COPY_STATUS
+          fi
           set -e
 
           {
