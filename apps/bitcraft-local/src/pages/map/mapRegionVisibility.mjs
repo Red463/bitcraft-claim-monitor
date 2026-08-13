@@ -4,3 +4,7 @@ export function mapFeatureInRegionScope(feature, selectedRegionIds = []) {
   if (!selected.size) return true;
   return selected.has(String(feature?.regionId ?? ""));
 }
+
+export function mapFeaturesInRegionScope(features, selectedRegionIds = []) {
+  return features.filter((feature) => mapFeatureInRegionScope(feature, selectedRegionIds));
+}

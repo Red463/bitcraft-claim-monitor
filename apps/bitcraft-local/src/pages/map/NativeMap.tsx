@@ -11,7 +11,7 @@ import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, lea
 import { planDensePointDraw } from "./mapDensePointPlan.mjs";
 import { MAP_LAYER_DEFINITIONS, defaultMapLayerVisibility, loadMapLayerVisibility, saveMapLayerVisibility, type MapLayerKey } from "./mapLayerPreferences.mjs";
 import { MAP_MARKER_PRESENTATIONS, claimDisplayTier, claimMarkerPresentation, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
-import { mapFeatureInRegionScope } from "./mapRegionVisibility.mjs";
+import { mapFeatureInRegionScope, mapFeaturesInRegionScope } from "./mapRegionVisibility.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { assignPlayerMarkerColours } from "./playerMarkerColours.mjs";
 import { applyResourceViewport, resourceLayerStatus } from "./resourceViewport.mjs";
@@ -306,6 +306,7 @@ export function NativeMap({
   const wantedResourceKeys = React.useMemo(() => request.resourcePartitions.map((partition) => partition.key), [resourceSelectionKey]);
   const resourceRows = React.useMemo(() => resourceRowsFromPartitions(resourcePartitions), [resourcePartitions]);
   const resourcePoints = React.useMemo(() => mapResourceFeatures(resourceRows) as MapFeature[], [resourceRows]);
+  const visibleResourcePoints = React.useMemo(() => mapFeaturesInRegionScope(resourcePoints, visibleRegionIds), [resourcePoints, visibleRegionIds.join(",")]);
   const resourceStatuses = wantedResourceKeys.map((key) => resourcePartitionStatuses.get(key));
   const loadedResourcePartitionCount = wantedResourceKeys.filter((key) => resourcePartitions.has(key)).length;
   const pendingResourcePartitionCount = resourceStatuses.filter((status) => status == null || status.status === "loading" || status.pending === true).length;
@@ -643,7 +644,7 @@ export function NativeMap({
       focusMarker.addTo(focusGroup);
     }
     resourcesRef.current?.setPointColour((feature) => resourceFeatureColour(feature, resourceTiers));
-    resourcesRef.current?.setPoints(resourcePoints);
+    resourcesRef.current?.setPoints(visibleResourcePoints);
     if (!snapshot) return;
     const playerColours = assignPlayerMarkerColours((snapshot.layers.players ?? []).map((feature) => String(feature.playerEntityId ?? feature.entityId)));
     for (const [layer, features] of Object.entries(snapshot.layers)) {
@@ -684,7 +685,7 @@ export function NativeMap({
         marker.addTo(markerGroup);
       }
     }
-    enemiesRef.current?.setPoints(snapshot.layers.enemies ?? []);
+    enemiesRef.current?.setPoints(mapFeaturesInRegionScope(snapshot.layers.enemies ?? [], visibleRegionIds));
     const map = mapRef.current;
     if (!resourceSelectionKey) resourceFrameSelectionRef.current = "";
     else if (map) {
@@ -693,7 +694,7 @@ export function NativeMap({
         snapshotSelectionKey: snapshotResourceSelectionKey,
         consumedSelectionKey: resourceFrameSelectionRef.current,
         loading: resourceLayerLoading,
-        points: resourcePoints,
+        points: visibleResourcePoints,
         isVisible: (feature: MapFeature) => map.getBounds().contains(leafletPoint(feature.point)),
         frame: (features: readonly MapFeature[]) => {
           map.fitBounds(L.latLngBounds(features.map((feature) => leafletPoint(feature.point))), {
@@ -703,15 +704,16 @@ export function NativeMap({
         },
       });
     }
-  }, [snapshot, resourcePoints, resourceSelectionKey, resourceTiers, resourceLayerLoading, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
+  }, [snapshot, visibleResourcePoints, resourceSelectionKey, resourceTiers, resourceLayerLoading, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
 
   const accessibleFeatures = snapshot
     ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {
         if (!layerVisibility[layer as MapLayerKey]) return [];
         if (layer === "empire-territory") return [];
-        if (layer === "resources" || layer === "enemies") return features.filter((feature) => mapFeatureInRegionScope(feature, visibleRegionIds));
-        return features.filter((feature) => mapFeatureInRegionScope(feature, visibleRegionIds) && (feature.kind === "claim" ? claimMarkerPresentation(feature.tier, feature.npc) : mapMarkerPresentation(feature.kind)).mode === "canvas");
-      }).concat(layerVisibility.resources ? resourcePoints.filter((feature) => mapFeatureInRegionScope(feature, visibleRegionIds)) : [])
+        const visibleFeatures = mapFeaturesInRegionScope(features, visibleRegionIds);
+        if (layer === "resources" || layer === "enemies") return visibleFeatures;
+        return visibleFeatures.filter((feature) => (feature.kind === "claim" ? claimMarkerPresentation(feature.tier, feature.npc) : mapMarkerPresentation(feature.kind)).mode === "canvas");
+      }).concat(layerVisibility.resources ? visibleResourcePoints : [])
     : [];
   const layerAvailability: Record<string, LayerAvailability> = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, available, unavailableReason, selectionRequired }) => {
     const hasSelection = !selectionRequired || (key === "resources" ? resourceIds.length > 0 : enemyTypes.length > 0);
