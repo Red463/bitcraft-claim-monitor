@@ -12,6 +12,9 @@ test("recovery is manual, protected, pinned, and narrowly targets the stuck Rela
   assert.match(workflow, /systemctl kill --kill-whom=all --signal=KILL bitcraft-claim-monitor-relay\.service bitcraft-claim-monitor-relay-worker\.service/);
   assert.match(workflow, /systemctl reset-failed bitcraft-claim-monitor-relay\.service bitcraft-claim-monitor-relay-worker\.service/);
   assert.match(workflow, /systemctl start bitcraft-claim-monitor-relay\.service bitcraft-claim-monitor-relay-worker\.service/);
+  assert.match(workflow, /native-map-failed-\$\{GITHUB_SHA\}/);
+  assert.match(workflow, /for directory in map-overview map-tiles map-road-tiles/);
+  assert.match(workflow, /sudo mv \/var\/lib\/bitcraft-claim-monitor-relay\/\\\$directory \\\$quarantine\//);
   assert.match(workflow, /127\.0\.0\.1:19430\/api\/local\/health/);
   assert.doesNotMatch(workflow, /journalctl|cat \/etc|printenv/);
 });
