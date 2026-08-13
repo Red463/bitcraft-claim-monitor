@@ -1,6 +1,6 @@
 {
   "name": "@workspace/bitcraft-local",
-  "version": "0.54.1-beta.1",
+  "version": "0.55.0-beta.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -35,14 +35,17 @@
     "exceljs": "^4.4.0",
     "featurebase-js": "^1.0.3",
     "jsonwebtoken": "^9.0.3",
+    "leaflet": "1.9.4",
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "sharp": "0.35.3",
     "spacetimedb": "2.7.0",
     "typescript": "~5.9.3",
     "vite": "catalog:"
   },
   "devDependencies": {
+    "@types/leaflet": "1.9.21",
     "@types/node": "catalog:"
   }
 }

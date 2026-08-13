@@ -6,6 +6,192 @@ import {
   type DomainKey,
   type EntityId,
 } from "./contracts.ts";
+import type { MapResourceLease, MapResourceRuntimeHealth } from "./mapResourceRuntime.ts";
+
+type MapScopeSelection = {
+  regionIds: string[];
+  playerRegionIds: string[];
+  layers: string[];
+  resourceIds: string[];
+  enemyTypes: string[];
+  playerIds: string[];
+};
+
+type MapGenerationEvent = {
+  claimId?: string;
+  generation?: number;
+  generatedAt?: string | null;
+  changedDomains: DomainKey[];
+  mapSpatialScopeKey?: string;
+  mapResourceScopeKey?: string;
+};
+
+type MapGenerationListener = {
+  domains: Set<DomainKey>;
+  mapSpatialScopeKeys?: Set<string>;
+  mapResourceScopeKeys?: Set<string>;
+};
+
+export function mapResourceLeaseInputs(scope: MapScopeSelection): Array<{ regionId: string; resourceId: string }> {
+  if (!scope.layers.includes("resources")) return [];
+  return scope.regionIds.flatMap((regionId) => scope.resourceIds.map((resourceId) => ({ regionId, resourceId })));
+}
+
+export function mapSpatialLeaseInputs(
+  scope: MapScopeSelection,
+  permitted: { playerIds: string[]; enemyTypes: string[] },
+): Array<{ regionId: string; playerIds: string[]; enemyTypes: string[]; includeClaims: boolean }> {
+  const playerIds = scope.layers.includes("players") ? permitted.playerIds : [];
+  const enemyTypes = scope.layers.includes("enemies") ? permitted.enemyTypes : [];
+  const claimRegions = new Set(scope.layers.includes("claims") ? scope.regionIds : []);
+  const playerRegions = new Set(playerIds.length ? scope.playerRegionIds : []);
+  const enemyRegions = new Set(enemyTypes.length ? scope.regionIds : []);
+  const regionIds = [...new Set([...claimRegions, ...playerRegions, ...enemyRegions])]
+    .sort((left, right) => left.length - right.length || left.localeCompare(right));
+  return regionIds.map((regionId) => ({
+    regionId,
+    playerIds: playerRegions.has(regionId) ? playerIds : [],
+    enemyTypes: enemyRegions.has(regionId) ? enemyTypes : [],
+    includeClaims: claimRegions.has(regionId),
+  }));
+}
+
+export function mapRequestLogTarget(requestTarget: URL | string): string {
+  let url: URL;
+  try {
+    url = requestTarget instanceof URL ? requestTarget : new URL(requestTarget, "http://localhost");
+  } catch {
+    return "/";
+  }
+  return url.pathname.startsWith("/api/local/map/") ? url.pathname : `${url.pathname}${url.search}`;
+}
+
+export function combineMapResourceLeases(leases: MapResourceLease[]) {
+  const states = leases.map((lease) => ({ lease, ...lease.state() }));
+  const ready = states.filter((state) => state.snapshot != null);
+  const snapshots = ready.map((state) => state.snapshot!);
+  const receivedAt = snapshots.map((snapshot) => String(snapshot.receivedAt ?? "")).filter(Boolean).sort().at(0) ?? null;
+  const warnings = [...new Set([
+    ...states.map((state) => state.warning),
+    ...snapshots.flatMap((snapshot) => snapshot.warnings ?? []),
+  ].filter((warning): warning is string => Boolean(warning)))];
+  return {
+    data: { resources: snapshots.flatMap((snapshot) => snapshot.data?.resources ?? []) },
+    generation: Math.max(0, ...snapshots.map((snapshot) => Number(snapshot.generation) || 0)),
+    freshness: ready.some((state) => state.status === "stale") ? "stale" : warnings.length ? "partial" : "live",
+    provenance: { receivedAt },
+    warnings,
+    requestedKeys: states.map((state) => state.lease.key),
+    readyKeys: ready.map((state) => state.lease.key),
+    loadingKeys: states.filter((state) => state.snapshot == null && state.status === "loading").map((state) => state.lease.key),
+    unavailableKeys: states.filter((state) => state.snapshot == null && state.status === "unavailable").map((state) => state.lease.key),
+  };
+}
+
+export function mapSnapshotStatusCode({ scope, layerAvailability, regionClaims, market, empires, spatial, resourceCollection }: {
+  scope: { layers: string[] };
+  layerAvailability: Record<string, { status: string }>;
+  regionClaims: unknown;
+  market: unknown;
+  empires: unknown;
+  spatial: unknown;
+  resourceCollection: { readyKeys?: string[]; loadingKeys?: string[] } | null;
+}): 200 | 503 {
+  const hasRelevantSource = scope.layers.some((layer) => {
+    if (layerAvailability[layer]?.status === "unavailable") return false;
+    if (layer === "resources") return Boolean(resourceCollection?.readyKeys?.length || resourceCollection?.loadingKeys?.length);
+    if (layer === "claims") return Boolean(regionClaims || spatial);
+    if (layer === "markets") return Boolean(market);
+    if (layer === "waystones") return Boolean(regionClaims || spatial);
+    if (["empire-settlements", "empire-territory", "watchtowers"].includes(layer)) return Boolean(empires);
+    if (["players", "enemies"].includes(layer)) return Boolean(spatial);
+    return false;
+  });
+  return hasRelevantSource ? 200 : 503;
+}
+
+export function generationDomainsForListener(event: MapGenerationEvent, listener: MapGenerationListener): DomainKey[] {
+  return browserVisibleChangedDomains(event.changedDomains).filter((domain) => (
+    listener.domains.has(domain)
+    && (domain !== "map-spatial" || !event.mapSpatialScopeKey || listener.mapSpatialScopeKeys?.has(event.mapSpatialScopeKey))
+    && (domain !== "map-resources" || Boolean(event.mapResourceScopeKey && listener.mapResourceScopeKeys?.has(event.mapResourceScopeKey)))
+  ));
+}
+
+export function publicGenerationEvent(event: MapGenerationEvent, changedDomains: DomainKey[]) {
+  return {
+    ...(event.claimId == null ? {} : { claimId: event.claimId }),
+    ...(event.generation == null ? {} : { generation: event.generation }),
+    ...(event.generatedAt === undefined ? {} : { generatedAt: event.generatedAt }),
+    changedDomains,
+    ...(changedDomains.includes("map-resources") && event.mapResourceScopeKey
+      ? { mapResourceScopeKey: event.mapResourceScopeKey }
+      : {}),
+  };
+}
+
+export function bindMapLeaseRelease(
+  request: { once(event: string, listener: () => void): unknown },
+  response: { once(event: string, listener: () => void): unknown },
+  release: () => Promise<unknown>,
+) {
+  let releasePromise: Promise<unknown> | null = null;
+  const releaseOnce = () => {
+    releasePromise ??= Promise.resolve().then(release);
+    return releasePromise;
+  };
+  request.once("close", () => { void releaseOnce(); });
+  response.once("finish", () => { void releaseOnce(); });
+  response.once("close", () => { void releaseOnce(); });
+  return releaseOnce;
+}
+
+export async function acquireMapLeaseUnlessClosed<T extends { release(): Promise<unknown> }>(
+  acquire: () => Promise<T>,
+  requestClosed: () => boolean,
+  closedMessage: string,
+): Promise<T> {
+  const lease = await acquire();
+  if (!requestClosed()) return lease;
+  await lease.release();
+  throw new Error(closedMessage);
+}
+
+export function sanitizedMapResourceHealth(health: MapResourceRuntimeHealth) {
+  const regions = health.regions.map((region) => ({
+    regionId: region.regionId,
+    pinned: region.pinned,
+    resourceCount: region.resourceCount,
+    leaseCount: region.leaseCount,
+    failure: region.failure,
+    subscription: region.subscription ? {
+      connected: region.subscription.connected,
+      applied: region.subscription.applied,
+      stage: region.subscription.stage,
+      rowCount: region.subscription.rowCount,
+      rowsPerSubscription: [...region.subscription.rowsPerSubscription].sort((left, right) => left - right),
+      firstGenerationLatencyMs: region.subscription.firstGenerationLatencyMs,
+      lastAppliedAt: region.subscription.lastAppliedAt,
+      lastError: region.subscription.lastError,
+    } : null,
+  }));
+  return {
+    configuredRegionCount: health.configuredRegionIds.length,
+    pinnedRegionCount: health.pinnedRegionIds.length,
+    coldStartsInWindow: health.coldStartsInWindow,
+    regionalConnectionCount: health.regionalConnectionCount,
+    activeResourceSubscriptionCount: health.activeResourceSubscriptionCount,
+    idleRetainedResourceSubscriptionCount: health.idleRetainedResourceSubscriptionCount,
+    rowsPerSubscription: [...health.rowsPerSubscription].sort((left, right) => left - right),
+    firstGenerationLatencyMs: health.firstGenerationLatencyMs ? { ...health.firstGenerationLatencyMs } : null,
+    reconnectAttemptCount: health.reconnectAttemptCount,
+    capacityRejectionCount: health.capacityRejectionCount,
+    regionCount: regions.length,
+    resourceCount: regions.reduce((total, region) => total + region.resourceCount, 0),
+    leaseCount: regions.reduce((total, region) => total + region.leaseCount, 0),
+    regions,
+  };
+}
 
 export function parseDomainKeys(value: string | null): DomainKey[] {
   if (!value) return [];

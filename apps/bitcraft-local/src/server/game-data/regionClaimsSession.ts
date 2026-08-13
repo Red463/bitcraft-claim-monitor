@@ -28,6 +28,8 @@ type BindingConnection = {
     claimTechState: CachedTable;
     claimTechDesc: CachedTable;
     playerUsernameState: CachedTable;
+    bankState: CachedTable;
+    waystoneState: CachedTable;
   };
   subscriptionBuilder(): SubscriptionBuilder;
   disconnect(): void;
@@ -168,6 +170,8 @@ export class RelayRegionClaimsSession {
             "SELECT * FROM claim_tech_state",
             "SELECT * FROM claim_tech_desc",
             "SELECT * FROM player_username_state",
+            "SELECT * FROM bank_state",
+            "SELECT * FROM waystone_state",
           ]);
       })
       .onConnectError((_context, error) => {
@@ -202,8 +206,11 @@ export class RelayRegionClaimsSession {
       const claimTechRows = rows(connection.db.claimTechState);
       const claimTechDescriptionRows = rows(connection.db.claimTechDesc);
       const usernameRows = rows(connection.db.playerUsernameState);
+      const bankRows = rows(connection.db.bankState);
+      const waystoneRows = rows(connection.db.waystoneState);
       const rowCount = claimRows.length + localRows.length + claimTypeRows.length
-        + claimTechRows.length + claimTechDescriptionRows.length + usernameRows.length;
+        + claimTechRows.length + claimTechDescriptionRows.length + usernameRows.length
+        + bankRows.length + waystoneRows.length;
       this.#health.claimRowCount = claimRows.length;
       if (claimRows.length > config.maxClaims) {
         throw new Error(
@@ -230,6 +237,8 @@ export class RelayRegionClaimsSession {
         claimTechRows,
         claimTechDescriptionRows,
         usernameRows,
+        bankRows,
+        waystoneRows,
       });
       const receivedAt = this.#now().toISOString();
       const generation = this.#nextGeneration;
@@ -286,6 +295,8 @@ export class RelayRegionClaimsSession {
       connection.db.claimTechState,
       connection.db.claimTechDesc,
       connection.db.playerUsernameState,
+      connection.db.bankState,
+      connection.db.waystoneState,
     ]) {
       table.onInsert?.(this.#snapshotChanged);
       table.onUpdate?.(this.#snapshotChanged);
@@ -303,6 +314,8 @@ export class RelayRegionClaimsSession {
       this.#connection.db.claimTechState,
       this.#connection.db.claimTechDesc,
       this.#connection.db.playerUsernameState,
+      this.#connection.db.bankState,
+      this.#connection.db.waystoneState,
     ]) {
       table.removeOnInsert?.(this.#snapshotChanged);
       table.removeOnUpdate?.(this.#snapshotChanged);

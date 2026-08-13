@@ -1,13 +1,9 @@
 import React from "react";
 import "../styles/map.css";
-import { ExternalLink, MapPin, PanelLeftClose, PanelLeftOpen, Search, Users, X } from "lucide-react";
+import { ExternalLink, MapPin, Users } from "lucide-react";
 
-import { TierBadge } from "../components/main/Badges";
-import { Dialog } from "../components/main/Dialog";
-import { ItemIcon } from "../components/main/ItemDisplay";
-import { SearchBox } from "../components/main/SearchBox";
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
-import { formatCurrentSession, formatNumber } from "../utils/format";
+import { formatNumber } from "../utils/format";
 import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
 import { useGameDataGeneration } from "../hooks/useGameDataGeneration";
 import { usePageRefresh } from "../refresh/ManualRefreshContext";
@@ -18,117 +14,49 @@ import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { updateQueryState } from "../navigation";
 import { bitcraftMapUrl, mapEmbedSignature, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
-import { currentMapPlayerSelection, defaultMapPlayerSelection, filterMapPlayerRows, mapPlayerTrackingId, mapPlayerTrackingSummary, sortedMapPlayerRows, type MapPlayerFilter } from "./map/playerTracking";
+import { currentMapPlayerSelection, defaultMapPlayerSelection, mapPlayerTrackingId, type MapTrackedExternalPlayer } from "./map/playerTracking";
+import { NativeMap } from "./map/NativeMap";
+import { MapPlayerTrackingPanel } from "./map/MapPlayerTrackingPanel";
+import { MapRegionSelect } from "./map/MapRegionSelect";
+import { MapResourceFinderPanel } from "./map/MapResourceFinderPanel";
+import { mapRendererPolicy } from "./map/mapRendererPolicy.mjs";
+import { boundedNativeMapRegions, nativeMapResourceRegions, nativeMapResourceSelectionLimit, normalizeNativeMapRegionSelection } from "./map/nativeMapRequest.mjs";
+import { selectedResourceTierMap } from "./map/resourceNodeColours.mjs";
+import { RESOURCE_FINDER_BATCH_SIZE, nextResourceLimit, visibleResourceMatches } from "./map/resourceFinderWindow.mjs";
 
 const LOCAL_API = "/api/local";
 const FRAME_TIMEOUT_MS = 12000;
 type FrameState = "loading" | "ready" | "timed-out" | "failed";
 
-function MapPlayerTrackingControls({
-  roster,
-  selectedIds,
-  current,
-  onAutoOnline,
-  onTrackOnline,
-  onTrackAll,
-  onTrackNone,
-  onTogglePlayer,
-  onClearFilters,
-}: {
-  roster: AnyRecord[];
-  selectedIds: string[] | null;
-  current: Set<string>;
-  onAutoOnline: () => void;
-  onTrackOnline: () => void;
-  onTrackAll: () => void;
-  onTrackNone: () => void;
-  onTogglePlayer: (id: string, tracked: boolean) => void;
-  onClearFilters: () => void;
-}) {
-  const [managerOpen, setManagerOpen] = React.useState(false);
-  const [search, setSearch] = React.useState("");
-  const [filter, setFilter] = React.useState<MapPlayerFilter>("all");
-  const rows = React.useMemo(() => sortedMapPlayerRows(roster, current), [roster, current]);
-  const visibleRows = React.useMemo(() => filterMapPlayerRows(rows, filter, search), [rows, filter, search]);
-  const summary = mapPlayerTrackingSummary(selectedIds, roster);
-  const trackedCount = current.size;
-  const onlineCount = roster.filter((player) => player.signedIn === true).length;
-  const filterTabs: Array<{ key: MapPlayerFilter; label: string }> = [
-    { key: "all", label: "All" },
-    { key: "online", label: "Online" },
-    { key: "tracked", label: "Tracked" },
-    { key: "untracked", label: "Untracked" },
-  ];
-
-  return (
-    <section className="map-player-tracking" aria-label="Player tracking" data-tour="map-player-tracking">
-      <div className="map-player-tracking-summary">
-        <Users size={16} />
-        <div>
-          <strong>Player Tracking</strong>
-          <span>{summary}</span>
-        </div>
-      </div>
-      <div className="map-player-tracking-actions">
-        <button className={selectedIds === null ? "active" : ""} onClick={onAutoOnline}>Auto online</button>
-        <button className={trackedCount === roster.length && roster.length > 0 ? "active" : ""} onClick={onTrackAll}>All</button>
-        <button className={trackedCount === 0 ? "active" : ""} onClick={onTrackNone}>None</button>
-        <button onClick={() => setManagerOpen(true)}>Manage</button>
-        <button onClick={onClearFilters}>Clear filters</button>
-      </div>
-      {managerOpen ? (
-        <Dialog open title="Manage players" onClose={() => setManagerOpen(false)} className="map-player-dialog" backdropClassName="map-player-dialog-overlay">
-            <header>
-              <div>
-                <h3>Manage players</h3>
-                <p>{trackedCount} tracked, {onlineCount} online, {roster.length} total</p>
-              </div>
-              <button className="icon-button" onClick={() => setManagerOpen(false)} aria-label="Close player manager"><X size={15} /></button>
-            </header>
-            <div className="map-player-bulk-actions">
-              <button onClick={onTrackOnline}>Track online</button>
-              <button onClick={onTrackAll}>Track all</button>
-              <button onClick={onTrackNone}>Track none</button>
-              <button onClick={onAutoOnline}>Reset to auto</button>
-            </div>
-            <div className="map-player-manager-controls">
-              <div className="map-player-tabs" role="tablist" aria-label="Player filters">
-                {filterTabs.map((tab) => <button key={tab.key} className={filter === tab.key ? "active" : ""} onClick={() => setFilter(tab.key)}>{tab.label}</button>)}
-              </div>
-              <SearchBox label="Find tracked members" value={search} onChange={setSearch} placeholder="Find members" />
-            </div>
-            <div className="map-player-list">
-              {visibleRows.map((row) => (
-                <label key={row.id} className={row.tracked ? "active" : ""}>
-                  <input type="checkbox" checked={row.tracked} onChange={(event) => onTogglePlayer(row.id, event.target.checked)} />
-                  <span className={`online-dot ${row.signedIn ? "is-online" : ""}`} />
-                  <span>
-                    <strong>{row.name}</strong>
-                    <small>{row.signedIn ? `Online${formatCurrentSession(row.sessionSeconds) ? ` - ${formatCurrentSession(row.sessionSeconds)}` : ""}` : "Offline"}</small>
-                  </span>
-                </label>
-              ))}
-              {!visibleRows.length ? <p className="legend">No members match these filters.</p> : null}
-            </div>
-        </Dialog>
-      ) : null}
-    </section>
-  );
-}
-export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void; activeRegionScopeKey?: string }) {
+export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rendererMode = "external" }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void; activeRegionScopeKey?: string; rendererMode?: "external" | "native-beta" | "native" }) {
   const { cycle, trackPromise } = usePageRefresh();
+  const nativeRenderer = rendererMode !== "external";
   const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
+  const [externalPlayers, setExternalPlayers] = usePersistedState<MapTrackedExternalPlayer[]>("map.external-players", []);
   const [selectedResources, setSelectedResources] = usePersistedState<string[]>("map.resources", []);
+  const urlSelectionsApplied = React.useRef(false);
   const [resourceSearch, setResourceSearch] = usePersistedState("map.resource-search", "");
   const [resourceTier, setResourceTier] = usePersistedState("map.resource-tier", "All");
   const [resourceCategory, setResourceCategory] = usePersistedState("map.resource-category", "All");
+  const [resourceVisibleLimit, setResourceVisibleLimit] = React.useState<number>(RESOURCE_FINDER_BATCH_SIZE);
   const [resourceRegions, setResourceRegions] = usePersistedState<string[]>("map.regions", data.claim.regionId != null ? [String(data.claim.regionId)] : []);
-  const [resourcePanelCollapsed, setResourcePanelCollapsed] = usePersistedState("map.resource-finder-collapsed", false);
   const [resources, setResources] = React.useState<AnyRecord[]>([]);
   const [resourceError, setResourceError] = React.useState("");
   const [resourceNotice, setResourceNotice] = React.useState("");
   const [resourceCatalogLoaded, setResourceCatalogLoaded] = React.useState(false);
+  const [mapResourceRegions, setMapResourceRegions] = React.useState<AnyRecord[]>([]);
   const [, setMapUrlLog] = usePersistedState<AnyRecord[]>("diagnostics.mapUrlLog", []);
+  React.useEffect(() => {
+    if (!urlSelectionsApplied.current) {
+      urlSelectionsApplied.current = true;
+      const value = new URLSearchParams(window.location.search).get("mapLayers");
+      if (value != null) {
+        setSelectedResources([...new Set(value.split(",").map(normalizeMapResourceToken).filter(Boolean))]);
+        return;
+      }
+    }
+    updateQueryState({ mapLayers: selectedResources.length ? selectedResources.map(normalizeMapResourceToken).filter(Boolean).join(",") : null });
+  }, [selectedResources.join(",")]);
   const memberRoster = React.useMemo(() => {
     const detailById = new Map(data.players
       .map((player) => [String(player.entityId ?? player.playerEntityId ?? player.playerId ?? ""), player] as const)
@@ -191,6 +119,25 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
       });
     return () => controller.abort();
   }, [catalogGeneration, trackPromise]);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const refresh = fetch(`${LOCAL_API}/map/regions`, {
+      headers: cycle ? pageRefreshHeaders(cycle, "map") : {},
+      signal: controller.signal,
+    }).then((response) => response.ok ? response.json() : Promise.reject(new Error(`map regions HTTP ${response.status}`)));
+    void trackPromise("map-regions", refresh)
+      .then((payload) => {
+        const rows = Array.isArray(payload?.regions) ? payload.regions : [];
+        setMapResourceRegions(rows.map((region: AnyRecord) => ({
+          ...region,
+          regionId: String(region.regionId ?? ""),
+        })).filter((region: AnyRecord) => /^\d+$/.test(region.regionId) && region.relayReady === true));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setMapResourceRegions([]);
+      });
+    return () => controller.abort();
+  }, [cycle?.sequence, trackPromise]);
   const current = React.useMemo(() => currentMapPlayerSelection(selectedIds, roster), [selectedIds, roster]);
   const defaultFocus = data.claim.locationX != null && data.claim.locationZ != null ? {
     name: data.claim.name ?? "Monitored settlement",
@@ -201,14 +148,36 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
   const resourceByToken = React.useMemo(() => new Map(resources.map((resource) => [mapResourceToken(resource), resource])), [resources]);
   const resourceCategories = React.useMemo(() => unique(resources.map(mapResourceCategory).filter(Boolean)).sort((a, b) => a.localeCompare(b)), [resources]);
   const resourceTiers = React.useMemo(() => unique(resources.map((resource) => String(resource.tier ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [resources]);
-  const regionOptions = React.useMemo(() => unique([
+  const operationalRegionOptions = React.useMemo(() => unique([
     ...activeRegions.map((region) => String(region.regionId ?? "")),
     String(data.claim.regionId ?? ""),
     ...data.regionStatus.map((region) => String(region.regionId ?? "")),
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [activeRegions, data.claim.regionId, data.regionStatus]);
+  const readyResourceRegionIds = React.useMemo(
+    () => unique(mapResourceRegions.map((region) => String(region.regionId ?? "")).filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)),
+    [mapResourceRegions],
+  );
+  const regionOptions = React.useMemo(() => unique([
+    ...readyResourceRegionIds,
+    ...operationalRegionOptions,
+  ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b)), [readyResourceRegionIds, operationalRegionOptions]);
+  const normalizedRegionSelection = React.useMemo(
+    () => normalizeNativeMapRegionSelection(resourceRegions, regionOptions),
+    [resourceRegions.join(","), regionOptions.join(",")],
+  );
   const mapMarker = focus ?? defaultFocus;
-  const mapRegionIds = resourceRegions.length ? resourceRegions : regionOptions;
-  const selectedResourceIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length)), [normalizedSelectedResources]);
+  const mapRegionIds = React.useMemo(() => boundedNativeMapRegions(normalizedRegionSelection, regionOptions), [normalizedRegionSelection.join(","), regionOptions.join(",")]);
+  const readyPlayerRegionIds = React.useMemo(() => boundedNativeMapRegions([], readyResourceRegionIds, 16), [readyResourceRegionIds.join(",")]);
+  const resourceMapRegionIds = React.useMemo(() => nativeMapResourceRegions(normalizedRegionSelection, readyResourceRegionIds), [normalizedRegionSelection.join(","), readyResourceRegionIds.join(",")]);
+  const maxNativeResourceSelections = React.useMemo(() => nativeMapResourceSelectionLimit(resourceMapRegionIds), [resourceMapRegionIds.join(",")]);
+  const selectedResourceIds = React.useMemo(() => {
+    const resourceIds = normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length));
+    return nativeRenderer ? resourceIds.slice(0, maxNativeResourceSelections) : resourceIds;
+  }, [nativeRenderer, maxNativeResourceSelections, normalizedSelectedResources]);
+  const selectedResourceTiers = React.useMemo(
+    () => selectedResourceTierMap(selectedResourceIds, resourceByToken),
+    [selectedResourceIds.join(","), resourceByToken],
+  );
   const selectedEnemyIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("enemy:")).map((token) => token.slice("enemy:".length)), [normalizedSelectedResources]);
   const currentPlayerIds = React.useMemo(() => [...current].sort(), [current]);
   const currentPlayerIdsKey = currentPlayerIds.join(",");
@@ -217,10 +186,11 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
     mapMarker,
     flyTo: Boolean(focus),
     resourceIds: selectedResourceIds,
-    regionIds: mapRegionIds,
+    regionIds: resourceMapRegionIds,
     enemyIds: selectedEnemyIds,
-  }), [currentPlayerIdsKey, focus, mapMarker, selectedResourceIds.join(","), selectedEnemyIds.join(","), mapRegionIds.join(",")]);
-  const mapUrl = React.useMemo(() => bitcraftMapUrl(currentPlayerIds, mapMarker, Boolean(focus), selectedResourceIds, mapRegionIds, selectedEnemyIds), [mapSignature]);
+  }), [currentPlayerIdsKey, focus, mapMarker, selectedResourceIds.join(","), selectedEnemyIds.join(","), resourceMapRegionIds.join(",")]);
+  const mapUrl = React.useMemo(() => bitcraftMapUrl(currentPlayerIds, mapMarker, Boolean(focus), selectedResourceIds, resourceMapRegionIds, selectedEnemyIds), [mapSignature]);
+  const renderer = React.useMemo(() => mapRendererPolicy(rendererMode, mapUrl), [rendererMode, mapUrl]);
   const [currentFrameUrl, setCurrentFrameUrl] = React.useState(mapUrl);
   const [frameState, setFrameState] = React.useState<FrameState>("loading");
   const [frameAttempt, setFrameAttempt] = React.useState(0);
@@ -233,6 +203,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
     return () => window.clearTimeout(timeout);
   }, [currentFrameUrl, frameAttempt]);
   React.useEffect(() => {
+    if (nativeRenderer) return;
     const parsed = parseBitcraftMapUrl(currentFrameUrl);
     setMapUrlLog((currentLog) => [{
       at: new Date().toISOString(),
@@ -251,7 +222,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
       hasWaypoint: Boolean(parsed.hasWaypoint),
       url: currentFrameUrl,
     }, ...currentLog].slice(0, 20));
-  }, [currentFrameUrl, mapSignature, rosterSource, roster.length, selectedIds, currentPlayerIdsKey]);
+  }, [currentFrameUrl, mapSignature, rosterSource, roster.length, selectedIds, currentPlayerIdsKey, nativeRenderer]);
   const focusKey = focus ? `${focus.name}:${focus.locationX}:${focus.locationZ}` : "";
   React.useEffect(() => {
     if (focus) updateQueryState({ label: focus.name, x: String(focus.locationX), z: String(focus.locationZ), regionId: focus.regionId ?? null, mapName: null, mapX: null, mapZ: null });
@@ -270,6 +241,18 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
       return toNumber(a.mapSortOrder) - toNumber(b.mapSortOrder) || String(a.name).localeCompare(String(b.name));
     });
   }, [resources, resourceSearch, resourceTier, resourceCategory]);
+  React.useEffect(() => {
+    setResourceVisibleLimit(RESOURCE_FINDER_BATCH_SIZE);
+  }, [resourceSearch, resourceTier, resourceCategory]);
+  const renderedResources = React.useMemo(
+    () => visibleResourceMatches(visibleResources, resourceVisibleLimit),
+    [visibleResources, resourceVisibleLimit],
+  );
+  const resourceRegionOptions = React.useMemo(() => regionOptions.map((id) => {
+    const region = mapResourceRegions.find((entry) => String(entry.regionId) === String(id)) ?? activeRegions.find((entry) => String(entry.regionId) === String(id)) ?? data.regionStatus.find((entry) => String(entry.regionId) === String(id)) ?? { regionId: id };
+    return { id, label: activeRegionLabel({ ...region, regionId: String(region.regionId ?? id) }, String(data.claim.regionId ?? "")) };
+  }), [regionOptions, mapResourceRegions, activeRegions, data.regionStatus, data.claim.regionId]);
+  const resourceRegionValue = normalizedRegionSelection.length === 1 ? normalizedRegionSelection[0] : "All";
   function setResourceRegion(value: string) {
     setResourceRegions(value === "All" ? [] : [value]);
   }
@@ -297,34 +280,65 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
     const normalizedToken = normalizeMapResourceToken(token);
     setSelectedResources((prev) => {
       const next = new Set(prev.map(normalizeMapResourceToken).filter(Boolean));
+      const selectedResourceCount = [...next].filter((value) => value.startsWith("resource:")).length;
       if (next.has(normalizedToken)) next.delete(normalizedToken);
+      else if (nativeRenderer && normalizedToken.startsWith("resource:") && !next.has(normalizedToken) && selectedResourceCount >= maxNativeResourceSelections) return [...next];
       else next.add(normalizedToken);
       return [...next].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     });
   }
-  function resetMapFilters() {
-    setSelectedIds(null);
-    setSelectedResources([]);
-    setResourceSearch("");
-    setResourceTier("All");
-    setResourceCategory("All");
-    setResourceRegions(data.claim.regionId != null ? [String(data.claim.regionId)] : []);
-    onClearFocus();
-  }
   const onlineCount = roster.filter((player) => player.signedIn).length;
+  const trackedPlayerCount = new Set([...current, ...externalPlayers.map((player) => player.playerId)]).size;
+  const playerPanel = <MapPlayerTrackingPanel
+    roster={roster}
+    selectedIds={selectedIds}
+    current={current}
+    externalPlayers={externalPlayers}
+    onAutoOnline={() => setSelectedIds(null)}
+    onTrackOnline={trackOnlinePlayers}
+    onTrackAll={trackAllPlayers}
+    onTrackNone={trackNoPlayers}
+    onTogglePlayer={togglePlayerTracking}
+    onRemoveExternal={(playerId) => setExternalPlayers((players) => players.filter((player) => player.playerId !== playerId))}
+    onClearExternal={() => setExternalPlayers([])}
+  />;
+  const resourceFinder = <MapResourceFinderPanel
+    search={resourceSearch}
+    tier={resourceTier}
+    category={resourceCategory}
+    tiers={resourceTiers}
+    categories={resourceCategories}
+    selectedTokens={normalizedSelectedResources}
+    resourceByToken={resourceByToken}
+    resources={renderedResources}
+    visibleCount={visibleResources.length}
+    catalogCount={resources.length}
+    catalogLoaded={resourceCatalogLoaded}
+    error={resourceError}
+    notice={resourceNotice}
+    onSearchChange={setResourceSearch}
+    onTierChange={setResourceTier}
+    onCategoryChange={setResourceCategory}
+    onToggle={toggleResource}
+    onRemove={toggleResource}
+    onClear={() => setSelectedResources([])}
+    onShowMore={() => setResourceVisibleLimit((current) => nextResourceLimit(current, visibleResources.length))}
+  />;
+  const regionControl = <MapRegionSelect value={resourceRegionValue} options={resourceRegionOptions} onChange={setResourceRegion} />;
   return (
-    <div className={`panel map-panel full-height ${focus ? "has-focus" : ""}`}>
+    <div className={`panel map-panel full-height ${focus ? "has-focus" : ""} ${nativeRenderer ? "has-native-tools" : ""}`}>
       <header className="members-topbar map-topbar">
         <div>
           <h2>World Map</h2>
-          <p>Live player and resource tracking via bitcraftmap.com</p>
+          <p>{nativeRenderer ? "Same-origin Relay map with explicit data freshness" : "Live player and resource tracking via bitcraftmap.com"}</p>
         </div>
         <div className="dashboard-top-meta">
+          {!nativeRenderer ? <div className="map-external-region-control">{regionControl}</div> : null}
           <div className="dashboard-meta-cluster">
             <span><Users size={14} /> {formatNumber(onlineCount)} online</span>
             <span>{formatNumber(roster.length)} members total</span>
           </div>
-          <a className="toolbar-button" href={currentFrameUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /> Open full map</a>
+          {renderer.externalHref ? <a className="toolbar-button" href={renderer.externalHref} target="_blank" rel="noreferrer"><ExternalLink size={15} /> {renderer.externalLabel}</a> : null}
         </div>
       </header>
       {focus ? (
@@ -334,69 +348,12 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
           <button className="mini-action" onClick={onClearFocus}>Clear</button>
         </div>
       ) : null}
-      <MapPlayerTrackingControls
-        roster={roster}
-        selectedIds={selectedIds}
-        current={current}
-        onAutoOnline={() => setSelectedIds(null)}
-        onTrackOnline={trackOnlinePlayers}
-        onTrackAll={trackAllPlayers}
-        onTrackNone={trackNoPlayers}
-        onTogglePlayer={togglePlayerTracking}
-        onClearFilters={resetMapFilters}
-      />
-      <div className={`map-workspace ${resourcePanelCollapsed ? "resources-collapsed" : ""}`}>
-        <aside className={`map-resource-panel ${resourcePanelCollapsed ? "collapsed" : ""}`}>
-          <div className="map-resource-heading">
-            <Search size={16} />
-            <div><strong>Resource Finder</strong><span>{selectedResources.length ? `${formatNumber(selectedResources.length)} tracked` : "Track resources on the map"}</span></div>
-            <button className="icon-button" type="button" onClick={() => setResourcePanelCollapsed((current) => !current)} title={resourcePanelCollapsed ? "Expand resource finder" : "Collapse resource finder"} aria-label={resourcePanelCollapsed ? "Expand resource finder" : "Collapse resource finder"}>
-              {resourcePanelCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-            </button>
-          </div>
-          {!resourcePanelCollapsed ? <><div className="map-resource-controls">
-            <label className="field"><span>Region</span><select className="select-control map-region-select" value={resourceRegions.length === 1 ? resourceRegions[0] : "All"} onChange={(event) => setResourceRegion(event.target.value)}><option value="All">All regions</option>{regionOptions.map((id) => {
-              const region = activeRegions.find((entry) => String(entry.regionId) === String(id)) ?? data.regionStatus.find((entry) => String(entry.regionId) === String(id)) ?? { regionId: id };
-              return <option key={id} value={id}>{activeRegionLabel({ ...region, regionId: String(region.regionId ?? id) }, String(data.claim.regionId ?? ""))}</option>;
-            })}</select></label>
-            <label className="field"><span>Tier</span><select className="select-control" value={resourceTier} onChange={(event) => setResourceTier(event.target.value)}><option>All</option>{resourceTiers.map((tier) => <option key={tier}>{tier}</option>)}</select></label>
-            <label className="field"><span>Category</span><select className="select-control" value={resourceCategory} onChange={(event) => setResourceCategory(event.target.value)}><option>All</option>{resourceCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
-            <SearchBox label="Find map resources" value={resourceSearch} onChange={setResourceSearch} placeholder="Find resources" />
-          </div>
-          {selectedResources.length ? (
-            <div className="map-selected-resources">
-              {selectedResources.map((id) => {
-                const token = normalizeMapResourceToken(id);
-                const resource = resourceByToken.get(token);
-                return <button key={id} onClick={() => toggleResource(id)}>{resource?.name ?? `Resource ${id}`}<X size={12} /></button>;
-              })}
-            </div>
-          ) : null}
-          {resourceError ? <div className="error">Resources unavailable: {resourceError}</div> : null}
-          {resourceNotice ? <p className="legend">{resourceNotice}</p> : null}
-          <div className="map-resource-list">
-            {visibleResources.map((resource) => {
-              const id = mapResourceToken(resource);
-              const active = normalizedSelectedResources.includes(id);
-              const resourceIcon = {
-                itemType: resource.itemType,
-                itemId: resource.itemId,
-                iconAssetName: resource.iconAssetName,
-                name: resource.name,
-              };
-              return <button key={id} className={active ? "active" : ""} onClick={() => toggleResource(id)}>
-                <span className="map-resource-icon"><ItemIcon item={resourceIcon} /></span>
-                <strong>{resource.name}</strong>
-                {resource.tier != null ? <TierBadge tier={resource.tier} /> : null}
-                <small>{resource.mapKind === "enemy" ? "Animal" : mapResourceCategory(resource) || resource.tag || "Resource"}</small>
-              </button>;
-            })}
-            {!visibleResources.length ? <p className="legend">{resources.length ? "No resources match these filters." : resourceCatalogLoaded ? "No map resources are available from Relay." : "Loading live Relay resources..."}</p> : null}
-          </div></> : null}
-        </aside>
-        <div className={`map-frame-host is-${frameState}`}>
-          <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />
-          {frameState !== "ready" ? (
+      {!nativeRenderer ? playerPanel : null}
+      <div className={`map-workspace ${nativeRenderer ? "native-tools" : ""}`}>
+        {!nativeRenderer ? <aside className="map-resource-panel">{resourceFinder}</aside> : null}
+        <div className={`map-frame-host ${nativeRenderer ? "is-native" : `is-${frameState}`}`}>
+          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} visibleRegionIds={normalizedRegionSelection} playerRegionIds={readyPlayerRegionIds} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} playerTool={{ label: "Players", count: trackedPlayerCount, content: playerPanel, primaryFocusSelector: "input[placeholder='Find settlement members']" }} resourceTool={{ label: "Resources", count: normalizedSelectedResources.length, content: resourceFinder, primaryFocusSelector: ".map-resource-finder-search input" }} regionControl={regionControl} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
+          {!nativeRenderer && frameState !== "ready" ? (
             <section className="map-frame-state" aria-live="polite">
               <strong>{frameState === "loading" ? "Loading embedded map..." : frameState === "timed-out" ? "The embedded map is taking longer than expected." : "The embedded map could not be loaded."}</strong>
               <span>{frameState === "loading" ? "The map will appear here when the external host responds." : "You can retry the embed or open the full page. This does not affect Claim Monitor data."}</span>

@@ -4,8 +4,8 @@ import test from "node:test";
 
 const script = readFileSync(new URL("../../../scripts/start-bitcraft-local-smoke.mjs", import.meta.url), "utf8");
 
-test("smoke launcher detaches cleanly and disables background work", () => {
-  assert.match(script, /BITCRAFT_PROCESS_ROLE:\s*"web"/);
+test("smoke launcher detaches cleanly with preview background collection", () => {
+  assert.match(script, /BITCRAFT_PROCESS_ROLE:\s*process\.env\.BITCRAFT_SMOKE_PROCESS_ROLE \?\? "all"/);
   assert.match(script, /ENABLE_SERVER_POLLING:\s*"false"/);
   assert.match(script, /ENABLE_SCHEDULED_JOBS:\s*"false"/);
   assert.match(script, /ENABLE_DISCORD_STARTUP:\s*"false"/);

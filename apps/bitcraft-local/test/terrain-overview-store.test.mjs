@@ -1,0 +1,53 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { createLayeredTerrainTileStore } from "../src/server/terrainOverviewStore.mjs";
+
+test("layered terrain store exposes whole-world overview coverage and detail fallback", async () => {
+  let detailReads = 0;
+  let overviewReads = 0;
+  const detail = {
+    readManifest: async () => ({ generation: "2", generatedAt: "2026-08-11T12:00:00.000Z", regionIds: ["19"], bounds: { minX: 23040, minZ: 23040, maxX: 30720, maxZ: 30720 }, tileCount: 10, totalBytes: 100, biomes: [{ biomeType: 1, name: "Calm Forest", present: true }, { biomeType: 2, name: "Pine Woods", present: false }], waterTypes: ["lake"] }),
+    readTile: async ({ z }) => {
+      detailReads += 1;
+      return z === 0 ? { bytes: Buffer.from("detail"), contentType: "image/webp", generation: "2" } : null;
+    },
+  };
+  const overview = {
+    readManifest: async () => ({ generation: "100", generatedAt: "2026-08-11T11:00:00.000Z", regionIds: ["3", "19"], bounds: { minX: 0, minZ: 0, maxX: 38400, maxZ: 38400 }, tileCount: 20, totalBytes: 200, biomes: [{ biomeType: 1, name: "Calm Forest", present: false }, { biomeType: 2, name: "Pine Woods", present: true }], waterTypes: ["river", "ocean"] }),
+    readTile: async ({ z }) => {
+      overviewReads += 1;
+      return z <= -2 ? { bytes: Buffer.from("overview"), contentType: "image/webp", generation: "100" } : null;
+    },
+  };
+  const store = createLayeredTerrainTileStore({ detailStore: detail, overviewStore: overview });
+  const manifest = await store.readManifest();
+  assert.deepEqual(manifest.regionIds, ["3", "19"]);
+  assert.deepEqual(manifest.bounds, { minX: 0, minZ: 0, maxX: 38400, maxZ: 38400 });
+  assert.deepEqual(manifest.biomes.map(({ biomeType, present }) => [biomeType, present]), [[1, true], [2, true]]);
+  assert.deepEqual(manifest.waterTypes, ["lake", "ocean", "river"]);
+  assert.equal((await store.readTile({ style: "terrain", z: -5, x: 0, y: -1 })).bytes.toString(), "overview");
+  assert.equal((await store.readTile({ style: "terrain", z: -5, x: 0, y: -1 })).bytes.toString(), "overview");
+  assert.equal((await store.readTile({ style: "terrain", z: 0, x: 1, y: -1 })).bytes.toString(), "detail");
+  assert.equal(detailReads, 2);
+  assert.equal(overviewReads, 2);
+});
+
+test("layered terrain generation changes when a newer detail bundle replaces an older high-number overview", async () => {
+  let detailGeneratedAt = "2026-08-12T22:00:00.000Z";
+  const detailStore = {
+    readManifest: async () => ({ generation: "1", generatedAt: detailGeneratedAt, regionIds: ["19"], tileCount: 1, totalBytes: 1 }),
+    readTile: async () => null,
+  };
+  const overviewStore = {
+    readManifest: async () => ({ generation: "1786488998418", generatedAt: "2026-08-11T22:56:38.418Z", regionIds: ["3"], tileCount: 1, totalBytes: 1 }),
+    readTile: async () => null,
+  };
+  const store = createLayeredTerrainTileStore({ detailStore, overviewStore });
+  const first = await store.readManifest();
+  assert.equal(first.generation, String(Date.parse(detailGeneratedAt)));
+  detailGeneratedAt = "2026-08-12T22:05:00.000Z";
+  const second = await store.readManifest();
+  assert.equal(second.generation, String(Date.parse(detailGeneratedAt)));
+  assert.notEqual(second.generation, first.generation, "a replaced immutable tile bundle needs a new browser cache key");
+});

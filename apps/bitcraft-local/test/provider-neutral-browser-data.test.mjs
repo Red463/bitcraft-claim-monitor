@@ -182,6 +182,17 @@ test("Map uses live Relay identity and catalog inputs without the unused legacy 
   assert.doesNotMatch(normalizer, /raw\?\.layout|\blayout,/);
 });
 
+test("native terrain browser code is same-origin and contains no third-party tile dependency", async () => {
+  const nativeMap = await readFile(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  const terrainStatus = await readFile(new URL("../src/pages/map/terrainTileStatus.mjs", import.meta.url), "utf8");
+  const browserTerrain = `${nativeMap}\n${terrainStatus}`;
+  assert.match(browserTerrain, /\/api\/local\/map\/tiles\/status/);
+  assert.match(browserTerrain, /mapTileUrl\("terrain"/);
+  assert.match(browserTerrain, /mapTileUrl\("water"/);
+  assert.match(browserTerrain, /biomeTileUrl\(/);
+  assert.doesNotMatch(browserTerrain, /https?:\/\/|prism\.brico|bitcraftmap\.com|BitJita|SpacetimeDB|sharp/i);
+});
+
 test("Region composes live regional claims and global status without legacy page requests", async () => {
   const { normalizeData } = await import(new URL("../src/utils/normalize.ts", import.meta.url).href);
   assert.equal(usesProviderNeutralGameData("region"), true);

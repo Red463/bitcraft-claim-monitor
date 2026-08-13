@@ -9,6 +9,25 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.1] - 2026-08-13
+
+### Added
+
+- Added a first-party native BitCraft map with self-hosted terrain, water, roads, biome highlighting, claim and NPC-town markers, watchtowers, waypoints, and live player tracking.
+- Added multi-region resource tracking with tier-based marker colours, stable variations, viewport-efficient rendering, and Relay-backed live updates.
+- Added integrated Layers, Biomes, Players, Resources, and Region controls that preserve selections and work across desktop and mobile layouts.
+
+### Changed
+
+- Replaced selection-bearing third-party map requests with provider-neutral, same-origin map snapshots and event streams.
+- Expanded the Region selector so claim markers and selected resources load from every Relay-ready region, including an all-regions view.
+- Pre-generates slow-changing world terrain and water while keeping roads, players, and resources on bounded live update paths.
+
+### Fixed
+
+- Fixed stale, partial, oversized, and cold resource selections so usable last-good results remain visible while updated regions load.
+- Fixed regional claim filtering, native marker layering, low-zoom terrain coverage, biome decoding, and mobile map-tool layout.
+
 ## [0.54.1-beta.1] - 2026-08-11
 
 ### Fixed

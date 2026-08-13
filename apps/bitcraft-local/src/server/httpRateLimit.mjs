@@ -4,6 +4,8 @@ export const RATE_LIMITS = {
   discordInteraction: { windowMs: 60 * 1000, max: 120 },
   proxy: { windowMs: 60 * 1000, max: 600 },
   expensiveLocal: { windowMs: 60 * 1000, max: 60 },
+  mapSnapshot: { windowMs: 60 * 1000, max: 600 },
+  mapEvents: { windowMs: 60 * 1000, max: 300 },
 };
 
 export function requestAddress(req) {

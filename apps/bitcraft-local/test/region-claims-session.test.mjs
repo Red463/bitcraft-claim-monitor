@@ -79,6 +79,8 @@ test("regional claims session applies claims and usernames through one authorita
     claimTechState: table(claimTechRows),
     claimTechDesc: table(claimTechDescriptionRows),
     playerUsernameState: table(usernameRows),
+    bankState: table([]),
+    waystoneState: table([]),
   };
   const connection = {
     db,
@@ -150,6 +152,8 @@ test("regional claims session applies claims and usernames through one authorita
     "SELECT * FROM claim_tech_state",
     "SELECT * FROM claim_tech_desc",
     "SELECT * FROM player_username_state",
+    "SELECT * FROM bank_state",
+    "SELECT * FROM waystone_state",
   ]);
   assert.equal(subscriptions.length, 1);
   assert.equal(snapshot.data.claims[0].ownerPlayerUsername, "Red463");
