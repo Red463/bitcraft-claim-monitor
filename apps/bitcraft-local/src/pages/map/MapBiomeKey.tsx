@@ -1,6 +1,3 @@
-import React from "react";
-import { Trees } from "lucide-react";
-
 import { terrainBiomeColour } from "../../shared/terrainBiomes.mjs";
 import { TERRAIN_LEGEND_GROUPS } from "../../shared/terrainPaletteDefinition.mjs";
 import type { TerrainBiomeStatus } from "./terrainTileStatus.mjs";
@@ -21,24 +18,16 @@ function rgba(colour: readonly number[]) {
 }
 
 export function MapBiomeKey({ biomes, waterTypes, activeBiomeType, pinnedBiomeType, onPreview, onLeave, onPin, onClear }: MapBiomeKeyProps) {
-  const [open, setOpen] = React.useState(false);
   const sortedBiomes = biomes.filter((biome) => biome.present).sort((left, right) => left.biomeType - right.biomeType);
   const presentWaterTypes = new Set(waterTypes.map((waterType) => waterType === "swamp" ? "swamp-water" : waterType));
   const waterEntries = (TERRAIN_LEGEND_GROUPS.find(({ key }) => key === "water")?.entries ?? []).filter((entry) => presentWaterTypes.has(entry.key));
   return (
-    <div className="native-map-biome-key">
-      <button type="button" className="native-map-layers-button" aria-expanded={open} aria-controls="native-map-biome-key-popover" onClick={() => setOpen((value) => !value)}>
-        <Trees size={16} aria-hidden="true" />
-        <span>Biomes</span>
-      </button>
-      {open ? (
-        <div
-          id="native-map-biome-key-popover"
-          className="native-map-biome-key-popover"
-          role="group"
-          aria-label="Terrain colour key"
-          onKeyDown={(event) => { if (event.key === "Escape") onClear(); }}
-        >
+    <div
+      className="native-map-biome-key-popover"
+      role="group"
+      aria-label="Terrain colour key"
+      onKeyDown={(event) => { if (event.key === "Escape") onClear(); }}
+    >
           <p className="native-map-biome-key-helper">Hover or focus to preview; click to pin.</p>
           <section aria-labelledby="native-map-biome-key-biomes">
             <h3 id="native-map-biome-key-biomes">Biomes</h3>
@@ -77,8 +66,6 @@ export function MapBiomeKey({ biomes, waterTypes, activeBiomeType, pinnedBiomeTy
             </div>
           </section> : null}
           <p>Terrain shading varies with elevation, biome density, relief, texture, water depth, and shorelines.</p>
-        </div>
-      ) : null}
     </div>
   );
 }

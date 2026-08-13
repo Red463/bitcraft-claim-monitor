@@ -226,7 +226,7 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   assert.match(nativeMap, /<MapLayersControl/);
   assert.doesNotMatch(control, /setResourceIds|setEnemyTypes|resourceIds\s*=|enemyTypes\s*=/);
   assert.match(control, /aria-describedby/);
-  assert.match(control, />Layers</);
+  assert.match(nativeMap, /id: "layers"[\s\S]*label: "Layers"/);
   assert.match(nativeMap, /alt:\s*accessibleLabel,\s*title:\s*accessibleLabel/s);
   assert.match(nativeMap, /setAttribute\("aria-label", accessibleLabel\)/);
   assert.match(nativeMap, /zoomend/);
@@ -253,12 +253,24 @@ test("Native map tool dock exposes exclusive accessible controls", () => {
   assert.match(dock, /closest\("\[data-map-tool-panel\]"\)/);
 });
 
-test("Native map places a viewport-bounded biome key beside Layers", () => {
+test("Native map combines renderer and page tools in the approved order", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  const layers = readFileSync(new URL("../src/pages/map/MapLayersControl.tsx", import.meta.url), "utf8");
+
+  assert.match(nativeMap, /<MapToolDock tools=\{mapTools\}/);
+  assert.ok(nativeMap.indexOf('id: "layers"') < nativeMap.indexOf('id: "biomes"'));
+  assert.ok(nativeMap.indexOf('id: "biomes"') < nativeMap.indexOf('id: "players"'));
+  assert.ok(nativeMap.indexOf('id: "players"') < nativeMap.indexOf('id: "resources"'));
+  assert.doesNotMatch(layers, /React\.useState|aria-expanded|native-map-layers-button/);
+  assert.match(layers, /aria-label="Map layer visibility"/);
+});
+
+test("Native map places the biome key inside the shared tool dock", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   const key = readFileSync(new URL("../src/pages/map/MapBiomeKey.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
 
-  assert.match(nativeMap, /native-map-controls[\s\S]*<MapLayersControl[\s\S]*<MapBiomeKey/);
+  assert.match(nativeMap, /id: "layers"[\s\S]*<MapLayersControl[\s\S]*id: "biomes"[\s\S]*<MapBiomeKey/);
   assert.match(nativeMap, /biomes=\{terrainStatus\?\.biomes \?\? \[\]\}/);
   assert.match(nativeMap, /waterTypes=\{terrainStatus\?\.waterTypes \?\? \[\]\}/);
   assert.match(nativeMap, /activeBiomeType=\{biomeHighlight\.active\}/);
@@ -267,7 +279,6 @@ test("Native map places a viewport-bounded biome key beside Layers", () => {
   assert.match(nativeMap, /onClear=\{biomeHighlightController\.clear\}/);
   assert.match(nativeMap, /React\.useEffect\(\(\) => \{\s*const controller = createBiomeHighlightController/);
   assert.match(nativeMap, /biomeHighlightControllerRef\.current === controller[\s\S]*biomeHighlightControllerRef\.current = null/);
-  assert.match(key, /<span>Biomes<\/span>/);
   assert.match(css, /native-map-biome-key-popover[^}]*max-height:\s*min\(30rem, calc\(100dvh - 8rem\)\)[^}]*overflow:\s*auto/s);
   assert.match(css, /native-map-biome-key-grid[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/s);
   assert.match(css, /@media \(max-width: 620px\)[\s\S]*native-map-biome-key-grid[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);

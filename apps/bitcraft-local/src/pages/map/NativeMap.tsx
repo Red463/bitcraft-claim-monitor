@@ -1,9 +1,11 @@
 import React from "react";
 import L from "leaflet";
+import { Layers3, Pickaxe, Trees, Users } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
 import { MapBiomeKey } from "./MapBiomeKey";
 import { MapLayersControl } from "./MapLayersControl";
+import { MapToolDock, type MapToolDescriptor } from "./MapToolDock";
 import { createBiomeHighlightController } from "./biomeHighlightState.mjs";
 import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, leafletPoint } from "./mapCoordinates.mjs";
 import { planDensePointDraw } from "./mapDensePointPlan.mjs";
@@ -55,6 +57,13 @@ type LayerAvailability = {
   status?: "live" | "partial" | "stale" | "loading" | "unavailable";
   pending?: boolean;
   reason: string | null;
+};
+
+export type NativeMapToolContent = {
+  label: string;
+  count: number;
+  content: React.ReactNode;
+  primaryFocusSelector?: string;
 };
 
 const MAP_PROJECTION: L.Projection = {
@@ -243,6 +252,8 @@ export function NativeMap({
   resourceTiers,
   enemyTypes,
   focus,
+  playerTool,
+  resourceTool,
 }: {
   regionIds: string[];
   resourceRegionIds: string[];
@@ -251,6 +262,8 @@ export function NativeMap({
   resourceTiers: Readonly<Record<string, number | null>>;
   enemyTypes: string[];
   focus: MapFocus;
+  playerTool?: NativeMapToolContent;
+  resourceTool?: NativeMapToolContent;
 }) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<L.Map | null>(null);
@@ -735,21 +748,50 @@ export function NativeMap({
     freshness: snapshot?.freshness ?? "unavailable",
   });
   const toggleLayer = (key: MapLayerKey) => setLayerVisibility((current) => ({ ...current, [key]: !current[key] }));
+  const mapTools: MapToolDescriptor[] = [
+    {
+      id: "layers",
+      label: "Layers",
+      icon: <Layers3 size={16} aria-hidden="true" />,
+      panel: <MapLayersControl visibility={layerVisibility} availability={layerAvailability} counts={layerCounts} onToggle={toggleLayer} />,
+    },
+    {
+      id: "biomes",
+      label: "Biomes",
+      icon: <Trees size={16} aria-hidden="true" />,
+      panel: <MapBiomeKey
+        biomes={terrainStatus?.biomes ?? []}
+        waterTypes={terrainStatus?.waterTypes ?? []}
+        activeBiomeType={biomeHighlight.active}
+        pinnedBiomeType={biomeHighlight.pinned}
+        onPreview={biomeHighlightController.preview}
+        onLeave={biomeHighlightController.leave}
+        onPin={biomeHighlightController.pin}
+        onClear={biomeHighlightController.clear}
+      />,
+    },
+    {
+      id: "players",
+      label: playerTool?.label ?? "Players",
+      count: playerTool?.count ?? playerIds.length,
+      icon: <Users size={16} aria-hidden="true" />,
+      panel: playerTool?.content ?? <p>Player tracking controls are unavailable.</p>,
+      primaryFocusSelector: playerTool?.primaryFocusSelector,
+    },
+    {
+      id: "resources",
+      label: resourceTool?.label ?? "Resources",
+      count: resourceTool?.count ?? resourceIds.length,
+      icon: <Pickaxe size={16} aria-hidden="true" />,
+      panel: resourceTool?.content ?? <p>Resource finder controls are unavailable.</p>,
+      primaryFocusSelector: resourceTool?.primaryFocusSelector,
+    },
+  ];
   return (
     <section className="native-map-shell" aria-label="Native BitCraft map">
       <div ref={hostRef} className="native-map-canvas" role="application" aria-label="Interactive BitCraft coordinate map" tabIndex={0} />
       <div className="native-map-controls">
-        <MapLayersControl visibility={layerVisibility} availability={layerAvailability} counts={layerCounts} onToggle={toggleLayer} />
-        <MapBiomeKey
-          biomes={terrainStatus?.biomes ?? []}
-          waterTypes={terrainStatus?.waterTypes ?? []}
-          activeBiomeType={biomeHighlight.active}
-          pinnedBiomeType={biomeHighlight.pinned}
-          onPreview={biomeHighlightController.preview}
-          onLeave={biomeHighlightController.leave}
-          onPin={biomeHighlightController.pin}
-          onClear={biomeHighlightController.clear}
-        />
+        <MapToolDock tools={mapTools} />
       </div>
       <div className="native-map-status" aria-live="polite">
         <strong>{loading && !snapshot ? "Loading native map…" : snapshot ? `${snapshot.freshness} · generation ${snapshot.generation}` : "Native map unavailable"}</strong>

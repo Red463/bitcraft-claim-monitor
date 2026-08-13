@@ -7,13 +7,10 @@ test("map biome key exposes accessible preview and pin controls for the live cat
 
   assert.match(source, /terrainBiomeColour/);
   assert.match(source, /TERRAIN_LEGEND_GROUPS/);
-  assert.match(source, /aria-expanded=\{open\}/);
-  assert.match(source, /aria-controls="native-map-biome-key-popover"/);
   assert.match(source, /aria-label="Terrain colour key"/);
   assert.match(source, /biomes\.filter\(\(biome\) => biome\.present\)/);
   assert.match(source, /waterTypes/);
-  assert.match(source, /Trees/);
-  assert.match(source, /<span>Biomes<\/span>/);
+  assert.doesNotMatch(source, /React\.useState|aria-expanded|native-map-layers-button/);
   assert.match(source, /aria-pressed=/);
   assert.match(source, /onPointerEnter=/);
   assert.match(source, /onPointerLeave=/);
