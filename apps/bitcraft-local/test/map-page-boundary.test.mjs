@@ -93,10 +93,20 @@ test("Map Resource Finder bounds rendered rows and reveals deterministic batches
 test("Map page owns the region selector and supplies its selected scope to the native map", () => {
   const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  const dock = readFileSync(new URL("../src/pages/map/MapToolDock.tsx", import.meta.url), "utf8");
+  const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
 
   assert.match(mapPage, /<MapRegionSelect/);
-  assert.match(mapPage, /visibleRegionIds=\{resourceRegions\}/);
-  assert.match(nativeMap, /regionControl=\{regionControl\}/);
+  assert.match(mapPage, /const normalizedRegionSelection = React\.useMemo/);
+  assert.match(mapPage, /boundedNativeMapRegions\(normalizedRegionSelection, operationalRegionOptions\)/);
+  assert.match(mapPage, /nativeMapResourceRegions\(normalizedRegionSelection, regionOptions\)/);
+  assert.match(mapPage, /visibleRegionIds=\{normalizedRegionSelection\}/);
+  assert.doesNotMatch(mapPage, /visibleRegionIds=\{resourceRegions\}/);
+  assert.match(nativeMap, /trailingControl=\{regionControl\}/);
+  assert.doesNotMatch(dock, /regionControl/);
+  assert.match(mapCss, /\.native-map-region-select\s*\{[^}]*min-height:\s*34px;[^}]*border:\s*1px solid var\(--border\);[^}]*background:[^;]+;[^}]*font-size:[^;]+;/s);
+  assert.match(mapCss, /\.native-map-region-select:(?:hover|focus-within)[^}]*border-color:/s);
+  assert.match(mapCss, /@media \(max-width:\s*620px\)[\s\S]*\.native-map-region-select\s*\{[^}]*min-width:\s*0;[^}]*max-width:[^;]+;/s);
 });
 
 test("Native map projection preserves X and squishes only Leaflet Y", () => {

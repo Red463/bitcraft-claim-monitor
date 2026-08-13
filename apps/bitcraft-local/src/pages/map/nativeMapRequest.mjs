@@ -9,6 +9,11 @@ function decimalSort(values) {
     .sort((left, right) => left.length - right.length || left.localeCompare(right));
 }
 
+export function normalizeNativeMapRegionSelection(selectedRegionIds = [], availableRegionIds = []) {
+  const allowed = new Set(decimalSort(availableRegionIds));
+  return decimalSort(selectedRegionIds).filter((regionId) => allowed.has(regionId));
+}
+
 export function boundedNativeMapRegions(selectedRegionIds = [], availableRegionIds = [], limit = 4) {
   const available = decimalSort(availableRegionIds);
   const allowed = new Set(available);

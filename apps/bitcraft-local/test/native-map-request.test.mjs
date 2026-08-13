@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { boundedNativeMapRegions, nativeMapRequest, nativeMapResourceRegions } from "../src/pages/map/nativeMapRequest.mjs";
+import { boundedNativeMapRegions, nativeMapRequest, nativeMapResourceRegions, normalizeNativeMapRegionSelection } from "../src/pages/map/nativeMapRequest.mjs";
 
 test("native map requests are same-origin, canonical, and omit empty bounded layers", () => {
   const request = nativeMapRequest({
@@ -42,4 +42,17 @@ test("native map regions discard stale persisted ids and respect the API region 
   assert.deepEqual(boundedNativeMapRegions([], ["1", "2", "3", "4", "5"]), ["1", "2", "3", "4"]);
   assert.deepEqual(nativeMapResourceRegions([], ["1", "2", "3", "4", "5"]), ["1", "2", "3", "4", "5"]);
   assert.deepEqual(nativeMapResourceRegions(["99", "24"], ["19", "24"]), ["24"]);
+});
+
+test("stale persisted region selection becomes All without mutating persistence", () => {
+  const persisted = ["99"];
+
+  assert.deepEqual(normalizeNativeMapRegionSelection(persisted, ["19", "24"]), []);
+  assert.deepEqual(persisted, ["99"]);
+});
+
+test("region selection follows ready-region transitions and retains valid ids", () => {
+  assert.deepEqual(normalizeNativeMapRegionSelection(["24"], ["19", "24"]), ["24"]);
+  assert.deepEqual(normalizeNativeMapRegionSelection(["24"], ["19"]), []);
+  assert.deepEqual(normalizeNativeMapRegionSelection(["99", "19"], ["19", "24"]), ["19"]);
 });

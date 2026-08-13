@@ -14,7 +14,7 @@ export type MapToolDescriptor = {
   primaryFocusSelector?: string;
 };
 
-export function MapToolDock({ tools, trailingControl, regionControl }: { tools: MapToolDescriptor[]; trailingControl?: React.ReactNode; regionControl?: React.ReactNode }) {
+export function MapToolDock({ tools, trailingControl }: { tools: MapToolDescriptor[]; trailingControl?: React.ReactNode }) {
   const [activeTool, setActiveTool] = React.useState<MapToolId | null>(null);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
@@ -98,7 +98,7 @@ export function MapToolDock({ tools, trailingControl, regionControl }: { tools: 
             </button>
           );
         })}
-        {trailingControl ?? regionControl}
+        {trailingControl}
       </div>
       {activeDescriptor ? createPortal((
         <div
