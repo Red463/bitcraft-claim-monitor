@@ -22,3 +22,27 @@ test("visible point projection excludes out-of-region resource and enemy points"
 
   assert.deepEqual(visible.map((feature) => feature.entityId), ["resource-19", "enemy-19", "player-12"]);
 });
+
+test("visible point projection normalizes the selected region set once", () => {
+  const NativeSet = globalThis.Set;
+  let constructedSets = 0;
+  globalThis.Set = class CountingSet extends NativeSet {
+    constructor(values) {
+      super(values);
+      constructedSets += 1;
+    }
+  };
+
+  try {
+    mapFeaturesInRegionScope([
+      { kind: "resource", regionId: "19" },
+      { kind: "resource", regionId: "12" },
+      { kind: "enemy", regionId: "19" },
+      { kind: "player", regionId: "12" },
+    ], ["19"]);
+  } finally {
+    globalThis.Set = NativeSet;
+  }
+
+  assert.equal(constructedSets, 1);
+});

@@ -166,6 +166,18 @@ test("Native map keeps resource canvases and player markers above ordinary featu
   assert.doesNotMatch(nativeMap, /pane: feature\.kind === "player" \? "native-map-players" : undefined/);
 });
 
+test("Native map projects region-scoped dense points before rendering and resource framing", () => {
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+
+  assert.match(nativeMap, /const visibleResourcePoints = React\.useMemo\(\(\) => mapFeaturesInRegionScope\(resourcePoints, visibleRegionIds\)/);
+  assert.match(nativeMap, /const visibleEnemyPoints = React\.useMemo\(\(\) => mapFeaturesInRegionScope\(snapshot\?\.layers\.enemies \?\? \[\], visibleRegionIds\)/);
+  assert.match(nativeMap, /resourcesRef\.current\?\.setPoints\(visibleResourcePoints\)/);
+  assert.match(nativeMap, /enemiesRef\.current\?\.setPoints\(visibleEnemyPoints\)/);
+  assert.match(nativeMap, /applyResourceViewport\(\{[\s\S]*points: visibleResourcePoints,/);
+  assert.doesNotMatch(nativeMap, /resourcesRef\.current\?\.setPoints\(resourcePoints\)/);
+  assert.doesNotMatch(nativeMap, /enemiesRef\.current\?\.setPoints\(snapshot\.layers\.enemies \?\? \[\]\)/);
+});
+
 test("Native map frames a newly selected off-screen resource result once", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   assert.match(nativeMap, /applyResourceViewport/);

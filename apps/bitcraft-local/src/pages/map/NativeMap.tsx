@@ -307,6 +307,7 @@ export function NativeMap({
   const resourceRows = React.useMemo(() => resourceRowsFromPartitions(resourcePartitions), [resourcePartitions]);
   const resourcePoints = React.useMemo(() => mapResourceFeatures(resourceRows) as MapFeature[], [resourceRows]);
   const visibleResourcePoints = React.useMemo(() => mapFeaturesInRegionScope(resourcePoints, visibleRegionIds), [resourcePoints, visibleRegionIds.join(",")]);
+  const visibleEnemyPoints = React.useMemo(() => mapFeaturesInRegionScope(snapshot?.layers.enemies ?? [], visibleRegionIds), [snapshot?.layers.enemies, visibleRegionIds.join(",")]);
   const resourceStatuses = wantedResourceKeys.map((key) => resourcePartitionStatuses.get(key));
   const loadedResourcePartitionCount = wantedResourceKeys.filter((key) => resourcePartitions.has(key)).length;
   const pendingResourcePartitionCount = resourceStatuses.filter((status) => status == null || status.status === "loading" || status.pending === true).length;
@@ -685,7 +686,7 @@ export function NativeMap({
         marker.addTo(markerGroup);
       }
     }
-    enemiesRef.current?.setPoints(mapFeaturesInRegionScope(snapshot.layers.enemies ?? [], visibleRegionIds));
+    enemiesRef.current?.setPoints(visibleEnemyPoints);
     const map = mapRef.current;
     if (!resourceSelectionKey) resourceFrameSelectionRef.current = "";
     else if (map) {
@@ -704,7 +705,7 @@ export function NativeMap({
         },
       });
     }
-  }, [snapshot, visibleResourcePoints, resourceSelectionKey, resourceTiers, resourceLayerLoading, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
+  }, [snapshot, visibleResourcePoints, visibleEnemyPoints, resourceSelectionKey, resourceTiers, resourceLayerLoading, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
 
   const accessibleFeatures = snapshot
     ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {
