@@ -241,6 +241,18 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   assert.match(nativeMap, /selectionRequired.*resourceIds\.length.*enemyTypes\.length/s);
 });
 
+test("Native map tool dock exposes exclusive accessible controls", () => {
+  const dock = readFileSync(new URL("../src/pages/map/MapToolDock.tsx", import.meta.url), "utf8");
+
+  assert.match(dock, /role="toolbar"/);
+  assert.match(dock, /aria-label="Map tools"/);
+  assert.match(dock, /aria-expanded=\{activeTool === tool\.id\}/);
+  assert.match(dock, /aria-controls=\{panelId\}/);
+  assert.match(dock, /event\.key !== "Escape"/);
+  assert.match(dock, /triggerRefs\.current\.get\(closingTool\)\?\.focus\(\)/);
+  assert.match(dock, /closest\("\[data-map-tool-panel\]"\)/);
+});
+
 test("Native map places a viewport-bounded biome key beside Layers", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   const key = readFileSync(new URL("../src/pages/map/MapBiomeKey.tsx", import.meta.url), "utf8");
