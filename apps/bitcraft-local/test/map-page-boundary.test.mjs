@@ -67,9 +67,14 @@ test("Native map tool panels keep close controls compact and resource results as
   const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
 
   assert.match(mapCss, /\.native-map-tool-panel-header \.icon-button\s*\{[^}]*width:\s*28px;[^}]*height:\s*28px;/s);
+  assert.match(mapCss, /\.native-map-tool-panel-header \.icon-button\s*\{[^}]*background:\s*transparent;[^}]*color:\s*var\(--muted\);/s);
+  assert.match(mapCss, /\.native-map-tool-panel-header \.icon-button svg\s*\{[^}]*width:\s*15px;[^}]*height:\s*15px;/s);
+  assert.match(mapCss, /\.native-map-tool-panel-header \.icon-button:hover,\s*\.native-map-tool-panel-header \.icon-button:focus-visible\s*\{[^}]*border-color:[^}]*background:[^}]*color:\s*var\(--text\);/s);
   assert.match(mapCss, /\.native-map-tool-panel--resources\s*\{[^}]*overflow:\s*hidden;/s);
   assert.match(mapCss, /\.native-map-tool-panel--resources \.map-resource-list\s*\{[^}]*overflow-y:\s*auto;/s);
   assert.match(mapCss, /\.native-map-tool-panel--resources \.map-resource-list\s*\{[^}]*min-height:\s*0;/s);
+  assert.match(mapCss, /@media \(max-width:\s*620px\)[\s\S]*\.native-map-tool-panel--resources\s*\{[^}]*overflow:\s*auto;/s);
+  assert.match(mapCss, /@media \(max-width:\s*620px\)[\s\S]*\.native-map-tool-count\s*\{[^}]*position:\s*absolute;[^}]*width:\s*1px;[^}]*height:\s*1px;[^}]*overflow:\s*hidden;[^}]*clip:\s*rect\(0 0 0 0\);[^}]*white-space:\s*nowrap;/s);
   assert.match(mapCss, /\.map-player-list label\s*\{[^}]*grid-template-columns:\s*[^;]+;/s);
   assert.match(mapCss, /\.map-player-row-colour\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*1;/s);
   assert.match(mapCss, /\.map-resource-filters\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s);

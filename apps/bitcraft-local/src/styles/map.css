@@ -623,7 +623,8 @@ button.native-map-biome-key-row { cursor: pointer; }
   .native-map-controls { left: 3.1rem; right: 0.5rem; top: 0.5rem; }
   .native-map-tool-triggers { gap: 0.3rem; }
   .native-map-tool-trigger { min-width: 36px; min-height: 36px; justify-content: center; padding: 0 8px; }
-  .native-map-tool-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .native-map-tool-label,
+  .native-map-tool-count { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .native-map-region-select { min-width: 0; max-width: 8.5rem; min-height: 36px; padding-inline: 8px; }
   .native-map-region-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .native-map-region-select select { max-width: 6rem; }
@@ -638,5 +639,6 @@ button.native-map-biome-key-row { cursor: pointer; }
     overflow: auto;
     padding: 0.75rem;
   }
+  .native-map-tool-panel--resources { overflow: auto; }
   .native-map-biome-key-grid { grid-template-columns: minmax(0, 1fr); }
 }
