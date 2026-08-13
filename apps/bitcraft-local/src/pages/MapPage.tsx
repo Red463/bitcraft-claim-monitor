@@ -1,10 +1,8 @@
 import React from "react";
 import "../styles/map.css";
-import { ExternalLink, MapPin, PanelLeftClose, PanelLeftOpen, Search, Users, X } from "lucide-react";
+import { ExternalLink, MapPin, Users, X } from "lucide-react";
 
-import { TierBadge } from "../components/main/Badges";
 import { Dialog } from "../components/main/Dialog";
-import { ItemIcon } from "../components/main/ItemDisplay";
 import { SearchBox } from "../components/main/SearchBox";
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
 import { formatCurrentSession, formatNumber } from "../utils/format";
@@ -20,6 +18,7 @@ import { updateQueryState } from "../navigation";
 import { bitcraftMapUrl, mapEmbedSignature, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
 import { currentMapPlayerSelection, defaultMapPlayerSelection, filterMapPlayerRows, mapPlayerTrackingId, mapPlayerTrackingSummary, sortedMapPlayerRows, type MapPlayerFilter } from "./map/playerTracking";
 import { NativeMap } from "./map/NativeMap";
+import { MapResourceFinderPanel } from "./map/MapResourceFinderPanel";
 import { mapRendererPolicy } from "./map/mapRendererPolicy.mjs";
 import { boundedNativeMapRegions, nativeMapResourceRegions } from "./map/nativeMapRequest.mjs";
 import { selectedResourceTierMap } from "./map/resourceNodeColours.mjs";
@@ -130,7 +129,6 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
   const [resourceCategory, setResourceCategory] = usePersistedState("map.resource-category", "All");
   const [resourceVisibleLimit, setResourceVisibleLimit] = React.useState<number>(RESOURCE_FINDER_BATCH_SIZE);
   const [resourceRegions, setResourceRegions] = usePersistedState<string[]>("map.regions", data.claim.regionId != null ? [String(data.claim.regionId)] : []);
-  const [resourcePanelCollapsed, setResourcePanelCollapsed] = usePersistedState("map.resource-finder-collapsed", false);
   const [resources, setResources] = React.useState<AnyRecord[]>([]);
   const [resourceError, setResourceError] = React.useState("");
   const [resourceNotice, setResourceNotice] = React.useState("");
@@ -327,6 +325,10 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
     () => visibleResourceMatches(visibleResources, resourceVisibleLimit),
     [visibleResources, resourceVisibleLimit],
   );
+  const resourceRegionOptions = React.useMemo(() => regionOptions.map((id) => {
+    const region = mapResourceRegions.find((entry) => String(entry.regionId) === String(id)) ?? activeRegions.find((entry) => String(entry.regionId) === String(id)) ?? data.regionStatus.find((entry) => String(entry.regionId) === String(id)) ?? { regionId: id };
+    return { id, label: activeRegionLabel({ ...region, regionId: String(region.regionId ?? id) }, String(data.claim.regionId ?? "")) };
+  }), [regionOptions, mapResourceRegions, activeRegions, data.regionStatus, data.claim.regionId]);
   function setResourceRegion(value: string) {
     setResourceRegions(value === "All" ? [] : [value]);
   }
@@ -369,6 +371,31 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
     onClearFocus();
   }
   const onlineCount = roster.filter((player) => player.signedIn).length;
+  const resourceFinder = <MapResourceFinderPanel
+    search={resourceSearch}
+    tier={resourceTier}
+    category={resourceCategory}
+    regionValue={resourceRegions.length === 1 && regionOptions.includes(resourceRegions[0]) ? resourceRegions[0] : "All"}
+    regionOptions={resourceRegionOptions}
+    tiers={resourceTiers}
+    categories={resourceCategories}
+    selectedTokens={normalizedSelectedResources}
+    resourceByToken={resourceByToken}
+    resources={renderedResources}
+    visibleCount={visibleResources.length}
+    catalogCount={resources.length}
+    catalogLoaded={resourceCatalogLoaded}
+    error={resourceError}
+    notice={resourceNotice}
+    onSearchChange={setResourceSearch}
+    onTierChange={setResourceTier}
+    onCategoryChange={setResourceCategory}
+    onRegionChange={setResourceRegion}
+    onToggle={toggleResource}
+    onRemove={toggleResource}
+    onClear={() => setSelectedResources([])}
+    onShowMore={() => setResourceVisibleLimit((current) => nextResourceLimit(current, visibleResources.length))}
+  />;
   return (
     <div className={`panel map-panel full-height ${focus ? "has-focus" : ""}`}>
       <header className="members-topbar map-topbar">
@@ -402,63 +429,10 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
         onTogglePlayer={togglePlayerTracking}
         onClearFilters={resetMapFilters}
       />
-      <div className={`map-workspace ${resourcePanelCollapsed ? "resources-collapsed" : ""}`}>
-        <aside className={`map-resource-panel ${resourcePanelCollapsed ? "collapsed" : ""}`}>
-          <div className="map-resource-heading">
-            <Search size={16} />
-            <div><strong>Resource Finder</strong><span>{selectedResources.length ? `${formatNumber(selectedResources.length)} tracked` : "Track resources on the map"}</span></div>
-            <button className="icon-button" type="button" onClick={() => setResourcePanelCollapsed((current) => !current)} title={resourcePanelCollapsed ? "Expand resource finder" : "Collapse resource finder"} aria-label={resourcePanelCollapsed ? "Expand resource finder" : "Collapse resource finder"}>
-              {resourcePanelCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-            </button>
-          </div>
-          {!resourcePanelCollapsed ? <><div className="map-resource-controls">
-            <label className="field"><span>Region</span><select className="select-control map-region-select" value={resourceRegions.length === 1 && regionOptions.includes(resourceRegions[0]) ? resourceRegions[0] : "All"} onChange={(event) => setResourceRegion(event.target.value)}><option value="All">All regions</option>{regionOptions.map((id) => {
-              const region = mapResourceRegions.find((entry) => String(entry.regionId) === String(id)) ?? activeRegions.find((entry) => String(entry.regionId) === String(id)) ?? data.regionStatus.find((entry) => String(entry.regionId) === String(id)) ?? { regionId: id };
-              return <option key={id} value={id}>{activeRegionLabel({ ...region, regionId: String(region.regionId ?? id) }, String(data.claim.regionId ?? ""))}</option>;
-            })}</select></label>
-            <label className="field"><span>Tier</span><select className="select-control" value={resourceTier} onChange={(event) => setResourceTier(event.target.value)}><option>All</option>{resourceTiers.map((tier) => <option key={tier}>{tier}</option>)}</select></label>
-            <label className="field"><span>Category</span><select className="select-control" value={resourceCategory} onChange={(event) => setResourceCategory(event.target.value)}><option>All</option>{resourceCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
-            <SearchBox label="Find map resources" value={resourceSearch} onChange={setResourceSearch} placeholder="Find resources" />
-          </div>
-          {selectedResources.length ? (
-            <div className="map-selected-resources">
-              {selectedResources.map((id) => {
-                const token = normalizeMapResourceToken(id);
-                const resource = resourceByToken.get(token);
-                return <button key={id} onClick={() => toggleResource(id)}>{resource?.name ?? `Resource ${id}`}<X size={12} /></button>;
-              })}
-            </div>
-          ) : null}
-          {resourceError ? <div className="error">Resources unavailable: {resourceError}</div> : null}
-          {resourceNotice ? <p className="legend">{resourceNotice}</p> : null}
-          <div className="map-resource-list">
-            {renderedResources.map((resource) => {
-              const id = mapResourceToken(resource);
-              const active = normalizedSelectedResources.includes(id);
-              const resourceIcon = {
-                itemType: resource.itemType,
-                itemId: resource.itemId,
-                iconAssetName: resource.iconAssetName,
-                name: resource.name,
-              };
-              return <button key={id} className={active ? "active" : ""} onClick={() => toggleResource(id)}>
-                <span className="map-resource-icon"><ItemIcon item={resourceIcon} /></span>
-                <strong>{resource.name}</strong>
-                {resource.tier != null ? <TierBadge tier={resource.tier} /> : null}
-                <small>{resource.mapKind === "enemy" ? "Animal" : mapResourceCategory(resource) || resource.tag || "Resource"}</small>
-              </button>;
-            })}
-            {!visibleResources.length ? <p className="legend">{resources.length ? "No resources match these filters." : resourceCatalogLoaded ? "No map resources are available from Relay." : "Loading live Relay resources..."}</p> : null}
-          </div>
-          {visibleResources.length ? <div className="map-resource-list-footer">
-            <span aria-live="polite">Showing {renderedResources.length} of {visibleResources.length}</span>
-            {renderedResources.length < visibleResources.length ? (
-              <button type="button" className="toolbar-button" onClick={() => setResourceVisibleLimit((current) => nextResourceLimit(current, visibleResources.length))}>Show more</button>
-            ) : null}
-          </div> : null}</> : null}
-        </aside>
+      <div className={`map-workspace ${nativeRenderer ? "native-tools" : ""}`}>
+        {!nativeRenderer ? <aside className="map-resource-panel">{resourceFinder}</aside> : null}
         <div className={`map-frame-host ${nativeRenderer ? "is-native" : `is-${frameState}`}`}>
-          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
+          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} resourceTool={{ label: "Resources", count: normalizedSelectedResources.length, content: resourceFinder, primaryFocusSelector: ".map-resource-finder-search input" }} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
           {!nativeRenderer && frameState !== "ready" ? (
             <section className="map-frame-state" aria-live="polite">
               <strong>{frameState === "loading" ? "Loading embedded map..." : frameState === "timed-out" ? "The embedded map is taking longer than expected." : "The embedded map could not be loaded."}</strong>

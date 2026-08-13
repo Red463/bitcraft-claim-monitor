@@ -17,10 +17,10 @@ test("Map Resource Finder reads the continuously maintained Relay catalog", () =
 });
 
 test("Map Resource Finder preserves icon metadata and compound identity from the Relay catalog", () => {
-  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+  const finder = readFileSync(new URL("../src/pages/map/MapResourceFinderPanel.tsx", import.meta.url), "utf8");
 
-  assert.match(mapPage, /itemType:\s*resource\.itemType/);
-  assert.match(mapPage, /itemId:\s*resource\.itemId/);
-  assert.match(mapPage, /iconAssetName:\s*resource\.iconAssetName/);
-  assert.match(mapPage, /<ItemIcon item=\{resourceIcon\} \/>/);
+  assert.match(finder, /itemType:\s*resource\.itemType/);
+  assert.match(finder, /itemId:\s*resource\.itemId/);
+  assert.match(finder, /iconAssetName:\s*resource\.iconAssetName/);
+  assert.match(finder, /<ItemIcon item=\{resourceIcon\} \/>/);
 });

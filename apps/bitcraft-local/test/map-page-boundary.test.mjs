@@ -62,18 +62,19 @@ test("Map player tracking controls wrap within phone-width panels", () => {
 });
 
 test("Map Resource Finder uses the shared icon fallback for compound item identities", () => {
-  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+  const finder = readFileSync(new URL("../src/pages/map/MapResourceFinderPanel.tsx", import.meta.url), "utf8");
 
-  assert.match(mapPage, /import \{ ItemIcon \} from "\.\.\/components\/main\/ItemDisplay"/);
-  assert.match(mapPage, /itemType:\s*resource\.itemType/);
-  assert.match(mapPage, /itemId:\s*resource\.itemId/);
-  assert.match(mapPage, /iconAssetName:\s*resource\.iconAssetName/);
-  assert.match(mapPage, /<ItemIcon item=\{resourceIcon\} \/>/);
-  assert.doesNotMatch(mapPage, /const iconUrl = gameIconUrl\(resource\)/);
+  assert.match(finder, /import \{ ItemIcon \} from "\.\.\/\.\.\/components\/main\/ItemDisplay"/);
+  assert.match(finder, /itemType:\s*resource\.itemType/);
+  assert.match(finder, /itemId:\s*resource\.itemId/);
+  assert.match(finder, /iconAssetName:\s*resource\.iconAssetName/);
+  assert.match(finder, /<ItemIcon item=\{resourceIcon\} \/>/);
+  assert.doesNotMatch(finder, /const iconUrl = gameIconUrl\(resource\)/);
 });
 
 test("Map Resource Finder bounds rendered rows and reveals deterministic batches", () => {
   const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+  const finder = readFileSync(new URL("../src/pages/map/MapResourceFinderPanel.tsx", import.meta.url), "utf8");
 
   assert.match(mapPage, /import \{ RESOURCE_FINDER_BATCH_SIZE, nextResourceLimit, visibleResourceMatches \} from "\.\/map\/resourceFinderWindow\.mjs"/);
   assert.match(mapPage, /useState<number>\(RESOURCE_FINDER_BATCH_SIZE\)/);
@@ -81,10 +82,10 @@ test("Map Resource Finder bounds rendered rows and reveals deterministic batches
   assert.match(mapPage, /\[resourceSearch, resourceTier, resourceCategory\]/);
   assert.match(mapPage, /const renderedResources = React\.useMemo/);
   assert.match(mapPage, /visibleResourceMatches\(visibleResources, resourceVisibleLimit\)/);
-  assert.match(mapPage, /renderedResources\.map\(\(resource\) =>/);
-  assert.match(mapPage, /Showing \{renderedResources\.length\} of \{visibleResources\.length\}/);
+  assert.match(finder, /resources\.map\(\(resource\) =>/);
+  assert.match(finder, /Showing \{resources\.length\} of \{visibleCount\}/);
   assert.match(mapPage, /nextResourceLimit\(current, visibleResources\.length\)/);
-  assert.match(mapPage, />Show more</);
+  assert.match(finder, />Show more</);
 });
 
 test("Native map projection preserves X and squishes only Leaflet Y", () => {
