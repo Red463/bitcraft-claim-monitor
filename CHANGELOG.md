@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.5] - 2026-08-13
+
+### Fixed
+
+- Fixed live installation of the verified native map terrain, water, biome, and road bundle by transferring it directly and installing it with the required production ownership.
+
 ## [0.55.0-beta.4] - 2026-08-13
 
 ### Fixed
