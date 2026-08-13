@@ -311,7 +311,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
     onShowMore={() => setResourceVisibleLimit((current) => nextResourceLimit(current, visibleResources.length))}
   />;
   return (
-    <div className={`panel map-panel full-height ${focus ? "has-focus" : ""}`}>
+    <div className={`panel map-panel full-height ${focus ? "has-focus" : ""} ${nativeRenderer ? "has-native-tools" : ""}`}>
       <header className="members-topbar map-topbar">
         <div>
           <h2>World Map</h2>

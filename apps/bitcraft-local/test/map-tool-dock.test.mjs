@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 
 import { nextMapTool } from "../src/pages/map/mapToolDockState.mjs";
@@ -17,4 +19,10 @@ test("requesting another map tool switches directly", () => {
 
 test("map tool state rejects unknown tool identities", () => {
   assert.throws(() => nextMapTool("layers", "unknown"), /Unknown map tool/);
+});
+
+test("tool panels render at the viewport root so mobile bottom sheets are not trapped by transformed ancestors", () => {
+  const source = fs.readFileSync(path.resolve("src/pages/map/MapToolDock.tsx"), "utf8");
+  assert.match(source, /createPortal/);
+  assert.match(source, /document\.body/);
 });

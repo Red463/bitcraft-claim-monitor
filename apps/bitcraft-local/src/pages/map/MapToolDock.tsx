@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 import { nextMapTool, type MapToolId } from "./mapToolDockState.mjs";
@@ -18,6 +19,7 @@ export function MapToolDock({ tools }: { tools: MapToolDescriptor[] }) {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const triggerRefs = React.useRef(new Map<MapToolId, HTMLButtonElement>());
+  const [panelAnchor, setPanelAnchor] = React.useState({ left: 0, top: 0 });
   const activeDescriptor = tools.find((tool) => tool.id === activeTool) ?? null;
 
   const close = React.useCallback((restoreFocus: boolean) => {
@@ -42,6 +44,13 @@ export function MapToolDock({ tools }: { tools: MapToolDescriptor[] }) {
 
   React.useEffect(() => {
     if (!activeTool) return;
+    const updatePanelAnchor = () => {
+      const rect = triggerRefs.current.get(activeTool)?.getBoundingClientRect();
+      if (rect) setPanelAnchor({ left: rect.left, top: rect.bottom + 7 });
+    };
+    updatePanelAnchor();
+    window.addEventListener("resize", updatePanelAnchor);
+    window.addEventListener("scroll", updatePanelAnchor, true);
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
@@ -57,6 +66,8 @@ export function MapToolDock({ tools }: { tools: MapToolDescriptor[] }) {
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
+      window.removeEventListener("resize", updatePanelAnchor);
+      window.removeEventListener("scroll", updatePanelAnchor, true);
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
@@ -88,7 +99,7 @@ export function MapToolDock({ tools }: { tools: MapToolDescriptor[] }) {
           );
         })}
       </div>
-      {activeDescriptor ? (
+      {activeDescriptor ? createPortal((
         <div
           ref={panelRef}
           id={`native-map-tool-panel-${activeDescriptor.id}`}
@@ -96,6 +107,10 @@ export function MapToolDock({ tools }: { tools: MapToolDescriptor[] }) {
           data-map-tool-panel
           role="group"
           aria-labelledby={`native-map-tool-heading-${activeDescriptor.id}`}
+          style={{
+            "--map-tool-anchor-left": `${panelAnchor.left}px`,
+            "--map-tool-anchor-top": `${panelAnchor.top}px`,
+          } as React.CSSProperties}
         >
           <div className="native-map-tool-panel-header">
             <h2 id={`native-map-tool-heading-${activeDescriptor.id}`} data-map-tool-heading tabIndex={-1}>{activeDescriptor.label}</h2>
@@ -105,7 +120,7 @@ export function MapToolDock({ tools }: { tools: MapToolDescriptor[] }) {
           </div>
           {activeDescriptor.panel}
         </div>
-      ) : null}
+      ), document.body) : null}
     </div>
   );
 }

@@ -52,13 +52,15 @@ test("Map iframe URL updates when auto-online tracked players change", () => {
   assert.doesNotMatch(mapPage, /autoFramePlayerIds/);
 });
 
-test("Map player tracking controls wrap within phone-width panels", () => {
+test("Native map tools use a full-width desktop workspace and mobile bottom sheet", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
   const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
 
-  assert.match(
-    mapCss,
-    /@media \(max-width:\s*620px\)[\s\S]*\.map-player-tracking\s*\{[^}]*flex-wrap:\s*wrap/s,
-  );
+  assert.match(mapPage, /has-native-tools/);
+  assert.doesNotMatch(mapPage, /resources-collapsed|map\.resource-finder-collapsed/);
+  assert.match(mapCss, /\.map-workspace\.native-tools\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+  assert.match(mapCss, /\.native-map-tool-panel\s*\{[^}]*position:\s*fixed;[^}]*top:\s*var\(--map-tool-anchor-top/s);
+  assert.match(mapCss, /@media \(max-width:\s*620px\)[\s\S]*\.native-map-tool-panel\s*\{[^}]*position:\s*fixed;[^}]*bottom:\s*[^;]+;[^}]*max-height:\s*66dvh;[^}]*overflow:\s*auto/s);
 });
 
 test("Map Resource Finder uses the shared icon fallback for compound item identities", () => {
