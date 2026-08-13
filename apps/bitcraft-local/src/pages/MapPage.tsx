@@ -17,6 +17,7 @@ import { bitcraftMapUrl, mapEmbedSignature, mapResourceCategory, mapResourceToke
 import { currentMapPlayerSelection, defaultMapPlayerSelection, mapPlayerTrackingId, type MapTrackedExternalPlayer } from "./map/playerTracking";
 import { NativeMap } from "./map/NativeMap";
 import { MapPlayerTrackingPanel } from "./map/MapPlayerTrackingPanel";
+import { MapRegionSelect } from "./map/MapRegionSelect";
 import { MapResourceFinderPanel } from "./map/MapResourceFinderPanel";
 import { mapRendererPolicy } from "./map/mapRendererPolicy.mjs";
 import { boundedNativeMapRegions, nativeMapResourceRegions } from "./map/nativeMapRequest.mjs";
@@ -238,6 +239,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
     const region = mapResourceRegions.find((entry) => String(entry.regionId) === String(id)) ?? activeRegions.find((entry) => String(entry.regionId) === String(id)) ?? data.regionStatus.find((entry) => String(entry.regionId) === String(id)) ?? { regionId: id };
     return { id, label: activeRegionLabel({ ...region, regionId: String(region.regionId ?? id) }, String(data.claim.regionId ?? "")) };
   }), [regionOptions, mapResourceRegions, activeRegions, data.regionStatus, data.claim.regionId]);
+  const resourceRegionValue = resourceRegions.length === 1 && regionOptions.includes(resourceRegions[0]) ? resourceRegions[0] : "All";
   function setResourceRegion(value: string) {
     setResourceRegions(value === "All" ? [] : [value]);
   }
@@ -289,8 +291,6 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
     search={resourceSearch}
     tier={resourceTier}
     category={resourceCategory}
-    regionValue={resourceRegions.length === 1 && regionOptions.includes(resourceRegions[0]) ? resourceRegions[0] : "All"}
-    regionOptions={resourceRegionOptions}
     tiers={resourceTiers}
     categories={resourceCategories}
     selectedTokens={normalizedSelectedResources}
@@ -304,12 +304,12 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
     onSearchChange={setResourceSearch}
     onTierChange={setResourceTier}
     onCategoryChange={setResourceCategory}
-    onRegionChange={setResourceRegion}
     onToggle={toggleResource}
     onRemove={toggleResource}
     onClear={() => setSelectedResources([])}
     onShowMore={() => setResourceVisibleLimit((current) => nextResourceLimit(current, visibleResources.length))}
   />;
+  const regionControl = <MapRegionSelect value={resourceRegionValue} options={resourceRegionOptions} onChange={setResourceRegion} />;
   return (
     <div className={`panel map-panel full-height ${focus ? "has-focus" : ""} ${nativeRenderer ? "has-native-tools" : ""}`}>
       <header className="members-topbar map-topbar">
@@ -336,7 +336,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
       <div className={`map-workspace ${nativeRenderer ? "native-tools" : ""}`}>
         {!nativeRenderer ? <aside className="map-resource-panel">{resourceFinder}</aside> : null}
         <div className={`map-frame-host ${nativeRenderer ? "is-native" : `is-${frameState}`}`}>
-          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} playerTool={{ label: "Players", count: trackedPlayerCount, content: playerPanel, primaryFocusSelector: "input[placeholder='Find settlement members']" }} resourceTool={{ label: "Resources", count: normalizedSelectedResources.length, content: resourceFinder, primaryFocusSelector: ".map-resource-finder-search input" }} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
+          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} visibleRegionIds={resourceRegions} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} playerTool={{ label: "Players", count: trackedPlayerCount, content: playerPanel, primaryFocusSelector: "input[placeholder='Find settlement members']" }} resourceTool={{ label: "Resources", count: normalizedSelectedResources.length, content: resourceFinder, primaryFocusSelector: ".map-resource-finder-search input" }} regionControl={regionControl} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
           {!nativeRenderer && frameState !== "ready" ? (
             <section className="map-frame-state" aria-live="polite">
               <strong>{frameState === "loading" ? "Loading embedded map..." : frameState === "timed-out" ? "The embedded map is taking longer than expected." : "The embedded map could not be loaded."}</strong>

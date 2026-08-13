@@ -24,3 +24,9 @@ test("resource finder keeps typed resource identities through every action", asy
   assert.match(source, /onRemove\(token\)/);
   assert.doesNotMatch(source, /Number\(token\)|parseInt\(token/);
 });
+
+test("resource finder leaves region scope to the map toolbar", async () => {
+  const source = await readFile(new URL("../src/pages/map/MapResourceFinderPanel.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /regionValue|regionOptions|onRegionChange|>Region/);
+});

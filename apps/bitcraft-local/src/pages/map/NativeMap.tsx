@@ -256,6 +256,7 @@ export function NativeMap({
   focus,
   playerTool,
   resourceTool,
+  regionControl,
 }: {
   regionIds: string[];
   visibleRegionIds?: string[];
@@ -267,6 +268,7 @@ export function NativeMap({
   focus: MapFocus;
   playerTool?: NativeMapToolContent;
   resourceTool?: NativeMapToolContent;
+  regionControl?: React.ReactNode;
 }) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<L.Map | null>(null);
@@ -798,7 +800,7 @@ export function NativeMap({
     <section className="native-map-shell" aria-label="Native BitCraft map">
       <div ref={hostRef} className="native-map-canvas" role="application" aria-label="Interactive BitCraft coordinate map" tabIndex={0} />
       <div className="native-map-controls">
-        <MapToolDock tools={mapTools} />
+        <MapToolDock tools={mapTools} regionControl={regionControl} />
       </div>
       <div className="native-map-status" aria-live="polite">
         <strong>{loading && !snapshot ? "Loading native map…" : snapshot ? `${snapshot.freshness} · generation ${snapshot.generation}` : "Native map unavailable"}</strong>

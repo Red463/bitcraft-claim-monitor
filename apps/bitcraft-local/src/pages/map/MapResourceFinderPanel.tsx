@@ -6,14 +6,10 @@ import { SearchBox } from "../../components/main/SearchBox";
 import type { AnyRecord } from "../../main-app-data";
 import { mapResourceCategory, mapResourceToken } from "./mapUtils";
 
-type RegionOption = { id: string; label: string };
-
 export function MapResourceFinderPanel({
   search,
   tier,
   category,
-  regionValue,
-  regionOptions,
   tiers,
   categories,
   selectedTokens,
@@ -27,7 +23,6 @@ export function MapResourceFinderPanel({
   onSearchChange,
   onTierChange,
   onCategoryChange,
-  onRegionChange,
   onToggle,
   onRemove,
   onClear,
@@ -36,8 +31,6 @@ export function MapResourceFinderPanel({
   search: string;
   tier: string;
   category: string;
-  regionValue: string;
-  regionOptions: RegionOption[];
   tiers: string[];
   categories: string[];
   selectedTokens: string[];
@@ -51,7 +44,6 @@ export function MapResourceFinderPanel({
   onSearchChange: (value: string) => void;
   onTierChange: (value: string) => void;
   onCategoryChange: (value: string) => void;
-  onRegionChange: (value: string) => void;
   onToggle: (token: string) => void;
   onRemove: (token: string) => void;
   onClear: () => void;
@@ -63,7 +55,6 @@ export function MapResourceFinderPanel({
         <SearchBox label="Find map resources" value={search} onChange={onSearchChange} placeholder="Search resources and creatures" />
       </div>
       <div className="map-resource-filters">
-        <label className="field"><span>Region</span><select className="select-control map-region-select" value={regionValue} onChange={(event) => onRegionChange(event.target.value)}><option value="All">All regions</option>{regionOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
         <label className="field"><span>Tier</span><select className="select-control" value={tier} onChange={(event) => onTierChange(event.target.value)}><option>All</option>{tiers.map((value) => <option key={value}>{value}</option>)}</select></label>
         <label className="field"><span>Category</span><select className="select-control" value={category} onChange={(event) => onCategoryChange(event.target.value)}><option>All</option>{categories.map((value) => <option key={value}>{value}</option>)}</select></label>
       </div>

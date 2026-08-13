@@ -90,6 +90,15 @@ test("Map Resource Finder bounds rendered rows and reveals deterministic batches
   assert.match(finder, />Show more</);
 });
 
+test("Map page owns the region selector and supplies its selected scope to the native map", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+  const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+
+  assert.match(mapPage, /<MapRegionSelect/);
+  assert.match(mapPage, /visibleRegionIds=\{resourceRegions\}/);
+  assert.match(nativeMap, /regionControl=\{regionControl\}/);
+});
+
 test("Native map projection preserves X and squishes only Leaflet Y", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
 
