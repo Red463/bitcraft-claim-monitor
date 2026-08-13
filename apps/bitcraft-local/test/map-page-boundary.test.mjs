@@ -152,7 +152,12 @@ test("Native map keeps resource canvases and player markers above ordinary featu
   assert.match(nativeMap, /createPane\("native-map-players"\)/);
   assert.match(nativeMap, /resourcePane\.style\.zIndex\s*=\s*"650"/);
   assert.match(nativeMap, /playerPane\.style\.zIndex\s*=\s*"700"/);
-  assert.match(nativeMap, /new DensePointLayer\([^\n]+"native-map-resources"\)/);
+  assert.match(nativeMap, /new DensePointLayer\([^\n]+"native-map-resources"/);
+  assert.match(nativeMap, /new DensePointLayer\(RESOURCE_NODE_FALLBACK_COLOUR, "native-map-resources", \{ strokeColour: "rgba\(3, 8, 12, \.92\)", strokeWidth: 1\.25 \}\)/);
+  assert.match(nativeMap, /context\.strokeStyle = this\.#strokeColour/);
+  assert.match(nativeMap, /context\.lineWidth = this\.#strokeWidth/);
+  assert.match(nativeMap, /if \(this\.#strokeColour && this\.#strokeWidth > 0\) \{[^}]*context\.stroke\(\)/s);
+  assert.match(nativeMap, /new DensePointLayer\("rgba\(255, 112, 112, 0\.92\)"\)\.addTo\(map\)/);
   assert.match(nativeMap, /L\.layerGroup\(\[\], \{ pane: "native-map-players" \}\)/);
   assert.match(nativeMap, /\.\.\.\(feature\.kind === "player" \? \{ pane: "native-map-players" \} : \{\}\)/);
   assert.doesNotMatch(nativeMap, /pane: feature\.kind === "player" \? "native-map-players" : undefined/);

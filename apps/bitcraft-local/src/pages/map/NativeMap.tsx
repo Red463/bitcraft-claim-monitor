@@ -102,12 +102,20 @@ class DensePointLayer extends L.Layer {
   #frame = 0;
   #colour: string | ((point: MapFeature) => string);
   #pane: string;
+  #strokeColour: string | null;
+  #strokeWidth: number;
   #visible = true;
 
-  constructor(colour: string | ((point: MapFeature) => string), pane = "overlayPane") {
+  constructor(
+    colour: string | ((point: MapFeature) => string),
+    pane = "overlayPane",
+    presentation: { strokeColour?: string; strokeWidth?: number } = {},
+  ) {
     super();
     this.#colour = colour;
     this.#pane = pane;
+    this.#strokeColour = presentation.strokeColour ?? null;
+    this.#strokeWidth = presentation.strokeWidth ?? 0;
   }
 
   setPoints(points: MapFeature[]) {
@@ -165,6 +173,11 @@ class DensePointLayer extends L.Layer {
       const pixel = this.#map.latLngToContainerPoint(leafletPoint(point.point));
       context.beginPath();
       context.arc(pixel.x, pixel.y, 3, 0, Math.PI * 2);
+      if (this.#strokeColour && this.#strokeWidth > 0) {
+        context.strokeStyle = this.#strokeColour;
+        context.lineWidth = this.#strokeWidth;
+        context.stroke();
+      }
       context.fill();
     }
   }
@@ -323,7 +336,7 @@ export function NativeMap({
     for (const [key, group] of Object.entries(markerGroups)) if (layerVisibility[key as MapLayerKey]) group.addTo(map);
     markerGroupsRef.current = markerGroups;
     focusGroupRef.current = L.layerGroup().addTo(map);
-    resourcesRef.current = new DensePointLayer(RESOURCE_NODE_FALLBACK_COLOUR, "native-map-resources").addTo(map);
+    resourcesRef.current = new DensePointLayer(RESOURCE_NODE_FALLBACK_COLOUR, "native-map-resources", { strokeColour: "rgba(3, 8, 12, .92)", strokeWidth: 1.25 }).addTo(map);
     enemiesRef.current = new DensePointLayer("rgba(255, 112, 112, 0.92)").addTo(map);
     mapRef.current = map;
     return () => {
