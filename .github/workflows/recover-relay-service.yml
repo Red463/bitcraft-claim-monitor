@@ -1,0 +1,41 @@
+name: Recover Relay service
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-preview
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: relay-preview
+    steps:
+      - name: Configure pinned SSH identity
+        env:
+          RELAY_VPS_SSH_PRIVATE_KEY: ${{ secrets.RELAY_VPS_SSH_PRIVATE_KEY }}
+          RELAY_VPS_KNOWN_HOSTS: ${{ secrets.RELAY_VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$RELAY_VPS_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$RELAY_VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Stop stuck updater and restore Relay services
+        env:
+          RELAY_VPS_HOST: ${{ secrets.RELAY_VPS_HOST }}
+          RELAY_VPS_DEPLOY_USER: ${{ secrets.RELAY_VPS_DEPLOY_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -- "$RELAY_VPS_DEPLOY_USER@$RELAY_VPS_HOST" \
+            "sudo pkill -TERM -f '[u]pdate-bitcraft-claim-monitor-relay --revision' || true; sudo systemctl restart bitcraft-claim-monitor-relay.service bitcraft-claim-monitor-relay-worker.service; for attempt in {1..30}; do curl -fsS --connect-timeout 1 --max-time 3 http://127.0.0.1:19430/api/local/health >/dev/null && exit 0; sleep 1; done; exit 1" \
+            >/dev/null
