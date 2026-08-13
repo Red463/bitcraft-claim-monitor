@@ -1,11 +1,9 @@
 import React from "react";
 import "../styles/map.css";
-import { ExternalLink, MapPin, Users, X } from "lucide-react";
+import { ExternalLink, MapPin, Users } from "lucide-react";
 
-import { Dialog } from "../components/main/Dialog";
-import { SearchBox } from "../components/main/SearchBox";
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
-import { formatCurrentSession, formatNumber } from "../utils/format";
+import { formatNumber } from "../utils/format";
 import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
 import { useGameDataGeneration } from "../hooks/useGameDataGeneration";
 import { usePageRefresh } from "../refresh/ManualRefreshContext";
@@ -16,8 +14,9 @@ import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { updateQueryState } from "../navigation";
 import { bitcraftMapUrl, mapEmbedSignature, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
-import { currentMapPlayerSelection, defaultMapPlayerSelection, filterMapPlayerRows, mapPlayerTrackingId, mapPlayerTrackingSummary, sortedMapPlayerRows, type MapPlayerFilter } from "./map/playerTracking";
+import { currentMapPlayerSelection, defaultMapPlayerSelection, mapPlayerTrackingId, type MapTrackedExternalPlayer } from "./map/playerTracking";
 import { NativeMap } from "./map/NativeMap";
+import { MapPlayerTrackingPanel } from "./map/MapPlayerTrackingPanel";
 import { MapResourceFinderPanel } from "./map/MapResourceFinderPanel";
 import { mapRendererPolicy } from "./map/mapRendererPolicy.mjs";
 import { boundedNativeMapRegions, nativeMapResourceRegions } from "./map/nativeMapRequest.mjs";
@@ -28,100 +27,10 @@ const LOCAL_API = "/api/local";
 const FRAME_TIMEOUT_MS = 12000;
 type FrameState = "loading" | "ready" | "timed-out" | "failed";
 
-function MapPlayerTrackingControls({
-  roster,
-  selectedIds,
-  current,
-  onAutoOnline,
-  onTrackOnline,
-  onTrackAll,
-  onTrackNone,
-  onTogglePlayer,
-  onClearFilters,
-}: {
-  roster: AnyRecord[];
-  selectedIds: string[] | null;
-  current: Set<string>;
-  onAutoOnline: () => void;
-  onTrackOnline: () => void;
-  onTrackAll: () => void;
-  onTrackNone: () => void;
-  onTogglePlayer: (id: string, tracked: boolean) => void;
-  onClearFilters: () => void;
-}) {
-  const [managerOpen, setManagerOpen] = React.useState(false);
-  const [search, setSearch] = React.useState("");
-  const [filter, setFilter] = React.useState<MapPlayerFilter>("all");
-  const rows = React.useMemo(() => sortedMapPlayerRows(roster, current), [roster, current]);
-  const visibleRows = React.useMemo(() => filterMapPlayerRows(rows, filter, search), [rows, filter, search]);
-  const summary = mapPlayerTrackingSummary(selectedIds, roster);
-  const trackedCount = current.size;
-  const onlineCount = roster.filter((player) => player.signedIn === true).length;
-  const filterTabs: Array<{ key: MapPlayerFilter; label: string }> = [
-    { key: "all", label: "All" },
-    { key: "online", label: "Online" },
-    { key: "tracked", label: "Tracked" },
-    { key: "untracked", label: "Untracked" },
-  ];
-
-  return (
-    <section className="map-player-tracking" aria-label="Player tracking" data-tour="map-player-tracking">
-      <div className="map-player-tracking-summary">
-        <Users size={16} />
-        <div>
-          <strong>Player Tracking</strong>
-          <span>{summary}</span>
-        </div>
-      </div>
-      <div className="map-player-tracking-actions">
-        <button className={selectedIds === null ? "active" : ""} onClick={onAutoOnline}>Auto online</button>
-        <button className={trackedCount === roster.length && roster.length > 0 ? "active" : ""} onClick={onTrackAll}>All</button>
-        <button className={trackedCount === 0 ? "active" : ""} onClick={onTrackNone}>None</button>
-        <button onClick={() => setManagerOpen(true)}>Manage</button>
-        <button onClick={onClearFilters}>Clear filters</button>
-      </div>
-      {managerOpen ? (
-        <Dialog open title="Manage players" onClose={() => setManagerOpen(false)} className="map-player-dialog" backdropClassName="map-player-dialog-overlay">
-            <header>
-              <div>
-                <h3>Manage players</h3>
-                <p>{trackedCount} tracked, {onlineCount} online, {roster.length} total</p>
-              </div>
-              <button className="icon-button" onClick={() => setManagerOpen(false)} aria-label="Close player manager"><X size={15} /></button>
-            </header>
-            <div className="map-player-bulk-actions">
-              <button onClick={onTrackOnline}>Track online</button>
-              <button onClick={onTrackAll}>Track all</button>
-              <button onClick={onTrackNone}>Track none</button>
-              <button onClick={onAutoOnline}>Reset to auto</button>
-            </div>
-            <div className="map-player-manager-controls">
-              <div className="map-player-tabs" role="tablist" aria-label="Player filters">
-                {filterTabs.map((tab) => <button key={tab.key} className={filter === tab.key ? "active" : ""} onClick={() => setFilter(tab.key)}>{tab.label}</button>)}
-              </div>
-              <SearchBox label="Find tracked members" value={search} onChange={setSearch} placeholder="Find members" />
-            </div>
-            <div className="map-player-list">
-              {visibleRows.map((row) => (
-                <label key={row.id} className={row.tracked ? "active" : ""}>
-                  <input type="checkbox" checked={row.tracked} onChange={(event) => onTogglePlayer(row.id, event.target.checked)} />
-                  <span className={`online-dot ${row.signedIn ? "is-online" : ""}`} />
-                  <span>
-                    <strong>{row.name}</strong>
-                    <small>{row.signedIn ? `Online${formatCurrentSession(row.sessionSeconds) ? ` - ${formatCurrentSession(row.sessionSeconds)}` : ""}` : "Offline"}</small>
-                  </span>
-                </label>
-              ))}
-              {!visibleRows.length ? <p className="legend">No members match these filters.</p> : null}
-            </div>
-        </Dialog>
-      ) : null}
-    </section>
-  );
-}
 export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rendererMode = "external" }: { data: ReturnType<typeof normalizeData>; focus: MapFocus; onClearFocus: () => void; activeRegionScopeKey?: string; rendererMode?: "external" | "native-beta" | "native" }) {
   const { cycle, trackPromise } = usePageRefresh();
   const [selectedIds, setSelectedIds] = usePersistedState<string[] | null>("map.players", null);
+  const [externalPlayers, setExternalPlayers] = usePersistedState<MapTrackedExternalPlayer[]>("map.external-players", []);
   const [selectedResources, setSelectedResources] = usePersistedState<string[]>("map.resources", []);
   const urlSelectionsApplied = React.useRef(false);
   const [resourceSearch, setResourceSearch] = usePersistedState("map.resource-search", "");
@@ -361,16 +270,21 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
       return [...next].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     });
   }
-  function resetMapFilters() {
-    setSelectedIds(null);
-    setSelectedResources([]);
-    setResourceSearch("");
-    setResourceTier("All");
-    setResourceCategory("All");
-    setResourceRegions(data.claim.regionId != null ? [String(data.claim.regionId)] : []);
-    onClearFocus();
-  }
   const onlineCount = roster.filter((player) => player.signedIn).length;
+  const trackedPlayerCount = new Set([...current, ...externalPlayers.map((player) => player.playerId)]).size;
+  const playerPanel = <MapPlayerTrackingPanel
+    roster={roster}
+    selectedIds={selectedIds}
+    current={current}
+    externalPlayers={externalPlayers}
+    onAutoOnline={() => setSelectedIds(null)}
+    onTrackOnline={trackOnlinePlayers}
+    onTrackAll={trackAllPlayers}
+    onTrackNone={trackNoPlayers}
+    onTogglePlayer={togglePlayerTracking}
+    onRemoveExternal={(playerId) => setExternalPlayers((players) => players.filter((player) => player.playerId !== playerId))}
+    onClearExternal={() => setExternalPlayers([])}
+  />;
   const resourceFinder = <MapResourceFinderPanel
     search={resourceSearch}
     tier={resourceTier}
@@ -418,21 +332,11 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, rend
           <button className="mini-action" onClick={onClearFocus}>Clear</button>
         </div>
       ) : null}
-      <MapPlayerTrackingControls
-        roster={roster}
-        selectedIds={selectedIds}
-        current={current}
-        onAutoOnline={() => setSelectedIds(null)}
-        onTrackOnline={trackOnlinePlayers}
-        onTrackAll={trackAllPlayers}
-        onTrackNone={trackNoPlayers}
-        onTogglePlayer={togglePlayerTracking}
-        onClearFilters={resetMapFilters}
-      />
+      {!nativeRenderer ? playerPanel : null}
       <div className={`map-workspace ${nativeRenderer ? "native-tools" : ""}`}>
         {!nativeRenderer ? <aside className="map-resource-panel">{resourceFinder}</aside> : null}
         <div className={`map-frame-host ${nativeRenderer ? "is-native" : `is-${frameState}`}`}>
-          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} resourceTool={{ label: "Resources", count: normalizedSelectedResources.length, content: resourceFinder, primaryFocusSelector: ".map-resource-finder-search input" }} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
+          {nativeRenderer ? <NativeMap regionIds={mapRegionIds} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} playerTool={{ label: "Players", count: trackedPlayerCount, content: playerPanel, primaryFocusSelector: "input[placeholder='Find settlement members']" }} resourceTool={{ label: "Resources", count: normalizedSelectedResources.length, content: resourceFinder, primaryFocusSelector: ".map-resource-finder-search input" }} /> : <iframe key={frameAttempt} className="map-frame" src={currentFrameUrl} title="BitCraft World Map" onLoad={() => setFrameState("ready")} onError={() => setFrameState("failed")} />}
           {!nativeRenderer && frameState !== "ready" ? (
             <section className="map-frame-state" aria-live="polite">
               <strong>{frameState === "loading" ? "Loading embedded map..." : frameState === "timed-out" ? "The embedded map is taking longer than expected." : "The embedded map could not be loaded."}</strong>

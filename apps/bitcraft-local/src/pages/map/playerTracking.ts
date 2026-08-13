@@ -10,6 +10,21 @@ export type MapPlayerTrackingRow = {
   tracked: boolean;
 };
 
+export type MapTrackedExternalPlayer = {
+  playerId: string;
+  username: string;
+};
+
+export function replaceSettlementPlayerSelection(
+  current: { settlementIds: string[]; externalPlayers: MapTrackedExternalPlayer[] },
+  settlementIds: string[],
+) {
+  return {
+    settlementIds: [...settlementIds],
+    externalPlayers: current.externalPlayers,
+  };
+}
+
 export function mapPlayerTrackingId(player: AnyRecord): string {
   return String(player.entityId ?? player.playerEntityId ?? player.playerId ?? "").trim();
 }

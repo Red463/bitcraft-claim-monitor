@@ -1,0 +1,29 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+test("player panel is the complete settlement-first manager", async () => {
+  const source = await readFile(new URL("../src/pages/map/MapPlayerTrackingPanel.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /"settlement" \| "all-players" \| "tracked"/);
+  assert.match(source, /label: "Settlement"/);
+  assert.match(source, /label: "All players"/);
+  assert.match(source, /label: "Tracked"/);
+  assert.match(source, />Auto</);
+  assert.match(source, />Online</);
+  assert.match(source, />All</);
+  assert.match(source, />None</);
+  assert.match(source, /Find settlement members/);
+  assert.match(source, /assignPlayerMarkerColours/);
+  assert.match(source, /--player-marker-color/);
+  assert.doesNotMatch(source, /<Dialog|managerOpen/);
+});
+
+test("player panel retains explicit external identities while positions are unavailable", async () => {
+  const source = await readFile(new URL("../src/pages/map/MapPlayerTrackingPanel.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /Offline - waiting for live position/);
+  assert.match(source, /Clear external players/);
+  assert.match(source, /onRemoveExternal\(player\.playerId\)/);
+  assert.match(source, /Global player search is unavailable until Relay identity and coordinate verification completes/);
+});

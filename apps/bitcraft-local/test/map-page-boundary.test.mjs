@@ -25,14 +25,14 @@ test("Map iframe host exposes loading, timeout, failure, retry, and full-page re
   assert.match(mapPage, /Open full page/);
 });
 
-test("Map page exposes compact player tracking controls", () => {
+test("Map page supplies the complete player panel to the native map", () => {
   const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
 
   assert.match(mapPage, /usePersistedState<string\[\] \| null>\("map\.players", null\)/);
-  assert.match(mapPage, /MapPlayerTrackingControls/);
-  assert.match(mapPage, /Manage players/);
-  assert.match(mapPage, /Track online/);
-  assert.doesNotMatch(mapPage, /roster\.map\(\(player\) => \{/);
+  assert.match(mapPage, /usePersistedState<MapTrackedExternalPlayer\[\]>\("map\.external-players", \[\]\)/);
+  assert.match(mapPage, /<MapPlayerTrackingPanel/);
+  assert.match(mapPage, /playerTool=\{\{/);
+  assert.doesNotMatch(mapPage, /MapPlayerTrackingControls|Manage players|<Dialog/);
 });
 test("Map iframe is not remounted on every generated URL refresh", () => {
   const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
