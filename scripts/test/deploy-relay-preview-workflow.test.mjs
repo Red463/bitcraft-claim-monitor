@@ -85,13 +85,8 @@ test("workflow supports explicit backups and long-running SSH keepalives", () =>
 
 test("workflow provisions the slow-changing native map artifacts and reloads the web reader", () => {
   assert.match(workflow, /Validate native map static bundle[\s\S]*tar -tzf deploy\/native-map-static-bundle\.tar\.gz/);
-  assert.match(workflow, /scp[\s\S]*deploy\/native-map-static-bundle\.tar\.gz[\s\S]*native-map-static-bundle-\$\{GITHUB_SHA\}\.tar\.gz/);
-  assert.match(workflow, /sudo tar --no-same-owner -xzf \/tmp\/native-map-static-bundle-\$\{GITHUB_SHA\}\.tar\.gz -C \/var\/lib\/bitcraft-claim-monitor-relay/);
-  assert.match(workflow, /sudo chown -R bitcraft:bitcraft \/var\/lib\/bitcraft-claim-monitor-relay\/map-overview \/var\/lib\/bitcraft-claim-monitor-relay\/map-tiles \/var\/lib\/bitcraft-claim-monitor-relay\/map-road-tiles/);
-  assert.match(workflow, /sudo rm -f \/tmp\/native-map-static-bundle-\$\{GITHUB_SHA\}\.tar\.gz/);
-  assert.match(workflow, /sudo systemctl restart bitcraft-claim-monitor-relay\.service/);
+  assert.doesNotMatch(workflow, /Install native map terrain and roads|native-map-static-bundle-\$\{GITHUB_SHA\}/);
   assert.doesNotMatch(workflow, /build-relay-terrain-overview\.mjs|BITCRAFT_INSTALL_ROAD_TILES=true/);
-  assert.doesNotMatch(workflow, /printf[^\n]*MAP_INSTALL_OUTPUT/);
 });
 
 test("active deployment paths never target the maintained application", () => {

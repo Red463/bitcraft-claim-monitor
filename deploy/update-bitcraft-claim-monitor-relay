@@ -658,6 +658,24 @@ install_release_config() {
   systemctl daemon-reload
 }
 
+install_native_map_bundle() {
+  local release_dir="$1"
+  local bundle="$release_dir/deploy/native-map-static-bundle.tar.gz"
+  local -a map_directories=(
+    "$DATA_DIR/map-overview"
+    "$DATA_DIR/map-tiles"
+    "$DATA_DIR/map-road-tiles"
+  )
+  [[ -f "$bundle" && ! -L "$bundle" ]] || {
+    printf "Native map static bundle is missing: %s\n" "$bundle" >&2
+    return 1
+  }
+  run_logged "Installing native map static bundle" \
+    tar --no-same-owner -xzf "$bundle" -C "$DATA_DIR"
+  chown -R "$RUN_USER:$RUN_USER" "${map_directories[@]}"
+  chmod -R u=rwX,g=rX,o= "${map_directories[@]}"
+}
+
 prune_releases() {
   local active_path
   active_path="$(readlink -f "$1")"
@@ -771,6 +789,7 @@ main() {
   backup_kind="$(schema_backup_kind "$previous_release" "$release_dir")"
   create_required_backup "$backup_kind"
   install_release_config "$release_dir"
+  install_native_map_bundle "$release_dir"
   prepare_finished="$(date +%s)"
   cutover_started="$prepare_finished"
   atomic_switch "$release_dir"

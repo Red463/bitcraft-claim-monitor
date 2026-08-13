@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.6] - 2026-08-13
+
+### Fixed
+
+- Made native map artifact installation part of the root-owned transactional application updater instead of an unreliable second remote deployment phase.
+
 ## [0.55.0-beta.5] - 2026-08-13
 
 ### Fixed
