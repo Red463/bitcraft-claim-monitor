@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.35] - 2026-08-14
+
+### Fixed
+
+- Covered road bundle preflight and manifest construction in exact secret-safe generation diagnostics.
+
 ## [0.55.0-beta.34] - 2026-08-14
 
 ### Fixed

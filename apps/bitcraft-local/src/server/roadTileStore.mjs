@@ -6,7 +6,7 @@ import { createMapTilePackStore } from "./mapTilePackStore.mjs";
 import { canonicalMapRegionIds } from "./mapRegionIds.mjs";
 
 const MAX_TILE_BYTES = 2 * 1024 * 1024;
-const ROAD_TILE_STORE_STAGES = new Set(["prepare-root", "create-staging", "write-tiles", "write-manifest", "install-pack"]);
+const ROAD_TILE_STORE_STAGES = new Set(["preflight", "prepare-root", "create-staging", "write-tiles", "build-manifest", "write-manifest", "install-pack"]);
 
 export async function roadTileStoreStage(stage, task) {
   if (!ROAD_TILE_STORE_STAGES.has(stage)) throw new TypeError(`Unsupported road tile store stage: ${stage}`);
@@ -55,14 +55,19 @@ export function createRoadTileStore({ dataDir, now = () => new Date() }) {
   let queue = Promise.resolve();
   let closed = false;
 
-  async function installRoads({ generation, regionIds, observedAt, bounds, tiles, featureCount }) {
-    if (closed) throw new Error("Road tile store is closed");
-    const generationId = String(generation ?? "");
-    if (!/^\d+$/.test(generationId)) throw new TypeError("Road generation must be a decimal integer");
-    const generatedAt = currentDate(now);
-    const version = `g-${generationId}-${generatedAt.getTime()}-${process.pid}`;
-    const staging = path.resolve(root, `.staging-${version}`);
-    if (!within(root, staging)) throw new TypeError("Road bundle staging path escapes store");
+  async function installRoads(input) {
+    const prepared = await roadTileStoreStage("preflight", async () => {
+      if (closed) throw new Error("Road tile store is closed");
+      const { generation, regionIds, observedAt, bounds, tiles, featureCount } = input ?? {};
+      const generationId = String(generation ?? "");
+      if (!/^\d+$/.test(generationId)) throw new TypeError("Road generation must be a decimal integer");
+      const generatedAt = currentDate(now);
+      const version = `g-${generationId}-${generatedAt.getTime()}-${process.pid}`;
+      const staging = path.resolve(root, `.staging-${version}`);
+      if (!within(root, staging)) throw new TypeError("Road bundle staging path escapes store");
+      return { generationId, regionIds, observedAt, bounds, tiles, featureCount, generatedAt, version, staging };
+    });
+    const { generationId, regionIds, observedAt, bounds, tiles, featureCount, generatedAt, version, staging } = prepared;
     let totalBytes = 0;
     const files = [];
     try {
@@ -82,20 +87,20 @@ export function createRoadTileStore({ dataDir, now = () => new Date() }) {
           files.push({ path: relativeTilePath, bytes: bytes.byteLength, sha256: sha256(bytes) });
         }
       });
-      const manifest = {
-        provider: "relay",
-        generation: generationId,
-        generatedAt: generatedAt.toISOString(),
-        observedAt,
-        regionIds: canonicalMapRegionIds(regionIds),
-        dimension: "1",
-        bounds,
-        zoomRange: { min: -5, max: 0 },
-        tileCount: files.length,
-        totalBytes,
-        featureCount,
-        files,
-      };
+      const manifest = await roadTileStoreStage("build-manifest", async () => ({
+          provider: "relay",
+          generation: generationId,
+          generatedAt: generatedAt.toISOString(),
+          observedAt,
+          regionIds: canonicalMapRegionIds(regionIds),
+          dimension: "1",
+          bounds,
+          zoomRange: { min: -5, max: 0 },
+          tileCount: files.length,
+          totalBytes,
+          featureCount,
+          files,
+        }));
       const manifestHash = await roadTileStoreStage("write-manifest", async () => {
         const manifestBytes = durableJsonBytes(manifest);
         const hash = sha256(manifestBytes);

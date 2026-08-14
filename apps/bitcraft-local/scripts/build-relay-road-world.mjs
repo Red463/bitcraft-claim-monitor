@@ -13,7 +13,7 @@ const ROAD_GENERATION_STAGES = new Set([
 function roadBatchInstallReason(cause) {
   const code = String(cause?.code ?? "");
   const message = String(cause?.message ?? "");
-  const storeStage = /ROAD_BATCH_STAGE=(prepare-root|create-staging|write-tiles|write-manifest|install-pack)/i.exec(message)?.[1]?.toLowerCase();
+  const storeStage = /ROAD_BATCH_STAGE=(preflight|prepare-root|create-staging|write-tiles|build-manifest|write-manifest|install-pack)/i.exec(message)?.[1]?.toLowerCase();
   if (storeStage) return `store-${storeStage}`;
   if (/tile exceeds (?:byte|read) budget/i.test(message)) return "tile-budget";
   if (/ENOSPC/i.test(code) || /no space left on device/i.test(message)) return "disk";
