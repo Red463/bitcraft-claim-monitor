@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.27] - 2026-08-14
+
+### Fixed
+
+- Reused the cached Relay-ready region catalog so map requests no longer rebuild full provider health on every response.
+
 ## [0.55.0-beta.26] - 2026-08-14
 
 ### Fixed
