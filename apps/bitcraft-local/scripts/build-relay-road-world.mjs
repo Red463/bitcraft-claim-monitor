@@ -5,6 +5,25 @@ import path from "node:path";
 import { canonicalMapRegionIds } from "../src/server/mapRegionIds.mjs";
 import { isExecutedMainModule } from "../src/server/executedMainModule.mjs";
 
+const ROAD_GENERATION_STAGES = new Set([
+  "topology", "relay-connect", "relay-subscription", "coordinate-projection",
+  "tile-render", "batch-install", "pack-compose", "pack-install", "pack-prune",
+]);
+
+export function roadStageError(stage, cause) {
+  if (!ROAD_GENERATION_STAGES.has(stage)) throw new TypeError(`Unsupported road generation stage: ${stage}`);
+  return new Error(`ROAD_STAGE=${stage}`, { cause });
+}
+
+export async function roadGenerationStage(stage, task) {
+  try {
+    return await task();
+  } catch (error) {
+    if (/^ROAD_STAGE=/.test(String(error?.message ?? ""))) throw error;
+    throw roadStageError(stage, error);
+  }
+}
+
 function canonicalRegions(values) {
   const regions = canonicalMapRegionIds(values);
   if (!regions.length) throw new TypeError("Road world generation requires decimal region IDs");
@@ -64,7 +83,7 @@ export async function runRoadWorldGeneration({
     built.push(...results);
   }
   const featureCount = built.reduce((total, result) => total + Number(result.manifest?.featureCount ?? 0), 0);
-  const candidate = await compose({
+  const candidate = await roadGenerationStage("pack-compose", () => compose({
     batchRoots: built.map(({ batchRoot }) => batchRoot),
     expectedRegionIds: regionIds,
     manifestBase: {
@@ -78,9 +97,9 @@ export async function runRoadWorldGeneration({
       joinVersion: "paved-location-overworld-v1",
       generationDurationMs: Math.max(0, Date.now() - startedAt),
     },
-  });
-  const manifest = await install(candidate);
-  await prune();
+  }));
+  const manifest = await roadGenerationStage("pack-install", () => install(candidate));
+  await roadGenerationStage("pack-prune", () => prune());
   return { manifest, batches: built.map(({ manifest: value }) => value) };
 }
 
@@ -95,7 +114,7 @@ async function collectRoadRegion({ relayBaseUrl, source, timeoutMs }) {
   try {
     return await new Promise((resolve, reject) => {
       timeout = setTimeout(() => reject(new Error(`Timed out waiting for roads from ${source.database}`)), timeoutMs);
-      connection = DbConnection.builder()
+      const builder = DbConnection.builder()
         .withUri(relayWebSocketUri(relayBaseUrl, source.port))
         .withDatabaseName(source.database)
         .onConnect((connected) => {
@@ -109,18 +128,22 @@ async function collectRoadRegion({ relayBaseUrl, source, timeoutMs }) {
                 });
                 resolve({ points, observedAt: new Date().toISOString() });
               } catch (error) {
-                reject(error);
+                reject(roadStageError("coordinate-projection", error));
               }
             })
-            .onError((_context, error) => reject(error))
+            .onError((_context, error) => reject(roadStageError("relay-subscription", error)))
             .subscribe([
               `SELECT paved_tile_state.* ${join} WHERE location_state.dimension = 1`,
               `SELECT location_state.* ${join} WHERE location_state.dimension = 1`,
             ]);
         })
-        .onConnectError((_context, error) => reject(error))
-        .onDisconnect((_context, error) => { if (error) reject(error); })
-        .build();
+        .onConnectError((_context, error) => reject(roadStageError("relay-connect", error)))
+        .onDisconnect((_context, error) => { if (error) reject(roadStageError("relay-connect", error)); });
+      try {
+        connection = builder.build();
+      } catch (error) {
+        reject(roadStageError("relay-connect", error));
+      }
     });
   } finally {
     clearTimeout(timeout);
@@ -146,7 +169,7 @@ export async function runRoadWorldCli() {
   const requestedValues = String(process.env.BITCRAFT_MAP_REGION_IDS ?? "").split(",").map((value) => value.trim()).filter(Boolean);
   const requestedSet = requestedValues.length ? new Set(canonicalRegions(requestedValues)) : null;
   const manifest = JSON.parse(await readFile(new URL("../src/server/game-data/bindings/schema-manifest.json", import.meta.url), "utf8"));
-  const topology = await discoverRelayTopology(relayBaseUrl);
+  const topology = await roadGenerationStage("topology", () => discoverRelayTopology(relayBaseUrl));
   const readyRegionIds = canonicalRegions([...topology.regions.entries()].flatMap(([regionId, source]) => {
     if (!source.ready || (requestedSet && !requestedSet.has(String(regionId)))) return [];
     try {
@@ -189,13 +212,13 @@ export async function runRoadWorldCli() {
         for (let zoom = -5; zoom <= 0; zoom += 1) {
           for (const [key, groupedPoints] of groupRoadPointsForZoom(points, { zoom })) {
             const [x, y] = key.split(":").map(Number);
-            tiles.push({ z: zoom, x, y, bytes: await renderRoadTile({ points: groupedPoints, zoom }) });
+            tiles.push({ z: zoom, x, y, bytes: await roadGenerationStage("tile-render", () => renderRoadTile({ points: groupedPoints, zoom })) });
           }
         }
         const batchDataDir = path.join(jobRoot, `batch-${index + 1}-${regionId}`);
         const store = createRoadTileStore({ dataDir: batchDataDir });
         try {
-          const manifest = await store.install({
+          const manifest = await roadGenerationStage("batch-install", () => store.install({
             generation,
             regionIds: [regionId],
             observedAt,
@@ -205,7 +228,7 @@ export async function runRoadWorldCli() {
             },
             tiles,
             featureCount: points.length,
-          });
+          }));
           return { batchRoot: batchDataDir, manifest };
         } finally {
           await store.close();
