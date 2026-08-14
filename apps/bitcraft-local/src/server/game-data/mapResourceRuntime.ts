@@ -187,15 +187,11 @@ export class RelayMapResourceRuntime {
       this.#config = { relayBaseUrl, primaryRegionId, activeRegionIds };
     }
     for (const entry of this.#regions.values()) {
-      const wasPinned = entry.pinned;
       entry.configured = activeRegionIds.includes(entry.regionId);
-      entry.pinned = entry.regionId === primaryRegionId;
-      if (!wasPinned && entry.pinned) this.#cancelRegionIdleClose(entry);
+      entry.pinned = false;
       if (!entry.configured && this.#leaseCount(entry) === 0) await this.#closeRegion(entry);
-      else if (wasPinned && !entry.pinned && entry.resources.size === 0 && this.#leaseCount(entry) === 0) this.#scheduleRegionIdleClose(entry);
+      else if (entry.resources.size === 0 && this.#leaseCount(entry) === 0) this.#scheduleRegionIdleClose(entry);
     }
-    const primary = await this.#ensureRegion(primaryRegionId);
-    primary.pinned = true;
   }
 
   async acquire(input: { regionId: string; resourceId: string }): Promise<MapResourceLease> {
@@ -280,7 +276,7 @@ export class RelayMapResourceRuntime {
       throw new Error(`Relay map resource region capacity ${this.#maxRegions} is exhausted`);
     }
     const entry: RegionEntry = {
-      regionId, pinned: this.#config?.primaryRegionId === regionId,
+      regionId, pinned: false,
       configured: this.#config?.activeRegionIds.includes(regionId) ?? false,
       session: null, resources: new Map(), idleTimer: null, reconnectTimer: null,
       reconnectAttempts: 0, failure: null, schemaUnavailable: false,
@@ -454,12 +450,6 @@ export class RelayMapResourceRuntime {
       void this.#closeRegion(entry);
     }, this.#regionIdleMs);
     entry.idleTimer = timer;
-  }
-
-  #cancelRegionIdleClose(entry: RegionEntry) {
-    if (entry.idleTimer == null) return;
-    this.#clearTimer(entry.idleTimer);
-    entry.idleTimer = null;
   }
 
   async #closeRegion(entry: RegionEntry) {
