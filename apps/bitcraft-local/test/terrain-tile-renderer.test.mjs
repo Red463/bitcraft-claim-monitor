@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import sharp from "sharp";
+import { terrainWaterRgba } from "../src/shared/terrainPaletteDefinition.mjs";
 
 let paletteModule = null;
 let rendererModule = null;
@@ -89,6 +90,12 @@ test("terrain palette gives water semantic priority and deterministic elevation 
   assert.notDeepEqual(deepOcean, coastOcean);
   assert.ok(coastOcean[0] - deepOcean[0] >= 10, "shoreline water must be visibly brighter than deep water");
   assert.equal(deepOcean[2] > deepOcean[0], true);
+
+  assert.deepEqual(
+    paletteModule.terrainCellRgba({ surface: "ocean", depth: 24, mapX: 0, mapZ: 0 }),
+    terrainWaterRgba({ surface: "ocean", depth: 24, texture: -3 }),
+    "the renderer and shared synthetic-ocean path must use the same water shading",
+  );
 
   const texturedA = paletteModule.terrainCellRgba({ surface: "ground", biomeContributions: [{ biomeType: 4, density: 128 }], elevation: 0, mapX: 310, mapZ: -87 });
   const texturedARepeat = paletteModule.terrainCellRgba({ surface: "ground", biomeContributions: [{ biomeType: 4, density: 128 }], elevation: 0, mapX: 310, mapZ: -87 });
