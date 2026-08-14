@@ -105,6 +105,14 @@ export function parseMapResourceSelectionScope(searchParams, { allowedRegionIds 
   return { regionIds, resourceIds };
 }
 
+export function mapResourceSelectionLeasePlan({ regionIds = [], resourceIds = [] } = {}) {
+  const inputs = [];
+  for (const resourceId of resourceIds) {
+    for (const regionId of regionIds) inputs.push({ regionId, resourceId });
+  }
+  return { inputs, concurrency: Math.min(regionIds.length, inputs.length) };
+}
+
 function availability(collection, key) {
   const ready = new Set(collection?.readyKeys ?? []);
   const loading = new Set(collection?.loadingKeys ?? []);
