@@ -14,7 +14,7 @@ function table(rows) {
     removeOnInsert: (callback) => { listeners.insert = listeners.insert.filter((item) => item !== callback); },
     removeOnUpdate: (callback) => { listeners.update = listeners.update.filter((item) => item !== callback); },
     removeOnDelete: (callback) => { listeners.delete = listeners.delete.filter((item) => item !== callback); },
-    emit(kind) { for (const callback of [...listeners[kind]]) callback(); },
+    emit(kind, ...args) { for (const callback of [...listeners[kind]]) callback(...args); },
     listenerCount() { return listeners.insert.length + listeners.update.length + listeners.delete.length; },
     iterationCount() { return iterationCount; },
   };
@@ -301,20 +301,89 @@ test("resource session health counts rows for each selected resource independent
   await session.stop();
 });
 
-test("resource session budgets unique normalized nodes instead of reciprocal join rows", async () => {
+test("resource session attaches row listeners before a subscription can hydrate", async () => {
+  const relay = fixture();
+  const session = new RelayMapResourceRegionSession({ loadBindings: relay.loadBindings, onSnapshot() {}, onFailure() {} });
+  await session.start(config());
+
+  assert.equal(relay.db.resourceState.listenerCount(), 3);
+  assert.equal(relay.db.locationState.listenerCount(), 3);
+  await session.stop();
+});
+
+test("resource session publishes cold provisional additions before application", async () => {
+  const relay = fixture();
+  const timers = fakeTimers();
+  const provisional = [];
+  const session = new RelayMapResourceRegionSession({
+    loadBindings: relay.loadBindings,
+    onSnapshot() {},
+    onProvisional: (notice) => provisional.push(notice),
+    onFailure() {},
+    now: () => new Date("2026-08-12T12:00:00.000Z"),
+    ...timers,
+  });
+  await session.start(config());
+  await session.subscribe("28", 7);
+  const resource = { entityId: 10n, resourceId: 28 };
+  const location = { entityId: 10n, x: 100, z: 200, dimension: 1 };
+  relay.db.resourceState.emit("insert", undefined, resource);
+  relay.db.locationState.emit("insert", undefined, location);
+  timers.run(300);
+  await drainMicrotasks();
+
+  assert.equal(provisional.length, 1);
+  assert.equal(provisional[0].resourceId, "28");
+  assert.deepEqual([...provisional[0].additions], [13_107_300]);
+  assert.equal(session.health().appliedResourceIds.includes("28"), false);
+  await session.stop();
+});
+
+test("resource session publishes only the resource changed by a live row", async () => {
+  const resourceRows = [
+    { entityId: 1n, resourceId: 28 },
+    { entityId: 2n, resourceId: 125 },
+  ];
+  const locationRows = [
+    { entityId: 1n, x: 10, z: 20, dimension: 1 },
+    { entityId: 2n, x: 30, z: 40, dimension: 1 },
+  ];
+  const relay = fixture({ resourceRows, locationRows });
+  const timers = fakeTimers();
+  const snapshots = [];
+  const deltas = [];
+  const session = new RelayMapResourceRegionSession({
+    loadBindings: relay.loadBindings,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+    onDelta: (delta) => deltas.push(delta),
+    onFailure() {},
+    ...timers,
+  });
+  await session.start(config());
+  await session.subscribe("28", 7);
+  await session.subscribe("125", 8);
+  relay.subscriptions[0].apply();
+  relay.subscriptions[1].apply();
+  await drainMicrotasks();
+  snapshots.length = 0;
+
+  const oldLocation = { ...locationRows[1] };
+  locationRows[1].x = 31;
+  relay.db.locationState.emit("update", undefined, oldLocation, locationRows[1]);
+  timers.run(300);
+  await drainMicrotasks();
+
+  assert.deepEqual(snapshots.map(({ resourceId }) => resourceId), ["125"]);
+  assert.deepEqual(deltas.map(({ resourceId }) => resourceId), ["125"]);
+  assert.deepEqual([...deltas[0].additions], [2_621_471]);
+  assert.deepEqual([...deltas[0].removals], [2_621_470]);
+  await session.stop();
+});
+
+test("resource session accepts a partition above the retired node budget", async () => {
   const relay = fixture({
-    resourceRows: [
-      { entityId: 1n, resourceId: 28 },
-      { entityId: 2n, resourceId: 28 },
-      { entityId: 3n, resourceId: 28 },
-      ...Array.from({ length: 10 }, (_, index) => ({ entityId: BigInt(index + 100), resourceId: 999 })),
-    ],
-    locationRows: [
-      { entityId: 1n, x: 100, z: 200, dimension: 1 },
-      { entityId: 2n, x: 101, z: 201, dimension: 1 },
-      { entityId: 3n, x: 102, z: 202, dimension: 1 },
-      ...Array.from({ length: 10 }, (_, index) => ({ entityId: BigInt(index + 100), x: index, z: index, dimension: 1 })),
-    ],
+    resourceRows: Array(250_001).fill({ entityId: 1n, resourceId: 28 }),
+    locationRows: [{ entityId: 1n, x: 100, z: 200, dimension: 1 }],
   });
   const snapshots = [];
   const failures = [];
@@ -323,49 +392,16 @@ test("resource session budgets unique normalized nodes instead of reciprocal joi
     onSnapshot: (snapshot) => snapshots.push(snapshot),
     onFailure: (warning) => failures.push(warning),
   });
-  await session.start(config({ maxNodes: 3 }));
+  await session.start(config());
   await session.subscribe("28", 7);
 
   relay.subscriptions[0].apply();
   await drainMicrotasks();
 
   assert.equal(snapshots.length, 1);
-  assert.equal(snapshots[0].data.resources.length, 3);
-  assert.deepEqual(session.health().rowsPerType, { "28": { resourceState: 3, locationState: 3 } });
-  assert.equal(session.health().rowCount, 6, "health retains raw join evidence for diagnostics");
+  assert.deepEqual([...snapshots[0].packedCoordinates], [13_107_300]);
+  assert.equal(failures.some((warning) => /node budget/i.test(warning)), false);
   assert.deepEqual(failures, []);
-  await session.stop();
-});
-
-test("resource session rejects a genuinely oversized normalized partition", async () => {
-  const relay = fixture({
-    resourceRows: [
-      { entityId: 1n, resourceId: 28 },
-      { entityId: 2n, resourceId: 28 },
-      { entityId: 3n, resourceId: 28 },
-    ],
-    locationRows: [
-      { entityId: 1n, x: 100, z: 200, dimension: 1 },
-      { entityId: 2n, x: 101, z: 201, dimension: 1 },
-      { entityId: 3n, x: 102, z: 202, dimension: 1 },
-    ],
-  });
-  const snapshots = [];
-  const failures = [];
-  const session = new RelayMapResourceRegionSession({
-    loadBindings: relay.loadBindings,
-    onSnapshot: (snapshot) => snapshots.push(snapshot),
-    onFailure: (warning) => failures.push(warning),
-  });
-  await session.start(config({ maxNodes: 2 }));
-  await session.subscribe("28", 7);
-
-  relay.subscriptions[0].apply();
-  await drainMicrotasks();
-
-  assert.equal(snapshots.length, 0);
-  assert.match(failures[0], /node budget 2 exceeded by 3 nodes/);
-  assert.match(session.health().lastError, /node budget 2 exceeded by 3 nodes/);
   await session.stop();
 });
 
