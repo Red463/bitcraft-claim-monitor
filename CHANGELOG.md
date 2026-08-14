@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.37] - 2026-08-14
+
+### Fixed
+
+- Preserved exact secret-safe road storage diagnostics through nested generation errors.
+
 ## [0.55.0-beta.36] - 2026-08-14
 
 ### Fixed

@@ -122,6 +122,18 @@ test("road batch install failures embed only an allow-listed reason in the outer
   }
 });
 
+test("road batch diagnostics find allow-listed store stages through nested causes", () => {
+  const nested = new Error("private outer storage detail", {
+    cause: new Error("private middle storage detail", {
+      cause: new Error("ROAD_BATCH_STAGE=install-pack"),
+    }),
+  });
+
+  const error = roadJob.roadStageError("batch-install", nested);
+  assert.equal(error.message, "ROAD_STAGE=batch-install ROAD_REASON=store-install-pack");
+  assert.equal(error.message.includes("private"), false);
+});
+
 test("world jobs retain the verified Relay joins and bounded package entrypoints", async () => {
   const [terrainSource, roadSource, packageSource] = await Promise.all([
     readFile(new URL("../scripts/build-relay-terrain-world.mjs", import.meta.url), "utf8"),
