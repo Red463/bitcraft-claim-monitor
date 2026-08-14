@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { TERRAIN_WATER_COLOURS } from "../src/shared/terrainPaletteDefinition.mjs";
 import {
   SYNTHETIC_OCEAN_LEAFLET_BOUNDS,
   createSyntheticOceanLayerController,
@@ -43,11 +42,7 @@ test("synthetic ocean spans the full world in Leaflet z-x order", () => {
 });
 
 test("synthetic ocean colours derive from the canonical ocean palette", () => {
-  const [red, green, blue] = TERRAIN_WATER_COLOURS.ocean;
-  const colours = syntheticOceanColours();
-  assert.equal(colours.base, `rgb(${red} ${green} ${blue})`);
-  assert.notEqual(colours.light, colours.base);
-  assert.notEqual(colours.dark, colours.base);
+  assert.deepEqual(syntheticOceanColours(), { base: "rgb(8 31 78)" });
 });
 
 test("synthetic ocean SVG is static, decorative, and world-sized", () => {
@@ -57,9 +52,9 @@ test("synthetic ocean SVG is static, decorative, and world-sized", () => {
   assert.equal(svg.attributes.get("preserveAspectRatio"), "none");
   assert.equal(svg.attributes.get("aria-hidden"), "true");
   assert.equal(svg.attributes.get("focusable"), "false");
-  assert.deepEqual(svg.children.map(({ tagName }) => tagName), ["defs", "rect", "ellipse", "ellipse", "ellipse"]);
-  assert.equal(svg.children[1].attributes.get("fill"), syntheticOceanColours().base);
-  assert.doesNotMatch(svgAttributeText(svg), /https?:|animation|animate/i);
+  assert.deepEqual(svg.children.map(({ tagName }) => tagName), ["rect"]);
+  assert.equal(svg.children[0].attributes.get("fill"), syntheticOceanColours().base);
+  assert.doesNotMatch(svgAttributeText(svg), /https?:|animation|animate|gradient|ellipse/i);
 });
 
 test("synthetic ocean accepts stale last-good terrain and rejects unusable statuses", () => {
