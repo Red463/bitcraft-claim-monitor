@@ -37,6 +37,15 @@ export function mapResourceLeaseInputs(scope: MapScopeSelection): Array<{ region
   return scope.regionIds.flatMap((regionId) => scope.resourceIds.map((resourceId) => ({ regionId, resourceId })));
 }
 
+export function mapRequestNeedsResourceReadiness(pathname: string, searchParams: URLSearchParams): boolean {
+  if (["/api/local/map/regions", "/api/local/map/resources", "/api/local/map/resource-events"].includes(pathname)) {
+    return true;
+  }
+  return String(searchParams.get("layers") ?? "")
+    .split(",")
+    .some((layer) => layer.trim() === "resources");
+}
+
 export function mapSpatialLeaseInputs(
   scope: MapScopeSelection,
   permitted: { playerIds: string[]; enemyTypes: string[] },

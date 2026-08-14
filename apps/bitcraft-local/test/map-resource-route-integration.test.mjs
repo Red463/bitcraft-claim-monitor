@@ -143,6 +143,7 @@ test("incomplete Relay generations retain last-good rows, notify the scoped coll
       rebuildDelayMs: 1,
       now: () => new Date("2026-08-12T10:00:00.000Z"),
     }),
+    refreshMs: 1,
     onGeneration: (event) => events.push(event),
   });
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
@@ -152,7 +153,8 @@ test("incomplete Relay generations retain last-good rows, notify the scoped coll
   assert.equal(activeLease.state().status, "live");
 
   resourceRows.push({ entityId: 2n, resourceId: 28 });
-  resourceState.emit();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  applied();
   await new Promise((resolve) => setTimeout(resolve, 5));
   const degraded = routeModule.combineMapResourceLeases([activeLease]);
   assert.equal(activeLease.state().status, "stale");
@@ -307,6 +309,31 @@ test("map request logging omits complete resource and player selections", () => 
   assert.equal(
     routeModule.mapRequestLogTarget(new URL("http://localhost/api/local/health?probe=1")),
     "/api/local/health?probe=1",
+  );
+});
+
+test("operational map snapshots do not block on resource readiness discovery", () => {
+  assert.equal(typeof routeModule.mapRequestNeedsResourceReadiness, "function");
+  assert.equal(
+    routeModule.mapRequestNeedsResourceReadiness(
+      "/api/local/map/snapshot",
+      new URLSearchParams("regions=19&layers=claim-areas,claims,watchtowers"),
+    ),
+    false,
+  );
+  assert.equal(
+    routeModule.mapRequestNeedsResourceReadiness(
+      "/api/local/map/snapshot",
+      new URLSearchParams("regions=19&layers=claims,resources&resourceIds=28"),
+    ),
+    true,
+  );
+  assert.equal(
+    routeModule.mapRequestNeedsResourceReadiness(
+      "/api/local/map/resources",
+      new URLSearchParams("region=19&resourceId=28"),
+    ),
+    true,
   );
 });
 

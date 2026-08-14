@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.25] - 2026-08-14
+
+### Fixed
+
+- Kept the map responsive by releasing the large Relay resource cache after each bounded position refresh.
+- Removed unnecessary Relay readiness waits from claim, watchtower, and other non-resource map snapshots.
+
 ## [0.55.0-beta.24] - 2026-08-14
 
 ### Changed
