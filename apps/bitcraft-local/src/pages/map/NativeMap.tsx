@@ -6,6 +6,7 @@ import "leaflet/dist/leaflet.css";
 import { MapBiomeKey } from "./MapBiomeKey";
 import { MapLayersControl } from "./MapLayersControl";
 import { MapToolDock, type MapToolDescriptor } from "./MapToolDock";
+import { PackedResourceCanvasLayer } from "./PackedResourceCanvasLayer";
 import { createBiomeHighlightController } from "./biomeHighlightState.mjs";
 import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, leafletPoint } from "./mapCoordinates.mjs";
 import { planDensePointDraw } from "./mapDensePointPlan.mjs";
@@ -15,13 +16,12 @@ import { applyNativeMapPaneOrder } from "./mapPaneOrder.mjs";
 import { mapFeatureInRegionScope, mapFeaturesInRegionScope } from "./mapRegionVisibility.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { assignPlayerMarkerColours } from "./playerMarkerColours.mjs";
-import { applyResourceViewport, resourceLayerStatus } from "./resourceViewport.mjs";
-import { createMapResourcePartitionLoader } from "./mapResourcePartitionLoader.mjs";
-import { applyResourcePartitionPage, resourceRowsFromPartitions, retainResourcePartitions, type ResourcePartition } from "./mapResourcePartitionState.mjs";
-import { mapResourceFeatures } from "./mapResourceSnapshotState.mjs";
+import { resourceLayerStatus } from "./resourceViewport.mjs";
+import { createMapResourceBinaryLoader } from "./mapResourceBinaryLoader.mjs";
+import type { BrowserResourcePartition } from "./mapResourceBinaryState.mjs";
+import { packedResourceBounds, packedResourcePointCount, packedResourceSamples, packedResourceSome } from "./packedResourceCanvasPlan.mjs";
 import { createMapSnapshotLoader, mapEventNeedsSnapshot } from "./mapSnapshotLoader.mjs";
 import { replaceMapSnapshot } from "./mapSnapshotState.mjs";
-import { RESOURCE_NODE_FALLBACK_COLOUR, resourceFeatureColour } from "./resourceNodeColours.mjs";
 import {
   SYNTHETIC_OCEAN_LEAFLET_BOUNDS,
   createSyntheticOceanLayerController,
@@ -285,17 +285,17 @@ export function NativeMap({
   const markerGroupsRef = React.useRef<Record<string, L.LayerGroup> | null>(null);
   const focusGroupRef = React.useRef<L.LayerGroup | null>(null);
   const ordinaryRendererRef = React.useRef<L.Canvas | null>(null);
-  const resourcesRef = React.useRef<DensePointLayer | null>(null);
+  const resourcesRef = React.useRef<PackedResourceCanvasLayer | null>(null);
   const enemiesRef = React.useRef<DensePointLayer | null>(null);
   const syntheticOceanControllerRef = React.useRef<SyntheticOceanLayerController<L.SVGOverlay> | null>(null);
   const terrainTilesRef = React.useRef<L.TileLayer | null>(null);
   const waterTilesRef = React.useRef<L.TileLayer | null>(null);
   const biomeMaskTilesRef = React.useRef<L.TileLayer | null>(null);
   const roadTilesRef = React.useRef<L.TileLayer | null>(null);
+  const resourceLoaderRef = React.useRef<ReturnType<typeof createMapResourceBinaryLoader> | null>(null);
   const resourceFrameSelectionRef = React.useRef("");
   const [snapshot, setSnapshot] = React.useState<MapSnapshot | null>(null);
-  const [resourcePartitions, setResourcePartitions] = React.useState<Map<string, ResourcePartition>>(() => new Map());
-  const [resourcePartitionStatuses, setResourcePartitionStatuses] = React.useState<Map<string, { status: string; warning?: string | null; pending?: boolean }>>(() => new Map());
+  const [resourcePartitions, setResourcePartitions] = React.useState<ReadonlyMap<string, BrowserResourcePartition>>(() => new Map());
   const [resourceStreamError, setResourceStreamError] = React.useState("");
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
@@ -317,14 +317,13 @@ export function NativeMap({
   snapshotRequestKeyRef.current = request.eventsUrl;
   const resourceSelectionKey = React.useMemo(() => request.resourcePartitions.map((partition) => partition.key).join(","), [request.resourcePartitions]);
   const wantedResourceKeys = React.useMemo(() => request.resourcePartitions.map((partition) => partition.key), [resourceSelectionKey]);
-  const resourceRows = React.useMemo(() => resourceRowsFromPartitions(resourcePartitions), [resourcePartitions]);
-  const resourcePoints = React.useMemo(() => mapResourceFeatures(resourceRows) as MapFeature[], [resourceRows]);
-  const visibleResourcePoints = React.useMemo(() => mapFeaturesInRegionScope(resourcePoints, visibleRegionIds), [resourcePoints, visibleRegionIds.join(",")]);
+  const resourcePointCount = React.useMemo(() => packedResourcePointCount(resourcePartitions, visibleRegionIds), [resourcePartitions, visibleRegionIds.join(",")]);
+  const resourceSamples = React.useMemo(() => packedResourceSamples(resourcePartitions, visibleRegionIds, 250), [resourcePartitions, visibleRegionIds.join(",")]);
   const visibleEnemyPoints = React.useMemo(() => mapFeaturesInRegionScope(snapshot?.layers.enemies ?? [], visibleRegionIds), [snapshot?.layers.enemies, visibleRegionIds.join(",")]);
-  const resourceStatuses = wantedResourceKeys.map((key) => resourcePartitionStatuses.get(key));
-  const startedResourcePartitionCount = wantedResourceKeys.filter((key) => resourcePartitions.has(key)).length;
-  const loadedResourcePartitionCount = wantedResourceKeys.filter((key) => resourcePartitions.get(key)?.complete === true).length;
-  const pendingResourcePartitionCount = resourceStatuses.filter((status) => status == null || status.status === "loading" || status.pending === true).length;
+  const resourceStatuses = wantedResourceKeys.map((key) => resourcePartitions.get(key));
+  const startedResourcePartitionCount = resourceStatuses.filter((status) => status && (status.generation != null || status.provisional.length > 0 || status.status !== "loading")).length;
+  const loadedResourcePartitionCount = resourceStatuses.filter((status) => status?.generation != null).length;
+  const pendingResourcePartitionCount = resourceStatuses.filter((status) => status == null || status.status === "loading").length;
   const unavailableResourcePartitionCount = resourceStatuses.filter((status) => status?.status === "unavailable").length;
   const resourceLayerLoading = wantedResourceKeys.length > 0 && pendingResourcePartitionCount > 0;
   const snapshotResourceSelectionKey = resourceLayerLoading ? "" : resourceSelectionKey;
@@ -392,7 +391,7 @@ export function NativeMap({
     for (const [key, group] of Object.entries(markerGroups)) if (layerVisibility[key as MapLayerKey]) group.addTo(map);
     markerGroupsRef.current = markerGroups;
     focusGroupRef.current = L.layerGroup().addTo(map);
-    resourcesRef.current = new DensePointLayer(RESOURCE_NODE_FALLBACK_COLOUR, "native-map-resources", { strokeColour: "rgba(3, 8, 12, .92)", strokeWidth: 1.25 }).addTo(map);
+    resourcesRef.current = new PackedResourceCanvasLayer().addTo(map);
     enemiesRef.current = new DensePointLayer("rgba(255, 112, 112, 0.92)").addTo(map);
     mapRef.current = map;
     return () => {
@@ -612,64 +611,50 @@ export function NativeMap({
   }, [request.snapshotUrl, request.eventsUrl]);
 
   React.useEffect(() => {
-    const wanted = new Set(wantedResourceKeys);
-    setResourcePartitions((current) => retainResourcePartitions(current, wantedResourceKeys));
-    setResourcePartitionStatuses((current) => new Map([...current].filter(([key]) => wanted.has(key))));
     setResourceStreamError("");
-    const loader = createMapResourcePartitionLoader({
-      concurrency: 4,
-      fetchPage: async ({ partition, cursor, signal }) => {
-        const url = new URL(request.resourcePartitions.find((entry) => entry.key === partition.key)?.url ?? "", window.location.origin);
-        if (cursor) url.searchParams.set("cursor", cursor);
-        const response = await fetch(`${url.pathname}${url.search}`, { signal, credentials: "same-origin" });
-        const payload = await response.json();
-        if (!response.ok && !payload?.provider) {
-          const requestError = new Error(payload?.error || `Map resource partition HTTP ${response.status}`) as Error & { staleCursor?: boolean };
-          if (response.status === 422 && cursor) requestError.staleCursor = true;
-          throw requestError;
-        }
-        return payload;
+    const loader = createMapResourceBinaryLoader({
+      fetchBinary: async (url, signal) => {
+        const response = await fetch(url, { signal, credentials: "same-origin" });
+        if (response.status === 409) return { status: 409 as const, json: await response.json() };
+        if (!response.ok) throw new Error("Resource partition could not be loaded");
+        return response.arrayBuffer();
       },
-      onPage: (page) => setResourcePartitions((current) => applyResourcePartitionPage(current, page)),
-      onStatus: (status) => setResourcePartitionStatuses((current) => {
-        const next = new Map(current);
-        next.set(status.key, { status: status.status, warning: status.warning, pending: status.pending });
-        return next;
-      }),
+      connectEvents: (url, onEvent, onConnectionError) => {
+        const events = new EventSource(url, { withCredentials: true });
+        events.onmessage = (message) => {
+          try {
+            onEvent(JSON.parse(message.data));
+            setResourceStreamError("");
+          } catch {
+            setResourceStreamError("A resource update was malformed; reconnecting.");
+          }
+        };
+        events.onerror = () => {
+          setResourceStreamError((current) => current || "Live resource updates are reconnecting.");
+          onConnectionError();
+        };
+        events.onopen = () => setResourceStreamError("");
+        return { close: () => events.close() };
+      },
+      onChange: setResourcePartitions,
+      onError: setResourceStreamError,
     });
-    loader.setScope(request.resourcePartitions);
-    let events: EventSource | null = null;
-    const connect = () => {
-      if (!request.resourceEventUrl || document.hidden) return;
-      events?.close();
-      events = new EventSource(request.resourceEventUrl, { withCredentials: true });
-      events.onmessage = (message) => {
-        try {
-          const payload = JSON.parse(message.data);
-          if (typeof payload?.mapResourceScopeKey === "string") loader.refresh([payload.mapResourceScopeKey]);
-        } catch {
-          setResourceStreamError("A resource update was malformed; reconnecting.");
-        }
-      };
-      events.onerror = () => setResourceStreamError((current) => current || "Live resource updates are reconnecting.");
-      events.onopen = () => setResourceStreamError("");
-    };
+    resourceLoaderRef.current = loader;
+    if (document.hidden) loader.pause();
     const visibility = () => {
-      if (document.hidden) {
-        loader.pause();
-        events?.close();
-      } else {
-        loader.resume();
-        connect();
-      }
+      if (document.hidden) loader.pause();
+      else loader.resume();
     };
-    connect();
     document.addEventListener("visibilitychange", visibility);
     return () => {
       loader.stop();
-      events?.close();
+      if (resourceLoaderRef.current === loader) resourceLoaderRef.current = null;
       document.removeEventListener("visibilitychange", visibility);
     };
+  }, []);
+
+  React.useEffect(() => {
+    resourceLoaderRef.current?.setScope(request.resourcePartitions, request.resourceEventUrl ?? "");
   }, [resourceSelectionKey, request.resourceEventUrl]);
 
   React.useEffect(() => {
@@ -685,8 +670,22 @@ export function NativeMap({
       focusMarker.bindTooltip(`${focus.name} · N ${readable.north}, E ${readable.east}`, { permanent: true, direction: "top" });
       focusMarker.addTo(focusGroup);
     }
-    resourcesRef.current?.setPointColour((feature) => resourceFeatureColour(feature, resourceTiers));
-    resourcesRef.current?.setPoints(visibleResourcePoints);
+    resourcesRef.current?.setResources(resourcePartitions, visibleRegionIds, resourceTiers);
+    const map = mapRef.current;
+    if (!resourceSelectionKey) resourceFrameSelectionRef.current = "";
+    else if (map && !resourceLayerLoading && resourceFrameSelectionRef.current !== resourceSelectionKey) {
+      const hasVisiblePoint = packedResourceSome(resourcePartitions, visibleRegionIds, ({ x, z }) => map.getBounds().contains(L.latLng(z, x)));
+      if (!hasVisiblePoint) {
+        const bounds = packedResourceBounds(resourcePartitions, visibleRegionIds);
+        if (bounds) {
+          map.fitBounds(L.latLngBounds([bounds.minZ, bounds.minX], [bounds.maxZ, bounds.maxX]), {
+            padding: [32, 32],
+            maxZoom: 1,
+          });
+        }
+      }
+      resourceFrameSelectionRef.current = resourceSelectionKey;
+    }
     if (!snapshot) return;
     const playerColours = assignPlayerMarkerColours((snapshot.layers.players ?? []).map((feature) => String(feature.playerEntityId ?? feature.entityId)));
     for (const [layer, features] of Object.entries(snapshot.layers)) {
@@ -728,26 +727,16 @@ export function NativeMap({
       }
     }
     enemiesRef.current?.setPoints(visibleEnemyPoints);
-    const map = mapRef.current;
-    if (!resourceSelectionKey) resourceFrameSelectionRef.current = "";
-    else if (map) {
-      resourceFrameSelectionRef.current = applyResourceViewport({
-        selectionKey: resourceSelectionKey,
-        snapshotSelectionKey: snapshotResourceSelectionKey,
-        consumedSelectionKey: resourceFrameSelectionRef.current,
-        loading: resourceLayerLoading,
-        points: visibleResourcePoints,
-        isVisible: (feature: MapFeature) => map.getBounds().contains(leafletPoint(feature.point)),
-        frame: (features: readonly MapFeature[]) => {
-          map.fitBounds(L.latLngBounds(features.map((feature) => leafletPoint(feature.point))), {
-            padding: [32, 32],
-            maxZoom: 1,
-          });
-        },
-      });
-    }
-  }, [snapshot, visibleResourcePoints, visibleEnemyPoints, resourceSelectionKey, resourceTiers, resourceLayerLoading, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
+  }, [snapshot, resourcePartitions, visibleEnemyPoints, resourceSelectionKey, resourceTiers, resourceLayerLoading, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
 
+  const accessibleResourceFeatures: MapFeature[] = layerVisibility.resources ? resourceSamples.map((sample) => ({
+    kind: "resource",
+    entityId: `${sample.key}:${sample.x}:${sample.z}`,
+    regionId: sample.regionId,
+    identity: `resource:${sample.resourceId}`,
+    resourceId: sample.resourceId,
+    point: { x: sample.x, z: sample.z, dimension: "1", coordinateSpace: "map-xz" },
+  })) : [];
   const accessibleFeatures = snapshot
     ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {
         if (!layerVisibility[layer as MapLayerKey]) return [];
@@ -755,8 +744,8 @@ export function NativeMap({
         const visibleFeatures = mapFeaturesInRegionScope(features, visibleRegionIds);
         if (layer === "resources" || layer === "enemies") return visibleFeatures;
         return visibleFeatures.filter((feature) => (feature.kind === "claim" ? claimMarkerPresentation(feature.tier, feature.npc) : mapMarkerPresentation(feature.kind)).mode === "canvas");
-      }).concat(layerVisibility.resources ? visibleResourcePoints : [])
-    : [];
+      }).concat(accessibleResourceFeatures)
+    : accessibleResourceFeatures;
   const layerAvailability: Record<string, LayerAvailability> = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, available, unavailableReason, selectionRequired }) => {
     const hasSelection = !selectionRequired || (key === "resources" ? resourceIds.length > 0 : enemyTypes.length > 0);
     const selectionReason = key === "resources" ? "Select at least one resource to enable this layer." : "Select at least one enemy to enable this layer.";
@@ -764,7 +753,6 @@ export function NativeMap({
   }));
   Object.assign(layerAvailability, snapshot?.layerAvailability ?? {});
   const resourceWarnings = [...new Set([
-    ...[...resourcePartitions.values()].flatMap((partition) => [...partition.warnings]),
     ...resourceStatuses.map((status) => status?.warning).filter((warning): warning is string => Boolean(warning)),
   ])];
   layerAvailability.resources = !wantedResourceKeys.length
@@ -772,7 +760,7 @@ export function NativeMap({
     : loadedResourcePartitionCount === wantedResourceKeys.length
       ? {
           available: true,
-          status: [...resourcePartitions.values()].some((partition) => partition.freshness === "stale") ? "stale" : "live",
+          status: resourceStatuses.some((partition) => partition?.freshness === "stale") ? "stale" : "live",
           pending: false,
           reason: resourceWarnings[0] ?? null,
         }
@@ -784,7 +772,7 @@ export function NativeMap({
   layerAvailability.roads = terrainStatus?.roads?.available
     ? { available: true, reason: null }
     : { available: false, reason: "Road tiles have not been generated for this server yet." };
-  const layerCounts = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, dataLayer }) => [key, key === "resources" ? resourcePoints.length : dataLayer ? snapshot?.layers[dataLayer]?.length ?? 0 : null]));
+  const layerCounts = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, dataLayer }) => [key, key === "resources" ? resourcePointCount : dataLayer ? snapshot?.layers[dataLayer]?.length ?? 0 : null]));
   const resourceStatus = resourceLayerStatus({
     selectionKey: resourceSelectionKey,
     snapshotSelectionKey: snapshotResourceSelectionKey,
@@ -855,7 +843,7 @@ export function NativeMap({
           : "Terrain/water tiles are not installed on this server; showing the coordinate fallback."}</span> : null}
         {terrainStatusError ? <span className="error">{terrainStatusError}</span> : null}
         {terrainStatus?.warnings?.map((warning) => <span key={warning}>{warning}</span>)}
-        {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{layerAvailability[layer]?.available === false ? "unavailable" : layerVisibility[layer as MapLayerKey] ? snapshot.freshness : "hidden"}</small></li>)}{wantedResourceKeys.length ? <li><span>resources</span><strong>{resourcePoints.length}</strong><small>{resourceStatus}</small></li> : null}</ul> : null}
+        {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{layerAvailability[layer]?.available === false ? "unavailable" : layerVisibility[layer as MapLayerKey] ? snapshot.freshness : "hidden"}</small></li>)}{wantedResourceKeys.length ? <li><span>resources</span><strong>{resourcePointCount}</strong><small>{resourceStatus}</small></li> : null}</ul> : null}
         {snapshot?.warnings?.length ? <details><summary>{snapshot.warnings.length} data warning{snapshot.warnings.length === 1 ? "" : "s"}</summary><ul>{snapshot.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
         {resourceWarnings.length ? <details><summary>{resourceWarnings.length} resource warning{resourceWarnings.length === 1 ? "" : "s"}</summary><ul>{resourceWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
       </div>

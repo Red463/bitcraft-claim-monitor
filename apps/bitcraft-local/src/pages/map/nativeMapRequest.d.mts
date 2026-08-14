@@ -7,6 +7,6 @@ export function nativeMapRequest(input: NativeMapRequestInput): {
   layers: string[];
   snapshotUrl: string;
   eventsUrl: string;
-  resourcePartitions: Array<{ key: string; regionId: string; resourceId: string; url: string }>;
+  resourcePartitions: Array<{ key: string; regionId: string; resourceId: string }>;
   resourceEventUrl: string | null;
 };
