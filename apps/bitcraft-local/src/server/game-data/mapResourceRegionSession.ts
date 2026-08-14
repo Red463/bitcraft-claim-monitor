@@ -457,7 +457,6 @@ export class RelayMapResourceRegionSession {
       return;
     }
     const receivedAt = this.#now().toISOString();
-    const applied: ResourceSubscription[] = [];
     const notices: Promise<void>[] = [];
     for (const resourceId of resourceIds) {
       const subscription = this.#subscriptions.get(resourceId);
@@ -486,9 +485,7 @@ export class RelayMapResourceRegionSession {
         removals: delta.removals,
         receivedAt,
       })));
-      applied.push(subscription);
     }
-    if (applied.length > 0) this.#applyGeneration(connection, applied, false);
     void Promise.all(notices).catch((error) => this.#recordError(error));
   }
 

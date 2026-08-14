@@ -373,7 +373,7 @@ test("resource session publishes only the resource changed by a live row", async
   timers.run(300);
   await drainMicrotasks();
 
-  assert.deepEqual(snapshots.map(({ resourceId }) => resourceId), ["125"]);
+  assert.deepEqual(snapshots.map(({ resourceId }) => resourceId), []);
   assert.deepEqual(deltas.map(({ resourceId }) => resourceId), ["125"]);
   assert.deepEqual([...deltas[0].additions], [2_621_471]);
   assert.deepEqual([...deltas[0].removals], [2_621_470]);
