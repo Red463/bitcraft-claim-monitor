@@ -61,7 +61,7 @@ export class MapResourceBinaryCache {
     const newBytes = partitionBytes(partition);
     const key = String(partition.key ?? "");
     if (!key) throw new TypeError("Binary resource partition key is required");
-    if (newBytes > this.#maxBytes) return this.#reject(key, newBytes);
+    if (newBytes > this.#maxBytes) return this.#reject(newBytes);
     this.#expirePrevious();
 
     const entries = new Map(this.#entries);
@@ -93,7 +93,7 @@ export class MapResourceBinaryCache {
         if (bytes <= this.#maxBytes) break;
       }
     }
-    if (bytes > this.#maxBytes) return this.#reject(key, newBytes);
+    if (bytes > this.#maxBytes) return this.#reject(newBytes);
 
     this.#entries = entries;
     this.#bytes = bytes;
@@ -167,10 +167,10 @@ export class MapResourceBinaryCache {
     }
   }
 
-  #reject(key, encodedBytes) {
+  #reject(encodedBytes) {
     this.#rejections += 1;
     throw new MapResourceAdmissionError(
-      `Binary resource cache cannot admit ${encodedBytes} bytes for ${key}`,
+      `Binary resource cache cannot admit a ${encodedBytes}-byte partition`,
     );
   }
 }

@@ -56,3 +56,19 @@ test("sendJson emits no body or content length for a 204 response", () => {
   assert.equal(response.headers["content-length"], undefined);
   assert.equal(response.body, undefined);
 });
+
+test("sendBinary emits exact length for content and no body headers for 204 or 304", () => {
+  const binary = fakeResponse();
+  sendBinary(binary, 200, Uint8Array.of(1, 2, 3, 4), "application/octet-stream");
+  assert.equal(binary.headers["content-length"], 4);
+  assert.deepEqual([...binary.body], [1, 2, 3, 4]);
+
+  for (const status of [204, 304]) {
+    const bodyless = fakeResponse();
+    sendBinary(bodyless, status, Uint8Array.of(1), "application/octet-stream", { etag: '"v1"' });
+    assert.equal(bodyless.body, undefined);
+    assert.equal(bodyless.headers["content-length"], undefined);
+    assert.equal(bodyless.headers["content-type"], undefined);
+    assert.equal(bodyless.headers.etag, '"v1"');
+  }
+});

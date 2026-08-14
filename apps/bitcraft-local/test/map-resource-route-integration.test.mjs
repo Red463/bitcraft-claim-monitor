@@ -356,6 +356,7 @@ test("every resource route authorizes before web readiness discovery or lease ac
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const routeMarkers = [
     'url.pathname === "/api/local/map/regions"',
+    'url.pathname === "/api/local/map/resource-partition"',
     'url.pathname === "/api/local/map/resources"',
     'url.pathname === "/api/local/map/resource-events"',
     '["/api/local/map/snapshot", "/api/local/map/resources", "/api/local/map/events"].includes(url.pathname)',

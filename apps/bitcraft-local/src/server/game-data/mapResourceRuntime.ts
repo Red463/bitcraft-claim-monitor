@@ -54,7 +54,7 @@ export type MapResourceLease = {
   key: string;
   state(): { status: MapResourceLeaseState; snapshot: MapResourceSnapshot | null; warning: string | null };
   waitForSnapshot(timeoutMs: number): Promise<MapResourceSnapshot | null>;
-  current(): CachedBinaryPartition | null;
+  current(generation?: string): CachedBinaryPartition | null;
   subscribe(listener: (event: MapResourcePartitionEvent) => void): () => void;
   release(): Promise<void>;
 };
@@ -298,7 +298,7 @@ export class RelayMapResourceRuntime {
           resource.waiters.add(waiter);
         });
       },
-      current: () => this.#cache.latest(key),
+      current: (generation) => generation === undefined ? this.#cache.latest(key) : this.#cache.get(key, generation),
       subscribe: (listener) => {
         resource.listeners.add(listener);
         const current = this.#cache.latest(key);

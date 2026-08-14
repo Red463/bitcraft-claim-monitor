@@ -32,6 +32,7 @@ test("public map health contains aggregate partition metrics without coordinates
       reconnectAttemptCount: 2,
       capacityRejectionCount: 1,
       coldStartsInWindow: 4,
+      binaryCache: { bytes: 1_600_000, entries: 3, activeEntries: 2, evictions: 4, rejections: 1 },
       regions: [{ regionId: "19", resourceIds: ["28"], locationX: 123, locationZ: 456 }],
     },
     telemetry: {
@@ -54,6 +55,13 @@ test("public map health contains aggregate partition metrics without coordinates
   assert.deepEqual(health.resources.partitionCounts, { live: 2, loading: 1, stale: 1, unavailable: 0 });
   assert.equal(health.tiles.pointerReloadFailureCount, 2);
   assert.equal(health.eventLoopDelayMs, 12);
+  assert.deepEqual(health.resources.binaryCache, {
+    bytes: 1_600_000,
+    entries: 3,
+    activeEntries: 2,
+    evictions: 4,
+    rejections: 1,
+  });
 });
 
 test("map telemetry keeps bounded numeric samples while retaining total observation counts", () => {

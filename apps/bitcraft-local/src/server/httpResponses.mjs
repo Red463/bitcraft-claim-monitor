@@ -21,6 +21,17 @@ export function sendText(res, status, text, contentType, headers = {}) {
 }
 
 export function sendBinary(res, status, content, contentType, headers = {}) {
-  res.writeHead(status, securityHeaders({ "content-type": contentType, "cache-control": "no-cache", ...headers }));
+  if (status === 204 || status === 304 || (status >= 100 && status < 200)) {
+    res.writeHead(status, securityHeaders(headers));
+    res.end();
+    return;
+  }
+  const contentLength = content?.byteLength ?? Buffer.byteLength(content ?? "");
+  res.writeHead(status, securityHeaders({
+    "content-type": contentType,
+    "content-length": contentLength,
+    "cache-control": "no-cache",
+    ...headers,
+  }));
   res.end(content);
 }
