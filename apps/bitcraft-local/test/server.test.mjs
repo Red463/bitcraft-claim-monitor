@@ -1621,8 +1621,12 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({ kind: "basic" }),
   });
   assert.equal(anonymousDiscordSandboxTest.status, 401);
+  const isMismatchedSandboxMessage = (message) => (
+    message.channelId === "555555555555555555"
+    && message.payload?.content === "Discord integration test from Timbersteel Trade."
+  );
   const mismatchedChannelMessagesBefore = discordChannelMessages
-    .filter((message) => message.channelId === "555555555555555555")
+    .filter(isMismatchedSandboxMessage)
     .length;
   const mismatchedDiscordSandboxTest = await fetch(`${origin}/api/local/admin/discord/test`, {
     method: "POST",
@@ -1631,7 +1635,7 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(mismatchedDiscordSandboxTest.status, 400);
   assert.equal(
-    discordChannelMessages.filter((message) => message.channelId === "555555555555555555").length,
+    discordChannelMessages.filter(isMismatchedSandboxMessage).length,
     mismatchedChannelMessagesBefore,
   );
   const basicDiscordSandboxTest = await fetch(`${origin}/api/local/admin/discord/test`, {
