@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.36] - 2026-08-14
+
+### Fixed
+
+- Prevented best-effort road staging cleanup from masking the primary generation failure.
+
 ## [0.55.0-beta.35] - 2026-08-14
 
 ### Fixed

@@ -18,6 +18,15 @@ export async function roadTileStoreStage(stage, task) {
   }
 }
 
+export async function rethrowAfterRoadStagingCleanup(error, cleanup) {
+  try {
+    await cleanup();
+  } catch {
+    // The parent job root is also removed on exit; retain the primary staged failure here.
+  }
+  throw error;
+}
+
 function within(parent, child) {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -109,8 +118,7 @@ export function createRoadTileStore({ dataDir, now = () => new Date() }) {
       });
       return await roadTileStoreStage("install-pack", () => packStore.install({ stagedVersionDir: staging, version, manifestHash }));
     } catch (error) {
-      await rm(staging, { recursive: true, force: true });
-      throw error;
+      return rethrowAfterRoadStagingCleanup(error, () => rm(staging, { recursive: true, force: true }));
     }
   }
 

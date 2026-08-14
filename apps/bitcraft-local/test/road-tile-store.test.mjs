@@ -19,6 +19,15 @@ test("road tile storage failures retain only the exact operation stage", async (
   await assert.rejects(roadTileStore.roadTileStoreStage("unsupported", async () => {}), /unsupported road tile store stage/i);
 });
 
+test("road staging cleanup never masks the primary store failure", async () => {
+  assert.equal(typeof roadTileStore.rethrowAfterRoadStagingCleanup, "function", "road staging cleanup guard is unavailable");
+  const primary = new Error("ROAD_BATCH_STAGE=install-pack");
+  await assert.rejects(
+    roadTileStore.rethrowAfterRoadStagingCleanup(primary, async () => { throw new Error("private cleanup detail"); }),
+    (error) => error === primary,
+  );
+});
+
 test("road tile store atomically installs and reads a same-origin bundle", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "bitcraft-road-store-"));
   const store = createRoadTileStore({ dataDir, now: () => new Date("2026-08-11T12:00:00.000Z") });
