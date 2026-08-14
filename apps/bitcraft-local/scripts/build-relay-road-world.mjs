@@ -11,17 +11,30 @@ const ROAD_GENERATION_STAGES = new Set([
 ]);
 
 function roadBatchInstallReason(cause) {
-  const code = String(cause?.code ?? "");
-  const message = String(cause?.message ?? "");
-  const storeStage = /ROAD_BATCH_STAGE=(preflight|prepare-root|create-staging|write-tiles|build-manifest|write-manifest|install-pack)/i.exec(message)?.[1]?.toLowerCase();
-  if (storeStage) return `store-${storeStage}`;
-  if (/tile exceeds (?:byte|read) budget/i.test(message)) return "tile-budget";
-  if (/ENOSPC/i.test(code) || /no space left on device/i.test(message)) return "disk";
-  if (/^(?:EACCES|EPERM)$/i.test(code) || /permission denied/i.test(message)) return "permission";
-  if (/EEXIST/i.test(code) || /already (?:exists|installed)/i.test(message)) return "collision";
-  if (/ENOENT/i.test(code) || /no such file or directory|missing tile/i.test(message)) return "missing-path";
-  if (/tile store is closed|pack store is closed/i.test(message)) return "closed";
-  if (/manifest|invalid tile path|tile (?:byte count|hash)|totals do not match/i.test(message)) return "validation";
+  const chain = [];
+  const seen = new Set();
+  let current = cause;
+  while (current && chain.length < 8 && !seen.has(current)) {
+    seen.add(current);
+    chain.push(current);
+    current = current?.cause;
+  }
+  for (const error of chain) {
+    const message = String(error?.message ?? "");
+    const storeStage = /ROAD_BATCH_STAGE=(preflight|prepare-root|create-staging|write-tiles|build-manifest|write-manifest|install-pack)/i.exec(message)?.[1]?.toLowerCase();
+    if (storeStage) return `store-${storeStage}`;
+  }
+  for (const error of chain) {
+    const code = String(error?.code ?? "");
+    const message = String(error?.message ?? "");
+    if (/tile exceeds (?:byte|read) budget/i.test(message)) return "tile-budget";
+    if (/ENOSPC/i.test(code) || /no space left on device/i.test(message)) return "disk";
+    if (/^(?:EACCES|EPERM)$/i.test(code) || /permission denied/i.test(message)) return "permission";
+    if (/EEXIST/i.test(code) || /already (?:exists|installed)/i.test(message)) return "collision";
+    if (/ENOENT/i.test(code) || /no such file or directory|missing tile/i.test(message)) return "missing-path";
+    if (/tile store is closed|pack store is closed/i.test(message)) return "closed";
+    if (/manifest|invalid tile path|tile (?:byte count|hash)|totals do not match/i.test(message)) return "validation";
+  }
   return "other";
 }
 
