@@ -9,7 +9,7 @@ import {
 import {
   encodeResourcePartition,
   mergePackedCoordinateDelta,
-} from "../../map/resourcePartitionCodec.mjs";
+} from "#map/resourcePartitionCodec.mjs";
 import {
   MapResourceAdmissionError,
   MapResourceBinaryCache,

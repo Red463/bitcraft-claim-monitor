@@ -1,7 +1,7 @@
 import {
   normalizePackedCoordinates,
   packResourceCoordinate,
-} from "../../map/resourcePartitionCodec.mjs";
+} from "#map/resourcePartitionCodec.mjs";
 
 type WireRecord = Record<string, unknown>;
 

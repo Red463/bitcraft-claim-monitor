@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -9,6 +10,15 @@ import {
   packResourceCoordinate,
   unpackResourceCoordinate,
 } from "../src/map/resourcePartitionCodec.mjs";
+
+test("compiled server modules resolve the shared codec through a package alias", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const liveIndex = readFileSync(new URL("../src/server/game-data/mapResourceLiveIndex.ts", import.meta.url), "utf8");
+  const runtime = readFileSync(new URL("../src/server/game-data/mapResourceRuntime.ts", import.meta.url), "utf8");
+  assert.equal(packageJson.imports?.["#map/*"], "./src/map/*");
+  assert.match(liveIndex, /from "#map\/resourcePartitionCodec\.mjs"/);
+  assert.match(runtime, /from "#map\/resourcePartitionCodec\.mjs"/);
+});
 
 test("packs and unpacks unsigned world coordinates at both bounds", () => {
   assert.equal(packResourceCoordinate(0, 0), 0);
