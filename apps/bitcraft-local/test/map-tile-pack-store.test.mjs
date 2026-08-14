@@ -197,13 +197,26 @@ test("valid staged pack switches current only after complete installation", asyn
 
   const installed = await store.install({ stagedVersionDir: staged.stagedVersionDir, version: "g-2", manifestHash: staged.manifestHash });
   assert.equal(installed.generation, "2");
-  assert.equal((await store.readManifest()).generation, "2");
+  const activeManifest = await store.readManifest();
+  assert.equal(activeManifest.generation, "2");
+  assert.equal(activeManifest.files, undefined, "runtime readers must not retain the full immutable file ledger");
+  assert.equal((await store.readVerificationManifest()).files.length, 1, "explicit verification must retain access to the immutable file ledger");
   assert.equal((await store.readTile({ style: "terrain", z: -1, x: 45, y: -47 })).bytes.toString(), "tile");
   const complete = JSON.parse(await readFile(path.join(root, "versions", "g-2", "complete.json"), "utf8"));
   assert.equal(complete.manifestHash, staged.manifestHash);
+  const pointer = JSON.parse(await readFile(path.join(root, "current.json"), "utf8"));
+  assert.deepEqual(pointer, {
+    version: "g-2",
+    generation: "2",
+    manifestHash: staged.manifestHash,
+  }, "the hot pointer must not duplicate the complete tile manifest");
   assert.equal(await exists(staged.stagedVersionDir), false);
   assert.deepEqual(await installedVersions(root), ["g-1", "g-2"], "install must not prune the retained previous pack");
   await store.close();
+
+  const reopened = storeModule.createMapTilePackStore({ root, allowedStyles: ["terrain"] });
+  assert.equal((await reopened.readManifest()).generation, "2", "a compact pointer must survive process restart");
+  await reopened.close();
 });
 
 test("prune keeps current and previous generation during grace", async () => {
