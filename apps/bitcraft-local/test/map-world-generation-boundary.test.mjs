@@ -88,6 +88,14 @@ test("road projection rejects non-overworld and impossible coordinates", () => {
   }), /coordinates/i);
 });
 
+test("road generation failures retain only a deterministic stage marker", async () => {
+  await assert.rejects(
+    roadJob.roadGenerationStage("relay-subscription", async () => { throw new Error("provider detail"); }),
+    (error) => error.message === "ROAD_STAGE=relay-subscription" && error.cause?.message === "provider detail",
+  );
+  assert.throws(() => roadJob.roadStageError("unsupported", new Error("detail")), /unsupported road generation stage/i);
+});
+
 test("world jobs retain the verified Relay joins and bounded package entrypoints", async () => {
   const [terrainSource, roadSource, packageSource] = await Promise.all([
     readFile(new URL("../scripts/build-relay-terrain-world.mjs", import.meta.url), "utf8"),

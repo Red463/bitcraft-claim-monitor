@@ -24,6 +24,11 @@ test("classifies road generator failures without returning raw journal text", as
     ["PNG canvas render failed", "render"],
     ["flock failed: Resource temporarily unavailable", "busy"],
     ["TypeError: cannot read properties of undefined", "implementation"],
+    ["ROAD_STAGE=relay-connect", "connection"],
+    ["ROAD_STAGE=relay-subscription", "subscription"],
+    ["ROAD_STAGE=coordinate-projection", "invalid-coordinate"],
+    ["ROAD_STAGE=tile-render", "render"],
+    ["ROAD_STAGE=pack-compose", "filesystem"],
     ["some unrecognized internal failure carrying entity 998877", "other"],
     ["", "unavailable"],
   ];

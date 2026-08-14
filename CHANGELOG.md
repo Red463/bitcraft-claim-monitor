@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.30] - 2026-08-14
+
+### Fixed
+
+- Added deterministic, secret-safe stage diagnostics for failed road map generation.
+
 ## [0.55.0-beta.29] - 2026-08-14
 
 ### Fixed
