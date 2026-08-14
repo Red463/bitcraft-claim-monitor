@@ -16,8 +16,10 @@ test("compiled server modules resolve the shared codec through a package alias",
   const liveIndex = readFileSync(new URL("../src/server/game-data/mapResourceLiveIndex.ts", import.meta.url), "utf8");
   const runtime = readFileSync(new URL("../src/server/game-data/mapResourceRuntime.ts", import.meta.url), "utf8");
   assert.equal(packageJson.imports?.["#map/*"], "./src/map/*");
+  assert.equal(packageJson.imports?.["#server/*"], "./src/server/*");
   assert.match(liveIndex, /from "#map\/resourcePartitionCodec\.mjs"/);
   assert.match(runtime, /from "#map\/resourcePartitionCodec\.mjs"/);
+  assert.match(runtime, /from "#server\/mapResourceBinaryCache\.mjs"/);
 });
 
 test("packs and unpacks unsigned world coordinates at both bounds", () => {

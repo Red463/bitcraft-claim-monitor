@@ -14,7 +14,7 @@ import {
   MapResourceAdmissionError,
   MapResourceBinaryCache,
   type CachedBinaryPartition,
-} from "../mapResourceBinaryCache.mjs";
+} from "#server/mapResourceBinaryCache.mjs";
 import { discoverRelayTopology, type RelayTopology } from "./topology.ts";
 
 type BindingManifest = Parameters<RelayMapResourceRegionSession["start"]>[0]["manifest"];
