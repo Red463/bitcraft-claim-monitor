@@ -157,6 +157,7 @@ import {
   bindMapLeaseRelease,
   combineMapResourceLeases,
   mapResourceLeaseInputs,
+  mapRequestNeedsResourceReadiness,
   mapSpatialLeaseInputs,
   mapRequestLogTarget,
   mapSnapshotStatusCode,
@@ -8242,7 +8243,10 @@ const server = createServer(async (req, res) => {
       const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
       if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
       const claimId = currentClaimId();
-      const readyMapRegionIds = (await ensureCurrentMapResourceRegions(claimId)).regionIds;
+      const readyMapRegions = mapRequestNeedsResourceReadiness(url.pathname, url.searchParams)
+        ? await ensureCurrentMapResourceRegions(claimId)
+        : currentMapResourceRegions(claimId);
+      const readyMapRegionIds = readyMapRegions.regionIds;
       let scope;
       try {
         scope = parseMapScope(url.searchParams, {

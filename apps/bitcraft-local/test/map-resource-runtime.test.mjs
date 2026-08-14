@@ -154,7 +154,7 @@ test("runtime health reports aggregate partition states, bytes, and queued cold 
   assert.ok(runtime.health().bytesPerSubscription[0] > 0);
 
   sessions[0].options.onFailure("temporary disconnect");
-  assert.deepEqual(runtime.health().partitionCounts, { live: 0, loading: 0, stale: 1, unavailable: 0 });
+  assert.deepEqual(runtime.health().partitionCounts, { live: 1, loading: 0, stale: 0, unavailable: 0 }, "late callbacks from the released SDK session cannot degrade retained rows");
   await lease.release();
   await runtime.stop();
 });
@@ -265,7 +265,7 @@ test("changing the primary resource region does not open or pin empty connection
   await runtime.stop();
 });
 
-test("leases share canonical resource entries, snapshots, and the owning regional connection", async () => {
+test("leases share canonical resource entries while completed hydrations release their regional connection", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
   const { runtime, sessions } = runtimeFixture();
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
@@ -285,11 +285,84 @@ test("leases share canonical resource entries, snapshots, and the owning regiona
   assert.equal(second.state().snapshot, empty);
 
   const another = await runtime.acquire({ regionId: "19", resourceId: "54" });
-  assert.equal(sessions.length, 1, "a region owns one connection");
-  assert.deepEqual(sessions[0].subscriptions, [{ resourceId: "28", generation: 1 }, { resourceId: "54", generation: 1 }]);
+  assert.equal(sessions.length, 2, "a new uncached resource uses a fresh bounded connection");
+  assert.deepEqual(sessions[0].subscriptions, [{ resourceId: "28", generation: 1 }]);
+  assert.deepEqual(sessions[1].subscriptions, [{ resourceId: "54", generation: 1 }]);
   await first.release();
   await second.release();
   await another.release();
+  await runtime.stop();
+});
+
+test("accepted resource generations release the SDK cache while retaining compact live snapshots", async () => {
+  const { runtime, sessions } = runtimeFixture({ regions: ["19"] });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const first = await runtime.acquire({ regionId: "19", resourceId: "28" });
+
+  sessions[0].options.onSnapshot(snapshot("19", "28", 1, [
+    { entityId: "100", regionId: "19", resourceId: "28", locationX: 10, locationZ: 20, dimension: "1" },
+  ]));
+  await Promise.resolve();
+
+  assert.equal(sessions[0].stopped, true, "the hydrated SDK cache must not remain attached to the web server");
+  assert.equal(runtime.health().regionalConnectionCount, 0);
+  assert.equal(first.state().status, "live");
+  assert.equal(first.state().snapshot?.compactResources?.length, 1);
+
+  const second = await runtime.acquire({ regionId: "19", resourceId: "54" });
+  assert.equal(sessions.length, 2, "a new uncached resource opens a fresh bounded hydration session");
+  assert.deepEqual(sessions[1].subscriptions, [{ resourceId: "54", generation: 1 }]);
+  assert.deepEqual(sessions[0].subscriptions, [{ resourceId: "28", generation: 1 }]);
+
+  await first.release();
+  await second.release();
+  await runtime.stop();
+});
+
+test("active resource leases refresh with a new bounded hydration session", async () => {
+  const clock = manualClock();
+  const { runtime, sessions } = runtimeFixture({ regions: ["19"], clock });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const lease = await runtime.acquire({ regionId: "19", resourceId: "28" });
+  sessions[0].options.onSnapshot(snapshot("19", "28", 1, [{ entityId: "first" }]));
+  await Promise.resolve();
+
+  await clock.advance(299_999);
+  assert.equal(sessions.length, 1);
+  await clock.advance(1);
+  while (sessions.length < 2) await Promise.resolve();
+  while (sessions[1].subscriptions.length < 1) await Promise.resolve();
+  assert.equal(sessions.length, 2);
+  assert.deepEqual(sessions[1].subscriptions, [{ resourceId: "28", generation: 2 }]);
+
+  sessions[1].options.onSnapshot(snapshot("19", "28", 2, [{ entityId: "second" }]));
+  await Promise.resolve();
+  assert.equal(sessions[1].stopped, true);
+  assert.equal(lease.state().snapshot?.generation, 2);
+  await lease.release();
+  await runtime.stop();
+});
+
+test("simultaneous resource refreshes share one bounded regional hydration session", async () => {
+  const clock = manualClock();
+  const { runtime, sessions } = runtimeFixture({ regions: ["19"], clock });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const first = await runtime.acquire({ regionId: "19", resourceId: "28" });
+  const second = await runtime.acquire({ regionId: "19", resourceId: "54" });
+  sessions[0].options.onSnapshot(snapshot("19", "28", 1, [{ entityId: "first" }]));
+  sessions[0].options.onSnapshot(snapshot("19", "54", 1, [{ entityId: "second" }]));
+  await Promise.resolve();
+
+  await clock.advance(300_000);
+  for (let index = 0; index < 20 && (sessions.length < 2 || sessions[1].subscriptions.length < 2); index += 1) await Promise.resolve();
+  assert.equal(sessions.length, 2);
+  assert.deepEqual([...sessions[1].subscriptions].sort((left, right) => Number(left.resourceId) - Number(right.resourceId)), [
+    { resourceId: "28", generation: 2 },
+    { resourceId: "54", generation: 2 },
+  ]);
+
+  await first.release();
+  await second.release();
   await runtime.stop();
 });
 
@@ -392,25 +465,27 @@ test("failed regions reconnect with bounded backoff, restore warm entries, and p
   const lease = await runtime.acquire({ regionId: "19", resourceId: "28" });
   const prior = snapshot("19", "28", 7, [{ entityId: "x" }]);
   await sessions[0].options.onSnapshot(prior);
-  sessions[0].options.onFailure("socket closed");
+  const pending = await runtime.acquire({ regionId: "19", resourceId: "54" });
+  sessions[1].options.onFailure("socket closed");
   assert.equal(lease.state().status, "stale");
   assert.equal(lease.state().snapshot, prior);
   await clock.advance(999);
-  assert.equal(sessions.length, 1);
-  await clock.advance(1);
   assert.equal(sessions.length, 2);
-  assert.equal(sessions[1].starts[0].generation, 8);
-  assert.deepEqual(sessions[1].subscriptions, [{ resourceId: "28", generation: 8 }]);
+  await clock.advance(1);
+  assert.equal(sessions.length, 3);
+  assert.equal(sessions[2].starts[0].generation, 8);
+  assert.deepEqual(sessions[2].subscriptions, [{ resourceId: "28", generation: 8 }, { resourceId: "54", generation: 1 }]);
 
-  sessions[1].options.onFailure("schema fingerprint mismatch");
+  sessions[2].options.onFailure("schema fingerprint mismatch");
   await Promise.resolve();
   await clock.advance(1_000);
-  assert.equal(sessions[1].stopped, true, "schema mismatch must detach and stop the active session");
+  assert.equal(sessions[2].stopped, true, "schema mismatch must detach and stop the active session");
   assert.equal(lease.state().status, "stale", "a schema mismatch retains last usable rows as stale");
   assert.equal(lease.state().snapshot, prior);
-  await sessions[1].options.onSnapshot(snapshot("19", "28", 8, [{ entityId: "late" }]));
+  await sessions[2].options.onSnapshot(snapshot("19", "28", 8, [{ entityId: "late" }]));
   assert.equal(lease.state().snapshot, prior, "a detached mismatched session cannot publish a late snapshot");
   assert.deepEqual(generations, [prior], "late snapshots cannot emit a generation notification");
+  await pending.release();
   await runtime.stop();
 });
 
