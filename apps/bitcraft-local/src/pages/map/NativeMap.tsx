@@ -21,6 +21,13 @@ import { mapResourceFeatures } from "./mapResourceSnapshotState.mjs";
 import { createMapSnapshotLoader, mapEventNeedsSnapshot } from "./mapSnapshotLoader.mjs";
 import { replaceMapSnapshot } from "./mapSnapshotState.mjs";
 import { RESOURCE_NODE_FALLBACK_COLOUR, resourceFeatureColour } from "./resourceNodeColours.mjs";
+import {
+  SYNTHETIC_OCEAN_LEAFLET_BOUNDS,
+  createSyntheticOceanLayerController,
+  createSyntheticOceanSvg,
+  terrainStatusSupportsSyntheticOcean,
+  type SyntheticOceanLayerController,
+} from "./syntheticOceanUnderlay.mjs";
 import { biomeTileUrl, loadTerrainTileStatus, mapTileUrl, type TerrainTileStatus } from "./terrainTileStatus.mjs";
 import type { MapFocus } from "./mapUtils";
 
@@ -279,6 +286,7 @@ export function NativeMap({
   const ordinaryRendererRef = React.useRef<L.Canvas | null>(null);
   const resourcesRef = React.useRef<DensePointLayer | null>(null);
   const enemiesRef = React.useRef<DensePointLayer | null>(null);
+  const syntheticOceanControllerRef = React.useRef<SyntheticOceanLayerController<L.SVGOverlay> | null>(null);
   const terrainTilesRef = React.useRef<L.TileLayer | null>(null);
   const waterTilesRef = React.useRef<L.TileLayer | null>(null);
   const biomeMaskTilesRef = React.useRef<L.TileLayer | null>(null);
@@ -332,6 +340,12 @@ export function NativeMap({
   React.useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
     const map = L.map(hostRef.current, { crs: NATIVE_CRS, minZoom: -6, maxZoom: 5, zoomControl: true, preferCanvas: true, attributionControl: false });
+    const gridPane = map.createPane("native-map-grid");
+    gridPane.style.zIndex = "100";
+    gridPane.style.pointerEvents = "none";
+    const oceanPane = map.createPane("native-map-ocean");
+    oceanPane.style.zIndex = "190";
+    oceanPane.style.pointerEvents = "none";
     const terrainPane = map.createPane("native-map-terrain");
     terrainPane.style.zIndex = "200";
     const waterPane = map.createPane("native-map-water");
@@ -345,6 +359,20 @@ export function NativeMap({
     const playerPane = map.createPane("native-map-players");
     playerPane.style.zIndex = "700";
     const bounds = L.latLngBounds([MAP_WORLD_BOUNDS.minZ, MAP_WORLD_BOUNDS.minX], [MAP_WORLD_BOUNDS.maxZ, MAP_WORLD_BOUNDS.maxX]);
+    const syntheticOceanBounds = L.latLngBounds(
+      [SYNTHETIC_OCEAN_LEAFLET_BOUNDS[0][0], SYNTHETIC_OCEAN_LEAFLET_BOUNDS[0][1]],
+      [SYNTHETIC_OCEAN_LEAFLET_BOUNDS[1][0], SYNTHETIC_OCEAN_LEAFLET_BOUNDS[1][1]],
+    );
+    const syntheticOceanController = createSyntheticOceanLayerController({
+      map,
+      createLayer: () => L.svgOverlay(
+        createSyntheticOceanSvg(document),
+        syntheticOceanBounds,
+        { pane: "native-map-ocean", interactive: false },
+      ),
+      onUnavailable: () => console.warn("Synthetic ocean underlay is unavailable."),
+    });
+    syntheticOceanControllerRef.current = syntheticOceanController;
     const updateClaimScale = () => {
       const scale = Math.max(0.72, Math.min(1.1, 0.72 + (map.getZoom() + 5) * 0.038));
       hostRef.current?.style.setProperty("--native-map-claim-scale", scale.toFixed(3));
@@ -353,7 +381,7 @@ export function NativeMap({
     map.setMaxBounds(bounds.pad(0.25));
     map.on("zoomend", updateClaimScale);
     updateClaimScale();
-    new CoordinateGridLayer({ tileSize: 256, noWrap: false }).addTo(map);
+    new CoordinateGridLayer({ tileSize: 256, noWrap: false, pane: "native-map-grid" }).addTo(map);
     ordinaryRendererRef.current = L.canvas({ padding: 0.25 });
     const markerGroups = Object.fromEntries(MARKER_LAYER_KEYS.map((key) => [key, key === "players" ? L.layerGroup([], { pane: "native-map-players" }) : L.layerGroup()]));
     for (const [key, group] of Object.entries(markerGroups)) if (layerVisibility[key as MapLayerKey]) group.addTo(map);
@@ -371,6 +399,8 @@ export function NativeMap({
       ordinaryRendererRef.current = null;
       resourcesRef.current = null;
       enemiesRef.current = null;
+      syntheticOceanController.dispose();
+      if (syntheticOceanControllerRef.current === syntheticOceanController) syntheticOceanControllerRef.current = null;
       terrainTilesRef.current = null;
       waterTilesRef.current = null;
       biomeMaskTilesRef.current = null;
@@ -426,6 +456,7 @@ export function NativeMap({
   React.useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    syntheticOceanControllerRef.current?.sync(terrainStatusSupportsSyntheticOcean(terrainStatus));
     if (!terrainStatus?.available || !terrainStatus.generation) {
       terrainTilesRef.current?.removeFrom(map);
       waterTilesRef.current?.removeFrom(map);
