@@ -23,6 +23,20 @@ function validManifest(value) {
   return value && typeof value === "object" && /^\d+$/.test(String(value.generation ?? ""));
 }
 
+function pointerGeneration(value) {
+  const generation = value?.generation ?? value?.manifest?.generation;
+  return /^\d+$/.test(String(generation ?? "")) ? String(generation) : null;
+}
+
+function runtimeManifest(manifest) {
+  const { files: _files, ...summary } = manifest;
+  return Object.freeze(summary);
+}
+
+function pointerIdentity(metadata) {
+  return `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}:${metadata.ctimeMs}`;
+}
+
 async function writeDurableJson(filePath, value) {
   const handle = await open(filePath, "w");
   try {
@@ -59,7 +73,7 @@ function safePackFile(file, allowed) {
   return { ...file, z, x, y };
 }
 
-async function readInstalledPointer(root, candidate) {
+async function readInstalledPointer(root, candidate, { includeFiles = false } = {}) {
   if (!candidate || typeof candidate !== "object" || !VERSION.test(candidate.version) || !MANIFEST_HASH.test(candidate.manifestHash)) return null;
   const versionsRoot = path.resolve(root, "versions");
   const versionRoot = path.resolve(versionsRoot, candidate.version);
@@ -72,8 +86,12 @@ async function readInstalledPointer(root, candidate) {
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   const complete = JSON.parse(completeBytes);
   if (!validManifest(manifest) || complete?.manifestHash !== candidate.manifestHash || sha256(manifestBytes) !== candidate.manifestHash) return null;
-  if (!validManifest(candidate.manifest) || String(candidate.manifest.generation) !== String(manifest.generation)) return null;
-  return Object.freeze({ version: candidate.version, manifest: Object.freeze({ ...manifest }), manifestHash: candidate.manifestHash });
+  if (pointerGeneration(candidate) !== String(manifest.generation)) return null;
+  return Object.freeze({
+    version: candidate.version,
+    manifest: includeFiles ? Object.freeze({ ...manifest }) : runtimeManifest(manifest),
+    manifestHash: candidate.manifestHash,
+  });
 }
 
 export function createMapTilePackStore({
@@ -99,18 +117,28 @@ export function createMapTilePackStore({
   let queue = Promise.resolve();
   let pointerReloadFailureCount = 0;
   let currentLoad = null;
+  let currentPointerIdentity = null;
 
   async function reloadCurrent(checkedNow) {
     checkedAt = checkedNow;
     try {
-      const candidate = JSON.parse(await readFile(path.join(resolvedRoot, "current.json"), "utf8"));
+      const currentPath = path.join(resolvedRoot, "current.json");
+      const metadata = await stat(currentPath);
+      const identity = pointerIdentity(metadata);
+      if (lastGood && identity === currentPointerIdentity) return lastGood;
+      const candidate = JSON.parse(await readFile(currentPath, "utf8"));
       if (lastGood
         && candidate?.version === lastGood.version
         && candidate?.manifestHash === lastGood.manifestHash
-        && validManifest(candidate.manifest)
-        && String(candidate.manifest.generation) === String(lastGood.manifest.generation)) return lastGood;
+        && pointerGeneration(candidate) === String(lastGood.manifest.generation)) {
+        currentPointerIdentity = identity;
+        return lastGood;
+      }
       const installed = await readInstalledPointer(resolvedRoot, candidate);
-      if (installed) lastGood = installed;
+      if (installed) {
+        lastGood = installed;
+        currentPointerIdentity = identity;
+      }
       else pointerReloadFailureCount += 1;
     } catch (error) {
       if (error?.code !== "ENOENT" || lastGood) pointerReloadFailureCount += 1;
@@ -136,6 +164,17 @@ export function createMapTilePackStore({
   async function readManifest() {
     const pointer = await current();
     return pointer ? { ...pointer.manifest } : null;
+  }
+
+  async function readVerificationManifest() {
+    const pointer = await current();
+    if (!pointer) return null;
+    const verified = await readInstalledPointer(resolvedRoot, {
+      version: pointer.version,
+      generation: String(pointer.manifest.generation),
+      manifestHash: pointer.manifestHash,
+    }, { includeFiles: true });
+    return verified ? { ...verified.manifest } : null;
   }
 
   async function readTile({ style, z, x, y }) {
@@ -211,13 +250,15 @@ export function createMapTilePackStore({
     await mkdir(versionsRoot, { recursive: true });
     await rename(staged, installed);
     await syncDirectory(versionsRoot);
-    const pointer = { version, manifest, manifestHash };
+    const pointer = { version, generation: String(manifest.generation), manifestHash };
     const temporaryPointer = path.join(resolvedRoot, `.current-${process.pid}-${nowMilliseconds(now)}.tmp`);
     await mkdir(resolvedRoot, { recursive: true });
     await writeDurableJson(temporaryPointer, pointer);
-    await rename(temporaryPointer, path.join(resolvedRoot, "current.json"));
+    const currentPath = path.join(resolvedRoot, "current.json");
+    await rename(temporaryPointer, currentPath);
     await syncDirectory(resolvedRoot);
-    lastGood = Object.freeze({ version, manifest: Object.freeze({ ...manifest }), manifestHash });
+    lastGood = Object.freeze({ version, manifest: runtimeManifest(manifest), manifestHash });
+    currentPointerIdentity = pointerIdentity(await stat(currentPath));
     checkedAt = nowMilliseconds(now);
     return { ...manifest };
   }
@@ -279,6 +320,7 @@ export function createMapTilePackStore({
 
   return Object.freeze({
     readManifest,
+    readVerificationManifest,
     readTile,
     install(input) { return enqueue(() => installPack(input)); },
     prune(input) { return enqueue(() => prunePacks(input)); },

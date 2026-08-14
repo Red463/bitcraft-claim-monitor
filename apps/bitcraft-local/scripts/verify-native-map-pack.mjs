@@ -18,7 +18,7 @@ export async function verifyNativeMapPack({ dataDir, product }) {
   const store = createMapTilePackStore({ root: path.join(path.resolve(dataDir), definition.directory), allowedStyles: definition.allowedStyles });
   let manifest;
   try {
-    manifest = await store.readManifest();
+    manifest = await store.readVerificationManifest();
     if (!manifest) throw new Error(`Native map ${product} has no readable installed pointer`);
     for (const style of definition.sampleStyles) {
       const sample = manifest.files?.find((file) => typeof file?.path === "string" && file.path.startsWith(`tiles/${style}/`));
