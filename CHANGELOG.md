@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.31] - 2026-08-14
+
+### Fixed
+
+- Distinguished the exact secret-safe filesystem stage when road map generation fails.
+
 ## [0.55.0-beta.30] - 2026-08-14
 
 ### Fixed
