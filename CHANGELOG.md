@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.28] - 2026-08-14
+
+### Fixed
+
+- Added secret-safe road generator diagnostics when a protected generation run fails.
+
 ## [0.55.0-beta.27] - 2026-08-14
 
 ### Fixed
