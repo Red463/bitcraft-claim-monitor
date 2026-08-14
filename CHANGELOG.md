@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.26] - 2026-08-14
+
+### Fixed
+
+- Removed the fixed two-second delay from claim-only map snapshots while regional claim data hydrates in the background.
+
 ## [0.55.0-beta.25] - 2026-08-14
 
 ### Fixed
