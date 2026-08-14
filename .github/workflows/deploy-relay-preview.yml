@@ -115,7 +115,7 @@ jobs:
 
           ROAD_FAILURE_CATEGORY="$(sed -n 's/.*"roadUnit":.*"failure":{"category":"\([a-z-]*\)"}.*/\1/p' <<<"$DEPLOY_OUTPUT" | tail -n 1)"
           case "$ROAD_FAILURE_CATEGORY" in
-            empty-region|join-mismatch|timeout|schema|invalid-coordinate|other|unavailable) ;;
+            empty-region|join-mismatch|timeout|schema|invalid-coordinate|out-of-memory|subscription|connection|module|filesystem|disk|render|busy|implementation|other|unavailable) ;;
             *) ROAD_FAILURE_CATEGORY="unavailable" ;;
           esac
           printf 'Road generator failure category: %s\n' "$ROAD_FAILURE_CATEGORY"
