@@ -121,14 +121,23 @@ test("resource event leases open one partition in every region before the next r
     resourceIds: ["28", "130"],
   });
 
-  assert.equal(plan.concurrency, 5);
-  assert.deepEqual(plan.inputs.slice(0, plan.concurrency), [
+  assert.equal(plan.concurrency, 10);
+  assert.deepEqual(plan.inputs.slice(0, 5), [
     { regionId: "3", resourceId: "28" },
     { regionId: "7", resourceId: "28" },
     { regionId: "8", resourceId: "28" },
     { regionId: "9", resourceId: "28" },
     { regionId: "11", resourceId: "28" },
   ]);
+});
+
+test("resource event leases admit the complete validated 16 by 13 scope", () => {
+  const regionIds = Array.from({ length: 13 }, (_, index) => String(index + 1));
+  const resourceIds = Array.from({ length: 16 }, (_, index) => String(index + 1));
+  const plan = mapResourceSelectionLeasePlan({ regionIds, resourceIds });
+
+  assert.equal(plan.inputs.length, 208);
+  assert.equal(plan.concurrency, 208);
 });
 
 test("large resource pages slice an already sorted compact partition without sorting it again", () => {

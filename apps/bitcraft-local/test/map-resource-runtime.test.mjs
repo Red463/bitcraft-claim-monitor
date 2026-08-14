@@ -598,6 +598,25 @@ test("the default runtime can lease every configured Relay-ready region", async 
   await runtime.stop();
 });
 
+test("the default runtime admits the complete validated 16 by 13 resource scope", async () => {
+  const regionIds = Array.from({ length: 13 }, (_, index) => String(index + 1));
+  const resourceIds = Array.from({ length: 16 }, (_, index) => String(index + 1));
+  const { runtime } = runtimeFixture({ regions: regionIds });
+  const leases = [];
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "1", activeRegionIds: regionIds });
+
+  try {
+    for (const resourceId of resourceIds) {
+      for (const regionId of regionIds) leases.push(await runtime.acquire({ regionId, resourceId }));
+    }
+    assert.equal(leases.length, 208);
+    assert.equal(runtime.health().capacityRejectionCount, 0);
+  } finally {
+    await Promise.all(leases.map((lease) => lease.release()));
+    await runtime.stop();
+  }
+});
+
 test("configuration, capacity, and cold-start limits reject only cold creation", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
   const clock = manualClock();

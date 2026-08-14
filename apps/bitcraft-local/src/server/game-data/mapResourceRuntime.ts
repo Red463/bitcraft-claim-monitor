@@ -192,7 +192,7 @@ export class RelayMapResourceRuntime {
     this.#maxRegions = dependencies.maxRegions ?? null;
     this.#maxResourceTypesPerRegion = dependencies.maxResourceTypesPerRegion ?? 16;
     this.#coldStartWindowMs = dependencies.coldStartWindowMs ?? 60_000;
-    this.#maxColdStartsPerWindow = dependencies.maxColdStartsPerWindow ?? 64;
+    this.#maxColdStartsPerWindow = dependencies.maxColdStartsPerWindow ?? 256;
     this.#reconnectDelayMs = dependencies.reconnectDelayMs
       ?? ((attempt) => Math.min(30_000, 1_000 * 2 ** Math.max(0, attempt - 1)));
     this.#cache = new MapResourceBinaryCache({
