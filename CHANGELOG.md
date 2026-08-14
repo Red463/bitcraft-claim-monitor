@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.29] - 2026-08-14
+
+### Fixed
+
+- Expanded secret-safe road failure classification to distinguish memory, Relay subscription, connection, module, storage, renderer, lock, and implementation failures.
+
 ## [0.55.0-beta.28] - 2026-08-14
 
 ### Fixed

@@ -124,7 +124,7 @@ test("deployment diagnostics classify only secret-safe failure categories", () =
 
 test("workflow publishes only an allow-listed native map failure category", () => {
   assert.match(workflow, /ROAD_FAILURE_CATEGORY=.*DEPLOY_OUTPUT/);
-  assert.match(workflow, /empty-region\|join-mismatch\|timeout\|schema\|invalid-coordinate\|other\|unavailable/);
+  assert.match(workflow, /empty-region\|join-mismatch\|timeout\|schema\|invalid-coordinate\|out-of-memory\|subscription\|connection\|module\|filesystem\|disk\|render\|busy\|implementation\|other\|unavailable/);
   assert.match(workflow, /Road generator failure category/);
   assert.match(workflow, /printf 'Road generator failure category: %s\\n' "\$ROAD_FAILURE_CATEGORY"/);
   assert.doesNotMatch(workflow, /printf[^\n]*DEPLOY_OUTPUT/);
