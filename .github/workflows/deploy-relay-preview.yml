@@ -67,6 +67,8 @@ jobs:
     timeout-minutes: 75
     environment: relay-preview
     steps:
+      - name: Check out deployment diagnostics
+        uses: actions/checkout@v4
       - name: Configure pinned SSH identity
         env:
           RELAY_VPS_SSH_PRIVATE_KEY: ${{ secrets.RELAY_VPS_SSH_PRIVATE_KEY }}
@@ -100,6 +102,17 @@ jobs:
           DEPLOY_STATUS=$?
           set -e
 
+          if [[ "$DEPLOY_STATUS" -eq 0 ]]; then
+            DEPLOY_FAILURE_CATEGORY="none"
+          else
+            DEPLOY_FAILURE_CATEGORY="$(node scripts/classify-relay-deploy-failure.mjs <<<"$DEPLOY_OUTPUT")"
+          fi
+          case "$DEPLOY_FAILURE_CATEGORY" in
+            none|rollback|out-of-memory|startup-module|web-service|worker-service|public-check|health-timeout|prepare|other) ;;
+            *) DEPLOY_FAILURE_CATEGORY="other" ;;
+          esac
+          printf 'Deployment failure category: %s\n' "$DEPLOY_FAILURE_CATEGORY"
+
           ROAD_FAILURE_CATEGORY="$(sed -n 's/.*"roadUnit":.*"failure":{"category":"\([a-z-]*\)"}.*/\1/p' <<<"$DEPLOY_OUTPUT" | tail -n 1)"
           case "$ROAD_FAILURE_CATEGORY" in
             empty-region|join-mismatch|timeout|schema|invalid-coordinate|other|unavailable) ;;
@@ -111,6 +124,7 @@ jobs:
             printf '## Relay preview deployment\n\n'
             printf 'Revision: `%s`  \n' "$GITHUB_SHA"
             printf 'Result: `%s`\n\n' "$([[ "$DEPLOY_STATUS" -eq 0 ]] && printf success || printf failed)"
+            printf 'Deployment failure category: `%s`\n\n' "$DEPLOY_FAILURE_CATEGORY"
             printf 'Road generator failure category: `%s`\n\n' "$ROAD_FAILURE_CATEGORY"
             printf 'Remote diagnostics are retained on the VPS and are not copied into GitHub output.\n'
           } >> "$GITHUB_STEP_SUMMARY"

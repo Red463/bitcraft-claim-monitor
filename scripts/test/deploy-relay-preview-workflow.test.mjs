@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const workflowUrl = new URL("../../.github/workflows/deploy-relay-preview.yml", import.meta.url);
 const generationWorkflowUrl = new URL("../../.github/workflows/generate-native-map.yml", import.meta.url);
 const deploymentUrl = new URL("../../DEPLOYMENT.md", import.meta.url);
+const deployClassifierUrl = new URL("../classify-relay-deploy-failure.mjs", import.meta.url);
+const deployClassifierPath = fileURLToPath(deployClassifierUrl);
 
 const workflow = readFileSync(workflowUrl, "utf8");
 const generationWorkflow = readFileSync(generationWorkflowUrl, "utf8");
@@ -72,6 +76,8 @@ test("workflow pins host identity and deploys the verified full commit with the 
 
 test("workflow does not publish raw VPS output or journals", () => {
   assert.match(workflow, /DEPLOY_STATUS=\$\?/);
+  assert.match(workflow, /classify-relay-deploy-failure\.mjs/);
+  assert.match(workflow, /Deployment failure category/);
   assert.match(workflow, /GITHUB_STEP_SUMMARY/);
   assert.doesNotMatch(workflow, /printf[^\n]*DEPLOY_OUTPUT/);
   assert.doesNotMatch(workflow, /```text\\n%s\\n```[\s\S]*DEPLOY_OUTPUT/);
@@ -89,6 +95,31 @@ test("workflow preserves slow-changing native map packs for independent validate
   assert.doesNotMatch(workflow, /native-map-static-bundle\.tar\.gz/);
   assert.doesNotMatch(workflow, /Install native map terrain and roads/);
   assert.doesNotMatch(workflow, /build-relay-terrain-overview\.mjs|BITCRAFT_INSTALL_ROAD_TILES=true/);
+});
+
+test("deployment diagnostics classify only secret-safe failure categories", () => {
+  const classify = (input) => spawnSync(
+    process.execPath,
+    [deployClassifierPath],
+    { input, encoding: "utf8" },
+  );
+  const cases = [
+    ["FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory", "out-of-memory"],
+    ["Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/opt/app/missing.mjs'", "startup-module"],
+    ["Waiting for web service.............................. failed", "web-service"],
+    ["Deployment failed.\nCandidate Health: not checked\nCandidate Public: skipped", "health-timeout"],
+    ["Deployment failed.\nCandidate Health: ok=true, polling enabled=true, version=0.55.0-beta.24\nCandidate Public: check failed status=503", "public-check"],
+    ["Deployment failed.\nRollback: failed; recovery snapshot retained", "rollback"],
+    ["Installing dependencies failed (exit 1)\nsecret-token=must-not-escape", "prepare"],
+  ];
+
+  for (const [input, expected] of cases) {
+    const result = classify(input);
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout.trim(), expected);
+    assert.equal(result.stderr, "");
+    assert.doesNotMatch(result.stdout, /secret-token|missing\.mjs|0\.55\.0/);
+  }
 });
 
 test("workflow publishes only an allow-listed native map failure category", () => {
