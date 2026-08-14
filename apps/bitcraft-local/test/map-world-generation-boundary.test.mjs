@@ -96,6 +96,25 @@ test("road generation failures retain only a deterministic stage marker", async 
   assert.throws(() => roadJob.roadStageError("unsupported", new Error("detail")), /unsupported road generation stage/i);
 });
 
+test("road batch install failures embed only an allow-listed reason in the outer marker", () => {
+  const cases = [
+    [new RangeError("Road tile exceeds byte budget"), "tile-budget"],
+    [new Error("Map tile pack manifest totals do not match referenced tiles"), "validation"],
+    [Object.assign(new Error("private collision detail"), { code: "EEXIST" }), "collision"],
+    [Object.assign(new Error("private permission detail"), { code: "EACCES" }), "permission"],
+    [Object.assign(new Error("private disk detail"), { code: "ENOSPC" }), "disk"],
+    [Object.assign(new Error("private missing detail"), { code: "ENOENT" }), "missing-path"],
+    [new Error("Road tile store is closed"), "closed"],
+    [new Error("private unknown detail 999"), "other"],
+  ];
+
+  for (const [cause, reason] of cases) {
+    const error = roadJob.roadStageError("batch-install", cause);
+    assert.equal(error.message, `ROAD_STAGE=batch-install ROAD_REASON=${reason}`);
+    assert.equal(error.message.includes("private"), false);
+  }
+});
+
 test("world jobs retain the verified Relay joins and bounded package entrypoints", async () => {
   const [terrainSource, roadSource, packageSource] = await Promise.all([
     readFile(new URL("../scripts/build-relay-terrain-world.mjs", import.meta.url), "utf8"),

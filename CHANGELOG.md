@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.33] - 2026-08-14
+
+### Fixed
+
+- Preserved the allow-listed road batch failure reason when Node omits nested error details from service journals.
+
 ## [0.55.0-beta.32] - 2026-08-14
 
 ### Fixed

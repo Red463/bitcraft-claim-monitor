@@ -10,9 +10,23 @@ const ROAD_GENERATION_STAGES = new Set([
   "tile-render", "batch-install", "pack-compose", "pack-install", "pack-prune",
 ]);
 
+function roadBatchInstallReason(cause) {
+  const code = String(cause?.code ?? "");
+  const message = String(cause?.message ?? "");
+  if (/tile exceeds (?:byte|read) budget/i.test(message)) return "tile-budget";
+  if (/ENOSPC/i.test(code) || /no space left on device/i.test(message)) return "disk";
+  if (/^(?:EACCES|EPERM)$/i.test(code) || /permission denied/i.test(message)) return "permission";
+  if (/EEXIST/i.test(code) || /already (?:exists|installed)/i.test(message)) return "collision";
+  if (/ENOENT/i.test(code) || /no such file or directory|missing tile/i.test(message)) return "missing-path";
+  if (/tile store is closed|pack store is closed/i.test(message)) return "closed";
+  if (/manifest|invalid tile path|tile (?:byte count|hash)|totals do not match/i.test(message)) return "validation";
+  return "other";
+}
+
 export function roadStageError(stage, cause) {
   if (!ROAD_GENERATION_STAGES.has(stage)) throw new TypeError(`Unsupported road generation stage: ${stage}`);
-  return new Error(`ROAD_STAGE=${stage}`, { cause });
+  const reason = stage === "batch-install" ? ` ROAD_REASON=${roadBatchInstallReason(cause)}` : "";
+  return new Error(`ROAD_STAGE=${stage}${reason}`, { cause });
 }
 
 export async function roadGenerationStage(stage, task) {
