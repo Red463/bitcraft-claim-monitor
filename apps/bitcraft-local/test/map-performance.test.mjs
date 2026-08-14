@@ -3,6 +3,7 @@ import test from "node:test";
 
 let performanceModule = null;
 let benchmarkModule = null;
+let binaryBenchmarkModule = null;
 try {
   performanceModule = await import("../src/server/mapPerformance.mjs");
 } catch {
@@ -13,6 +14,22 @@ try {
 } catch {
   // RED: the production-shaped native map benchmark has not been implemented yet.
 }
+try {
+  binaryBenchmarkModule = await import("../scripts/benchmark-map-resource-binary.mjs");
+} catch {
+  // RED: the deterministic binary resource benchmark has not been implemented yet.
+}
+
+test("400,000-point binary resource processing stays bounded", async () => {
+  assert.ok(binaryBenchmarkModule?.runBinaryResourceBenchmark);
+  const result = await binaryBenchmarkModule.runBinaryResourceBenchmark({ pointCount: 400_000, iterations: 3 });
+  assert.equal(result.pointCount, 400_000);
+  assert.equal(result.encodedBytes, 44 + (400_000 * 4));
+  assert.equal(result.identityLeak, false);
+  assert.ok(result.maxHeapMiB <= 256);
+  assert.ok(result.p95CodecMs <= 5_000);
+  assert.ok(result.p95DeltaMs <= 2_000);
+});
 
 test("public map health contains aggregate partition metrics without coordinates or selected ids", () => {
   assert.ok(performanceModule?.publicMapHealth);

@@ -31,3 +31,5 @@ jobs:
         run: corepack pnpm --filter @workspace/bitcraft-local run build
       - name: Run application tests
         run: corepack pnpm --filter @workspace/bitcraft-local test
+      - name: Benchmark binary map resources
+        run: node --max-old-space-size=512 apps/bitcraft-local/scripts/benchmark-map-resource-binary.mjs
