@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.24] - 2026-08-14
+
+### Changed
+
+- Improved failed deployment diagnostics without exposing remote logs or secrets.
+
 ## [0.55.0-beta.23] - 2026-08-14
 
 ### Fixed
