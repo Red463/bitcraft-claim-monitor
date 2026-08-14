@@ -65,6 +65,10 @@ export function mapSpatialLeaseInputs(
   }));
 }
 
+export function mapSpatialLeaseNeedsInitialWait(input: { playerIds: string[]; enemyTypes: string[] }): boolean {
+  return input.playerIds.length > 0 || input.enemyTypes.length > 0;
+}
+
 export function mapRequestLogTarget(requestTarget: URL | string): string {
   let url: URL;
   try {

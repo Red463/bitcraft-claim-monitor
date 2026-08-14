@@ -159,6 +159,7 @@ import {
   mapResourceLeaseInputs,
   mapRequestNeedsResourceReadiness,
   mapSpatialLeaseInputs,
+  mapSpatialLeaseNeedsInitialWait,
   mapRequestLogTarget,
   mapSnapshotStatusCode,
   publicGenerationEvent,
@@ -8356,7 +8357,9 @@ const server = createServer(async (req, res) => {
         });
         return;
       }
-      await Promise.all(spatialLeases.map((lease) => lease.waitForSnapshot(MAP_SPATIAL_INITIAL_WAIT_MS)));
+      await Promise.all(spatialLeases
+        .filter((_lease, index) => mapSpatialLeaseNeedsInitialWait(spatialInputs[index]))
+        .map((lease) => lease.waitForSnapshot(MAP_SPATIAL_INITIAL_WAIT_MS)));
       await Promise.all(resourceLeases
         .filter((lease) => lease.state().snapshot == null)
         .map((lease) => lease.waitForSnapshot(MAP_SPATIAL_INITIAL_WAIT_MS)));

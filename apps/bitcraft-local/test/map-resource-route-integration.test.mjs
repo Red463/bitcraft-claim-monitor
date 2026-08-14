@@ -71,6 +71,13 @@ test("spatial lease inputs collect claims in every selected operational region",
   ]);
 });
 
+test("claim-only spatial leases hydrate in the background without delaying the operational snapshot", () => {
+  assert.equal(typeof routeModule.mapSpatialLeaseNeedsInitialWait, "function");
+  assert.equal(routeModule.mapSpatialLeaseNeedsInitialWait({ includeClaims: true, playerIds: [], enemyTypes: [] }), false);
+  assert.equal(routeModule.mapSpatialLeaseNeedsInitialWait({ includeClaims: true, playerIds: ["101"], enemyTypes: [] }), true);
+  assert.equal(routeModule.mapSpatialLeaseNeedsInitialWait({ includeClaims: false, playerIds: [], enemyTypes: ["8"] }), true);
+});
+
 test("resource lease composition preserves warm rows and loading readiness", () => {
   assert.equal(typeof routeModule.combineMapResourceLeases, "function");
   const warm = resourceSnapshot("19", "28", 7, [{ entityId: "100", resourceId: "28", regionId: "19", locationX: 10, locationZ: 20, dimension: "1" }]);
