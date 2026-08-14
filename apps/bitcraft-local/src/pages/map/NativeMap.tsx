@@ -11,6 +11,7 @@ import { MAP_HEX_APOTHEM, MAP_WORLD_BOUNDS, displayHexPoint, gridTileOrigin, lea
 import { planDensePointDraw } from "./mapDensePointPlan.mjs";
 import { MAP_LAYER_DEFINITIONS, defaultMapLayerVisibility, loadMapLayerVisibility, saveMapLayerVisibility, type MapLayerKey } from "./mapLayerPreferences.mjs";
 import { MAP_MARKER_PRESENTATIONS, claimDisplayTier, claimMarkerPresentation, mapMarkerPresentation, type MapMarkerPresentation } from "./mapMarkerPresentation.mjs";
+import { applyNativeMapPaneOrder } from "./mapPaneOrder.mjs";
 import { mapFeatureInRegionScope, mapFeaturesInRegionScope } from "./mapRegionVisibility.mjs";
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { assignPlayerMarkerColours } from "./playerMarkerColours.mjs";
@@ -354,10 +355,14 @@ export function NativeMap({
     biomeMaskPane.style.zIndex = "250";
     biomeMaskPane.style.pointerEvents = "none";
     const resourcePane = map.createPane("native-map-resources");
-    resourcePane.style.zIndex = "650";
     resourcePane.style.pointerEvents = "none";
     const playerPane = map.createPane("native-map-players");
-    playerPane.style.zIndex = "700";
+    applyNativeMapPaneOrder({
+      resources: resourcePane,
+      markers: map.getPane("markerPane"),
+      players: playerPane,
+      tooltips: map.getPane("tooltipPane"),
+    });
     const bounds = L.latLngBounds([MAP_WORLD_BOUNDS.minZ, MAP_WORLD_BOUNDS.minX], [MAP_WORLD_BOUNDS.maxZ, MAP_WORLD_BOUNDS.maxX]);
     const syntheticOceanBounds = L.latLngBounds(
       [SYNTHETIC_OCEAN_LEAFLET_BOUNDS[0][0], SYNTHETIC_OCEAN_LEAFLET_BOUNDS[0][1]],
@@ -382,7 +387,7 @@ export function NativeMap({
     map.on("zoomend", updateClaimScale);
     updateClaimScale();
     new CoordinateGridLayer({ tileSize: 256, noWrap: false, pane: "native-map-grid" }).addTo(map);
-    ordinaryRendererRef.current = L.canvas({ padding: 0.25 });
+    ordinaryRendererRef.current = L.canvas({ padding: 0.25, pane: "markerPane" });
     const markerGroups = Object.fromEntries(MARKER_LAYER_KEYS.map((key) => [key, key === "players" ? L.layerGroup([], { pane: "native-map-players" }) : L.layerGroup()]));
     for (const [key, group] of Object.entries(markerGroups)) if (layerVisibility[key as MapLayerKey]) group.addTo(map);
     markerGroupsRef.current = markerGroups;

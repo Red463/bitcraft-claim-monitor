@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.40] - 2026-08-14
+
+### Fixed
+
+- Kept claims, watchtowers, player markers, and map tooltips visible above dense resource nodes.
+
 ## [0.55.0-beta.39] - 2026-08-14
 
 ### Fixed
