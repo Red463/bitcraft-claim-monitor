@@ -1,3 +1,14 @@
+function classifyBatchInstallReason(text) {
+  if (/tile exceeds (?:byte|read) budget/i.test(text)) return "tile-budget";
+  if (/ENOSPC|no space left on device/i.test(text)) return "disk";
+  if (/EACCES|EPERM|permission denied/i.test(text)) return "permission";
+  if (/EEXIST|already (?:exists|installed)/i.test(text)) return "collision";
+  if (/ENOENT|no such file or directory|missing tile/i.test(text)) return "missing-path";
+  if (/tile store is closed|pack store is closed/i.test(text)) return "closed";
+  if (/manifest|invalid tile path|tile (?:byte count|hash)|totals do not match/i.test(text)) return "validation";
+  return "other";
+}
+
 export function classifyNativeMapUnitFailure(journal) {
   const text = String(journal ?? "");
   if (!text.trim()) return { category: "unavailable" };
@@ -6,6 +17,7 @@ export function classifyNativeMapUnitFailure(journal) {
   if (/ROAD_STAGE=coordinate-projection/i.test(text)) return { category: "invalid-coordinate" };
   if (/ROAD_STAGE=tile-render/i.test(text)) return { category: "render" };
   const filesystemStage = /ROAD_STAGE=(batch-install|pack-compose|pack-install|pack-prune)/i.exec(text)?.[1]?.toLowerCase();
+  if (filesystemStage === "batch-install") return { category: "filesystem", stage: filesystemStage, reason: classifyBatchInstallReason(text) };
   if (filesystemStage) return { category: "filesystem", stage: filesystemStage };
   if (/returned no verified paving points/i.test(text)) return { category: "empty-region" };
   if (/missing location data/i.test(text)) return { category: "join-mismatch" };

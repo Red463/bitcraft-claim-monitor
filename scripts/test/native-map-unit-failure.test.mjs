@@ -43,7 +43,6 @@ test("classifies road generator failures without returning raw journal text", as
 test("reports the exact allow-listed filesystem stage without journal details", async () => {
   const { classifyNativeMapUnitFailure } = await import("../../deploy/native-map-unit-failure.mjs");
   const cases = [
-    ["ROAD_STAGE=batch-install\nprivate provider detail 111", "batch-install"],
     ["ROAD_STAGE=pack-compose\nprivate provider detail 222", "pack-compose"],
     ["ROAD_STAGE=pack-install\nprivate provider detail 333", "pack-install"],
     ["ROAD_STAGE=pack-prune\nprivate provider detail 444", "pack-prune"],
@@ -53,5 +52,25 @@ test("reports the exact allow-listed filesystem stage without journal details", 
     const result = classifyNativeMapUnitFailure(journal);
     assert.deepEqual(result, { category: "filesystem", stage });
     assert.equal(JSON.stringify(result).includes("private provider detail"), false);
+  }
+});
+
+test("reports an allow-listed batch-install reason without raw storage details", async () => {
+  const { classifyNativeMapUnitFailure } = await import("../../deploy/native-map-unit-failure.mjs");
+  const cases = [
+    ["ROAD_STAGE=batch-install\nRoad tile exceeds byte budget", "tile-budget"],
+    ["ROAD_STAGE=batch-install\nMap tile pack manifest totals do not match referenced tiles", "validation"],
+    ["ROAD_STAGE=batch-install\nEEXIST: file already exists", "collision"],
+    ["ROAD_STAGE=batch-install\nEACCES: permission denied", "permission"],
+    ["ROAD_STAGE=batch-install\nENOSPC: no space left on device", "disk"],
+    ["ROAD_STAGE=batch-install\nENOENT: no such file or directory", "missing-path"],
+    ["ROAD_STAGE=batch-install\nRoad tile store is closed", "closed"],
+    ["ROAD_STAGE=batch-install\nprivate unrecognized detail 555", "other"],
+  ];
+
+  for (const [journal, reason] of cases) {
+    const result = classifyNativeMapUnitFailure(journal);
+    assert.deepEqual(result, { category: "filesystem", stage: "batch-install", reason });
+    assert.equal(JSON.stringify(result).includes("private unrecognized detail"), false);
   }
 });
