@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.43] - 2026-08-14
+
+### Fixed
+
+- Started every validated region/resource partition independently so one dense resource cannot delay the others.
+
 ## [0.55.0-beta.42] - 2026-08-14
 
 ### Fixed

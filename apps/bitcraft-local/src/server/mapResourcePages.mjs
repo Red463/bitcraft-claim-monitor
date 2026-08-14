@@ -110,7 +110,7 @@ export function mapResourceSelectionLeasePlan({ regionIds = [], resourceIds = []
   for (const resourceId of resourceIds) {
     for (const regionId of regionIds) inputs.push({ regionId, resourceId });
   }
-  return { inputs, concurrency: Math.min(regionIds.length, inputs.length) };
+  return { inputs, concurrency: inputs.length };
 }
 
 function availability(collection, key) {
