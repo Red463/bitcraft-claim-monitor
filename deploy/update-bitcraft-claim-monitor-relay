@@ -199,7 +199,11 @@ generate_native_map_packs() {
   run_logged "Validating terrain map pack" sudo -u "$RUN_USER" node \
     "$CURRENT_LINK/apps/bitcraft-local/scripts/verify-native-map-pack.mjs" \
     --data-dir "$DATA_DIR" --product terrain
-  start_and_wait_for_map_generation "$MAP_ROADS_SERVICE"
+  if ! start_and_wait_for_map_generation "$MAP_ROADS_SERVICE"; then
+    log "Reporting native map serving diagnostics"
+    node "$CURRENT_LINK/deploy/diagnose-native-map-serving.mjs" || true
+    return 1
+  fi
   run_logged "Validating road map pack" sudo -u "$RUN_USER" node \
     "$CURRENT_LINK/apps/bitcraft-local/scripts/verify-native-map-pack.mjs" \
     --data-dir "$DATA_DIR" --product roads
