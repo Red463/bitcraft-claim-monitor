@@ -28,7 +28,6 @@ test("classifies road generator failures without returning raw journal text", as
     ["ROAD_STAGE=relay-subscription", "subscription"],
     ["ROAD_STAGE=coordinate-projection", "invalid-coordinate"],
     ["ROAD_STAGE=tile-render", "render"],
-    ["ROAD_STAGE=pack-compose", "filesystem"],
     ["some unrecognized internal failure carrying entity 998877", "other"],
     ["", "unavailable"],
   ];
@@ -38,5 +37,21 @@ test("classifies road generator failures without returning raw journal text", as
     assert.deepEqual(result, { category: expected });
     assert.equal(JSON.stringify(result).includes("998877"), false);
     assert.equal(JSON.stringify(result).includes("bitcraft-live-7"), false);
+  }
+});
+
+test("reports the exact allow-listed filesystem stage without journal details", async () => {
+  const { classifyNativeMapUnitFailure } = await import("../../deploy/native-map-unit-failure.mjs");
+  const cases = [
+    ["ROAD_STAGE=batch-install\nprivate provider detail 111", "batch-install"],
+    ["ROAD_STAGE=pack-compose\nprivate provider detail 222", "pack-compose"],
+    ["ROAD_STAGE=pack-install\nprivate provider detail 333", "pack-install"],
+    ["ROAD_STAGE=pack-prune\nprivate provider detail 444", "pack-prune"],
+  ];
+
+  for (const [journal, stage] of cases) {
+    const result = classifyNativeMapUnitFailure(journal);
+    assert.deepEqual(result, { category: "filesystem", stage });
+    assert.equal(JSON.stringify(result).includes("private provider detail"), false);
   }
 });
