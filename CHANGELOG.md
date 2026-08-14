@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.23] - 2026-08-14
+
+### Fixed
+
+- Fixed the map retaining an empty regional resource connection when no resources are being tracked.
+
 ## [0.55.0-beta.22] - 2026-08-14
 
 ### Fixed

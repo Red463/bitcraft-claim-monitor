@@ -76,14 +76,13 @@ function runtimeFixture({ regions = ["19", "20"], clock = manualClock(), start =
   return { runtime, sessions, topology, clock };
 }
 
-test("reconcile pins only the primary regional connection without resource subscriptions", async () => {
+test("reconcile configures resource regions without opening an empty SDK connection", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
   const { runtime, sessions } = runtimeFixture();
   await runtime.reconcile({ relayBaseUrl: "https://relay.example/", primaryRegionId: "019", activeRegionIds: ["20", "19", "19"] });
-  assert.equal(sessions.length, 1);
-  assert.equal(sessions[0].starts[0].regionId, "19");
-  assert.deepEqual(sessions[0].subscriptions, []);
-  assert.deepEqual(runtime.health().pinnedRegionIds, ["19"]);
+  assert.equal(sessions.length, 0);
+  assert.equal(runtime.health().regionalConnectionCount, 0);
+  assert.deepEqual(runtime.health().pinnedRegionIds, []);
   await runtime.stop();
 });
 
@@ -96,7 +95,7 @@ test("an equivalent reconcile does not invalidate an in-flight cold region acqui
   const config = { relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] };
   await runtime.reconcile(config);
   const acquisition = runtime.acquire({ regionId: "20", resourceId: "28" });
-  while (sessions.length < 2) await Promise.resolve();
+  while (sessions.length < 1) await Promise.resolve();
 
   await runtime.reconcile({ ...config, activeRegionIds: ["20", "19"] });
   openRegion();
@@ -244,43 +243,25 @@ test("runtime health aggregates latency and reconnect attempts across connected 
     },
   });
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
-  await runtime.acquire({ regionId: "20", resourceId: "28" });
+  const region19 = await runtime.acquire({ regionId: "19", resourceId: "28" });
+  const region20 = await runtime.acquire({ regionId: "20", resourceId: "28" });
   sessionRecords[0].fail();
   sessionRecords[1].fail();
   const health = runtime.health();
   assert.deepEqual(health.firstGenerationLatencyMs, { sampleCount: 2, min: 8, max: 20, average: 14 });
   assert.equal(health.reconnectAttemptCount, 2);
+  await region19.release();
+  await region20.release();
   await runtime.stop();
 });
 
-test("reconcile starts the normal idle close window when an empty primary region is demoted", async () => {
+test("changing the primary resource region does not open or pin empty connections", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
-  const { runtime, sessions, clock } = runtimeFixture();
+  const { runtime, sessions } = runtimeFixture();
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "20", activeRegionIds: ["19", "20"] });
-  await clock.advance(59_999);
-  assert.equal(sessions[0].stopped, false);
-  await clock.advance(1);
-  assert.equal(sessions[0].stopped, true, "the demoted empty region must close after its normal idle window");
-  assert.equal(sessions[1].stopped, false, "the new primary region remains pinned");
-  await runtime.stop();
-});
-
-test("promoting an idle region cancels its old close timer and allows a later demotion to reschedule", async () => {
-  assert.ok(runtimeModule, "map-resource runtime module must exist");
-  const { runtime, sessions, clock } = runtimeFixture();
-  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
-  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "20", activeRegionIds: ["19", "20"] });
-  const oldIdleTimer = clock.pendingTimers()[0];
-  await clock.advance(30_000);
-  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
-  await clock.fire(oldIdleTimer);
-  assert.equal(sessions[0].stopped, false, "a stale close callback must not close the promoted region");
-  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "20", activeRegionIds: ["19", "20"] });
-  await clock.advance(30_000);
-  assert.equal(sessions[0].stopped, false, "the old timer must not shorten the second idle window");
-  await clock.advance(60_000);
-  assert.equal(sessions[0].stopped, true, "the second demotion must receive a fresh idle close timer");
+  assert.equal(sessions.length, 0);
+  assert.deepEqual(runtime.health().pinnedRegionIds, []);
   await runtime.stop();
 });
 
@@ -352,7 +333,10 @@ test("stop during a regional session open rejects the acquisition and stops the 
   }]]) });
   const runtime = new runtimeModule.RelayMapResourceRuntime({
     manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
-    discoverTopology: async () => topology(sessions.length === 0 ? "19" : "20"),
+    discoverTopology: async () => ({ regions: new Map([
+      ...topology("19").regions,
+      ...topology("20").regions,
+    ]) }),
     createSession: (options) => {
       const session = {
         options, stopped: false,
@@ -372,31 +356,31 @@ test("stop during a regional session open rejects the acquisition and stops the 
   resolveRegion20Start();
   await assert.rejects(acquiring, /stopped|configuration|ownership/i);
   await stopping;
-  assert.equal(sessions.length, 2);
-  assert.equal(sessions[1].stopped, true);
-  await sessions[1].options.onSnapshot(snapshot("20", "28", 1, [{ entityId: "late" }]));
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].stopped, true);
+  await sessions[0].options.onSnapshot(snapshot("20", "28", 1, [{ entityId: "late" }]));
   assert.deepEqual(generations, []);
   assert.deepEqual(runtime.health().regions, []);
 });
 
-test("zero leases retain a warm resource for 60 seconds, then close only an unpinned idle region", async () => {
+test("zero leases retain a warm resource for 60 seconds, then close its idle region", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
   const { runtime, sessions, clock } = runtimeFixture();
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
   const first = await runtime.acquire({ regionId: "20", resourceId: "28" });
-  assert.equal(sessions.length, 2);
+  assert.equal(sessions.length, 1);
   await first.release();
   await clock.advance(59_999);
   const warm = await runtime.acquire({ regionId: "20", resourceId: "28" });
   assert.equal(warm.state().status, "loading");
-  assert.equal(sessions[1].subscriptions.length, 1, "warm reacquisition cannot resubscribe");
+  assert.equal(sessions[0].subscriptions.length, 1, "warm reacquisition cannot resubscribe");
   await warm.release();
   await clock.advance(60_000);
-  assert.deepEqual(sessions[1].unsubscribed, ["28"]);
-  assert.equal(sessions[1].stopped, false, "the region gets its own idle window after resource expiry");
+  assert.deepEqual(sessions[0].unsubscribed, ["28"]);
+  assert.equal(sessions[0].stopped, false, "the region gets its own idle window after resource expiry");
   await clock.advance(60_000);
-  assert.equal(sessions[1].stopped, true);
-  assert.equal(sessions[0].stopped, false, "the primary connection remains pinned");
+  assert.equal(sessions[0].stopped, true);
+  assert.equal(runtime.health().regionalConnectionCount, 0);
   await runtime.stop();
 });
 
@@ -445,8 +429,8 @@ test("a failed cold non-primary region retries after its first lease is created"
   const lease = await runtime.acquire({ regionId: "20", resourceId: "28" });
   assert.equal(lease.state().status, "unavailable");
   await clock.advance(1_000);
-  assert.equal(sessions.length, 3, "the first lease must make a failed unpinned region reconnectable");
-  assert.deepEqual(sessions[2].subscriptions, [{ resourceId: "28", generation: 1 }]);
+  assert.equal(sessions.length, 2, "the first lease must make a failed lazy region reconnectable");
+  assert.deepEqual(sessions[1].subscriptions, [{ resourceId: "28", generation: 1 }]);
   await runtime.stop();
 });
 
