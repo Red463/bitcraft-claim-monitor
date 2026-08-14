@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.42] - 2026-08-14
+
+### Fixed
+
+- Improved cold all-region resource loading by opening each selected region in parallel.
+
 ## [0.55.0-beta.41] - 2026-08-14
 
 ### Added

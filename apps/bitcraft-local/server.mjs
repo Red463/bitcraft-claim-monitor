@@ -36,7 +36,7 @@ import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTrans
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { mapResourceRegionCatalog, nameMapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
-import { MapResourcePageError, buildMapResourcePartitionPayload, createMapResourceCursorCodec, parseMapResourcePartitionScope, parseMapResourceSelectionScope } from "./src/server/mapResourcePages.mjs";
+import { MapResourcePageError, buildMapResourcePartitionPayload, createMapResourceCursorCodec, mapResourceSelectionLeasePlan, parseMapResourcePartitionScope, parseMapResourceSelectionScope } from "./src/server/mapResourcePages.mjs";
 import {
   MapResourceBinaryRouteError,
   binaryPartitionRecoveryResponse,
@@ -8277,8 +8277,9 @@ const server = createServer(async (req, res) => {
         clearInterval(heartbeat);
         void releaseLeases();
       });
+      const leasePlan = mapResourceSelectionLeasePlan(scope);
       const tasks = [];
-      for (const regionId of scope.regionIds) for (const resourceId of scope.resourceIds) {
+      for (const { regionId, resourceId } of leasePlan.inputs) {
         tasks.push(async () => {
           const key = mapResourceScopeKey(regionId, resourceId);
           try {
@@ -8323,7 +8324,7 @@ const server = createServer(async (req, res) => {
           }
         });
       }
-      void runWithConcurrency(tasks, 4).catch(() => {});
+      void runWithConcurrency(tasks, leasePlan.concurrency).catch(() => {});
       return;
     }
     if (req.method === "GET" && ["/api/local/map/snapshot", "/api/local/map/resources", "/api/local/map/events"].includes(url.pathname)) {

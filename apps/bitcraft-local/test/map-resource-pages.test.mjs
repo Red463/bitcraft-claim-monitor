@@ -5,6 +5,7 @@ import {
   MapResourcePageError,
   buildMapResourcePartitionPayload,
   createMapResourceCursorCodec,
+  mapResourceSelectionLeasePlan,
   parseMapResourcePartitionScope,
   parseMapResourceSelectionScope,
 } from "../src/server/mapResourcePages.mjs";
@@ -112,6 +113,22 @@ test("resource selection accepts 16 resources across all 13 Relay regions", () =
   });
 
   assert.equal(scope.regionIds.length * scope.resourceIds.length, 208);
+});
+
+test("resource event leases open one partition in every region before the next resource", () => {
+  const plan = mapResourceSelectionLeasePlan({
+    regionIds: ["3", "7", "8", "9", "11"],
+    resourceIds: ["28", "130"],
+  });
+
+  assert.equal(plan.concurrency, 5);
+  assert.deepEqual(plan.inputs.slice(0, plan.concurrency), [
+    { regionId: "3", resourceId: "28" },
+    { regionId: "7", resourceId: "28" },
+    { regionId: "8", resourceId: "28" },
+    { regionId: "9", resourceId: "28" },
+    { regionId: "11", resourceId: "28" },
+  ]);
 });
 
 test("large resource pages slice an already sorted compact partition without sorting it again", () => {
