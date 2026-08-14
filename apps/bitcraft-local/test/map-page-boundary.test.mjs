@@ -157,8 +157,8 @@ test("Native map reuses one canvas renderer and fixed marker presentations", () 
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
 
   assert.match(nativeMap, /const ordinaryRendererRef = React\.useRef<L\.Canvas \| null>\(null\)/);
-  assert.equal((nativeMap.match(/L\.canvas\(\{ padding: 0\.25 \}\)/g) ?? []).length, 1);
-  assert.match(nativeMap, /ordinaryRendererRef\.current = L\.canvas\(\{ padding: 0\.25 \}\)/);
+  assert.equal((nativeMap.match(/L\.canvas\(\{ padding: 0\.25, pane: "markerPane" \}\)/g) ?? []).length, 1);
+  assert.match(nativeMap, /ordinaryRendererRef\.current = L\.canvas\(\{ padding: 0\.25, pane: "markerPane" \}\)/);
   assert.match(nativeMap, /renderer: ordinaryRendererRef\.current/);
   assert.doesNotMatch(nativeMap, /renderer: L\.canvas\(\)/);
   assert.match(nativeMap, /mapMarkerPresentation\(feature\.kind\)/);
@@ -196,12 +196,16 @@ test("Native map gives each visible player a stable accessible colour marker", (
   assert.match(css, /prefers-reduced-motion:\s*reduce[^}]*native-map-player-pulse[^}]*animation:\s*none/s);
 });
 
-test("Native map keeps resource canvases and player markers above ordinary features", () => {
+test("Native map keeps resources below operational markers, players, and tooltips", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   assert.match(nativeMap, /createPane\("native-map-resources"\)/);
   assert.match(nativeMap, /createPane\("native-map-players"\)/);
-  assert.match(nativeMap, /resourcePane\.style\.zIndex\s*=\s*"650"/);
-  assert.match(nativeMap, /playerPane\.style\.zIndex\s*=\s*"700"/);
+  assert.match(nativeMap, /applyNativeMapPaneOrder/);
+  assert.match(nativeMap, /resources:\s*resourcePane/);
+  assert.match(nativeMap, /markers:\s*map\.getPane\("markerPane"\)/);
+  assert.match(nativeMap, /players:\s*playerPane/);
+  assert.match(nativeMap, /tooltips:\s*map\.getPane\("tooltipPane"\)/);
+  assert.match(nativeMap, /L\.canvas\(\{ padding: 0\.25, pane: "markerPane" \}\)/);
   assert.match(nativeMap, /new DensePointLayer\([^\n]+"native-map-resources"/);
   assert.match(nativeMap, /new DensePointLayer\(RESOURCE_NODE_FALLBACK_COLOUR, "native-map-resources", \{ strokeColour: "rgba\(3, 8, 12, \.92\)", strokeWidth: 1\.25 \}\)/);
   assert.match(nativeMap, /context\.strokeStyle = this\.#strokeColour/);
