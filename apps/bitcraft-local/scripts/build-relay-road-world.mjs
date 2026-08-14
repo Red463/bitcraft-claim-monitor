@@ -75,6 +75,22 @@ export function projectRoadPoints({ pavedRows, locationRows }) {
   });
 }
 
+export function roadPointBounds(points) {
+  if (!points.length) throw new TypeError("Road bounds require at least one point");
+  let minX = points[0].x;
+  let minZ = points[0].z;
+  let maxX = points[0].x;
+  let maxZ = points[0].z;
+  for (let index = 1; index < points.length; index += 1) {
+    const { x, z } = points[index];
+    if (x < minX) minX = x;
+    if (z < minZ) minZ = z;
+    if (x > maxX) maxX = x;
+    if (z > maxZ) maxZ = z;
+  }
+  return { minX, minZ, maxX, maxZ };
+}
+
 function boundedBatchSize(value) {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? Math.max(1, Math.min(4, parsed)) : 1;
@@ -251,10 +267,7 @@ export async function runRoadWorldCli() {
             generation,
             regionIds: [regionId],
             observedAt,
-            bounds: {
-              minX: Math.min(...points.map(({ x }) => x)), minZ: Math.min(...points.map(({ z }) => z)),
-              maxX: Math.max(...points.map(({ x }) => x)), maxZ: Math.max(...points.map(({ z }) => z)),
-            },
+            bounds: roadPointBounds(points),
             tiles,
             featureCount: points.length,
           }));

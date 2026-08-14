@@ -88,6 +88,20 @@ test("road projection rejects non-overworld and impossible coordinates", () => {
   }), /coordinates/i);
 });
 
+test("road bounds handle dense regions without spreading every point as an argument", () => {
+  const points = Array.from({ length: 150_000 }, (_, index) => ({
+    x: index % 38_401,
+    z: 38_400 - (index % 38_401),
+  }));
+
+  assert.deepEqual(roadJob.roadPointBounds(points), {
+    minX: 0,
+    minZ: 0,
+    maxX: 38_400,
+    maxZ: 38_400,
+  });
+});
+
 test("road generation failures retain only a deterministic stage marker", async () => {
   await assert.rejects(
     roadJob.roadGenerationStage("relay-subscription", async () => { throw new Error("provider detail"); }),

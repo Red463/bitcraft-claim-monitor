@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.38] - 2026-08-14
+
+### Fixed
+
+- Fixed road generation for dense regions whose point counts exceed JavaScript's function-argument limit.
+
 ## [0.55.0-beta.37] - 2026-08-14
 
 ### Fixed
