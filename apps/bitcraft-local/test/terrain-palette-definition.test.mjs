@@ -5,6 +5,7 @@ import {
   TERRAIN_PALETTE_VERSION,
   TERRAIN_LEGEND_GROUPS,
   TERRAIN_WATER_COLOURS,
+  terrainWaterRgba,
 } from "../src/shared/terrainPaletteDefinition.mjs";
 import { TERRAIN_BIOME_DEFINITIONS } from "../src/shared/terrainBiomes.mjs";
 
@@ -20,4 +21,16 @@ test("terrain legend entries reference the canonical renderer colour tuples", ()
   assert.equal(byKey.get("swamp-water").rgba, TERRAIN_WATER_COLOURS.swamp);
   assert.deepEqual(TERRAIN_LEGEND_GROUPS.map((group) => group.label), ["Biomes", "Water types"]);
   assert.deepEqual(entries.slice(0, 19).map((entry) => entry.label), TERRAIN_BIOME_DEFINITIONS.map(({ label }) => label));
+});
+
+test("terrain water shading has one canonical deep-water and shoreline calculation", () => {
+  assert.deepEqual(
+    terrainWaterRgba({ surface: "ocean", depth: 24 }),
+    [8, 31, 78, 255],
+  );
+  assert.deepEqual(
+    terrainWaterRgba({ surface: "ocean", depth: 2, shoreline: true }),
+    [32, 55, 78, 255],
+  );
+  assert.equal(terrainWaterRgba({ surface: "ground", depth: 24 }), null);
 });

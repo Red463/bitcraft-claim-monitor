@@ -1,5 +1,5 @@
 export const SYNTHETIC_OCEAN_LEAFLET_BOUNDS: readonly [readonly [number, number], readonly [number, number]];
-export function syntheticOceanColours(): Readonly<{ base: string; light: string; dark: string }>;
+export function syntheticOceanColours(): Readonly<{ base: string }>;
 export function terrainStatusSupportsSyntheticOcean(status: { available?: boolean; generation?: string | null } | null | undefined): boolean;
 export type SyntheticOceanLayer<TMap, TLayer> = {
   addTo(map: TMap): TLayer;

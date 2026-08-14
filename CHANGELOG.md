@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.39] - 2026-08-14
+
+### Fixed
+
+- Matched the synthetic world-ocean background to the deep ocean used by generated terrain, removing abrupt colour blocks around temporary regions.
+
 ## [0.55.0-beta.38] - 2026-08-14
 
 ### Fixed

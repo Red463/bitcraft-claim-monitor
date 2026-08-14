@@ -15,6 +15,29 @@ export const TERRAIN_WATER_COLOURS = Object.freeze({
   swamp: Object.freeze([43, 72, 65, 255]),
 });
 
+function clampWaterChannel(value) {
+  return Math.max(0, Math.min(255, value));
+}
+
+export function terrainWaterRgba({
+  surface,
+  depth = 0,
+  shoreline = false,
+  texture = 0,
+} = {}) {
+  const water = TERRAIN_WATER_COLOURS[surface];
+  if (!water) return null;
+  const boundedDepth = Math.max(0, Math.min(24, Number(depth) || 0));
+  const depthShade = Math.trunc(boundedDepth / 2);
+  const coastShade = shoreline ? 13 : 0;
+  return [
+    clampWaterChannel(water[0] - depthShade + coastShade + texture),
+    clampWaterChannel(water[1] - depthShade + coastShade + texture),
+    clampWaterChannel(water[2] + Math.trunc(depthShade / 2) + Math.trunc(coastShade / 2) + texture),
+    255,
+  ];
+}
+
 // Compatibility for the current name-based renderer. Task 2 replaces this
 // with numeric biome blending while preserving the exported palette boundary.
 export const TERRAIN_BIOME_COLOURS = Object.freeze({

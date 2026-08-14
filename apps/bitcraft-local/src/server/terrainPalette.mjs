@@ -1,6 +1,6 @@
 import {
   TERRAIN_PALETTE_VERSION,
-  TERRAIN_WATER_COLOURS,
+  terrainWaterRgba,
 } from "../shared/terrainPaletteDefinition.mjs";
 import { blendTerrainBiomeColours } from "../shared/terrainBiomes.mjs";
 
@@ -29,18 +29,8 @@ export function terrainCellRgba({
   warnings = null,
 }) {
   const texture = textureShade(mapX, mapZ);
-  const water = TERRAIN_WATER_COLOURS[surface];
-  if (water) {
-    const boundedDepth = clamp(Number(depth) || 0, 0, 24);
-    const depthShade = Math.trunc(boundedDepth / 2);
-    const coastShade = shoreline ? 13 : 0;
-    return [
-      clamp(water[0] - depthShade + coastShade + texture, 0, 255),
-      clamp(water[1] - depthShade + coastShade + texture, 0, 255),
-      clamp(water[2] + Math.trunc(depthShade / 2) + Math.trunc(coastShade / 2) + texture, 0, 255),
-      255,
-    ];
-  }
+  const water = terrainWaterRgba({ surface, depth, shoreline, texture });
+  if (water) return water;
   const base = blendTerrainBiomeColours(biomeContributions, warnings);
   const biomeDensity = Math.max(0, ...(biomeContributions ?? []).map(({ density }) => Number(density) || 0));
   const meanElevation = ((Number(elevation) || 0) + (Number(originalElevation) || 0)) / 2;
