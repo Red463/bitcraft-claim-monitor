@@ -35,7 +35,7 @@ import {
 import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
-import { mapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
+import { mapResourceRegionCatalog, nameMapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
 import { MapResourcePageError, buildMapResourcePartitionPayload, createMapResourceCursorCodec, parseMapResourcePartitionScope, parseMapResourceSelectionScope } from "./src/server/mapResourcePages.mjs";
 import { MapSnapshotError, authorizedMapPlayerIds, buildMapResourcePayload, buildMapSnapshot, combineMapSpatialSnapshots, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
 import { serveLocalMapTile } from "./src/server/mapTiles.mjs";
@@ -5994,22 +5994,15 @@ function configuredRegionalMarketRegionIds(claimId) {
 }
 
 function currentMapResourceRegions(claimId) {
+  const readiness = relayMapResourceReadiness.catalog();
+  const regionSnapshot = currentStateRepository.read(claimId, "region");
+  if (readiness) return nameMapResourceRegionCatalog({ catalog: readiness, regionSnapshot });
   const fallback = mapResourceRegionCatalog({
     providerHealth: gameDataProviderHealth(),
-    regionSnapshot: currentStateRepository.read(claimId, "region"),
+    regionSnapshot,
     fallbackRegionIds: configuredRegionalMarketRegionIds(claimId),
   });
-  const readiness = relayMapResourceReadiness.catalog();
-  if (!readiness) return fallback;
-  const names = new Map(fallback.regions.map((region) => [region.regionId, region.regionName]));
-  return {
-    ...readiness,
-    generatedAt: readiness.generatedAt ?? fallback.generatedAt,
-    regions: readiness.regions.map((region) => ({
-      ...region,
-      regionName: names.get(region.regionId) ?? region.regionName,
-    })),
-  };
+  return fallback;
 }
 
 async function ensureCurrentMapResourceRegions(claimId) {

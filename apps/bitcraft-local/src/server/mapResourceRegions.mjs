@@ -23,6 +23,20 @@ function regionNames(snapshot) {
   }));
 }
 
+export function nameMapResourceRegionCatalog({ catalog, regionSnapshot } = {}) {
+  const names = regionNames(regionSnapshot);
+  const value = record(catalog);
+  return {
+    ...value,
+    regions: (Array.isArray(value.regions) ? value.regions : []).map((region) => {
+      const row = record(region);
+      const regionId = decimal(row.regionId);
+      if (!regionId) return row;
+      return { ...row, regionId, regionName: names.get(regionId) ?? String(row.regionName ?? `Region ${regionId}`) };
+    }),
+  };
+}
+
 export function mapResourceRegionCatalog({ providerHealth, regionSnapshot, fallbackRegionIds = [], generatedAt } = {}) {
   const sources = record(record(providerHealth).sources);
   const topologyEntries = Object.entries(sources).filter(([key]) => /^region:\d+$/.test(key));

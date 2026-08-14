@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mapResourceRegionCatalog } from "../src/server/mapResourceRegions.mjs";
+import { mapResourceRegionCatalog, nameMapResourceRegionCatalog } from "../src/server/mapResourceRegions.mjs";
 
 test("map resource regions include every schema-ready topology source in decimal order", () => {
   const result = mapResourceRegionCatalog({
@@ -62,4 +62,26 @@ test("known topology does not broaden to configured fallback regions", () => {
   });
 
   assert.deepEqual(result.regionIds, ["19"]);
+});
+
+test("a cached readiness catalog can be named without rebuilding provider health", () => {
+  const result = nameMapResourceRegionCatalog({
+    catalog: {
+      provider: "relay",
+      generatedAt: "2026-08-14T10:00:00.000Z",
+      freshness: "live",
+      warnings: [],
+      regionIds: ["19", "24"],
+      regions: [
+        { regionId: "19", regionName: "Region 19", relayReady: true, freshness: "live" },
+        { regionId: "24", regionName: "Region 24", relayReady: true, freshness: "live" },
+      ],
+    },
+    regionSnapshot: { data: { regions: [{ regionId: "19", regionName: "Zephra" }] } },
+  });
+
+  assert.deepEqual(result.regions.map(({ regionId, regionName }) => ({ regionId, regionName })), [
+    { regionId: "19", regionName: "Zephra" },
+    { regionId: "24", regionName: "Region 24" },
+  ]);
 });
