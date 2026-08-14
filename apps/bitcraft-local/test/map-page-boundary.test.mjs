@@ -198,6 +198,7 @@ test("Native map gives each visible player a stable accessible colour marker", (
 
 test("Native map keeps resources below operational markers, players, and tooltips", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  const packedLayer = readFileSync(new URL("../src/pages/map/PackedResourceCanvasLayer.ts", import.meta.url), "utf8");
   assert.match(nativeMap, /createPane\("native-map-resources"\)/);
   assert.match(nativeMap, /createPane\("native-map-players"\)/);
   assert.match(nativeMap, /applyNativeMapPaneOrder/);
@@ -206,11 +207,10 @@ test("Native map keeps resources below operational markers, players, and tooltip
   assert.match(nativeMap, /players:\s*playerPane/);
   assert.match(nativeMap, /tooltips:\s*map\.getPane\("tooltipPane"\)/);
   assert.match(nativeMap, /L\.canvas\(\{ padding: 0\.25, pane: "markerPane" \}\)/);
-  assert.match(nativeMap, /new DensePointLayer\([^\n]+"native-map-resources"/);
-  assert.match(nativeMap, /new DensePointLayer\(RESOURCE_NODE_FALLBACK_COLOUR, "native-map-resources", \{ strokeColour: "rgba\(3, 8, 12, \.92\)", strokeWidth: 1\.25 \}\)/);
-  assert.match(nativeMap, /context\.strokeStyle = this\.#strokeColour/);
-  assert.match(nativeMap, /context\.lineWidth = this\.#strokeWidth/);
-  assert.match(nativeMap, /if \(this\.#strokeColour && this\.#strokeWidth > 0\) \{[^}]*context\.stroke\(\)/s);
+  assert.match(nativeMap, /new PackedResourceCanvasLayer\(\)\.addTo\(map\)/);
+  assert.match(packedLayer, /context\.strokeStyle = "rgba\(3, 8, 12, \.92\)"/);
+  assert.match(packedLayer, /context\.lineWidth = 1\.25/);
+  assert.match(packedLayer, /context\.stroke\(\);\s*context\.fill\(\)/);
   assert.match(nativeMap, /new DensePointLayer\("rgba\(255, 112, 112, 0\.92\)"\)\.addTo\(map\)/);
   assert.match(nativeMap, /L\.layerGroup\(\[\], \{ pane: "native-map-players" \}\)/);
   assert.match(nativeMap, /\.\.\.\(feature\.kind === "player" \? \{ pane: "native-map-players" \} : \{\}\)/);
@@ -220,20 +220,22 @@ test("Native map keeps resources below operational markers, players, and tooltip
 test("Native map projects region-scoped dense points before rendering and resource framing", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
 
-  assert.match(nativeMap, /const visibleResourcePoints = React\.useMemo\(\(\) => mapFeaturesInRegionScope\(resourcePoints, visibleRegionIds\)/);
+  assert.match(nativeMap, /packedResourcePointCount\(resourcePartitions, visibleRegionIds\)/);
   assert.match(nativeMap, /const visibleEnemyPoints = React\.useMemo\(\(\) => mapFeaturesInRegionScope\(snapshot\?\.layers\.enemies \?\? \[\], visibleRegionIds\)/);
-  assert.match(nativeMap, /resourcesRef\.current\?\.setPoints\(visibleResourcePoints\)/);
+  assert.match(nativeMap, /resourcesRef\.current\?\.setResources\(resourcePartitions, visibleRegionIds, resourceTiers\)/);
   assert.match(nativeMap, /enemiesRef\.current\?\.setPoints\(visibleEnemyPoints\)/);
-  assert.match(nativeMap, /applyResourceViewport\(\{[\s\S]*points: visibleResourcePoints,/);
-  assert.doesNotMatch(nativeMap, /resourcesRef\.current\?\.setPoints\(resourcePoints\)/);
+  assert.match(nativeMap, /packedResourceSome\(resourcePartitions, visibleRegionIds/);
+  assert.match(nativeMap, /packedResourceBounds\(resourcePartitions, visibleRegionIds\)/);
+  assert.doesNotMatch(nativeMap, /resourceRowsFromPartitions|mapResourceFeatures|visibleResourcePoints/);
   assert.doesNotMatch(nativeMap, /enemiesRef\.current\?\.setPoints\(snapshot\.layers\.enemies \?\? \[\]\)/);
 });
 
 test("Native map frames a newly selected off-screen resource result once", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
-  assert.match(nativeMap, /applyResourceViewport/);
+  assert.match(nativeMap, /packedResourceSome/);
+  assert.match(nativeMap, /packedResourceBounds/);
   assert.match(nativeMap, /resourceFrameSelectionRef/);
-  assert.match(nativeMap, /map\.fitBounds\(L\.latLngBounds\(features\.map/);
+  assert.match(nativeMap, /map\.fitBounds\(L\.latLngBounds\(\[bounds\.minZ, bounds\.minX\], \[bounds\.maxZ, bounds\.maxX\]\)/);
   assert.match(nativeMap, /padding:\s*\[32, 32\]/);
   assert.match(nativeMap, /maxZoom:\s*1/);
 });
@@ -391,8 +393,10 @@ test("Native map uses event-driven snapshot loading without a snapshot polling t
   assert.match(snapshotEffect, /mapEventNeedsSnapshot\(JSON\.parse\(message\.data\)\)/);
   assert.match(snapshotEffect, /void loader\.request\(request\.eventsUrl\)/);
   assert.match(snapshotEffect, /fetch\(request\.snapshotUrl/);
-  assert.match(snapshotEffect, /createMapResourcePartitionLoader/);
-  assert.match(snapshotEffect, /new EventSource\(request\.resourceEventUrl/);
+  assert.match(snapshotEffect, /createMapResourceBinaryLoader/);
+  assert.match(snapshotEffect, /new EventSource\(url/);
+  assert.match(snapshotEffect, /response\.arrayBuffer\(\)/);
+  assert.doesNotMatch(snapshotEffect, /\/api\/local\/map\/resources|createMapResourcePartitionLoader/);
   assert.doesNotMatch(snapshotEffect, /setInterval|setTimeout/);
 });
 

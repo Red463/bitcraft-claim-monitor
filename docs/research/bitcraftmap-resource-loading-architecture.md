@@ -7,6 +7,32 @@ Upstream revision reviewed: [`xCausxn/bitcraftmap@c75c600`](https://github.com/x
 
 Current BitCraftMap does **not** serve resource positions from pre-generated GeoJSON, vector tiles, raster tiles, a REST resource API, or a periodically regenerated client bundle. Resource positions are live rows delivered directly to the browser through filtered SpacetimeDB subscriptions against `relay.bitjita.com`. The browser SDK cache is the working snapshot; insert/update/delete callbacks trigger a debounced rebuild of the selected resource layer.
 
+## 2026-08-14 production performance follow-up
+
+The upstream revision remains [`xCausxn/bitcraftmap@c75c600`](https://github.com/xCausxn/bitcraftmap/commit/c75c600746b92c16d676883967485a4c512c9496). Live Claim Monitor measurements against production version `0.55.0-beta.40` isolated three separate costs that are not present in the same form upstream:
+
+1. Adding Ghost Succulent (`resource:130`) in region 19 took about 13.7 seconds to expose the first 20,000 rows and 14.8 seconds to complete at 26,305 new rows.
+2. Adding Bush (`resource:2`) took about 15.8 seconds to expose its first page and 28.6 seconds to complete at 177,092 new rows. Each subsequent 20,000-row page added roughly one to two seconds.
+3. Adding Ferns (`resource:125`) made the displayed readiness of already complete partitions regress repeatedly (`3/4 -> 1/4 -> 2/4 -> 3/4 -> 2/4`) without changing their selected scope. This proves that a new dense subscription can invalidate and re-download unrelated completed resource partitions.
+
+A memory-capped local probe of `applyResourcePartitionPage` merged six 20,000-row pages (120,000 rows total) in 249 ms with a 56 MiB heap. The pure client merge is therefore not the dominant delay. The dominant path is Relay initial hydration/normalization followed by repeated JSON serialization, transfer, parsing and React publication of sequential 20,000-row pages.
+
+The hard ceiling is explicit in Claim Monitor source: [`mapResourceRegionSession.ts`](../../apps/bitcraft-local/src/server/game-data/mapResourceRegionSession.ts) defaults `maxNodes` to 250,000 and rejects a complete resource generation above it. [`mapResourcePages.mjs`](../../apps/bitcraft-local/src/server/mapResourcePages.mjs) then exposes accepted generations as sequential pages capped at 20,000 rows or 4 MiB. Upstream has no equivalent per-type node rejection or HTTP paging boundary because its filtered subscription rows remain in the SpacetimeDB browser cache.
+
+Claim Monitor also publishes snapshots for every applied subscription from a shared region rebuild. [`mapResourceRegionSession.ts`](../../apps/bitcraft-local/src/server/game-data/mapResourceRegionSession.ts) attaches shared resource/location listeners, queues a rebuild, normalizes all applied subscriptions, and calls `onSnapshot` for every complete result. The browser treats each generation notification as a reason to refresh that partition. Upstream also dirties all tracked types for unattributed `location_state` changes, but it only rebuilds their canvases from the already-local SDK cache; it does not re-download completed types. See upstream [`relay-service.ts`](https://github.com/xCausxn/bitcraftmap/blob/c75c600746b92c16d676883967485a4c512c9496/src/lib/services/relay-service.ts) and [`resource-canvas-layer.ts`](https://github.com/xCausxn/bitcraftmap/blob/c75c600746b92c16d676883967485a4c512c9496/src/lib/map/resource-canvas-layer.ts).
+
+### Recommended parity path
+
+Keep Relay server-owned, but change the delivery model rather than raising limits in the current JSON pipeline:
+
+1. Maintain a per-region entity-to-resource index so resource/location callbacks dirty only affected resource partitions. A new resource subscription must never republish or re-download already-complete resource types.
+2. Replace the 250,000-node correctness ceiling with memory/concurrency admission measured in encoded bytes. Large valid partitions should remain usable; overload should reject new cold subscriptions before hydration, not discard an accepted complete generation.
+3. Encode one complete resource partition once into a compact binary/typed-array representation, retain that encoded last-good generation for the existing idle window, and serve it from a same-origin immutable generation URL. Avoid reconstructing and serializing 20,000 JSON tuples for every page request.
+4. Let the browser store per-partition typed coordinate buffers and give those buffers directly to the canvas renderer. Apply viewport culling and deterministic LOD without constructing hundreds of thousands of `MapFeature` objects.
+5. Keep SSE as generation metadata only. A generation event should fetch only the changed partition and atomically replace its buffer; selected partitions that did not change must remain visible and untouched.
+
+This preserves Claim Monitor's access control, provider-neutral same-origin boundary, schema gating and shared server cache while matching the parts of BitCraftMap that make resources fast: one filtered upstream subscription, one local cache population, no arbitrary row ceiling, and no repeated full transfer of unchanged selections.
+
 Tiles and generated GeoJSON still exist, but for different concerns:
 
 - raster WebP tiles provide terrain/game basemaps and roads;

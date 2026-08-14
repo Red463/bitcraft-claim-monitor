@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { packResourceCoordinate } from "../src/map/resourcePartitionCodec.mjs";
 
 let runtimeModule = null;
 try {
@@ -43,6 +44,11 @@ function snapshot(regionId, resourceId, generation, resources = []) {
     data: { regionId, resourceId, resources }, warnings: [], database: `relay-region-${regionId}`,
     regionId, resourceId, schemaFingerprint: "regional-v1", generation,
     receivedAt: "2026-08-12T10:00:00.000Z",
+    packedCoordinates: new Uint32Array(resources.flatMap((resource) => (
+      Number.isInteger(resource.locationX) && Number.isInteger(resource.locationZ)
+        ? [packResourceCoordinate(resource.locationX, resource.locationZ)]
+        : []
+    ))),
   };
 }
 
@@ -154,7 +160,7 @@ test("runtime health reports aggregate partition states, bytes, and queued cold 
   assert.ok(runtime.health().bytesPerSubscription[0] > 0);
 
   sessions[0].options.onFailure("temporary disconnect");
-  assert.deepEqual(runtime.health().partitionCounts, { live: 1, loading: 0, stale: 0, unavailable: 0 }, "late callbacks from the released SDK session cannot degrade retained rows");
+  assert.deepEqual(runtime.health().partitionCounts, { live: 0, loading: 0, stale: 1, unavailable: 0 }, "a live subscription failure retains cached rows as stale");
   await lease.release();
   await runtime.stop();
 });
@@ -265,7 +271,7 @@ test("changing the primary resource region does not open or pin empty connection
   await runtime.stop();
 });
 
-test("leases share canonical resource entries while completed hydrations release their regional connection", async () => {
+test("leases share canonical resource entries and one live regional connection", async () => {
   assert.ok(runtimeModule, "map-resource runtime module must exist");
   const { runtime, sessions } = runtimeFixture();
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19", "20"] });
@@ -285,16 +291,18 @@ test("leases share canonical resource entries while completed hydrations release
   assert.equal(second.state().snapshot, empty);
 
   const another = await runtime.acquire({ regionId: "19", resourceId: "54" });
-  assert.equal(sessions.length, 2, "a new uncached resource uses a fresh bounded connection");
-  assert.deepEqual(sessions[0].subscriptions, [{ resourceId: "28", generation: 1 }]);
-  assert.deepEqual(sessions[1].subscriptions, [{ resourceId: "54", generation: 1 }]);
+  assert.equal(sessions.length, 1, "selected resources share the live regional connection");
+  assert.deepEqual(sessions[0].subscriptions, [
+    { resourceId: "28", generation: 1 },
+    { resourceId: "54", generation: 1 },
+  ]);
   await first.release();
   await second.release();
   await another.release();
   await runtime.stop();
 });
 
-test("accepted resource generations release the SDK cache while retaining compact live snapshots", async () => {
+test("accepted resource generations retain the live SDK subscription and binary partition", async () => {
   const { runtime, sessions } = runtimeFixture({ regions: ["19"] });
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
   const first = await runtime.acquire({ regionId: "19", resourceId: "28" });
@@ -304,22 +312,24 @@ test("accepted resource generations release the SDK cache while retaining compac
   ]));
   await Promise.resolve();
 
-  assert.equal(sessions[0].stopped, true, "the hydrated SDK cache must not remain attached to the web server");
-  assert.equal(runtime.health().regionalConnectionCount, 0);
+  assert.equal(sessions[0].stopped, false, "active resources keep event-driven subscriptions attached");
+  assert.equal(runtime.health().regionalConnectionCount, 1);
   assert.equal(first.state().status, "live");
-  assert.equal(first.state().snapshot?.compactResources?.length, 1);
+  assert.equal(first.current()?.pointCount, 1);
 
   const second = await runtime.acquire({ regionId: "19", resourceId: "54" });
-  assert.equal(sessions.length, 2, "a new uncached resource opens a fresh bounded hydration session");
-  assert.deepEqual(sessions[1].subscriptions, [{ resourceId: "54", generation: 1 }]);
-  assert.deepEqual(sessions[0].subscriptions, [{ resourceId: "28", generation: 1 }]);
+  assert.equal(sessions.length, 1);
+  assert.deepEqual(sessions[0].subscriptions, [
+    { resourceId: "28", generation: 1 },
+    { resourceId: "54", generation: 1 },
+  ]);
 
   await first.release();
   await second.release();
   await runtime.stop();
 });
 
-test("active resource leases refresh with a new bounded hydration session", async () => {
+test("active resource leases do not schedule polling hydration", async () => {
   const clock = manualClock();
   const { runtime, sessions } = runtimeFixture({ regions: ["19"], clock });
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
@@ -327,23 +337,16 @@ test("active resource leases refresh with a new bounded hydration session", asyn
   sessions[0].options.onSnapshot(snapshot("19", "28", 1, [{ entityId: "first" }]));
   await Promise.resolve();
 
-  await clock.advance(299_999);
+  await clock.advance(300_000);
   assert.equal(sessions.length, 1);
-  await clock.advance(1);
-  while (sessions.length < 2) await Promise.resolve();
-  while (sessions[1].subscriptions.length < 1) await Promise.resolve();
-  assert.equal(sessions.length, 2);
-  assert.deepEqual(sessions[1].subscriptions, [{ resourceId: "28", generation: 2 }]);
-
-  sessions[1].options.onSnapshot(snapshot("19", "28", 2, [{ entityId: "second" }]));
-  await Promise.resolve();
-  assert.equal(sessions[1].stopped, true);
-  assert.equal(lease.state().snapshot?.generation, 2);
+  assert.deepEqual(sessions[0].subscriptions, [{ resourceId: "28", generation: 1 }]);
+  assert.equal(sessions[0].stopped, false);
+  assert.equal(lease.current()?.generation, "1");
   await lease.release();
   await runtime.stop();
 });
 
-test("simultaneous resource refreshes share one bounded regional hydration session", async () => {
+test("multiple active resources stay on one event-driven regional session", async () => {
   const clock = manualClock();
   const { runtime, sessions } = runtimeFixture({ regions: ["19"], clock });
   await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
@@ -354,11 +357,10 @@ test("simultaneous resource refreshes share one bounded regional hydration sessi
   await Promise.resolve();
 
   await clock.advance(300_000);
-  for (let index = 0; index < 20 && (sessions.length < 2 || sessions[1].subscriptions.length < 2); index += 1) await Promise.resolve();
-  assert.equal(sessions.length, 2);
-  assert.deepEqual([...sessions[1].subscriptions].sort((left, right) => Number(left.resourceId) - Number(right.resourceId)), [
-    { resourceId: "28", generation: 2 },
-    { resourceId: "54", generation: 2 },
+  assert.equal(sessions.length, 1);
+  assert.deepEqual([...sessions[0].subscriptions].sort((left, right) => Number(left.resourceId) - Number(right.resourceId)), [
+    { resourceId: "28", generation: 1 },
+    { resourceId: "54", generation: 1 },
   ]);
 
   await first.release();
@@ -389,6 +391,80 @@ test("accepted resource generations notify the runtime owner", async () => {
   const accepted = snapshot("19", "28", 1);
   await sessions[0].options.onSnapshot(accepted);
   assert.deepEqual(events, [accepted]);
+  await runtime.stop();
+});
+
+test("accepted snapshots encode once, remain subscribed, and expose warm binary state", async () => {
+  const runtimeEvents = [];
+  const { runtime, sessions } = runtimeFixture({ regions: ["19"] });
+  runtimeEvents.push(...[]);
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const lease = await runtime.acquire({ regionId: "19", resourceId: "28" });
+  const notices = [];
+  const unsubscribe = lease.subscribe((event) => notices.push(event));
+  sessions[0].options.onSnapshot({
+    ...snapshot("19", "28", 1),
+    packedCoordinates: Uint32Array.of(packResourceCoordinate(10, 20)),
+  });
+  await Promise.resolve();
+
+  assert.equal(sessions[0].stopped, false, "an active lease keeps its event-driven regional session alive");
+  assert.equal(lease.current().generation, "1");
+  assert.equal(lease.current().pointCount, 1);
+  assert.equal(lease.current().encodedBytes, 48);
+  assert.deepEqual(notices.map(({ type }) => type), ["partition-ready"]);
+  unsubscribe();
+  await lease.release();
+  await runtime.stop();
+});
+
+test("a packed delta advances only its partition and preserves the previous generation", async () => {
+  const { runtime, sessions } = runtimeFixture({ regions: ["19"] });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const bush = await runtime.acquire({ regionId: "19", resourceId: "2" });
+  const ferns = await runtime.acquire({ regionId: "19", resourceId: "125" });
+  sessions[0].options.onSnapshot({ ...snapshot("19", "2", 1), packedCoordinates: Uint32Array.of(packResourceCoordinate(1, 1)) });
+  sessions[0].options.onSnapshot({ ...snapshot("19", "125", 1), packedCoordinates: Uint32Array.of(packResourceCoordinate(2, 2)) });
+  const events = [];
+  bush.subscribe((event) => events.push(event));
+  events.length = 0;
+
+  sessions[0].options.onDelta({
+    regionId: "19",
+    resourceId: "2",
+    additions: Uint32Array.of(packResourceCoordinate(3, 3)),
+    removals: Uint32Array.of(packResourceCoordinate(1, 1)),
+    receivedAt: "2026-08-12T10:00:01.000Z",
+  });
+  await Promise.resolve();
+
+  assert.equal(bush.current().generation, "2");
+  assert.deepEqual([...bush.current().coordinates], [packResourceCoordinate(3, 3)]);
+  assert.equal(ferns.current().generation, "1");
+  assert.deepEqual(events.map(({ type, baseGeneration, generation }) => ({ type, baseGeneration, generation })), [
+    { type: "partition-delta", baseGeneration: "1", generation: "2" },
+  ]);
+  await bush.release();
+  await ferns.release();
+  await runtime.stop();
+});
+
+test("warm reacquisition is ready immediately while the live subscription rehydrates", async () => {
+  const clock = manualClock();
+  const { runtime, sessions } = runtimeFixture({ regions: ["19"], clock });
+  await runtime.reconcile({ relayBaseUrl: "https://relay.example", primaryRegionId: "19", activeRegionIds: ["19"] });
+  const first = await runtime.acquire({ regionId: "19", resourceId: "28" });
+  sessions[0].options.onSnapshot({ ...snapshot("19", "28", 1), packedCoordinates: Uint32Array.of(packResourceCoordinate(8, 9)) });
+  await first.release();
+  await clock.advance(60_000);
+
+  const warm = await runtime.acquire({ regionId: "19", resourceId: "28" });
+  assert.equal(warm.current().generation, "1");
+  assert.deepEqual(sessions[0].subscriptions.at(-1), { resourceId: "28", generation: 2 });
+  const immediate = [];
+  warm.subscribe((event) => immediate.push(event));
+  assert.deepEqual(immediate.map(({ type }) => type), ["partition-ready"]);
+  await warm.release();
   await runtime.stop();
 });
 
@@ -466,23 +542,23 @@ test("failed regions reconnect with bounded backoff, restore warm entries, and p
   const prior = snapshot("19", "28", 7, [{ entityId: "x" }]);
   await sessions[0].options.onSnapshot(prior);
   const pending = await runtime.acquire({ regionId: "19", resourceId: "54" });
-  sessions[1].options.onFailure("socket closed");
+  sessions[0].options.onFailure("socket closed");
   assert.equal(lease.state().status, "stale");
   assert.equal(lease.state().snapshot, prior);
   await clock.advance(999);
-  assert.equal(sessions.length, 2);
+  assert.equal(sessions.length, 1);
   await clock.advance(1);
-  assert.equal(sessions.length, 3);
-  assert.equal(sessions[2].starts[0].generation, 8);
-  assert.deepEqual(sessions[2].subscriptions, [{ resourceId: "28", generation: 8 }, { resourceId: "54", generation: 1 }]);
+  assert.equal(sessions.length, 2);
+  assert.equal(sessions[1].starts[0].generation, 8);
+  assert.deepEqual(sessions[1].subscriptions, [{ resourceId: "28", generation: 8 }, { resourceId: "54", generation: 1 }]);
 
-  sessions[2].options.onFailure("schema fingerprint mismatch");
+  sessions[1].options.onFailure("schema fingerprint mismatch");
   await Promise.resolve();
   await clock.advance(1_000);
-  assert.equal(sessions[2].stopped, true, "schema mismatch must detach and stop the active session");
+  assert.equal(sessions[1].stopped, true, "schema mismatch must detach and stop the active session");
   assert.equal(lease.state().status, "stale", "a schema mismatch retains last usable rows as stale");
   assert.equal(lease.state().snapshot, prior);
-  await sessions[2].options.onSnapshot(snapshot("19", "28", 8, [{ entityId: "late" }]));
+  await sessions[1].options.onSnapshot(snapshot("19", "28", 8, [{ entityId: "late" }]));
   assert.equal(lease.state().snapshot, prior, "a detached mismatched session cannot publish a late snapshot");
   assert.deepEqual(generations, [prior], "late snapshots cannot emit a generation notification");
   await pending.release();

@@ -1,9 +1,20 @@
 import { relayWebSocketUri } from "./globalCatalogRuntime.ts";
 import {
   RelayMapResourceRegionSession,
+  type MapResourceDeltaNotice,
+  type MapResourceProvisionalNotice,
   type MapResourceStatus,
   type MapResourceSnapshot,
 } from "./mapResourceRegionSession.ts";
+import {
+  encodeResourcePartition,
+  mergePackedCoordinateDelta,
+} from "#map/resourcePartitionCodec.mjs";
+import {
+  MapResourceAdmissionError,
+  MapResourceBinaryCache,
+  type CachedBinaryPartition,
+} from "#server/mapResourceBinaryCache.mjs";
 import { discoverRelayTopology, type RelayTopology } from "./topology.ts";
 
 type BindingManifest = Parameters<RelayMapResourceRegionSession["start"]>[0]["manifest"];
@@ -18,11 +29,11 @@ type ResourceEntry = {
   snapshot: MapResourceSnapshot | null;
   nextGeneration: number;
   idleTimer: unknown | null;
-  refreshTimer: unknown | null;
-  refreshDue: boolean;
   waiters: Set<SnapshotWaiter>;
   failure: string | null;
   compactBytes: number;
+  listeners: Set<(event: MapResourcePartitionEvent) => void>;
+  cacheReleases: Set<() => void>;
 };
 type RegionEntry = {
   regionId: string;
@@ -43,8 +54,18 @@ export type MapResourceLease = {
   key: string;
   state(): { status: MapResourceLeaseState; snapshot: MapResourceSnapshot | null; warning: string | null };
   waitForSnapshot(timeoutMs: number): Promise<MapResourceSnapshot | null>;
+  current(generation?: string): CachedBinaryPartition | null;
+  subscribe(listener: (event: MapResourcePartitionEvent) => void): () => void;
   release(): Promise<void>;
 };
+
+export type MapResourcePartitionEvent =
+  | { type: "partition-loading"; key: string }
+  | { type: "partition-provisional"; key: string; additions: Uint32Array }
+  | { type: "partition-ready"; key: string; generation: string; pointCount: number; encodedBytes: number; receivedAt: string; freshness: string }
+  | { type: "partition-delta"; key: string; baseGeneration: string; generation: string; additions: Uint32Array; removals: Uint32Array }
+  | { type: "partition-stale"; key: string; generation: string; warning: string }
+  | { type: "partition-unavailable"; key: string; warning: string; retryAfterSeconds?: number };
 
 export type MapResourceRuntimeHealth = {
   configuredRegionIds: string[];
@@ -61,6 +82,7 @@ export type MapResourceRuntimeHealth = {
   normalizationDurationMs: { sampleCount: number; min: number; max: number; average: number } | null;
   reconnectAttemptCount: number;
   capacityRejectionCount: number;
+  binaryCache: { bytes: number; entries: number; activeEntries: number; evictions: number; rejections: number };
   regions: Array<{
     regionId: string;
     pinned: boolean;
@@ -84,6 +106,7 @@ export type MapResourceRuntimeHealth = {
 type Dependencies = {
   manifest: BindingManifest;
   onGeneration?: (generation: MapResourceGenerationNotice) => void;
+  onEvent?: (event: MapResourcePartitionEvent) => void;
   discoverTopology?: (baseUrl: string) => Promise<RelayTopology>;
   createSession?: RegionSessionFactory;
   now?: () => number;
@@ -91,26 +114,19 @@ type Dependencies = {
   clearTimer?: (timer: unknown) => void;
   resourceIdleMs?: number;
   regionIdleMs?: number;
-  refreshMs?: number;
   maxRegions?: number;
   maxResourceTypesPerRegion?: number;
   coldStartWindowMs?: number;
   maxColdStartsPerWindow?: number;
   reconnectDelayMs?: (attempt: number) => number;
+  cacheMaxBytes?: number;
+  cachePreviousGenerationGraceMs?: number;
+  memoryHeadroom?: () => { availableBytes: number | null };
 };
 
 export type MapResourceGenerationNotice = Pick<MapResourceSnapshot, "regionId" | "resourceId" | "generation" | "receivedAt">;
 
-export class MapResourceAdmissionError extends Error {
-  readonly statusCode = 429;
-  readonly retryAfterSeconds: number;
-
-  constructor(message: string, retryAfterSeconds: number) {
-    super(message);
-    this.name = "MapResourceAdmissionError";
-    this.retryAfterSeconds = retryAfterSeconds;
-  }
-}
+export { MapResourceAdmissionError };
 
 function decimal(value: unknown, label: string): string {
   const normalized = String(value ?? "").trim();
@@ -140,6 +156,7 @@ export function mapResourceScopeKey(regionId: string, resourceId: string): strin
 export class RelayMapResourceRuntime {
   readonly #manifest: BindingManifest;
   readonly #onGeneration: (generation: MapResourceGenerationNotice) => void;
+  readonly #onEvent: (event: MapResourcePartitionEvent) => void;
   readonly #discoverTopology: (baseUrl: string) => Promise<RelayTopology>;
   readonly #createSession: RegionSessionFactory;
   readonly #now: () => number;
@@ -147,12 +164,12 @@ export class RelayMapResourceRuntime {
   readonly #clearTimer: (timer: unknown) => void;
   readonly #resourceIdleMs: number;
   readonly #regionIdleMs: number;
-  readonly #refreshMs: number;
   readonly #maxRegions: number | null;
   readonly #maxResourceTypesPerRegion: number;
   readonly #coldStartWindowMs: number;
   readonly #maxColdStartsPerWindow: number;
   readonly #reconnectDelayMs: (attempt: number) => number;
+  readonly #cache: MapResourceBinaryCache;
   #config: { relayBaseUrl: string; activeRegionIds: string[]; primaryRegionId: string } | null = null;
   #regions = new Map<string, RegionEntry>();
   #opening = new Map<string, Promise<RegionEntry>>();
@@ -164,6 +181,7 @@ export class RelayMapResourceRuntime {
   constructor(dependencies: Dependencies) {
     this.#manifest = dependencies.manifest;
     this.#onGeneration = dependencies.onGeneration ?? (() => {});
+    this.#onEvent = dependencies.onEvent ?? (() => {});
     this.#discoverTopology = dependencies.discoverTopology ?? discoverRelayTopology;
     this.#createSession = dependencies.createSession ?? ((options) => new RelayMapResourceRegionSession(options));
     this.#now = dependencies.now ?? Date.now;
@@ -171,13 +189,17 @@ export class RelayMapResourceRuntime {
     this.#clearTimer = dependencies.clearTimer ?? ((timer) => clearTimeout(timer as ReturnType<typeof setTimeout>));
     this.#resourceIdleMs = dependencies.resourceIdleMs ?? 60_000;
     this.#regionIdleMs = dependencies.regionIdleMs ?? 60_000;
-    this.#refreshMs = dependencies.refreshMs ?? 300_000;
     this.#maxRegions = dependencies.maxRegions ?? null;
     this.#maxResourceTypesPerRegion = dependencies.maxResourceTypesPerRegion ?? 16;
     this.#coldStartWindowMs = dependencies.coldStartWindowMs ?? 60_000;
     this.#maxColdStartsPerWindow = dependencies.maxColdStartsPerWindow ?? 64;
     this.#reconnectDelayMs = dependencies.reconnectDelayMs
       ?? ((attempt) => Math.min(30_000, 1_000 * 2 ** Math.max(0, attempt - 1)));
+    this.#cache = new MapResourceBinaryCache({
+      maxBytes: dependencies.cacheMaxBytes ?? 512 * 1024 * 1024,
+      previousGenerationGraceMs: dependencies.cachePreviousGenerationGraceMs ?? 30_000,
+      now: this.#now,
+    });
   }
 
   async reconcile(input: { relayBaseUrl: string; primaryRegionId: string; activeRegionIds: string[] }): Promise<void> {
@@ -222,8 +244,24 @@ export class RelayMapResourceRuntime {
         throw new Error(`Relay map resource capacity ${this.#maxResourceTypesPerRegion} is exhausted for region ${regionId}`);
       }
       this.#recordColdStart();
-      resource = { resourceId, leases: 0, subscribed: false, subscribing: false, snapshot: null, nextGeneration: 1, idleTimer: null, refreshTimer: null, refreshDue: true, waiters: new Set(), failure: region.failure, compactBytes: 0 };
+      const cached = this.#cache.latest(mapResourceScopeKey(regionId, resourceId));
+      const cachedGeneration = cached ? Number(cached.generation) : 0;
+      resource = {
+        resourceId,
+        leases: 0,
+        subscribed: false,
+        subscribing: false,
+        snapshot: null,
+        nextGeneration: Number.isSafeInteger(cachedGeneration) ? cachedGeneration + 1 : 1,
+        idleTimer: null,
+        waiters: new Set(),
+        failure: region.failure,
+        compactBytes: cached?.encodedBytes ?? 0,
+        listeners: new Set(),
+        cacheReleases: new Set(),
+      };
       region.resources.set(resourceId, resource);
+      if (!cached) this.#emitEvent(resource, { type: "partition-loading", key: mapResourceScopeKey(regionId, resourceId) });
       if (region.session) await this.#subscribe(region, resource);
       else if (!region.schemaUnavailable) await this.#ensureSession(region);
       if (!region.session && !region.schemaUnavailable) this.#scheduleRestart(region);
@@ -233,17 +271,19 @@ export class RelayMapResourceRuntime {
       resource.idleTimer = null;
     }
     resource.leases += 1;
-    this.#scheduleResourceRefresh(region, resource);
     return this.#lease(region, resource);
   }
 
   #lease(region: RegionEntry, resource: ResourceEntry): MapResourceLease {
     let released = false;
+    const key = mapResourceScopeKey(region.regionId, resource.resourceId);
+    const releaseCache = this.#cache.retain(key);
+    resource.cacheReleases.add(releaseCache);
     return {
-      key: mapResourceScopeKey(region.regionId, resource.resourceId),
+      key,
       state: () => {
         const warning = resource.failure ?? region.failure;
-        if (resource.snapshot) return { status: warning ? "stale" : "live", snapshot: resource.snapshot, warning };
+        if (resource.snapshot || this.#cache.latest(key)) return { status: warning ? "stale" : "live", snapshot: resource.snapshot, warning };
         return { status: warning ? "unavailable" : "loading", snapshot: null, warning };
       },
       waitForSnapshot: (timeoutMs) => {
@@ -258,13 +298,20 @@ export class RelayMapResourceRuntime {
           resource.waiters.add(waiter);
         });
       },
+      current: (generation) => generation === undefined ? this.#cache.latest(key) : this.#cache.get(key, generation),
+      subscribe: (listener) => {
+        resource.listeners.add(listener);
+        const current = this.#cache.latest(key);
+        if (current) listener(this.#readyEvent(current));
+        return () => { resource.listeners.delete(listener); };
+      },
       release: async () => {
         if (released) return;
         released = true;
+        resource.cacheReleases.delete(releaseCache);
+        releaseCache();
         resource.leases = Math.max(0, resource.leases - 1);
         if (resource.leases === 0) {
-          if (resource.refreshTimer != null) this.#clearTimer(resource.refreshTimer);
-          resource.refreshTimer = null;
           resource.idleTimer = this.#setTimer(() => { void this.#expireResource(region, resource); }, this.#resourceIdleMs);
         }
       },
@@ -319,6 +366,8 @@ export class RelayMapResourceRuntime {
       session = this.#createSession({
         onSnapshot: (snapshot) => this.#acceptSnapshot(entry, session!, snapshot),
         onStatus: (status) => this.#acceptStatus(entry, session!, status),
+        onProvisional: (notice) => this.#acceptProvisional(entry, session!, notice),
+        onDelta: (notice) => this.#acceptDelta(entry, session!, notice),
         onFailure: (error) => this.#failRegion(entry, session!, error),
       });
       entry.session = session;
@@ -337,7 +386,7 @@ export class RelayMapResourceRuntime {
         throw new Error("Relay map resource runtime stopped or changed configuration during session open");
       }
       for (const resource of entry.resources.values()) {
-        if (resource.refreshDue || !resource.snapshot || resource.failure) await this.#subscribe(entry, resource);
+        await this.#subscribe(entry, resource);
       }
     } catch (error) {
       if (entry.session === session) entry.session = null;
@@ -391,6 +440,42 @@ export class RelayMapResourceRuntime {
     if (this.#stopped || this.#regions.get(entry.regionId) !== entry || entry.session !== session || snapshot.regionId !== entry.regionId) return;
     const resource = entry.resources.get(snapshot.resourceId);
     if (!resource) return;
+    const key = mapResourceScopeKey(entry.regionId, resource.resourceId);
+    const generation = String(snapshot.generation);
+    const coordinates = snapshot.packedCoordinates;
+    let partition: CachedBinaryPartition;
+    try {
+      const encoded = encodeResourcePartition({
+        regionId: entry.regionId,
+        resourceId: resource.resourceId,
+        dimension: "1",
+        generation,
+        coordinates,
+      });
+      partition = {
+        key,
+        regionId: entry.regionId,
+        resourceId: resource.resourceId,
+        generation,
+        coordinates,
+        encoded,
+        encodedBytes: encoded.byteLength,
+        pointCount: coordinates.length,
+        receivedAt: snapshot.receivedAt,
+        freshness: "live",
+        warning: null,
+      };
+      this.#cache.put(partition);
+    } catch (error) {
+      resource.failure = errorMessage(error);
+      this.#emitEvent(resource, {
+        type: "partition-unavailable",
+        key,
+        warning: resource.failure,
+        ...(error instanceof MapResourceAdmissionError ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
+      });
+      return;
+    }
     let compactBytes = 2;
     snapshot.compactResources = snapshot.data.resources.map((point, index) => {
       const tuple = [point.entityId, point.regionId, point.resourceId, point.locationX, point.locationZ] as const;
@@ -401,7 +486,6 @@ export class RelayMapResourceRuntime {
     resource.snapshot = snapshot;
     resource.compactBytes = compactBytes;
     resource.nextGeneration = Math.max(resource.nextGeneration, snapshot.generation + 1);
-    resource.refreshDue = false;
     resource.failure = null;
     entry.failure = null;
     entry.schemaUnavailable = false;
@@ -412,40 +496,79 @@ export class RelayMapResourceRuntime {
     }
     resource.waiters.clear();
     this.#onGeneration(snapshot);
-    this.#scheduleResourceRefresh(entry, resource);
-    if (![...entry.resources.values()].some((candidate) => candidate.refreshDue)) {
-      this.#detachHydratedSession(entry, session);
-    }
+    this.#emitEvent(resource, this.#readyEvent(partition));
   }
 
-  #scheduleResourceRefresh(entry: RegionEntry, resource: ResourceEntry) {
-    if (resource.refreshTimer != null || resource.leases === 0 || !resource.snapshot || this.#stopped) return;
-    resource.refreshTimer = this.#setTimer(() => {
-      resource.refreshTimer = null;
-      if (this.#regions.get(entry.regionId) !== entry || entry.resources.get(resource.resourceId) !== resource || resource.leases === 0) return;
-      resource.refreshDue = true;
-      void this.#hydrateResource(entry, resource);
-    }, this.#refreshMs);
+  #acceptProvisional(entry: RegionEntry, session: RegionSession, notice: MapResourceProvisionalNotice) {
+    if (this.#stopped || this.#regions.get(entry.regionId) !== entry || entry.session !== session || notice.regionId !== entry.regionId) return;
+    const resource = entry.resources.get(notice.resourceId);
+    if (!resource) return;
+    this.#emitEvent(resource, {
+      type: "partition-provisional",
+      key: mapResourceScopeKey(entry.regionId, resource.resourceId),
+      additions: notice.additions,
+    });
   }
 
-  async #hydrateResource(entry: RegionEntry, resource: ResourceEntry) {
-    if (this.#stopped || this.#regions.get(entry.regionId) !== entry || entry.resources.get(resource.resourceId) !== resource) return;
-    if (entry.session) {
-      if (!resource.subscribed) await this.#subscribe(entry, resource);
-    } else if (!entry.schemaUnavailable) {
-      await this.#ensureSession(entry);
+  #acceptDelta(entry: RegionEntry, session: RegionSession, notice: MapResourceDeltaNotice) {
+    if (this.#stopped || this.#regions.get(entry.regionId) !== entry || entry.session !== session || notice.regionId !== entry.regionId) return;
+    const resource = entry.resources.get(notice.resourceId);
+    if (!resource) return;
+    const key = mapResourceScopeKey(entry.regionId, resource.resourceId);
+    const current = this.#cache.latest(key);
+    if (!current) {
+      this.#emitEvent(resource, { type: "partition-loading", key });
+      return;
     }
-    if (!entry.session && !entry.schemaUnavailable && resource.refreshDue) this.#scheduleRestart(entry);
-  }
-
-  #detachHydratedSession(entry: RegionEntry, session: RegionSession) {
-    if (entry.session !== session) return;
-    entry.session = null;
-    for (const resource of entry.resources.values()) {
-      resource.subscribed = false;
-      resource.subscribing = false;
+    try {
+      const coordinates = mergePackedCoordinateDelta(current.coordinates, notice.additions, notice.removals);
+      const generation = String(resource.nextGeneration++);
+      const encoded = encodeResourcePartition({
+        regionId: entry.regionId,
+        resourceId: resource.resourceId,
+        dimension: "1",
+        generation,
+        coordinates,
+      });
+      const partition: CachedBinaryPartition = {
+        key,
+        regionId: entry.regionId,
+        resourceId: resource.resourceId,
+        generation,
+        coordinates,
+        encoded,
+        encodedBytes: encoded.byteLength,
+        pointCount: coordinates.length,
+        receivedAt: notice.receivedAt,
+        freshness: "live",
+        warning: null,
+      };
+      this.#cache.put(partition);
+      resource.compactBytes = partition.encodedBytes;
+      resource.failure = null;
+      this.#emitEvent(resource, {
+        type: "partition-delta",
+        key,
+        baseGeneration: current.generation,
+        generation,
+        additions: notice.additions,
+        removals: notice.removals,
+      });
+      this.#onGeneration({
+        regionId: entry.regionId,
+        resourceId: resource.resourceId,
+        generation: Number(generation),
+        receivedAt: notice.receivedAt,
+      });
+    } catch (error) {
+      resource.failure = errorMessage(error);
+      this.#emitEvent(resource, {
+        type: "partition-unavailable",
+        key,
+        warning: resource.failure,
+        ...(error instanceof MapResourceAdmissionError ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
+      });
     }
-    void session.stop().catch(() => {});
   }
 
   #acceptStatus(entry: RegionEntry, session: RegionSession, status: MapResourceStatus) {
@@ -453,6 +576,17 @@ export class RelayMapResourceRuntime {
     const resource = entry.resources.get(status.resourceId);
     if (!resource) return;
     resource.failure = status.warning;
+    const key = mapResourceScopeKey(entry.regionId, resource.resourceId);
+    const current = this.#cache.latest(key);
+    if (current) {
+      this.#cache.put({ ...current, freshness: "stale", warning: status.warning });
+      this.#emitEvent(resource, {
+        type: "partition-stale",
+        key,
+        generation: current.generation,
+        warning: status.warning,
+      });
+    }
     this.#onGeneration({
       regionId: entry.regionId,
       resourceId: resource.resourceId,
@@ -468,6 +602,17 @@ export class RelayMapResourceRuntime {
       resource.subscribed = false;
       resource.subscribing = false;
       resource.failure = error;
+      const key = mapResourceScopeKey(entry.regionId, resource.resourceId);
+      const current = this.#cache.latest(key);
+      if (current) {
+        this.#cache.put({ ...current, freshness: "stale", warning: error });
+        this.#emitEvent(resource, {
+          type: "partition-stale",
+          key,
+          generation: current.generation,
+          warning: error,
+        });
+      }
     }
     if (/schema.*mismatch/i.test(error)) {
       entry.schemaUnavailable = true;
@@ -500,14 +645,15 @@ export class RelayMapResourceRuntime {
   async #expireResource(entry: RegionEntry, resource: ResourceEntry) {
     if (entry.resources.get(resource.resourceId) !== resource || resource.leases > 0) return;
     resource.idleTimer = null;
-    if (resource.refreshTimer != null) this.#clearTimer(resource.refreshTimer);
-    resource.refreshTimer = null;
     entry.session?.unsubscribe(resource.resourceId);
     for (const waiter of resource.waiters) {
       this.#clearTimer(waiter.timer);
       waiter.resolve(null);
     }
     resource.waiters.clear();
+    resource.listeners.clear();
+    for (const release of resource.cacheReleases) release();
+    resource.cacheReleases.clear();
     entry.resources.delete(resource.resourceId);
     if (!entry.pinned && entry.resources.size === 0) this.#scheduleRegionIdleClose(entry);
   }
@@ -529,10 +675,6 @@ export class RelayMapResourceRuntime {
     if (entry.reconnectTimer != null) this.#clearTimer(entry.reconnectTimer);
     entry.idleTimer = null;
     entry.reconnectTimer = null;
-    for (const resource of entry.resources.values()) {
-      if (resource.refreshTimer != null) this.#clearTimer(resource.refreshTimer);
-      resource.refreshTimer = null;
-    }
     this.#regions.delete(entry.regionId);
     await entry.session?.stop();
   }
@@ -604,6 +746,7 @@ export class RelayMapResourceRuntime {
       } : null,
       reconnectAttemptCount: regions.reduce((total, entry) => total + entry.reconnectAttempts, 0),
       capacityRejectionCount: this.#capacityRejectionCount,
+      binaryCache: this.#cache.health(),
       regions: regionHealth.map(({ entry, summary }) => ({
         regionId: entry.regionId, pinned: entry.pinned, resourceCount: entry.resources.size,
         leaseCount: this.#leaseCount(entry), failure: entry.failure,
@@ -629,6 +772,23 @@ export class RelayMapResourceRuntime {
     };
   }
 
+  #readyEvent(partition: CachedBinaryPartition): MapResourcePartitionEvent {
+    return {
+      type: "partition-ready",
+      key: partition.key,
+      generation: partition.generation,
+      pointCount: partition.pointCount,
+      encodedBytes: partition.encodedBytes,
+      receivedAt: partition.receivedAt,
+      freshness: partition.freshness,
+    };
+  }
+
+  #emitEvent(resource: ResourceEntry, event: MapResourcePartitionEvent): void {
+    this.#onEvent(event);
+    for (const listener of resource.listeners) listener(event);
+  }
+
   async stop(): Promise<void> {
     this.#stopped = true;
     const entries = [...this.#regions.values()];
@@ -639,12 +799,14 @@ export class RelayMapResourceRuntime {
       if (entry.reconnectTimer != null) this.#clearTimer(entry.reconnectTimer);
       for (const resource of entry.resources.values()) {
         if (resource.idleTimer != null) this.#clearTimer(resource.idleTimer);
-        if (resource.refreshTimer != null) this.#clearTimer(resource.refreshTimer);
         for (const waiter of resource.waiters) {
           this.#clearTimer(waiter.timer);
           waiter.resolve(null);
         }
         resource.waiters.clear();
+        resource.listeners.clear();
+        for (const release of resource.cacheReleases) release();
+        resource.cacheReleases.clear();
       }
       await entry.session?.stop();
     }

@@ -3,17 +3,18 @@ import {
   normalizeMapResourceRegionGeneration,
   type MapResourcePoint,
 } from "./mapResourceProjection.ts";
+import { MapResourceLiveIndex } from "./mapResourceLiveIndex.ts";
 import { assertSchemaFingerprint, schemaBindingsReady } from "./schemaManifest.ts";
 
 type BindingManifest = Parameters<typeof assertSchemaFingerprint>[0];
 type CachedTable = {
   iter(): IterableIterator<unknown>;
-  onInsert?(callback: () => void): void;
-  onUpdate?(callback: () => void): void;
-  onDelete?(callback: () => void): void;
-  removeOnInsert?(callback: () => void): void;
-  removeOnUpdate?(callback: () => void): void;
-  removeOnDelete?(callback: () => void): void;
+  onInsert?(callback: (...args: unknown[]) => void): void;
+  onUpdate?(callback: (...args: unknown[]) => void): void;
+  onDelete?(callback: (...args: unknown[]) => void): void;
+  removeOnInsert?(callback: (...args: unknown[]) => void): void;
+  removeOnUpdate?(callback: (...args: unknown[]) => void): void;
+  removeOnDelete?(callback: (...args: unknown[]) => void): void;
 };
 type SubscriptionHandle = { unsubscribe(): void };
 type SubscriptionBuilder = {
@@ -38,7 +39,6 @@ type ConnectionBuilder = {
 export type RegionalBindingModule = { DbConnection: { builder(): ConnectionBuilder } };
 
 const MAX_RESOURCE_IDS = 16;
-const DEFAULT_MAX_NODES = 250_000;
 const DEFAULT_REBUILD_DELAY_MS = 300;
 
 export type RegionSessionConfig = {
@@ -48,7 +48,6 @@ export type RegionSessionConfig = {
   manifest: BindingManifest;
   generation: number;
   regionId: string;
-  maxNodes?: number;
 };
 
 export type MapResourceSnapshot = {
@@ -61,6 +60,7 @@ export type MapResourceSnapshot = {
   schemaFingerprint: string;
   generation: number;
   receivedAt: string;
+  packedCoordinates: Uint32Array;
 };
 
 export type MapResourceStatus = {
@@ -68,6 +68,17 @@ export type MapResourceStatus = {
   resourceId: string;
   warning: string;
   receivedAt: string;
+};
+
+export type MapResourceProvisionalNotice = {
+  regionId: string;
+  resourceId: string;
+  additions: Uint32Array;
+  receivedAt: string;
+};
+
+export type MapResourceDeltaNotice = MapResourceProvisionalNotice & {
+  removals: Uint32Array;
 };
 
 export type ResourceRegionHealth = {
@@ -86,7 +97,7 @@ export type ResourceRegionHealth = {
 type ResourceSubscription = {
   resourceId: string;
   generation: number;
-  handle: SubscriptionHandle;
+  handle: SubscriptionHandle | null;
   applied: boolean;
 };
 
@@ -114,6 +125,8 @@ export class RelayMapResourceRegionSession {
   readonly #loadBindings: () => Promise<RegionalBindingModule>;
   readonly #onSnapshot: (snapshot: MapResourceSnapshot) => void | Promise<void>;
   readonly #onStatus: (status: MapResourceStatus) => void | Promise<void>;
+  readonly #onProvisional: (notice: MapResourceProvisionalNotice) => void | Promise<void>;
+  readonly #onDelta: (notice: MapResourceDeltaNotice) => void | Promise<void>;
   readonly #onFailure: (error: string) => void;
   readonly #now: () => Date;
   readonly #setTimer: (callback: () => void, delayMs: number) => unknown;
@@ -122,8 +135,11 @@ export class RelayMapResourceRegionSession {
   #connection: BindingConnection | null = null;
   #pendingConnection: BindingConnection | null = null;
   #abortStart: (() => void) | null = null;
-  #config: (Omit<RegionSessionConfig, "regionId" | "generation" | "maxNodes"> & { regionId: string; generation: number; maxNodes: number }) | null = null;
+  #config: (Omit<RegionSessionConfig, "regionId" | "generation"> & { regionId: string; generation: number }) | null = null;
   #subscriptions = new Map<string, ResourceSubscription>();
+  #index: MapResourceLiveIndex | null = null;
+  #dirtyResourceIds = new Set<string>();
+  #needsReseed = false;
   #listenersAttached = false;
   #rebuildTimer: unknown | null = null;
   #startedAt: Date | null = null;
@@ -141,12 +157,19 @@ export class RelayMapResourceRegionSession {
     lastError: null,
   };
 
-  readonly #changed = () => this.#queueRebuild();
+  readonly #resourceInserted = (...args: unknown[]) => this.#handleResourceInsert(args);
+  readonly #resourceUpdated = (...args: unknown[]) => this.#handleResourceUpdate(args);
+  readonly #resourceDeleted = (...args: unknown[]) => this.#handleResourceDelete(args);
+  readonly #locationInserted = (...args: unknown[]) => this.#handleLocationInsert(args);
+  readonly #locationUpdated = (...args: unknown[]) => this.#handleLocationUpdate(args);
+  readonly #locationDeleted = (...args: unknown[]) => this.#handleLocationDelete(args);
 
   constructor({
     loadBindings = loadBundledRegionalBindings,
     onSnapshot,
     onStatus = () => {},
+    onProvisional = () => {},
+    onDelta = () => {},
     onFailure = () => {},
     now = () => new Date(),
     setTimer = (callback, delayMs) => setTimeout(callback, delayMs),
@@ -156,6 +179,8 @@ export class RelayMapResourceRegionSession {
     loadBindings?: () => Promise<RegionalBindingModule>;
     onSnapshot: (snapshot: MapResourceSnapshot) => void | Promise<void>;
     onStatus?: (status: MapResourceStatus) => void | Promise<void>;
+    onProvisional?: (notice: MapResourceProvisionalNotice) => void | Promise<void>;
+    onDelta?: (notice: MapResourceDeltaNotice) => void | Promise<void>;
     onFailure?: (error: string) => void;
     now?: () => Date;
     setTimer?: (callback: () => void, delayMs: number) => unknown;
@@ -165,6 +190,8 @@ export class RelayMapResourceRegionSession {
     this.#loadBindings = loadBindings;
     this.#onSnapshot = onSnapshot;
     this.#onStatus = onStatus;
+    this.#onProvisional = onProvisional;
+    this.#onDelta = onDelta;
     this.#onFailure = onFailure;
     this.#now = now;
     this.#setTimer = setTimer;
@@ -180,8 +207,8 @@ export class RelayMapResourceRegionSession {
       ...config,
       regionId: decimal(config.regionId, "Relay map resource region id"),
       generation: positiveInteger(config.generation, "Relay map resource generation"),
-      maxNodes: positiveInteger(config.maxNodes ?? DEFAULT_MAX_NODES, "Relay map resource node budget"),
     };
+    this.#index = new MapResourceLiveIndex(this.#config.regionId);
     this.#stopping = false;
     this.#startedAt = this.#now();
     this.#health.stage = "connecting";
@@ -232,6 +259,7 @@ export class RelayMapResourceRegionSession {
               this.#pendingConnection = null;
               this.#health.connected = true;
               this.#health.stage = "subscribed";
+              this.#attachListeners(connection);
               resolve();
             })
             .onConnectError((_context, error) => fail(error))
@@ -263,19 +291,29 @@ export class RelayMapResourceRegionSession {
     const existing = this.#subscriptions.get(resourceId);
     if (existing) return;
     if (this.#subscriptions.size >= MAX_RESOURCE_IDS) throw new Error(`Relay map resource request cap ${MAX_RESOURCE_IDS} exceeded`);
-    let subscription: ResourceSubscription;
-    const handle = connection.subscriptionBuilder()
+    const subscription: ResourceSubscription = {
+      resourceId,
+      generation: nextGeneration,
+      handle: null,
+      applied: false,
+    };
+    this.#subscriptions.set(resourceId, subscription);
+    this.#index?.select(resourceId);
+    try {
+      subscription.handle = connection.subscriptionBuilder()
       .onApplied(() => {
         if (this.#subscriptions.get(resourceId) !== subscription) return;
         subscription.applied = true;
         this.#refreshAppliedResourceIds();
-        this.#attachListeners(connection);
-        this.#applyGeneration(connection, [subscription]);
+        this.#applyGeneration(connection, [subscription], true);
       })
       .onError((_context, error) => this.#recordError(error))
       .subscribe(mapResourceQueries(resourceId));
-    subscription = { resourceId, generation: nextGeneration, handle, applied: false };
-    this.#subscriptions.set(resourceId, subscription);
+    } catch (error) {
+      this.#subscriptions.delete(resourceId);
+      this.#index?.unselect(resourceId);
+      throw error;
+    }
     this.#health.stage = "subscribed";
   }
 
@@ -283,8 +321,10 @@ export class RelayMapResourceRegionSession {
     const resourceId = decimal(rawResourceId, "Relay map resource id");
     const subscription = this.#subscriptions.get(resourceId);
     if (!subscription) return;
-    subscription.handle.unsubscribe();
+    subscription.handle?.unsubscribe();
     this.#subscriptions.delete(resourceId);
+    this.#index?.unselect(resourceId);
+    this.#dirtyResourceIds.delete(resourceId);
     delete this.#health.rowsPerType[resourceId];
     this.#health.rowCount = Object.values(this.#health.rowsPerType).reduce(
       (total, counts) => total + counts.resourceState + counts.locationState,
@@ -295,37 +335,164 @@ export class RelayMapResourceRegionSession {
 
   #attachListeners(connection: BindingConnection): void {
     if (this.#listenersAttached) return;
-    for (const table of [connection.db.resourceState, connection.db.locationState]) {
-      table.onInsert?.(this.#changed);
-      table.onUpdate?.(this.#changed);
-      table.onDelete?.(this.#changed);
-    }
+    connection.db.resourceState.onInsert?.(this.#resourceInserted);
+    connection.db.resourceState.onUpdate?.(this.#resourceUpdated);
+    connection.db.resourceState.onDelete?.(this.#resourceDeleted);
+    connection.db.locationState.onInsert?.(this.#locationInserted);
+    connection.db.locationState.onUpdate?.(this.#locationUpdated);
+    connection.db.locationState.onDelete?.(this.#locationDeleted);
     this.#listenersAttached = true;
   }
 
   #removeListeners(connection = this.#connection): void {
     if (!connection || !this.#listenersAttached) return;
-    for (const table of [connection.db.resourceState, connection.db.locationState]) {
-      table.removeOnInsert?.(this.#changed);
-      table.removeOnUpdate?.(this.#changed);
-      table.removeOnDelete?.(this.#changed);
-    }
+    connection.db.resourceState.removeOnInsert?.(this.#resourceInserted);
+    connection.db.resourceState.removeOnUpdate?.(this.#resourceUpdated);
+    connection.db.resourceState.removeOnDelete?.(this.#resourceDeleted);
+    connection.db.locationState.removeOnInsert?.(this.#locationInserted);
+    connection.db.locationState.removeOnUpdate?.(this.#locationUpdated);
+    connection.db.locationState.removeOnDelete?.(this.#locationDeleted);
     this.#listenersAttached = false;
   }
 
-  #queueRebuild(): void {
+  #queueRebuild(resourceIds: Iterable<string> = []): void {
+    for (const resourceId of resourceIds) this.#dirtyResourceIds.add(resourceId);
     if (!this.#connection || this.#rebuildTimer !== null) return;
     this.#rebuildTimer = this.#setTimer(() => {
       this.#rebuildTimer = null;
       const connection = this.#connection;
       if (!connection) return;
-      this.#applyGeneration(connection);
+      const dirtyResourceIds = this.#needsReseed
+        ? [...this.#subscriptions.keys()]
+        : [...this.#dirtyResourceIds];
+      this.#dirtyResourceIds.clear();
+      const reseed = this.#needsReseed;
+      this.#needsReseed = false;
+      this.#publishChanges(connection, dirtyResourceIds, reseed);
     }, this.#rebuildDelayMs);
+  }
+
+  #fallbackChanged(): void {
+    this.#needsReseed = true;
+    this.#queueRebuild(this.#subscriptions.keys());
+  }
+
+  #handleResourceInsert(args: unknown[]): void {
+    const row = args.at(-1);
+    if (!row || typeof row !== "object") return this.#fallbackChanged();
+    try {
+      this.#index?.upsertResource(row);
+      this.#queueRebuild(this.#index?.dirtyResourceIds());
+    } catch (error) {
+      this.#recordError(error);
+    }
+  }
+
+  #handleResourceUpdate(args: unknown[]): void {
+    const previous = args.at(-2);
+    const next = args.at(-1);
+    if (!previous || typeof previous !== "object" || !next || typeof next !== "object") return this.#fallbackChanged();
+    try {
+      this.#index?.deleteResource(previous);
+      this.#index?.upsertResource(next);
+      this.#queueRebuild(this.#index?.dirtyResourceIds());
+    } catch (error) {
+      this.#recordError(error);
+    }
+  }
+
+  #handleResourceDelete(args: unknown[]): void {
+    const row = args.at(-1);
+    if (!row || typeof row !== "object") return this.#fallbackChanged();
+    try {
+      this.#index?.deleteResource(row);
+      this.#queueRebuild(this.#index?.dirtyResourceIds());
+    } catch (error) {
+      this.#recordError(error);
+    }
+  }
+
+  #handleLocationInsert(args: unknown[]): void {
+    const row = args.at(-1);
+    if (!row || typeof row !== "object") return this.#fallbackChanged();
+    try {
+      this.#index?.upsertLocation(row);
+      this.#queueRebuild(this.#index?.dirtyResourceIds());
+    } catch (error) {
+      this.#recordError(error);
+    }
+  }
+
+  #handleLocationUpdate(args: unknown[]): void {
+    const previous = args.at(-2);
+    const next = args.at(-1);
+    if (!previous || typeof previous !== "object" || !next || typeof next !== "object") return this.#fallbackChanged();
+    try {
+      this.#index?.deleteLocation(previous);
+      this.#index?.upsertLocation(next);
+      this.#queueRebuild(this.#index?.dirtyResourceIds());
+    } catch (error) {
+      this.#recordError(error);
+    }
+  }
+
+  #handleLocationDelete(args: unknown[]): void {
+    const row = args.at(-1);
+    if (!row || typeof row !== "object") return this.#fallbackChanged();
+    try {
+      this.#index?.deleteLocation(row);
+      this.#queueRebuild(this.#index?.dirtyResourceIds());
+    } catch (error) {
+      this.#recordError(error);
+    }
+  }
+
+  #publishChanges(connection: BindingConnection, resourceIds: string[], reseed: boolean): void {
+    if (reseed) {
+      this.#applyGeneration(
+        connection,
+        resourceIds.map((resourceId) => this.#subscriptions.get(resourceId)).filter((value): value is ResourceSubscription => Boolean(value?.applied)),
+        true,
+      );
+      return;
+    }
+    const receivedAt = this.#now().toISOString();
+    const notices: Promise<void>[] = [];
+    for (const resourceId of resourceIds) {
+      const subscription = this.#subscriptions.get(resourceId);
+      if (!subscription) continue;
+      const delta = this.#index?.drain(resourceId) ?? {
+        resourceId,
+        additions: new Uint32Array(),
+        removals: new Uint32Array(),
+      };
+      if (delta.additions.length === 0 && delta.removals.length === 0) continue;
+      if (!subscription.applied) {
+        if (delta.additions.length > 0) {
+          notices.push(Promise.resolve(this.#onProvisional({
+            regionId: this.#requiredConfig().regionId,
+            resourceId,
+            additions: delta.additions,
+            receivedAt,
+          })));
+        }
+        continue;
+      }
+      notices.push(Promise.resolve(this.#onDelta({
+        regionId: this.#requiredConfig().regionId,
+        resourceId,
+        additions: delta.additions,
+        removals: delta.removals,
+        receivedAt,
+      })));
+    }
+    void Promise.all(notices).catch((error) => this.#recordError(error));
   }
 
   #applyGeneration(
     connection: BindingConnection,
     selectedSubscriptions = [...this.#subscriptions.values()].filter((subscription) => subscription.applied),
+    reseedIndex = false,
   ): void {
     const config = this.#config;
     const subscriptions = selectedSubscriptions.filter((subscription) => (
@@ -344,16 +511,21 @@ export class RelayMapResourceRegionSession {
         locationRows,
         observedAt: receivedAt,
       });
+      const seeded = reseedIndex
+        ? this.#index?.seed([...this.#subscriptions.keys()], resourceRows, locationRows)
+        : null;
       this.#health.normalizationDurationMs = Math.max(0, performance.now() - normalizationStartedAt);
       const pending: Promise<void>[] = [];
       const incompleteWarnings: string[] = [];
-      const hardErrors: string[] = [];
       let publishedSnapshot = false;
       for (const subscription of subscriptions) {
         const result = normalized.get(subscription.resourceId);
         if (!result) continue;
         this.#health.rowsPerType[subscription.resourceId] = { ...result.rowCounts };
-        if (!result.complete) {
+        const packedCoordinates = seeded?.get(subscription.resourceId)?.coordinates
+          ?? this.#index?.coordinates(subscription.resourceId)
+          ?? new Uint32Array();
+        if (!result.complete || seeded?.get(subscription.resourceId)?.complete === false) {
           const warning = result.warnings.join(" ") || "Relay map resource generation is incomplete";
           incompleteWarnings.push(warning);
           pending.push(Promise.resolve(this.#onStatus({
@@ -362,12 +534,6 @@ export class RelayMapResourceRegionSession {
             warning,
             receivedAt,
           })));
-          continue;
-        }
-        if (result.resources.length > config.maxNodes) {
-          const message = `Relay map resource node budget ${config.maxNodes} exceeded by ${result.resources.length} nodes`;
-          hardErrors.push(message);
-          this.#onFailure(message);
           continue;
         }
         publishedSnapshot = true;
@@ -380,6 +546,7 @@ export class RelayMapResourceRegionSession {
           schemaFingerprint: config.schemaFingerprint,
           generation: subscription.generation++,
           receivedAt,
+          packedCoordinates,
         };
         pending.push(Promise.resolve(this.#onSnapshot(snapshot)));
       }
@@ -387,14 +554,14 @@ export class RelayMapResourceRegionSession {
         (total, counts) => total + counts.resourceState + counts.locationState,
         0,
       );
-      this.#health.stage = hardErrors.length ? "error" : incompleteWarnings.length ? "partial" : "applied";
-      this.#health.lastError = [...hardErrors, ...incompleteWarnings].join(" ") || null;
+      this.#health.stage = incompleteWarnings.length ? "partial" : "applied";
+      this.#health.lastError = incompleteWarnings.join(" ") || null;
       void Promise.all(pending).then(() => {
         if (publishedSnapshot) this.#health.applied = true;
-        this.#health.stage = hardErrors.length ? "error" : incompleteWarnings.length ? "partial" : "applied";
+        this.#health.stage = incompleteWarnings.length ? "partial" : "applied";
         this.#refreshAppliedResourceIds();
         if (publishedSnapshot) this.#health.lastAppliedAt = receivedAt;
-        this.#health.lastError = [...hardErrors, ...incompleteWarnings].join(" ") || null;
+        this.#health.lastError = incompleteWarnings.join(" ") || null;
         if (publishedSnapshot && this.#health.firstGenerationLatencyMs === null && this.#startedAt) {
           this.#health.firstGenerationLatencyMs = Math.max(0, this.#now().getTime() - this.#startedAt.getTime());
         }
@@ -435,14 +602,17 @@ export class RelayMapResourceRegionSession {
     if (this.#rebuildTimer !== null) this.#clearTimer(this.#rebuildTimer);
     this.#rebuildTimer = null;
     this.#removeListeners();
-    for (const subscription of this.#subscriptions.values()) subscription.handle.unsubscribe();
+    for (const subscription of this.#subscriptions.values()) subscription.handle?.unsubscribe();
     this.#subscriptions.clear();
+    this.#dirtyResourceIds.clear();
+    this.#needsReseed = false;
     this.#abortStart?.();
     this.#connection?.disconnect();
     this.#connection = null;
     this.#pendingConnection = null;
     this.#abortStart = null;
     this.#config = null;
+    this.#index = null;
     this.#health.connected = false;
     this.#health.appliedResourceIds = [];
     this.#health.stage = "stopped";

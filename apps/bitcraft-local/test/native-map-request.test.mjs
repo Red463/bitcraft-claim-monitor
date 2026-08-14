@@ -27,11 +27,12 @@ test("native map request keeps resource and enemy namespaces separate", () => {
   assert.equal(new URL(request.snapshotUrl, "http://local").searchParams.has("resourceIds"), false);
   assert.equal(new URL(request.snapshotUrl, "http://local").searchParams.get("layers").includes("resources"), false);
   assert.deepEqual(request.resourcePartitions.map(({ key, url }) => [key, url]), [
-    ["19|resource:123", "/api/local/map/resources?region=19&resourceId=123"],
-    ["19|resource:456", "/api/local/map/resources?region=19&resourceId=456"],
-    ["24|resource:123", "/api/local/map/resources?region=24&resourceId=123"],
-    ["24|resource:456", "/api/local/map/resources?region=24&resourceId=456"],
+    ["19|resource:123", undefined],
+    ["19|resource:456", undefined],
+    ["24|resource:123", undefined],
+    ["24|resource:456", undefined],
   ]);
+  assert.equal(JSON.stringify(request).includes("/api/local/map/resources"), false);
   assert.equal(new URL(request.resourceEventUrl, "http://local").searchParams.get("regions"), "19,24");
   assert.equal(new URL(request.resourceEventUrl, "http://local").searchParams.get("resourceIds"), "123,456");
   assert.equal(new URL(request.eventsUrl, "http://local").searchParams.has("resourceIds"), false);

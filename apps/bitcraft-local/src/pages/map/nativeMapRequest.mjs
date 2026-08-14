@@ -53,10 +53,7 @@ export function nativeMapRequest({ operationalRegionIds = [], playerRegionIds = 
     snapshotParams.set("playerIds", players.join(","));
   }
   if (enemies.length) snapshotParams.set("enemyTypes", enemies.join(","));
-  const resourcePartitions = resourcePartitionPlan(resourceRegions, resources).map((partition) => ({
-    ...partition,
-    url: `/api/local/map/resources?${new URLSearchParams({ region: partition.regionId, resourceId: partition.resourceId })}`,
-  }));
+  const resourcePartitions = resourcePartitionPlan(resourceRegions, resources);
   const resourceEventUrl = resourcePartitions.length
     ? `/api/local/map/resource-events?${new URLSearchParams({ regions: resourceRegions.join(","), resourceIds: resources.join(",") })}`
     : null;

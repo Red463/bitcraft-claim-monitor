@@ -120,6 +120,13 @@ export function publicMapHealth({ resourceHealth = {}, telemetry = {}, tileHealt
       reconnectAttemptCount: Number(resourceHealth.reconnectAttemptCount ?? 0),
       capacityRejectionCount: Number(resourceHealth.capacityRejectionCount ?? 0),
       coldStartsInWindow: Number(resourceHealth.coldStartsInWindow ?? 0),
+      binaryCache: {
+        bytes: Number(resourceHealth.binaryCache?.bytes ?? 0),
+        entries: Number(resourceHealth.binaryCache?.entries ?? 0),
+        activeEntries: Number(resourceHealth.binaryCache?.activeEntries ?? 0),
+        evictions: Number(resourceHealth.binaryCache?.evictions ?? 0),
+        rejections: Number(resourceHealth.binaryCache?.rejections ?? 0),
+      },
       pageRows: telemetry.resourcePageRows ?? numericDistribution([]),
       pageBytes: telemetry.resourcePageBytes ?? numericDistribution([]),
       statusCounts: { ...(telemetry.resourceStatusCounts ?? {}) },

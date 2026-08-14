@@ -38,7 +38,7 @@ export function mapResourceLeaseInputs(scope: MapScopeSelection): Array<{ region
 }
 
 export function mapRequestNeedsResourceReadiness(pathname: string, searchParams: URLSearchParams): boolean {
-  if (["/api/local/map/regions", "/api/local/map/resources", "/api/local/map/resource-events"].includes(pathname)) {
+  if (["/api/local/map/regions", "/api/local/map/resources", "/api/local/map/resource-partition", "/api/local/map/resource-events"].includes(pathname)) {
     return true;
   }
   return String(searchParams.get("layers") ?? "")
@@ -209,6 +209,7 @@ export function sanitizedMapResourceHealth(health: MapResourceRuntimeHealth) {
     firstGenerationLatencyMs: health.firstGenerationLatencyMs ? { ...health.firstGenerationLatencyMs } : null,
     reconnectAttemptCount: health.reconnectAttemptCount,
     capacityRejectionCount: health.capacityRejectionCount,
+    binaryCache: { ...health.binaryCache },
     regionCount: regions.length,
     resourceCount: regions.reduce((total, region) => total + region.resourceCount, 0),
     leaseCount: regions.reduce((total, region) => total + region.leaseCount, 0),

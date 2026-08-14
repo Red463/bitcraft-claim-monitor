@@ -9,6 +9,21 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.41] - 2026-08-14
+
+### Added
+
+- Added near-live binary resource loading for dense selections across multiple regions.
+
+### Changed
+
+- Improved resource loading speed by caching compact coordinate partitions and updating only resources that changed.
+
+### Fixed
+
+- Removed the resource node-count failure that prevented very dense resources from loading.
+- Fixed new resource selections reloading or hiding resources that were already complete.
+
 ## [0.55.0-beta.40] - 2026-08-14
 
 ### Fixed
