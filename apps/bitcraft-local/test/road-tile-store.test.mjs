@@ -4,7 +4,20 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { createRoadTileStore } from "../src/server/roadTileStore.mjs";
+import * as roadTileStore from "../src/server/roadTileStore.mjs";
+
+const { createRoadTileStore } = roadTileStore;
+
+test("road tile storage failures retain only the exact operation stage", async () => {
+  assert.equal(typeof roadTileStore.roadTileStoreStage, "function", "road tile store stage wrapper is unavailable");
+  for (const stage of ["prepare-root", "create-staging", "write-tiles", "write-manifest", "install-pack"]) {
+    await assert.rejects(
+      roadTileStore.roadTileStoreStage(stage, async () => { throw new Error("private storage detail"); }),
+      (error) => error.message === `ROAD_BATCH_STAGE=${stage}` && error.cause?.message === "private storage detail",
+    );
+  }
+  await assert.rejects(roadTileStore.roadTileStoreStage("unsupported", async () => {}), /unsupported road tile store stage/i);
+});
 
 test("road tile store atomically installs and reads a same-origin bundle", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "bitcraft-road-store-"));

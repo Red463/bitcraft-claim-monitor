@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.34] - 2026-08-14
+
+### Fixed
+
+- Added exact secret-safe operation diagnostics inside per-region road bundle storage.
+
 ## [0.55.0-beta.33] - 2026-08-14
 
 ### Fixed

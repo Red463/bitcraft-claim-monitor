@@ -105,6 +105,11 @@ test("road batch install failures embed only an allow-listed reason in the outer
     [Object.assign(new Error("private disk detail"), { code: "ENOSPC" }), "disk"],
     [Object.assign(new Error("private missing detail"), { code: "ENOENT" }), "missing-path"],
     [new Error("Road tile store is closed"), "closed"],
+    [new Error("ROAD_BATCH_STAGE=prepare-root"), "store-prepare-root"],
+    [new Error("ROAD_BATCH_STAGE=create-staging"), "store-create-staging"],
+    [new Error("ROAD_BATCH_STAGE=write-tiles"), "store-write-tiles"],
+    [new Error("ROAD_BATCH_STAGE=write-manifest"), "store-write-manifest"],
+    [new Error("ROAD_BATCH_STAGE=install-pack"), "store-install-pack"],
     [new Error("private unknown detail 999"), "other"],
   ];
 

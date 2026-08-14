@@ -6,6 +6,17 @@ import { createMapTilePackStore } from "./mapTilePackStore.mjs";
 import { canonicalMapRegionIds } from "./mapRegionIds.mjs";
 
 const MAX_TILE_BYTES = 2 * 1024 * 1024;
+const ROAD_TILE_STORE_STAGES = new Set(["prepare-root", "create-staging", "write-tiles", "write-manifest", "install-pack"]);
+
+export async function roadTileStoreStage(stage, task) {
+  if (!ROAD_TILE_STORE_STAGES.has(stage)) throw new TypeError(`Unsupported road tile store stage: ${stage}`);
+  try {
+    return await task();
+  } catch (error) {
+    if (/^ROAD_BATCH_STAGE=/.test(String(error?.message ?? ""))) throw error;
+    throw new Error(`ROAD_BATCH_STAGE=${stage}`, { cause: error });
+  }
+}
 
 function within(parent, child) {
   const relative = path.relative(parent, child);
@@ -55,20 +66,22 @@ export function createRoadTileStore({ dataDir, now = () => new Date() }) {
     let totalBytes = 0;
     const files = [];
     try {
-      await mkdir(root, { recursive: true });
-      await mkdir(staging, { recursive: false });
-      for (const tile of tiles) {
-        if (!Number.isSafeInteger(tile.z) || !Number.isSafeInteger(tile.x) || !Number.isSafeInteger(tile.y)) throw new TypeError("Road tile coordinates must be safe integers");
-        const bytes = Buffer.from(tile.bytes ?? []);
-        if (!bytes.byteLength) throw new TypeError("Road tile must not be empty");
-        if (bytes.byteLength > MAX_TILE_BYTES) throw new RangeError("Road tile exceeds byte budget");
-        totalBytes += bytes.byteLength;
-        const relativeTilePath = path.posix.join("tiles", "roads", String(tile.z), String(tile.x), `${tile.y}.webp`);
-        const directory = path.join(staging, "tiles", "roads", String(tile.z), String(tile.x));
-        await mkdir(directory, { recursive: true });
-        await writeDurableBytes(path.join(directory, `${tile.y}.webp`), bytes);
-        files.push({ path: relativeTilePath, bytes: bytes.byteLength, sha256: sha256(bytes) });
-      }
+      await roadTileStoreStage("prepare-root", () => mkdir(root, { recursive: true }));
+      await roadTileStoreStage("create-staging", () => mkdir(staging, { recursive: false }));
+      await roadTileStoreStage("write-tiles", async () => {
+        for (const tile of tiles) {
+          if (!Number.isSafeInteger(tile.z) || !Number.isSafeInteger(tile.x) || !Number.isSafeInteger(tile.y)) throw new TypeError("Road tile coordinates must be safe integers");
+          const bytes = Buffer.from(tile.bytes ?? []);
+          if (!bytes.byteLength) throw new TypeError("Road tile must not be empty");
+          if (bytes.byteLength > MAX_TILE_BYTES) throw new RangeError("Road tile exceeds byte budget");
+          totalBytes += bytes.byteLength;
+          const relativeTilePath = path.posix.join("tiles", "roads", String(tile.z), String(tile.x), `${tile.y}.webp`);
+          const directory = path.join(staging, "tiles", "roads", String(tile.z), String(tile.x));
+          await mkdir(directory, { recursive: true });
+          await writeDurableBytes(path.join(directory, `${tile.y}.webp`), bytes);
+          files.push({ path: relativeTilePath, bytes: bytes.byteLength, sha256: sha256(bytes) });
+        }
+      });
       const manifest = {
         provider: "relay",
         generation: generationId,
@@ -83,10 +96,13 @@ export function createRoadTileStore({ dataDir, now = () => new Date() }) {
         featureCount,
         files,
       };
-      const manifestBytes = durableJsonBytes(manifest);
-      const manifestHash = sha256(manifestBytes);
-      await writeDurableBytes(path.join(staging, "manifest.json"), manifestBytes);
-      return await packStore.install({ stagedVersionDir: staging, version, manifestHash });
+      const manifestHash = await roadTileStoreStage("write-manifest", async () => {
+        const manifestBytes = durableJsonBytes(manifest);
+        const hash = sha256(manifestBytes);
+        await writeDurableBytes(path.join(staging, "manifest.json"), manifestBytes);
+        return hash;
+      });
+      return await roadTileStoreStage("install-pack", () => packStore.install({ stagedVersionDir: staging, version, manifestHash }));
     } catch (error) {
       await rm(staging, { recursive: true, force: true });
       throw error;
