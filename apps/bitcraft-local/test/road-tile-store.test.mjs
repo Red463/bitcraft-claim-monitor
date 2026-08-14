@@ -10,7 +10,7 @@ const { createRoadTileStore } = roadTileStore;
 
 test("road tile storage failures retain only the exact operation stage", async () => {
   assert.equal(typeof roadTileStore.roadTileStoreStage, "function", "road tile store stage wrapper is unavailable");
-  for (const stage of ["prepare-root", "create-staging", "write-tiles", "write-manifest", "install-pack"]) {
+  for (const stage of ["preflight", "prepare-root", "create-staging", "write-tiles", "build-manifest", "write-manifest", "install-pack"]) {
     await assert.rejects(
       roadTileStore.roadTileStoreStage(stage, async () => { throw new Error("private storage detail"); }),
       (error) => error.message === `ROAD_BATCH_STAGE=${stage}` && error.cause?.message === "private storage detail",
