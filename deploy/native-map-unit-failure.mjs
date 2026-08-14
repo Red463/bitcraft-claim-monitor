@@ -1,5 +1,5 @@
 function classifyBatchInstallReason(text) {
-  const markedReason = /ROAD_REASON=(tile-budget|validation|collision|permission|disk|missing-path|closed|other)/i.exec(text)?.[1]?.toLowerCase();
+  const markedReason = /ROAD_REASON=(tile-budget|validation|collision|permission|disk|missing-path|closed|other|store-(?:prepare-root|create-staging|write-tiles|write-manifest|install-pack))/i.exec(text)?.[1]?.toLowerCase();
   if (markedReason) return markedReason;
   if (/tile exceeds (?:byte|read) budget/i.test(text)) return "tile-budget";
   if (/ENOSPC|no space left on device/i.test(text)) return "disk";

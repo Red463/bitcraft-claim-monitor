@@ -77,8 +77,10 @@ test("reports an allow-listed batch-install reason without raw storage details",
 
 test("prefers the sanitized in-process batch reason marker when the nested cause is absent", async () => {
   const { classifyNativeMapUnitFailure } = await import("../../deploy/native-map-unit-failure.mjs");
-  assert.deepEqual(
-    classifyNativeMapUnitFailure("ROAD_STAGE=batch-install ROAD_REASON=validation"),
-    { category: "filesystem", stage: "batch-install", reason: "validation" },
-  );
+  for (const reason of ["validation", "store-prepare-root", "store-create-staging", "store-write-tiles", "store-write-manifest", "store-install-pack"]) {
+    assert.deepEqual(
+      classifyNativeMapUnitFailure(`ROAD_STAGE=batch-install ROAD_REASON=${reason}`),
+      { category: "filesystem", stage: "batch-install", reason },
+    );
+  }
 });
