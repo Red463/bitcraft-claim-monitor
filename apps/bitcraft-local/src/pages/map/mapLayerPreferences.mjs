@@ -9,6 +9,7 @@ export const MAP_LAYER_DEFINITIONS = Object.freeze([
   { key: "players", label: "Players", defaultVisible: true, dataLayer: "players", control: "markers:players", available: true, unavailableReason: null, selectionRequired: false },
   { key: "resources", label: "Resources", defaultVisible: true, dataLayer: "resources", control: "dense:resources", available: true, unavailableReason: null, selectionRequired: true },
   { key: "enemies", label: "Enemies", defaultVisible: true, dataLayer: "enemies", control: "dense:enemies", available: true, unavailableReason: null, selectionRequired: true },
+  { key: "debug", label: "Debug information", defaultVisible: false, dataLayer: null, control: "diagnostic:map", available: true, unavailableReason: null, selectionRequired: false },
 ].map(Object.freeze));
 
 export function defaultMapLayerVisibility() {

@@ -12,11 +12,12 @@ test("native map layer preferences are complete, versioned, and defensive", () =
   assert.ok(preferences, "map layer preferences module must exist");
   assert.deepEqual(preferences.MAP_LAYER_DEFINITIONS.map(({ key }) => key), [
     "claims", "claim-areas", "roads", "watchtowers", "players",
-    "resources", "enemies",
+    "resources", "enemies", "debug",
   ]);
   assert.equal(preferences.MAP_LAYER_PREFERENCE_KEY, "bitcraft-map-layers:v2");
   assert.equal(Object.hasOwn(preferences.defaultMapLayerVisibility(), "terrain"), false);
   assert.equal(preferences.defaultMapLayerVisibility().roads, false);
+  assert.equal(preferences.defaultMapLayerVisibility().debug, false);
   assert.equal(preferences.MAP_LAYER_DEFINITIONS.find(({ key }) => key === "roads").available, true);
   assert.equal(preferences.MAP_LAYER_DEFINITIONS.find(({ key }) => key === "roads").dataLayer, null);
   assert.equal(preferences.MAP_LAYER_DEFINITIONS.find(({ key }) => key === "resources").selectionRequired, true);
@@ -24,7 +25,9 @@ test("native map layer preferences are complete, versioned, and defensive", () =
   const parsed = preferences.parseMapLayerVisibility('{"claims":false,"roads":true,"unknown":true}');
   assert.equal(parsed.claims, false);
   assert.equal(parsed.roads, true);
+  assert.equal(parsed.debug, false);
   assert.equal(Object.hasOwn(parsed, "unknown"), false);
+  assert.equal(preferences.parseMapLayerVisibility('{"debug":true}').debug, true);
 });
 
 test("native map layer storage failures fall back without throwing", () => {
@@ -44,6 +47,7 @@ test("native map layer persistence emits only allowlisted boolean choices", () =
   const value = JSON.parse(serialized);
   assert.equal(Object.hasOwn(value, "terrain"), false);
   assert.equal(value.claims, false);
+  assert.equal(JSON.parse(preferences.serializeMapLayerVisibility({ debug: true })).debug, true);
   assert.equal(Object.hasOwn(value, "unknown"), false);
   assert.deepEqual(Object.keys(value), preferences.MAP_LAYER_DEFINITIONS.map(({ key }) => key));
 });
