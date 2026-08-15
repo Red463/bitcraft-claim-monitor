@@ -260,7 +260,7 @@ export function NativeMap({
   resourceRegionIds,
   playerIds,
   resourceIds,
-  resourceTiers,
+  resourceColours,
   enemyTypes,
   focus,
   playerTool,
@@ -273,7 +273,7 @@ export function NativeMap({
   resourceRegionIds: string[];
   playerIds: string[];
   resourceIds: string[];
-  resourceTiers: Readonly<Record<string, number | null>>;
+  resourceColours: Readonly<Record<string, string>>;
   enemyTypes: string[];
   focus: MapFocus;
   playerTool?: NativeMapToolContent;
@@ -670,7 +670,7 @@ export function NativeMap({
       focusMarker.bindTooltip(`${focus.name} · N ${readable.north}, E ${readable.east}`, { permanent: true, direction: "top" });
       focusMarker.addTo(focusGroup);
     }
-    resourcesRef.current?.setResources(resourcePartitions, visibleRegionIds, resourceTiers);
+    resourcesRef.current?.setResources(resourcePartitions, visibleRegionIds, resourceColours);
     const map = mapRef.current;
     if (!resourceSelectionKey) resourceFrameSelectionRef.current = "";
     else if (map && !resourceLayerLoading && resourceFrameSelectionRef.current !== resourceSelectionKey) {
@@ -727,7 +727,7 @@ export function NativeMap({
       }
     }
     enemiesRef.current?.setPoints(visibleEnemyPoints);
-  }, [snapshot, resourcePartitions, visibleEnemyPoints, resourceSelectionKey, resourceTiers, resourceLayerLoading, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
+  }, [snapshot, resourcePartitions, visibleEnemyPoints, resourceSelectionKey, resourceColours, resourceLayerLoading, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
 
   const accessibleResourceFeatures: MapFeature[] = layerVisibility.resources ? resourceSamples.map((sample) => ({
     kind: "resource",

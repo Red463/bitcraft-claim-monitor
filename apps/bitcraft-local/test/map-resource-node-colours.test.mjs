@@ -5,7 +5,7 @@ import {
   RESOURCE_NODE_FALLBACK_COLOUR,
   resourceFeatureColour,
   resourceNodeColour,
-  selectedResourceTierMap,
+  selectedResourceColourMap,
 } from "../src/pages/map/resourceNodeColours.mjs";
 
 test("resource node colours stay stable within the selected tier family", () => {
@@ -16,15 +16,18 @@ test("resource node colours stay stable within the selected tier family", () => 
   assert.notEqual(resourceNodeColour("28", 3), resourceNodeColour("1000028", 3));
 });
 
-test("resource feature colours resolve by typed resource identity rather than selection order", () => {
-  const tiers = { "28": 3, "54": 3 };
+test("resource feature colours resolve from the final colour map by typed identity", () => {
+  const colours = {
+    "28": resourceNodeColour("28", 3),
+    "54": resourceNodeColour("54", 3),
+  };
   const firstOrder = [
-    resourceFeatureColour({ identity: "resource:28" }, tiers),
-    resourceFeatureColour({ identity: "resource:54" }, tiers),
+    resourceFeatureColour({ identity: "resource:28" }, colours),
+    resourceFeatureColour({ identity: "resource:54" }, colours),
   ];
   const reverseOrder = [
-    resourceFeatureColour({ identity: "resource:54" }, tiers),
-    resourceFeatureColour({ identity: "resource:28" }, tiers),
+    resourceFeatureColour({ identity: "resource:54" }, colours),
+    resourceFeatureColour({ identity: "resource:28" }, colours),
   ].reverse();
 
   assert.deepEqual(firstOrder, reverseOrder);
@@ -35,24 +38,27 @@ test("resource node colours fall back when identity or tier metadata is unavaila
   assert.equal(resourceNodeColour("28", null), RESOURCE_NODE_FALLBACK_COLOUR);
   assert.equal(resourceNodeColour("28", 11), RESOURCE_NODE_FALLBACK_COLOUR);
   assert.equal(resourceNodeColour("not-an-id", 3), RESOURCE_NODE_FALLBACK_COLOUR);
-  assert.equal(resourceFeatureColour({ identity: "enemy:28" }, { "28": 3 }), RESOURCE_NODE_FALLBACK_COLOUR);
-  assert.equal(resourceFeatureColour({ identity: "resource:99" }, { "28": 3 }), RESOURCE_NODE_FALLBACK_COLOUR);
+  assert.equal(resourceFeatureColour({ identity: "enemy:28" }, { "28": "red" }), RESOURCE_NODE_FALLBACK_COLOUR);
+  assert.equal(resourceFeatureColour({ identity: "resource:99" }, { "28": "red" }), RESOURCE_NODE_FALLBACK_COLOUR);
 });
 
-test("selected resource tiers come from catalog metadata independent of selection order", () => {
+test("selected resource colours distinguish catalogued tierless resources independent of selection order", () => {
   const catalog = new Map([
-    ["resource:28", { tier: "3" }],
-    ["resource:54", { tier: 3 }],
-    ["resource:99", { tier: "unknown" }],
+    ["resource:700", { name: "Lost Shipment", tier: 0 }],
+    ["resource:701", { name: "Lost Wreckage", tier: null }],
+    ["resource:702", { name: "Lost Treasure", tier: "unknown" }],
+    ["resource:28", { name: "Fallen Tree", tier: 3 }],
   ]);
 
-  assert.deepEqual(selectedResourceTierMap(["54", "28", "99"], catalog), {
-    "28": 3,
-    "54": 3,
-    "99": null,
-  });
-  assert.deepEqual(selectedResourceTierMap(["028", "54"], catalog), {
-    "28": 3,
-    "54": 3,
+  const forward = selectedResourceColourMap(["700", "701", "702", "28"], catalog);
+  const reverse = selectedResourceColourMap(["28", "702", "701", "700"], catalog);
+
+  assert.deepEqual(forward, reverse);
+  assert.equal(new Set([forward["700"], forward["701"], forward["702"]]).size, 3);
+  assert.equal(forward["28"], resourceNodeColour("28", 3));
+  assert.equal(selectedResourceColourMap(["999"], catalog)["999"], RESOURCE_NODE_FALLBACK_COLOUR);
+  assert.deepEqual(selectedResourceColourMap(["0700", "702"], catalog), {
+    "700": forward["700"],
+    "702": forward["702"],
   });
 });

@@ -222,7 +222,7 @@ test("Native map projects region-scoped dense points before rendering and resour
 
   assert.match(nativeMap, /packedResourcePointCount\(resourcePartitions, visibleRegionIds\)/);
   assert.match(nativeMap, /const visibleEnemyPoints = React\.useMemo\(\(\) => mapFeaturesInRegionScope\(snapshot\?\.layers\.enemies \?\? \[\], visibleRegionIds\)/);
-  assert.match(nativeMap, /resourcesRef\.current\?\.setResources\(resourcePartitions, visibleRegionIds, resourceTiers\)/);
+  assert.match(nativeMap, /resourcesRef\.current\?\.setResources\(resourcePartitions, visibleRegionIds, resourceColours\)/);
   assert.match(nativeMap, /enemiesRef\.current\?\.setPoints\(visibleEnemyPoints\)/);
   assert.match(nativeMap, /packedResourceSome\(resourcePartitions, visibleRegionIds/);
   assert.match(nativeMap, /packedResourceBounds\(resourcePartitions, visibleRegionIds\)/);
