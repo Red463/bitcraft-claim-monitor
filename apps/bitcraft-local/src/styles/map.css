@@ -147,6 +147,16 @@
 }
 .map-selected-resources { display: flex; flex-wrap: wrap; gap: 6px; }
 .map-selected-resources button { min-height: 28px; border: 1px solid rgba(240,198,79,.38); border-radius: 999px; background: rgba(240,198,79,.1); color: #f0c64f; padding: 0 8px 0 10px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; }
+.map-selected-resources button.has-marker-colour {
+  border-color: color-mix(in srgb, var(--map-resource-chip-colour, #f0c64f) 58%, transparent);
+  background: color-mix(in srgb, var(--map-resource-chip-colour, #f0c64f) 12%, transparent);
+  color: var(--map-resource-chip-colour, #f0c64f);
+}
+.map-selected-resources button.has-marker-colour:hover,
+.map-selected-resources button.has-marker-colour:focus-visible {
+  border-color: color-mix(in srgb, var(--map-resource-chip-colour, #f0c64f) 88%, white 12%);
+  background: color-mix(in srgb, var(--map-resource-chip-colour, #f0c64f) 20%, transparent);
+}
 .map-resource-list { flex: 1 1 220px; min-height: 180px; overflow: auto; display: grid; gap: 6px; align-content: start; padding-right: 2px; }
 .map-resource-list > button {
   min-height: 50px;

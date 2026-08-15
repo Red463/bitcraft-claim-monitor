@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import type { CSSProperties } from "react";
 
 import { TierBadge } from "../../components/main/Badges";
 import { ItemIcon } from "../../components/main/ItemDisplay";
@@ -14,6 +15,7 @@ export function MapResourceFinderPanel({
   categories,
   selectedTokens,
   resourceByToken,
+  resourceColours,
   resources,
   visibleCount,
   catalogCount,
@@ -35,6 +37,7 @@ export function MapResourceFinderPanel({
   categories: string[];
   selectedTokens: string[];
   resourceByToken: ReadonlyMap<string, AnyRecord>;
+  resourceColours: Readonly<Record<string, string>>;
   resources: AnyRecord[];
   visibleCount: number;
   catalogCount: number;
@@ -65,7 +68,12 @@ export function MapResourceFinderPanel({
             {selectedTokens.map((token) => {
               const resource = resourceByToken.get(token);
               const label = String(resource?.name ?? token);
-              return <button type="button" key={token} onClick={() => onRemove(token)} aria-label={`Stop tracking ${label}`}>{label}<X size={12} aria-hidden="true" /></button>;
+              const resourceId = token.startsWith("resource:") ? token.slice("resource:".length) : "";
+              const resourceColour = resourceId ? resourceColours[resourceId] : "";
+              const colourStyle = resourceColour
+                ? ({ "--map-resource-chip-colour": resourceColour } as CSSProperties)
+                : undefined;
+              return <button type="button" key={token} className={resourceColour ? "has-marker-colour" : undefined} style={colourStyle} onClick={() => onRemove(token)} aria-label={`Stop tracking ${label}`}>{label}<X size={12} aria-hidden="true" /></button>;
             })}
           </div>
         </div>

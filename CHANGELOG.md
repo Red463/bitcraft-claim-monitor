@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.45] - 2026-08-15
+
+### Changed
+
+- Matched tracked resource pills to their resource marker colours for easier identification.
+
 ## [0.55.0-beta.44] - 2026-08-15
 
 ### Added

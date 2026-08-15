@@ -31,3 +31,16 @@ test("resource finder leaves region scope to the map toolbar", async () => {
 
   assert.doesNotMatch(source, /regionValue|regionOptions|onRegionChange|>Region/);
 });
+
+test("tracked resource pills reuse their final native marker colours", async () => {
+  const panel = await readFile(new URL("../src/pages/map/MapResourceFinderPanel.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../src/styles/map.css", import.meta.url), "utf8");
+
+  assert.match(panel, /resourceColours: Readonly<Record<string, string>>/);
+  assert.match(panel, /token\.startsWith\("resource:"\)/);
+  assert.match(panel, /resourceColours\[resourceId\]/);
+  assert.match(panel, /--map-resource-chip-colour/);
+  assert.doesNotMatch(panel, /Number\(resourceId\)|parseInt\(resourceId/);
+  assert.match(css, /\.map-selected-resources button\.has-marker-colour/);
+  assert.match(css, /color-mix\(in srgb, var\(--map-resource-chip-colour, #f0c64f\)/);
+});

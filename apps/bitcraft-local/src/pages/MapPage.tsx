@@ -261,6 +261,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
     categories={resourceCategories}
     selectedTokens={normalizedSelectedResources}
     resourceByToken={resourceByToken}
+    resourceColours={selectedResourceColours}
     resources={renderedResources}
     visibleCount={visibleResources.length}
     catalogCount={resources.length}
