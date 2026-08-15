@@ -1,0 +1,44 @@
+name: Vendor Relay game icons
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-game-icon-vendoring
+  cancel-in-progress: false
+
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Require main
+        run: test "$GITHUB_REF" = "refs/heads/main"
+      - name: Check out verified revision
+        uses: actions/checkout@v4
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+      - name: Build server runtime
+        run: corepack pnpm --filter @workspace/bitcraft-local run build:server
+      - name: Vendor normalized Relay resource icons
+        run: node --max-old-space-size=512 apps/bitcraft-local/scripts/vendor-relay-game-icons.mjs --source-origin=https://bitjita.com
+      - name: Verify self-hosted game assets
+        run: corepack pnpm --filter @workspace/bitcraft-local run verify:assets
+      - name: Publish vendored icon artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-game-icons-${{ github.run_id }}
+          retention-days: 3
+          if-no-files-found: error
+          path: |
+            apps/bitcraft-local/assets/game-icons-manifest.json
+            apps/bitcraft-local/public/game-icons
