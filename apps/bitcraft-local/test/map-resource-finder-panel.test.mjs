@@ -9,6 +9,7 @@ test("resource finder presents search, compact filters, tracked chips, rows, and
   assert.match(source, /selectedTokens\.map/);
   assert.match(source, /aria-label=\{`Stop tracking/);
   assert.match(source, /aria-pressed=\{active\}/);
+  assert.match(source, /iconAssetName:\s*resource\.iconAssetName/);
   assert.match(source, /<ItemIcon item=\{resourceIcon\} \/>/);
   assert.match(source, /<TierBadge tier=\{resource\.tier\} \/>/);
   assert.match(source, /Showing \{resources\.length\} of \{visibleCount\}/);

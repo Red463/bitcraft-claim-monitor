@@ -20,7 +20,7 @@ import { MapPlayerTrackingPanel } from "./map/MapPlayerTrackingPanel";
 import { MapRegionSelect } from "./map/MapRegionSelect";
 import { MapResourceFinderPanel } from "./map/MapResourceFinderPanel";
 import { boundedNativeMapRegions, nativeMapResourceRegions, nativeMapResourceSelectionLimit, normalizeNativeMapRegionSelection } from "./map/nativeMapRequest.mjs";
-import { selectedResourceTierMap } from "./map/resourceNodeColours.mjs";
+import { selectedResourceColourMap } from "./map/resourceNodeColours.mjs";
 import { RESOURCE_FINDER_BATCH_SIZE, nextResourceLimit, visibleResourceMatches } from "./map/resourceFinderWindow.mjs";
 
 const LOCAL_API = "/api/local";
@@ -168,8 +168,8 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
     const resourceIds = normalizedSelectedResources.filter((token) => token.startsWith("resource:")).map((token) => token.slice("resource:".length));
     return resourceIds.slice(0, maxNativeResourceSelections);
   }, [maxNativeResourceSelections, normalizedSelectedResources]);
-  const selectedResourceTiers = React.useMemo(
-    () => selectedResourceTierMap(selectedResourceIds, resourceByToken),
+  const selectedResourceColours = React.useMemo(
+    () => selectedResourceColourMap(selectedResourceIds, resourceByToken),
     [selectedResourceIds.join(","), resourceByToken],
   );
   const selectedEnemyIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("enemy:")).map((token) => token.slice("enemy:".length)), [normalizedSelectedResources]);
@@ -299,7 +299,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey }: { 
       ) : null}
       <div className="map-workspace native-tools">
         <div className="native-map-host">
-          <NativeMap regionIds={mapRegionIds} visibleRegionIds={normalizedRegionSelection} playerRegionIds={readyPlayerRegionIds} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceTiers={selectedResourceTiers} enemyTypes={selectedEnemyIds} focus={mapMarker} playerTool={{ label: "Players", count: trackedPlayerCount, content: playerPanel, primaryFocusSelector: "input[placeholder='Find settlement members']" }} resourceTool={{ label: "Resources", count: normalizedSelectedResources.length, content: resourceFinder, primaryFocusSelector: ".map-resource-finder-search input" }} regionControl={regionControl} />
+          <NativeMap regionIds={mapRegionIds} visibleRegionIds={normalizedRegionSelection} playerRegionIds={readyPlayerRegionIds} resourceRegionIds={resourceMapRegionIds} playerIds={currentPlayerIds} resourceIds={selectedResourceIds} resourceColours={selectedResourceColours} enemyTypes={selectedEnemyIds} focus={mapMarker} playerTool={{ label: "Players", count: trackedPlayerCount, content: playerPanel, primaryFocusSelector: "input[placeholder='Find settlement members']" }} resourceTool={{ label: "Resources", count: normalizedSelectedResources.length, content: resourceFinder, primaryFocusSelector: ".map-resource-finder-search input" }} regionControl={regionControl} />
         </div>
       </div>
     </div>

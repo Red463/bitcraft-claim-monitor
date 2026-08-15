@@ -7,7 +7,7 @@ import {
   discoverRelayTopology,
   RelayGlobalCatalogSession,
 } from "../dist-server/game-data/index.js";
-import { gameIconUrl } from "../src/utils/gameAssets.mjs";
+import { collectGameIconEntries } from "./game-icon-catalog.mjs";
 
 const sourceOriginArgument = process.argv.find((argument) => argument.startsWith("--source-origin="));
 const sourceOrigin = String(sourceOriginArgument?.slice("--source-origin=".length) ?? "").replace(/\/+$/, "");
@@ -57,17 +57,7 @@ const snapshot = await new Promise((resolve, reject) => {
 clearTimeout(timeout);
 await session.stop();
 
-const identitiesByIconUrl = new Map();
-for (const entity of snapshot.entities) {
-  const iconUrl = gameIconUrl(entity);
-  if (!iconUrl) continue;
-  const identities = identitiesByIconUrl.get(iconUrl) ?? [];
-  identities.push(`${entity.kind}:${entity.id}`);
-  identitiesByIconUrl.set(iconUrl, identities);
-}
-
-const iconEntries = [...identitiesByIconUrl.entries()]
-  .sort(([left], [right]) => left.localeCompare(right));
+const iconEntries = collectGameIconEntries(snapshot);
 const acquired = new Array(iconEntries.length);
 const unavailable = [];
 const failures = [];

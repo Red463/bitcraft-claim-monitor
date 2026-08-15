@@ -2,7 +2,7 @@ import L from "leaflet";
 
 import type { BrowserResourcePartition } from "./mapResourceBinaryState.mjs";
 import { planPackedResourceDraw } from "./packedResourceCanvasPlan.mjs";
-import { resourceNodeColour } from "./resourceNodeColours.mjs";
+import { RESOURCE_NODE_FALLBACK_COLOUR } from "./resourceNodeColours.mjs";
 
 export class PackedResourceCanvasLayer extends L.Layer {
   #map: L.Map | null = null;
@@ -10,13 +10,13 @@ export class PackedResourceCanvasLayer extends L.Layer {
   #frame = 0;
   #partitions: ReadonlyMap<string, BrowserResourcePartition> = new Map();
   #regions: readonly string[] = [];
-  #tiers: Readonly<Record<string, number | null>> = {};
+  #colours: Readonly<Record<string, string>> = {};
   #visible = true;
 
-  setResources(partitions: ReadonlyMap<string, BrowserResourcePartition>, regions: readonly string[], tiers: Readonly<Record<string, number | null>>) {
+  setResources(partitions: ReadonlyMap<string, BrowserResourcePartition>, regions: readonly string[], colours: Readonly<Record<string, string>>) {
     this.#partitions = partitions;
     this.#regions = regions;
-    this.#tiers = tiers;
+    this.#colours = colours;
     this.#scheduleDraw();
   }
 
@@ -64,7 +64,7 @@ export class PackedResourceCanvasLayer extends L.Layer {
     context.lineWidth = 1.25;
     context.strokeStyle = "rgba(3, 8, 12, .92)";
     for (const { partition, coordinates } of plan.partitions) {
-      context.fillStyle = resourceNodeColour(partition.resourceId, this.#tiers[partition.resourceId]);
+      context.fillStyle = this.#colours[partition.resourceId] ?? RESOURCE_NODE_FALLBACK_COLOUR;
       for (const packed of coordinates) {
         const draw = pointIndex % plan.stride === 0;
         pointIndex += 1;

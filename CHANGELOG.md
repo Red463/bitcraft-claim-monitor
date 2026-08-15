@@ -9,6 +9,20 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.55.0-beta.44] - 2026-08-15
+
+### Added
+
+- Added a saved Debug information option in Map Layers for showing generation details and canvas-point diagnostics only when needed.
+
+### Changed
+
+- Gave tierless resources stable, distinguishable map colours independent of selection order.
+
+### Fixed
+
+- Included resource-description artwork in the self-hosted game-icon acquisition workflow so resource finder entries can display their icons.
+
 ## [0.55.0-beta.43] - 2026-08-14
 
 ### Fixed

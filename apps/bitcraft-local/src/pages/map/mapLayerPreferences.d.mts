@@ -1,4 +1,4 @@
-export type MapLayerKey = "claims" | "claim-areas" | "roads" | "watchtowers" | "players" | "resources" | "enemies";
+export type MapLayerKey = "claims" | "claim-areas" | "roads" | "watchtowers" | "players" | "resources" | "enemies" | "debug";
 export type MapLayerVisibility = Record<MapLayerKey, boolean>;
 export type MapLayerDefinition = Readonly<{
   key: MapLayerKey;

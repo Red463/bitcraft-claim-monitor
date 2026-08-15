@@ -13,6 +13,8 @@ const TIER_BASE_COLOURS = Object.freeze({
   10: [222, 255, 255],
 });
 const VARIATIONS = Object.freeze([-48, -24, 0, 24, 48]);
+const TIERLESS_BASE_HUE = 24;
+const GOLDEN_ANGLE = 137.508;
 
 function canonicalDecimal(value) {
   if (typeof value !== "string" && typeof value !== "number" && typeof value !== "bigint") return null;
@@ -34,6 +36,15 @@ function stableHash(value) {
   return hash;
 }
 
+function compareCanonicalDecimal(left, right) {
+  return left.length - right.length || left.localeCompare(right);
+}
+
+function tierlessResourceColour(index) {
+  const hue = (TIERLESS_BASE_HUE + index * GOLDEN_ANGLE) % 360;
+  return `hsla(${hue.toFixed(1)}, 78%, 62%, 0.92)`;
+}
+
 export function resourceNodeColour(resourceId, tier) {
   const canonicalId = canonicalDecimal(resourceId);
   const tierNumber = Number(tier);
@@ -43,21 +54,44 @@ export function resourceNodeColour(resourceId, tier) {
   return `rgba(${base.map((channel) => clamp(channel + offset)).join(", ")}, 0.92)`;
 }
 
-export function resourceFeatureColour(feature, resourceTiers) {
+export function resourceFeatureColour(feature, resourceColours) {
   const identity = typeof feature?.identity === "string" ? feature.identity : "";
   if (!identity.startsWith("resource:")) return RESOURCE_NODE_FALLBACK_COLOUR;
   const resourceId = canonicalDecimal(identity.slice("resource:".length));
-  if (!resourceId) return RESOURCE_NODE_FALLBACK_COLOUR;
-  return resourceNodeColour(resourceId, resourceTiers?.[resourceId]);
+  return resourceId
+    ? resourceColours?.[resourceId] ?? RESOURCE_NODE_FALLBACK_COLOUR
+    : RESOURCE_NODE_FALLBACK_COLOUR;
 }
 
-export function selectedResourceTierMap(resourceIds, catalogByToken) {
-  const tiers = {};
-  for (const rawResourceId of resourceIds ?? []) {
-    const resourceId = canonicalDecimal(rawResourceId);
-    if (!resourceId) continue;
-    const tier = Number(catalogByToken?.get?.(`resource:${resourceId}`)?.tier);
-    tiers[resourceId] = Number.isInteger(tier) && tier >= 1 && tier <= 10 ? tier : null;
+export function selectedResourceColourMap(resourceIds, catalogByToken) {
+  const tierlessIds = new Set();
+  const catalogEntries = typeof catalogByToken?.entries === "function"
+    ? catalogByToken.entries()
+    : [];
+  for (const [token, row] of catalogEntries) {
+    if (!String(token).startsWith("resource:")) continue;
+    const resourceId = canonicalDecimal(String(token).slice("resource:".length));
+    const tier = Number(row?.tier);
+    if (resourceId && !(Number.isInteger(tier) && tier >= 1 && tier <= 10)) {
+      tierlessIds.add(resourceId);
+    }
   }
-  return tiers;
+  const tierlessColours = new Map(
+    [...tierlessIds]
+      .sort(compareCanonicalDecimal)
+      .map((resourceId, index) => [resourceId, tierlessResourceColour(index)]),
+  );
+  const selectedIds = [...new Set((resourceIds ?? [])
+    .map(canonicalDecimal)
+    .filter(Boolean))]
+    .sort(compareCanonicalDecimal);
+  const colours = {};
+  for (const resourceId of selectedIds) {
+    const row = catalogByToken?.get?.(`resource:${resourceId}`);
+    const tier = Number(row?.tier);
+    colours[resourceId] = Number.isInteger(tier) && tier >= 1 && tier <= 10
+      ? resourceNodeColour(resourceId, tier)
+      : tierlessColours.get(resourceId) ?? RESOURCE_NODE_FALLBACK_COLOUR;
+  }
+  return colours;
 }

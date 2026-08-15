@@ -260,7 +260,7 @@ export function NativeMap({
   resourceRegionIds,
   playerIds,
   resourceIds,
-  resourceTiers,
+  resourceColours,
   enemyTypes,
   focus,
   playerTool,
@@ -273,7 +273,7 @@ export function NativeMap({
   resourceRegionIds: string[];
   playerIds: string[];
   resourceIds: string[];
-  resourceTiers: Readonly<Record<string, number | null>>;
+  resourceColours: Readonly<Record<string, string>>;
   enemyTypes: string[];
   focus: MapFocus;
   playerTool?: NativeMapToolContent;
@@ -670,7 +670,7 @@ export function NativeMap({
       focusMarker.bindTooltip(`${focus.name} · N ${readable.north}, E ${readable.east}`, { permanent: true, direction: "top" });
       focusMarker.addTo(focusGroup);
     }
-    resourcesRef.current?.setResources(resourcePartitions, visibleRegionIds, resourceTiers);
+    resourcesRef.current?.setResources(resourcePartitions, visibleRegionIds, resourceColours);
     const map = mapRef.current;
     if (!resourceSelectionKey) resourceFrameSelectionRef.current = "";
     else if (map && !resourceLayerLoading && resourceFrameSelectionRef.current !== resourceSelectionKey) {
@@ -727,9 +727,10 @@ export function NativeMap({
       }
     }
     enemiesRef.current?.setPoints(visibleEnemyPoints);
-  }, [snapshot, resourcePartitions, visibleEnemyPoints, resourceSelectionKey, resourceTiers, resourceLayerLoading, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
+  }, [snapshot, resourcePartitions, visibleEnemyPoints, resourceSelectionKey, resourceColours, resourceLayerLoading, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
 
-  const accessibleResourceFeatures: MapFeature[] = layerVisibility.resources ? resourceSamples.map((sample) => ({
+  const debugInformationVisible = layerVisibility.debug === true;
+  const accessibleResourceFeatures: MapFeature[] = debugInformationVisible && layerVisibility.resources ? resourceSamples.map((sample) => ({
     kind: "resource",
     entityId: `${sample.key}:${sample.x}:${sample.z}`,
     regionId: sample.regionId,
@@ -737,15 +738,17 @@ export function NativeMap({
     resourceId: sample.resourceId,
     point: { x: sample.x, z: sample.z, dimension: "1", coordinateSpace: "map-xz" },
   })) : [];
-  const accessibleFeatures = snapshot
-    ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {
-        if (!layerVisibility[layer as MapLayerKey]) return [];
-        if (layer === "empire-territory") return [];
-        const visibleFeatures = mapFeaturesInRegionScope(features, visibleRegionIds);
-        if (layer === "resources" || layer === "enemies") return visibleFeatures;
-        return visibleFeatures.filter((feature) => (feature.kind === "claim" ? claimMarkerPresentation(feature.tier, feature.npc) : mapMarkerPresentation(feature.kind)).mode === "canvas");
-      }).concat(accessibleResourceFeatures)
-    : accessibleResourceFeatures;
+  const accessibleFeatures = debugInformationVisible
+    ? snapshot
+      ? Object.entries(snapshot.layers).flatMap(([layer, features]) => {
+          if (!layerVisibility[layer as MapLayerKey]) return [];
+          if (layer === "empire-territory") return [];
+          const visibleFeatures = mapFeaturesInRegionScope(features, visibleRegionIds);
+          if (layer === "resources" || layer === "enemies") return visibleFeatures;
+          return visibleFeatures.filter((feature) => (feature.kind === "claim" ? claimMarkerPresentation(feature.tier, feature.npc) : mapMarkerPresentation(feature.kind)).mode === "canvas");
+        }).concat(accessibleResourceFeatures)
+      : accessibleResourceFeatures
+    : [];
   const layerAvailability: Record<string, LayerAvailability> = Object.fromEntries(MAP_LAYER_DEFINITIONS.map(({ key, available, unavailableReason, selectionRequired }) => {
     const hasSelection = !selectionRequired || (key === "resources" ? resourceIds.length > 0 : enemyTypes.length > 0);
     const selectionReason = key === "resources" ? "Select at least one resource to enable this layer." : "Select at least one enemy to enable this layer.";
@@ -829,7 +832,7 @@ export function NativeMap({
       <div className="native-map-controls">
         <MapToolDock tools={mapTools} trailingControl={regionControl} />
       </div>
-      <div className="native-map-status" aria-live="polite">
+      {debugInformationVisible ? <div className="native-map-status" aria-live="polite">
         <strong>{loading && !snapshot ? "Loading native map…" : snapshot ? `${snapshot.freshness} · generation ${snapshot.generation}` : "Native map unavailable"}</strong>
         {snapshot?.ageMs != null ? <span>{Math.round(snapshot.ageMs / 1000)}s old</span> : null}
         {error ? <span className="error">{error}</span> : null}
@@ -846,8 +849,8 @@ export function NativeMap({
         {snapshot ? <ul className="native-map-legend" aria-label="Map layer status">{Object.entries(snapshot.layers).map(([layer, features]) => <li key={layer}><span>{layer}</span><strong>{features.length}</strong><small>{layerAvailability[layer]?.available === false ? "unavailable" : layerVisibility[layer as MapLayerKey] ? snapshot.freshness : "hidden"}</small></li>)}{wantedResourceKeys.length ? <li><span>resources</span><strong>{resourcePointCount}</strong><small>{resourceStatus}</small></li> : null}</ul> : null}
         {snapshot?.warnings?.length ? <details><summary>{snapshot.warnings.length} data warning{snapshot.warnings.length === 1 ? "" : "s"}</summary><ul>{snapshot.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
         {resourceWarnings.length ? <details><summary>{resourceWarnings.length} resource warning{resourceWarnings.length === 1 ? "" : "s"}</summary><ul>{resourceWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
-      </div>
-      {accessibleFeatures.length ? <details className="native-map-accessible-points"><summary>{accessibleFeatures.length} canvas map points</summary><ul>{accessibleFeatures.slice(0, 250).map((feature) => <li key={`${feature.kind}:${feature.regionId}:${feature.entityId}`}>{featureLabel(feature)} at {displayedPoint(feature)}</li>)}</ul></details> : null}
+      </div> : null}
+      {debugInformationVisible && accessibleFeatures.length ? <details className="native-map-accessible-points"><summary>{accessibleFeatures.length} canvas map points</summary><ul>{accessibleFeatures.slice(0, 250).map((feature) => <li key={`${feature.kind}:${feature.regionId}:${feature.entityId}`}>{featureLabel(feature)} at {displayedPoint(feature)}</li>)}</ul></details> : null}
     </section>
   );
 }

@@ -222,7 +222,7 @@ test("Native map projects region-scoped dense points before rendering and resour
 
   assert.match(nativeMap, /packedResourcePointCount\(resourcePartitions, visibleRegionIds\)/);
   assert.match(nativeMap, /const visibleEnemyPoints = React\.useMemo\(\(\) => mapFeaturesInRegionScope\(snapshot\?\.layers\.enemies \?\? \[\], visibleRegionIds\)/);
-  assert.match(nativeMap, /resourcesRef\.current\?\.setResources\(resourcePartitions, visibleRegionIds, resourceTiers\)/);
+  assert.match(nativeMap, /resourcesRef\.current\?\.setResources\(resourcePartitions, visibleRegionIds, resourceColours\)/);
   assert.match(nativeMap, /enemiesRef\.current\?\.setPoints\(visibleEnemyPoints\)/);
   assert.match(nativeMap, /packedResourceSome\(resourcePartitions, visibleRegionIds/);
   assert.match(nativeMap, /packedResourceBounds\(resourcePartitions, visibleRegionIds\)/);
@@ -303,12 +303,18 @@ test("Native map browser source excludes bank tracking and remote map assets", (
 test("Native map exposes persisted layer controls without clearing dense selections", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   const control = readFileSync(new URL("../src/pages/map/MapLayersControl.tsx", import.meta.url), "utf8");
+  const preferences = readFileSync(new URL("../src/pages/map/mapLayerPreferences.mjs", import.meta.url), "utf8");
 
   assert.match(nativeMap, /loadMapLayerVisibility\(\(\) => window\.localStorage\)/);
   assert.match(nativeMap, /saveMapLayerVisibility\(\(\) => window\.localStorage, layerVisibility\)/);
   assert.match(nativeMap, /setVisible\(layerVisibility\.resources\)/);
   assert.match(nativeMap, /setVisible\(layerVisibility\.enemies\)/);
   assert.match(nativeMap, /<MapLayersControl/);
+  assert.match(preferences, /key: "debug", label: "Debug information", defaultVisible: false/);
+  assert.match(nativeMap, /const debugInformationVisible = layerVisibility\.debug === true/);
+  assert.match(nativeMap, /const accessibleFeatures = debugInformationVisible\s*\?/);
+  assert.match(nativeMap, /\{debugInformationVisible \? <div className="native-map-status"/);
+  assert.match(nativeMap, /\{debugInformationVisible && accessibleFeatures\.length \? <details className="native-map-accessible-points"/);
   assert.doesNotMatch(control, /setResourceIds|setEnemyTypes|resourceIds\s*=|enemyTypes\s*=/);
   assert.match(control, /aria-describedby/);
   assert.match(nativeMap, /id: "layers"[\s\S]*label: "Layers"/);
