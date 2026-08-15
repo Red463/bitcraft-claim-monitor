@@ -42,5 +42,5 @@ test("tracked resource pills reuse their final native marker colours", async () 
   assert.match(panel, /--map-resource-chip-colour/);
   assert.doesNotMatch(panel, /Number\(resourceId\)|parseInt\(resourceId/);
   assert.match(css, /\.map-selected-resources button\.has-marker-colour/);
-  assert.match(css, /color-mix\(in srgb, var\(--map-resource-chip-colour\)/);
+  assert.match(css, /color-mix\(in srgb, var\(--map-resource-chip-colour, #f0c64f\)/);
 });
