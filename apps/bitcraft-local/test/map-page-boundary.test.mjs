@@ -76,6 +76,13 @@ test("Map Resource Finder uses the shared icon fallback for compound item identi
   assert.doesNotMatch(finder, /const iconUrl = gameIconUrl\(resource\)/);
 });
 
+test("Map page shares final resource marker colours with the tracked resource pills", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+
+  assert.match(mapPage, /const selectedResourceColours = React\.useMemo/);
+  assert.match(mapPage, /resourceByToken=\{resourceByToken\}\s+resourceColours=\{selectedResourceColours\}\s+resources=\{renderedResources\}/);
+});
+
 test("Map Resource Finder bounds rendered rows and reveals deterministic batches", () => {
   const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
   const finder = readFileSync(new URL("../src/pages/map/MapResourceFinderPanel.tsx", import.meta.url), "utf8");
