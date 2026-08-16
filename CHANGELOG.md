@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.54.2-beta.1] - 2026-08-16
+
+### Changed
+
+- Renamed the Public Craft Finder skill filter to Profession.
+
+### Fixed
+
+- Restored Public Craft Finder profession filtering after the Relay migration.
+
 ## [0.54.1-beta.1] - 2026-08-11
 
 ### Fixed
