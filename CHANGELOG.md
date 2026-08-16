@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.56.0-beta.5] - 2026-08-16
+
+### Fixed
+
+- Fixed verified off-box map-pack installation and allowed the capable deployment updater to self-update during normal releases.
+
 ## [0.56.0-beta.4] - 2026-08-16
 
 ### Fixed

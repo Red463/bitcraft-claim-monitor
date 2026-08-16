@@ -99,6 +99,8 @@ test("Relay updater installs only a hashed product archive through the atomic pa
   assert.match(script, /sha256sum[\s\S]*MAP_ARTIFACT_SHA256/);
   assert.match(script, /tar -tzf[\s\S]*tar -tvzf/);
   assert.match(script, /install-native-map-product\.mjs/);
+  assert.doesNotMatch(script, /sudo -u "\$RUN_USER" tar --no-same-owner --no-same-permissions -xzf "\$MAP_IMPORT_ARCHIVE"/);
+  assert.match(script, /tar --no-same-owner --no-same-permissions -xzf "\$MAP_IMPORT_ARCHIVE" -C "\$MAP_IMPORT_DIR"[\s\S]*chown -R "\$RUN_USER:\$RUN_USER" "\$MAP_IMPORT_DIR"/);
   assert.match(script, /systemctl disable --now "\$MAP_TERRAIN_TIMER" "\$MAP_ROADS_TIMER"/);
   assert.doesNotMatch(script, /--install-map-product[\s\S]{0,300}eval/);
 });
