@@ -9,7 +9,7 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
-## [0.54.2-beta.1] - 2026-08-16
+## [0.56.1-beta.1] - 2026-08-16
 
 ### Changed
 
@@ -18,6 +18,357 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 ### Fixed
 
 - Restored Public Craft Finder profession filtering after the Relay migration.
+
+## [0.56.0-beta.5] - 2026-08-16
+
+### Fixed
+
+- Fixed verified off-box map-pack installation and allowed the capable deployment updater to self-update during normal releases.
+
+## [0.56.0-beta.4] - 2026-08-16
+
+### Fixed
+
+- Fixed scheduled off-box map generation startup so road and terrain refreshes can run without VPS CPU load.
+
+## [0.56.0-beta.3] - 2026-08-16
+
+### Fixed
+
+- Fixed CI-built release installation so the secured artifact can be extracted without rebuilding on the VPS.
+
+## [0.56.0-beta.2] - 2026-08-16
+
+### Fixed
+
+- Fixed the scheduled off-box map generator so GitHub can start terrain and road jobs successfully.
+
+## [0.56.0-beta.1] - 2026-08-16
+
+### Added
+
+- Added per-service CPU attribution to server health diagnostics for the web app, worker, Caddy, and map generators.
+
+### Changed
+
+- Moved terrain and road generation to scheduled GitHub Actions jobs so normal VPS traffic is not competing with large generation workloads.
+- Changed production deployments to install verified CI build outputs instead of compiling the application again on the VPS.
+
+### Fixed
+
+- Capped fallback VPS map-generation CPU, worker concurrency, and runtime while preserving the last-good map when a generation fails.
+
+## [0.55.0-beta.45] - 2026-08-15
+
+### Changed
+
+- Matched tracked resource pills to their resource marker colours for easier identification.
+
+## [0.55.0-beta.44] - 2026-08-15
+
+### Added
+
+- Added a saved Debug information option in Map Layers for showing generation details and canvas-point diagnostics only when needed.
+
+### Changed
+
+- Gave tierless resources stable, distinguishable map colours independent of selection order.
+
+### Fixed
+
+- Included resource-description artwork in the self-hosted game-icon acquisition workflow so resource finder entries can display their icons.
+
+## [0.55.0-beta.43] - 2026-08-14
+
+### Fixed
+
+- Started every validated region/resource partition independently so one dense resource cannot delay the others.
+
+## [0.55.0-beta.42] - 2026-08-14
+
+### Fixed
+
+- Improved cold all-region resource loading by opening each selected region in parallel.
+
+## [0.55.0-beta.41] - 2026-08-14
+
+### Added
+
+- Added near-live binary resource loading for dense selections across multiple regions.
+
+### Changed
+
+- Improved resource loading speed by caching compact coordinate partitions and updating only resources that changed.
+
+### Fixed
+
+- Removed the resource node-count failure that prevented very dense resources from loading.
+- Fixed new resource selections reloading or hiding resources that were already complete.
+
+## [0.55.0-beta.40] - 2026-08-14
+
+### Fixed
+
+- Kept claims, watchtowers, player markers, and map tooltips visible above dense resource nodes.
+
+## [0.55.0-beta.39] - 2026-08-14
+
+### Fixed
+
+- Matched the synthetic world-ocean background to the deep ocean used by generated terrain, removing abrupt colour blocks around temporary regions.
+
+## [0.55.0-beta.38] - 2026-08-14
+
+### Fixed
+
+- Fixed road generation for dense regions whose point counts exceed JavaScript's function-argument limit.
+
+## [0.55.0-beta.37] - 2026-08-14
+
+### Fixed
+
+- Preserved exact secret-safe road storage diagnostics through nested generation errors.
+
+## [0.55.0-beta.36] - 2026-08-14
+
+### Fixed
+
+- Prevented best-effort road staging cleanup from masking the primary generation failure.
+
+## [0.55.0-beta.35] - 2026-08-14
+
+### Fixed
+
+- Covered road bundle preflight and manifest construction in exact secret-safe generation diagnostics.
+
+## [0.55.0-beta.34] - 2026-08-14
+
+### Fixed
+
+- Added exact secret-safe operation diagnostics inside per-region road bundle storage.
+
+## [0.55.0-beta.33] - 2026-08-14
+
+### Fixed
+
+- Preserved the allow-listed road batch failure reason when Node omits nested error details from service journals.
+
+## [0.55.0-beta.32] - 2026-08-14
+
+### Fixed
+
+- Added secret-safe reason diagnostics for failed per-region road bundle installation.
+
+## [0.55.0-beta.31] - 2026-08-14
+
+### Fixed
+
+- Distinguished the exact secret-safe filesystem stage when road map generation fails.
+
+## [0.55.0-beta.30] - 2026-08-14
+
+### Fixed
+
+- Added deterministic, secret-safe stage diagnostics for failed road map generation.
+
+## [0.55.0-beta.29] - 2026-08-14
+
+### Fixed
+
+- Expanded secret-safe road failure classification to distinguish memory, Relay subscription, connection, module, storage, renderer, lock, and implementation failures.
+
+## [0.55.0-beta.28] - 2026-08-14
+
+### Fixed
+
+- Added secret-safe road generator diagnostics when a protected generation run fails.
+
+## [0.55.0-beta.27] - 2026-08-14
+
+### Fixed
+
+- Reused the cached Relay-ready region catalog so map requests no longer rebuild full provider health on every response.
+
+## [0.55.0-beta.26] - 2026-08-14
+
+### Fixed
+
+- Removed the fixed two-second delay from claim-only map snapshots while regional claim data hydrates in the background.
+
+## [0.55.0-beta.25] - 2026-08-14
+
+### Fixed
+
+- Kept the map responsive by releasing the large Relay resource cache after each bounded position refresh.
+- Removed unnecessary Relay readiness waits from claim, watchtower, and other non-resource map snapshots.
+
+## [0.55.0-beta.24] - 2026-08-14
+
+### Changed
+
+- Improved failed deployment diagnostics without exposing remote logs or secrets.
+
+## [0.55.0-beta.23] - 2026-08-14
+
+### Fixed
+
+- Fixed the map retaining an empty regional resource connection when no resources are being tracked.
+
+## [0.55.0-beta.22] - 2026-08-14
+
+### Fixed
+
+- Fixed installed map status and tile requests repeatedly parsing the full terrain file ledger.
+
+## [0.55.0-beta.21] - 2026-08-14
+
+### Fixed
+
+- Reduced live resource subscription memory and network pressure by enabling the Relay SDK's light mode.
+
+## [0.55.0-beta.20] - 2026-08-14
+
+### Fixed
+
+- Fixed repeated map tile requests re-reading and hashing an unchanged installed terrain manifest.
+
+## [0.55.0-beta.19] - 2026-08-14
+
+### Fixed
+
+- Fixed fresh server starts stalling when many terrain tiles simultaneously opened the installed map pack.
+
+## [0.55.0-beta.18] - 2026-08-14
+
+### Added
+
+- Filled the native map's ungenerated world-corner gaps with a lightweight ocean underlay that follows the canonical water palette.
+
+## [0.55.0-beta.17] - 2026-08-14
+
+### Changed
+
+- Added the allow-listed road generator failure category to deployment logs for automated diagnosis while continuing to suppress raw VPS output.
+
+## [0.55.0-beta.16] - 2026-08-14
+
+### Changed
+
+- Added the privacy-safe road generator failure category to deployment summaries while continuing to suppress raw VPS output and journals.
+
+## [0.55.0-beta.15] - 2026-08-14
+
+### Changed
+
+- Added privacy-safe native-map generator failure categories so production road failures can be diagnosed without exposing raw Relay rows, entity IDs, or coordinates.
+
+## [0.55.0-beta.14] - 2026-08-14
+
+### Fixed
+
+- Fixed terrain, road, and pack-verifier CLIs so production execution through the active-release symlink actually runs instead of returning a false success.
+
+## [0.55.0-beta.13] - 2026-08-14
+
+### Changed
+
+- Extended redacted native-map diagnostics to verify effective terrain and road unit paths and detect release-local pack output.
+
+## [0.55.0-beta.12] - 2026-08-14
+
+### Fixed
+
+- Fixed the production native-map directory pin for deployments whose application root includes a different textual path form.
+
+## [0.55.0-beta.11] - 2026-08-14
+
+### Fixed
+
+- Fixed protected terrain and road generation so production validators cannot inherit a different data directory from the web service and generation units.
+
+## [0.55.0-beta.10] - 2026-08-14
+
+### Fixed
+
+- Fixed protected native-map diagnostics so they run through the existing restricted updater without requiring broader deployment-host permissions.
+
+## [0.55.0-beta.9] - 2026-08-14
+
+### Changed
+
+- Added redacted native-map deployment diagnostics that compare installed packs with local and canonical serving without exposing map selections or coordinates.
+
+## [0.55.0-beta.8] - 2026-08-13
+
+### Fixed
+
+- Fixed native map generation verification so only hashed installed packs that the live web service can read and serve are accepted, with the production data directory pinned at process launch.
+
+## [0.55.0-beta.7] - 2026-08-13
+
+### Changed
+
+- Improved native map resource loading so dense selections page progressively across every Relay-ready region without a global 50,000-node limit.
+- Moved slow-changing terrain, water, and roads to verified pre-generated tile packs with atomic last-good installation and off-peak schedules.
+- Changed application deployments to preserve the installed map packs; full-world terrain and road generators now activate replacements independently after complete validation.
+- Added a protected full-world map generation workflow that runs terrain and roads sequentially under systemd memory limits, verifies both packs, and then enables their off-peak schedules.
+- Added aggregate map performance and reliability diagnostics for tiles, resource partitions, queue pressure, and generation latency without exposing tracked selections or coordinates.
+
+### Fixed
+
+- Fixed full-world terrain and road coverage so zoomed-out maps remain detailed without generating tiles during normal web requests.
+- Fixed resource generation processing to normalize each regional update once and retain usable partitions while other regions continue loading.
+- Prevented invalid tile-pack pointers, failed generations, and overloaded resource subscriptions from replacing last-good map data.
+- Prevented incomplete bundled maps, schema-mismatched resource regions, malformed tile manifests, and incomplete road joins from being advertised or activated.
+
+## [0.55.0-beta.6] - 2026-08-13
+
+### Fixed
+
+- Made native map artifact installation part of the root-owned transactional application updater instead of an unreliable second remote deployment phase.
+
+## [0.55.0-beta.5] - 2026-08-13
+
+### Fixed
+
+- Fixed live installation of the verified native map terrain, water, biome, and road bundle by transferring it directly and installing it with the required production ownership.
+
+## [0.55.0-beta.4] - 2026-08-13
+
+### Fixed
+
+- Shipped the accepted pre-generated native map terrain, water, biome masks, and Region 19 roads as a verified static release artifact, avoiding memory-heavy generation on the live server.
+
+## [0.55.0-beta.3] - 2026-08-13
+
+### Fixed
+
+- Installed the pre-generated world terrain, water, and Region 19 road overlays during production deployment so the native map does not fall back to an empty coordinate grid.
+
+## [0.55.0-beta.2] - 2026-08-13
+
+### Fixed
+
+- Made the native map the only Map-page renderer and removed the legacy iframe, renderer setting, and selection-bearing external map URLs.
+
+## [0.55.0-beta.1] - 2026-08-13
+
+### Added
+
+- Added a first-party native BitCraft map with self-hosted terrain, water, roads, biome highlighting, claim and NPC-town markers, watchtowers, waypoints, and live player tracking.
+- Added multi-region resource tracking with tier-based marker colours, stable variations, viewport-efficient rendering, and Relay-backed live updates.
+- Added integrated Layers, Biomes, Players, Resources, and Region controls that preserve selections and work across desktop and mobile layouts.
+
+### Changed
+
+- Replaced selection-bearing third-party map requests with provider-neutral, same-origin map snapshots and event streams.
+- Expanded the Region selector so claim markers and selected resources load from every Relay-ready region, including an all-regions view.
+- Pre-generates slow-changing world terrain and water while keeping roads, players, and resources on bounded live update paths.
+
+### Fixed
+
+- Fixed stale, partial, oversized, and cold resource selections so usable last-good results remain visible while updated regions load.
+- Fixed regional claim filtering, native marker layering, low-zoom terrain coverage, biome decoding, and mobile map-tool layout.
 
 ## [0.54.1-beta.1] - 2026-08-11
 

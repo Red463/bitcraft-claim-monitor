@@ -77,7 +77,7 @@ test("defaultAppSettingRows preserves JSON defaults used by admin and notificati
 });
 
 test("obsoleteAppSettingKeys removes retired configuration from existing databases", () => {
-  assert.deepEqual(obsoleteAppSettingKeys, ["analytics_json", "collector_settings_json"]);
+  assert.deepEqual(obsoleteAppSettingKeys, ["analytics_json", "collector_settings_json", "map_renderer_mode"]);
 });
 test("applyDefaultAppSettings inserts defaults and removes obsolete settings", () => {
   const calls = [];
@@ -125,5 +125,5 @@ test("applyDefaultAppSettings derives default rows when rows are not supplied", 
 
   assert.equal(inserted.length, 18);
   assert.deepEqual(inserted.find(([key]) => key === "server_refresh_seconds"), ["server_refresh_seconds", "75", "2026-06-29T12:45:00.000Z"]);
-  assert.deepEqual(deleted, [["analytics_json"], ["collector_settings_json"]]);
+  assert.deepEqual(deleted, [["analytics_json"], ["collector_settings_json"], ["map_renderer_mode"]]);
 });

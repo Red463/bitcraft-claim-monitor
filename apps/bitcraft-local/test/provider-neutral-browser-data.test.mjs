@@ -182,6 +182,33 @@ test("Map uses live Relay identity and catalog inputs without the unused legacy 
   assert.doesNotMatch(normalizer, /raw\?\.layout|\blayout,/);
 });
 
+test("native terrain browser code is same-origin and contains no third-party tile dependency", async () => {
+  const nativeMap = await readFile(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  const terrainStatus = await readFile(new URL("../src/pages/map/terrainTileStatus.mjs", import.meta.url), "utf8");
+  const browserTerrain = `${nativeMap}\n${terrainStatus}`;
+  assert.match(browserTerrain, /\/api\/local\/map\/tiles\/status/);
+  assert.match(browserTerrain, /mapTileUrl\("terrain"/);
+  assert.match(browserTerrain, /mapTileUrl\("water"/);
+  assert.match(browserTerrain, /biomeTileUrl\(/);
+  assert.doesNotMatch(browserTerrain, /https?:\/\/|prism\.brico|bitcraftmap\.com|BitJita|SpacetimeDB|sharp/i);
+});
+
+test("native resource browser code uses only provider-neutral binary partitions", async () => {
+  const nativeMap = await readFile(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
+  const request = await readFile(new URL("../src/pages/map/nativeMapRequest.mjs", import.meta.url), "utf8");
+  const loader = await readFile(new URL("../src/pages/map/mapResourceBinaryLoader.mjs", import.meta.url), "utf8");
+  const state = await readFile(new URL("../src/pages/map/mapResourceBinaryState.mjs", import.meta.url), "utf8");
+  const packedLayer = await readFile(new URL("../src/pages/map/PackedResourceCanvasLayer.ts", import.meta.url), "utf8");
+  const browserResources = `${request}\n${loader}\n${state}\n${packedLayer}`;
+
+  assert.match(nativeMap, /response\.arrayBuffer\(\)/);
+  assert.match(request, /\/api\/local\/map\/resource-events/);
+  assert.match(loader, /\/api\/local\/map\/resource-partition/);
+  assert.doesNotMatch(nativeMap, /mapResourcePartitionLoader|mapResourceSnapshotState|resourceRowsFromPartitions/);
+  assert.doesNotMatch(browserResources, /relay\.bitjita|BitJita|SpacetimeDB|resource_state|location_state|entityId|https?:\/\//i);
+  assert.doesNotMatch(`${nativeMap}\n${request}`, /\/api\/local\/map\/resources\?/);
+});
+
 test("Region composes live regional claims and global status without legacy page requests", async () => {
   const { normalizeData } = await import(new URL("../src/utils/normalize.ts", import.meta.url).href);
   assert.equal(usesProviderNeutralGameData("region"), true);

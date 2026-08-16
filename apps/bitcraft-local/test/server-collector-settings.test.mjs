@@ -65,6 +65,16 @@ test("Empire current state runs on the adaptive regional Relay runtime", () => {
   assert.doesNotMatch(source, /empireScout(?:Cache|Inflight)/);
 });
 
+test("Relay terrain builds run only through the background runtime while HTTP reads installed bundles", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(source, /const relayTerrainRuntime = new RelayTerrainRuntime/);
+  assert.match(source, /if \(!relayTerrainStarted\) \{[\s\S]*?relayTerrainRuntime\.start/);
+  assert.match(source, /relayTerrainRuntime\.reconcile/);
+  assert.match(source, /serveLocalMapTile\(url\.pathname, res, terrainTileStore, undefined, relayTerrainRuntime\.health\(\), roadTileStore\)/);
+  assert.match(source, /if \(processRoleConfig\.runBackgroundJobs\) startBackgroundTasks\(\)/);
+  assert.doesNotMatch(source, /renderTerrainTile\([^\n]*url\.pathname/);
+});
+
 test("empire membership history is subscription-driven without a scheduled collector", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(source, /onSnapshotCommitted:\s*syncEmpireMembershipFromRelaySnapshot/);

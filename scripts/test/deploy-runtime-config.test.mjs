@@ -21,6 +21,10 @@ test("Relay services execute through the isolated active release symlink", () =>
   }
 });
 
+test("host telemetry monitors optional map generators alongside required services", () => {
+  assert.match(collector, /BITCRAFT_MONITOR_SERVICES=bitcraft-claim-monitor-relay,bitcraft-claim-monitor-relay-worker,caddy,bitcraft-claim-monitor-relay-map-terrain,bitcraft-claim-monitor-relay-map-roads/);
+});
+
 test("systemd leaves Discord activation to the validated environment", () => {
   for (const unit of [web, worker]) {
     assert.match(unit, /EnvironmentFile=-\/etc\/bitcraft-claim-monitor-relay\.env/);
@@ -34,11 +38,11 @@ test("systemd launch commands pin each process role outside the shared environme
   assert.doesNotMatch(worker, /^Environment=BITCRAFT_PROCESS_ROLE=/m);
   assert.match(
     web,
-    /^ExecStart=\/usr\/bin\/env BITCRAFT_PROCESS_ROLE=web \/usr\/bin\/node \/opt\/bitcraft-claim-monitor-relay\/current\/apps\/bitcraft-local\/server\.mjs$/m,
+    /^ExecStart=\/usr\/bin\/env BITCRAFT_PROCESS_ROLE=web BITCRAFT_LOCAL_DATA_DIR=\/var\/lib\/bitcraft-claim-monitor-relay \/usr\/bin\/node \/opt\/bitcraft-claim-monitor-relay\/current\/apps\/bitcraft-local\/server\.mjs$/m,
   );
   assert.match(
     worker,
-    /^ExecStart=\/usr\/bin\/env BITCRAFT_PROCESS_ROLE=worker \/usr\/bin\/node \/opt\/bitcraft-claim-monitor-relay\/current\/apps\/bitcraft-local\/worker\.mjs$/m,
+    /^ExecStart=\/usr\/bin\/env BITCRAFT_PROCESS_ROLE=worker BITCRAFT_LOCAL_DATA_DIR=\/var\/lib\/bitcraft-claim-monitor-relay \/usr\/bin\/node \/opt\/bitcraft-claim-monitor-relay\/current\/apps\/bitcraft-local\/worker\.mjs$/m,
   );
 });
 

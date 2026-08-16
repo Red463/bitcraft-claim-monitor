@@ -15,7 +15,7 @@ export const defaultTheme = {
   danger: "#ef6461",
 };
 
-export const obsoleteAppSettingKeys = ["analytics_json", "collector_settings_json"];
+export const obsoleteAppSettingKeys = ["analytics_json", "collector_settings_json", "map_renderer_mode"];
 
 export function defaultAppSettingRows({ serverRefreshSeconds, updatedAt }) {
   return [

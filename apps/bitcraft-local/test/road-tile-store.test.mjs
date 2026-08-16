@@ -1,0 +1,50 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import * as roadTileStore from "../src/server/roadTileStore.mjs";
+
+const { createRoadTileStore } = roadTileStore;
+
+test("road tile storage failures retain only the exact operation stage", async () => {
+  assert.equal(typeof roadTileStore.roadTileStoreStage, "function", "road tile store stage wrapper is unavailable");
+  for (const stage of ["preflight", "prepare-root", "create-staging", "write-tiles", "build-manifest", "write-manifest", "install-pack"]) {
+    await assert.rejects(
+      roadTileStore.roadTileStoreStage(stage, async () => { throw new Error("private storage detail"); }),
+      (error) => error.message === `ROAD_BATCH_STAGE=${stage}` && error.cause?.message === "private storage detail",
+    );
+  }
+  await assert.rejects(roadTileStore.roadTileStoreStage("unsupported", async () => {}), /unsupported road tile store stage/i);
+});
+
+test("road staging cleanup never masks the primary store failure", async () => {
+  assert.equal(typeof roadTileStore.rethrowAfterRoadStagingCleanup, "function", "road staging cleanup guard is unavailable");
+  const primary = new Error("ROAD_BATCH_STAGE=install-pack");
+  await assert.rejects(
+    roadTileStore.rethrowAfterRoadStagingCleanup(primary, async () => { throw new Error("private cleanup detail"); }),
+    (error) => error === primary,
+  );
+});
+
+test("road tile store atomically installs and reads a same-origin bundle", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "bitcraft-road-store-"));
+  const store = createRoadTileStore({ dataDir, now: () => new Date("2026-08-11T12:00:00.000Z") });
+  const manifest = await store.install({
+    generation: "7", regionIds: ["19"], observedAt: "2026-08-11T11:59:00.000Z",
+    bounds: { minX: 1, minZ: 2, maxX: 3, maxZ: 4 },
+    tiles: [{ z: -5, x: 0, y: -1, bytes: Buffer.from("road") }],
+    featureCount: 10,
+  });
+  assert.equal(manifest.tileCount, 1);
+  assert.equal(manifest.featureCount, 10);
+  assert.equal((await store.readTile({ style: "roads", z: -5, x: 0, y: -1 })).bytes.toString(), "road");
+  assert.equal(await store.readTile({ style: "terrain", z: -5, x: 0, y: -1 }), null);
+});
+
+test("road reads delegate to the immutable pack store", async () => {
+  const source = await readFile(new URL("../src/server/roadTileStore.mjs", import.meta.url), "utf8");
+  assert.match(source, /createMapTilePackStore/);
+  assert.match(source, /packStore\.readTile/);
+});

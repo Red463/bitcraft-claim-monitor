@@ -1,0 +1,146 @@
+import { createHash } from "node:crypto";
+import { mkdir, open, rm } from "node:fs/promises";
+import path from "node:path";
+
+import { createMapTilePackStore } from "./mapTilePackStore.mjs";
+import { canonicalMapRegionIds } from "./mapRegionIds.mjs";
+
+const MAX_TILE_BYTES = 2 * 1024 * 1024;
+const ROAD_TILE_STORE_STAGES = new Set(["preflight", "prepare-root", "create-staging", "write-tiles", "build-manifest", "write-manifest", "install-pack"]);
+
+export async function roadTileStoreStage(stage, task) {
+  if (!ROAD_TILE_STORE_STAGES.has(stage)) throw new TypeError(`Unsupported road tile store stage: ${stage}`);
+  try {
+    return await task();
+  } catch (error) {
+    if (/^ROAD_BATCH_STAGE=/.test(String(error?.message ?? ""))) throw error;
+    throw new Error(`ROAD_BATCH_STAGE=${stage}`, { cause: error });
+  }
+}
+
+export async function rethrowAfterRoadStagingCleanup(error, cleanup) {
+  try {
+    await cleanup();
+  } catch {
+    // The parent job root is also removed on exit; retain the primary staged failure here.
+  }
+  throw error;
+}
+
+function within(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function currentDate(now) {
+  const value = now();
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new TypeError("Road tile store clock returned an invalid date");
+  return date;
+}
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function durableJsonBytes(value) {
+  return Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+async function writeDurableBytes(filePath, bytes) {
+  const handle = await open(filePath, "wx");
+  try {
+    await handle.writeFile(bytes);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+export function createRoadTileStore({ dataDir, now = () => new Date() }) {
+  const root = path.resolve(dataDir, "map-road-tiles");
+  if (!within(path.resolve(dataDir), root)) throw new TypeError("Road tile store path escapes data directory");
+  const packStore = createMapTilePackStore({ root, allowedStyles: ["roads"], maxTileBytes: MAX_TILE_BYTES });
+  let queue = Promise.resolve();
+  let closed = false;
+
+  async function installRoads(input) {
+    const prepared = await roadTileStoreStage("preflight", async () => {
+      if (closed) throw new Error("Road tile store is closed");
+      const { generation, regionIds, observedAt, bounds, tiles, featureCount } = input ?? {};
+      const generationId = String(generation ?? "");
+      if (!/^\d+$/.test(generationId)) throw new TypeError("Road generation must be a decimal integer");
+      const generatedAt = currentDate(now);
+      const version = `g-${generationId}-${generatedAt.getTime()}-${process.pid}`;
+      const staging = path.resolve(root, `.staging-${version}`);
+      if (!within(root, staging)) throw new TypeError("Road bundle staging path escapes store");
+      return { generationId, regionIds, observedAt, bounds, tiles, featureCount, generatedAt, version, staging };
+    });
+    const { generationId, regionIds, observedAt, bounds, tiles, featureCount, generatedAt, version, staging } = prepared;
+    let totalBytes = 0;
+    const files = [];
+    try {
+      await roadTileStoreStage("prepare-root", () => mkdir(root, { recursive: true }));
+      await roadTileStoreStage("create-staging", () => mkdir(staging, { recursive: false }));
+      await roadTileStoreStage("write-tiles", async () => {
+        for (const tile of tiles) {
+          if (!Number.isSafeInteger(tile.z) || !Number.isSafeInteger(tile.x) || !Number.isSafeInteger(tile.y)) throw new TypeError("Road tile coordinates must be safe integers");
+          const bytes = Buffer.from(tile.bytes ?? []);
+          if (!bytes.byteLength) throw new TypeError("Road tile must not be empty");
+          if (bytes.byteLength > MAX_TILE_BYTES) throw new RangeError("Road tile exceeds byte budget");
+          totalBytes += bytes.byteLength;
+          const relativeTilePath = path.posix.join("tiles", "roads", String(tile.z), String(tile.x), `${tile.y}.webp`);
+          const directory = path.join(staging, "tiles", "roads", String(tile.z), String(tile.x));
+          await mkdir(directory, { recursive: true });
+          await writeDurableBytes(path.join(directory, `${tile.y}.webp`), bytes);
+          files.push({ path: relativeTilePath, bytes: bytes.byteLength, sha256: sha256(bytes) });
+        }
+      });
+      const manifest = await roadTileStoreStage("build-manifest", async () => ({
+          provider: "relay",
+          generation: generationId,
+          generatedAt: generatedAt.toISOString(),
+          observedAt,
+          regionIds: canonicalMapRegionIds(regionIds),
+          dimension: "1",
+          bounds,
+          zoomRange: { min: -5, max: 0 },
+          tileCount: files.length,
+          totalBytes,
+          featureCount,
+          files,
+        }));
+      const manifestHash = await roadTileStoreStage("write-manifest", async () => {
+        const manifestBytes = durableJsonBytes(manifest);
+        const hash = sha256(manifestBytes);
+        await writeDurableBytes(path.join(staging, "manifest.json"), manifestBytes);
+        return hash;
+      });
+      return await roadTileStoreStage("install-pack", () => packStore.install({ stagedVersionDir: staging, version, manifestHash }));
+    } catch (error) {
+      return rethrowAfterRoadStagingCleanup(error, () => rm(staging, { recursive: true, force: true }));
+    }
+  }
+
+  return {
+    install(input) {
+      const operation = queue.then(() => installRoads(input));
+      queue = operation.catch(() => undefined);
+      return operation;
+    },
+    async readManifest() {
+      return packStore.readManifest();
+    },
+    async readTile(request) {
+      return packStore.readTile(request);
+    },
+    health() {
+      return packStore.health();
+    },
+    async close() {
+      closed = true;
+      await queue;
+      await packStore.close();
+    },
+  };
+}

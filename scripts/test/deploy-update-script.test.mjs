@@ -6,6 +6,7 @@ const script = readFileSync(new URL("../../deploy/update-bitcraft-claim-monitor-
 const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
 const deployment = readFileSync(new URL("../../DEPLOYMENT.md", import.meta.url), "utf8");
 const gitAttributes = readFileSync(new URL("../../.gitattributes", import.meta.url), "utf8");
+const mapDiagnostic = readFileSync(new URL("../../deploy/diagnose-native-map-serving.mjs", import.meta.url), "utf8");
 
 test("Relay updater has only isolated defaults", () => {
   for (const expected of [
@@ -61,6 +62,64 @@ test("Relay updater builds an immutable release before cutover", () => {
   assert.doesNotMatch(script, /log "Stopping services"[\s\S]*Fetching latest code/);
 });
 
+test("Relay updater installs revision-bound CI outputs instead of rebuilding them", () => {
+  assert.match(script, /--capabilities[\s\S]*relay-build-artifact-v1/);
+  assert.match(script, /--build-artifact-sha256/);
+  assert.match(script, /bitcraft-build-\$\{BUILD_ARTIFACT_SHA256\}\.tar\.gz/);
+  assert.match(script, /install -d -o root -g root -m 0700 "\$LOG_DIR\/incoming"/);
+  assert.match(script, /chown root:root "\$secured_archive"/);
+  assert.match(script, /install-relay-build-artifact\.mjs/);
+  assert.match(script, /prepare_release\(\)[\s\S]*Installing dependencies[\s\S]*Installing verified CI build/);
+  assert.doesNotMatch(script, /sudo -u "\$RUN_USER" tar --no-same-owner --no-same-permissions -xzf "\$BUILD_IMPORT_ARCHIVE"/);
+  assert.match(script, /tar --no-same-owner --no-same-permissions -xzf "\$BUILD_IMPORT_ARCHIVE" -C "\$BUILD_IMPORT_DIR"[\s\S]*chown -R "\$RUN_USER:\$RUN_USER" "\$BUILD_IMPORT_DIR"/);
+  assert.doesNotMatch(script, /run_logged "Building app"/);
+});
+
+test("Relay updater exposes a revision-pinned sequential native map generation mode", () => {
+  assert.match(script, /--generate-map all/);
+  assert.match(script, /generate_native_map_packs\(\)/);
+  assert.match(script, /current_revision.*REVISION/);
+  assert.match(script, /start_and_wait_for_map_generation.*MAP_TERRAIN_SERVICE[\s\S]*start_and_wait_for_map_generation.*MAP_ROADS_SERVICE/);
+  assert.match(script, /verify-native-map-pack\.mjs[\s\S]*--product terrain/);
+  assert.match(script, /verify-native-map-pack\.mjs[\s\S]*--product roads/);
+  assert.match(script, /sudo -u "\$RUN_USER" node[\s\S]*--serve-base-url "http:\/\/127\.0\.0\.1:19430"/);
+  assert.match(script, /Validating served native map[\s\S]*systemctl enable --now/);
+  assert.match(script, /Reporting native map serving diagnostics[\s\S]*diagnose-native-map-serving\.mjs/);
+  assert.match(script, /if ! start_and_wait_for_map_generation "\$MAP_ROADS_SERVICE"[\s\S]*diagnose-native-map-serving\.mjs[\s\S]*return 1/);
+  assert.match(script, /MAP_GENERATION_MODE.*all[\s\S]*DATA_DIR="\/var\/lib\/bitcraft-claim-monitor-relay"/);
+  assert.doesNotMatch(script, /MAP_GENERATION_MODE.*all[^\n]*&&[^\n]*APP_ROOT/);
+  assert.match(script, /systemctl enable --now "\$MAP_TERRAIN_TIMER" "\$MAP_ROADS_TIMER"/);
+});
+
+test("Relay updater installs only a hashed product archive through the atomic pack store", () => {
+  assert.match(script, /--install-map-product terrain\|roads/);
+  assert.match(script, /--artifact-sha256 <64hex>/);
+  assert.match(script, /bitcraft-map-\$\{MAP_INSTALL_PRODUCT\}-\$\{MAP_ARTIFACT_SHA256\}\.tar\.gz/);
+  assert.match(script, /mv -- "\$expected_archive" "\$secured_archive"/);
+  assert.match(script, /sha256sum[\s\S]*MAP_ARTIFACT_SHA256/);
+  assert.match(script, /tar -tzf[\s\S]*tar -tvzf/);
+  assert.match(script, /install-native-map-product\.mjs/);
+  assert.doesNotMatch(script, /sudo -u "\$RUN_USER" tar --no-same-owner --no-same-permissions -xzf "\$MAP_IMPORT_ARCHIVE"/);
+  assert.match(script, /tar --no-same-owner --no-same-permissions -xzf "\$MAP_IMPORT_ARCHIVE" -C "\$MAP_IMPORT_DIR"[\s\S]*chown -R "\$RUN_USER:\$RUN_USER" "\$MAP_IMPORT_DIR"/);
+  assert.match(script, /systemctl disable --now "\$MAP_TERRAIN_TIMER" "\$MAP_ROADS_TIMER"/);
+  assert.doesNotMatch(script, /--install-map-product[\s\S]{0,300}eval/);
+});
+
+test("native map diagnostics compare effective unit storage without publishing raw settings", () => {
+  assert.match(mapDiagnostic, /unitSummary\(TERRAIN_SERVICE, "build-relay-terrain-world\.mjs"\)/);
+  assert.match(mapDiagnostic, /unitSummary\(ROAD_SERVICE, "build-relay-road-world\.mjs"\)/);
+  assert.match(mapDiagnostic, /releaseDataTerrainPointer/);
+  assert.match(mapDiagnostic, /releaseDataRoadPointer/);
+  assert.doesNotMatch(mapDiagnostic, /stdout:\s*stdout|environment:\s*environment/);
+});
+
+test("Relay updater preserves last-good native map packs during application cutover", () => {
+  assert.doesNotMatch(script, /install_native_map_bundle\(\)/);
+  assert.doesNotMatch(script, /native-map-static-bundle\.tar\.gz/);
+  assert.doesNotMatch(script, /\.map-install-\$REVISION/);
+  assert.match(script, /install_release_config "\$release_dir"[\s\S]*atomic_switch "\$release_dir"/);
+});
+
 test("Relay updater validates cutover and restores the previous release on failure", () => {
   assert.match(script, /expected_version/);
   assert.match(script, /rollback_deployment_transaction\(\)/);
@@ -109,7 +168,7 @@ test("Relay updater keeps successful output compact while logging details", () =
   assert.match(script, /printf "Full log: %s\\n" "\$LOG_FILE"/);
   assert.match(script, /run_logged\(\)/);
   assert.match(script, /run_logged "Installing dependencies"/);
-  assert.match(script, /run_logged "Building app"/);
+  assert.match(script, /run_logged "Installing verified CI build"/);
   assert.match(script, /Preparation: %ss/);
   assert.match(script, /Cutover: %ss/);
   assert.match(script, /--verbose/);
@@ -151,6 +210,12 @@ test("Relay updater snapshots and restores every live install target transaction
     "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.timer",
     "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.service",
     "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.timer",
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-terrain.service",
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-terrain.timer",
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-roads.service",
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-roads.timer",
+    "$DATA_DIR/map-tiles/current.json",
+    "$DATA_DIR/map-road-tiles/current.json",
   ]) {
     assert.match(script, new RegExp(target.replaceAll("$", "\\$").replaceAll(".", "\\.")));
   }
@@ -167,7 +232,7 @@ test("Relay rollback accumulates every restore failure and retains incomplete sn
     script.indexOf("restore_service_runtime()"),
   );
   assert.match(restore, /local status=0/);
-  assert.equal((restore.match(/restore_live_path [^\n]+ \|\| status=1/g) || []).length, 11);
+  assert.equal((restore.match(/restore_live_path [^\n]+ \|\| status=1/g) || []).length, 17);
   assert.match(restore, /systemctl daemon-reload \|\| status=1/);
   assert.match(restore, /return "\$status"/);
   assert.match(script, /rollback_attempted=1/);
@@ -218,6 +283,10 @@ test("Relay updater validates and installs only Relay units", () => {
     "bitcraft-claim-monitor-relay-collector.timer",
     "bitcraft-claim-monitor-relay-backup.service",
     "bitcraft-claim-monitor-relay-backup.timer",
+    "bitcraft-claim-monitor-relay-map-terrain.service",
+    "bitcraft-claim-monitor-relay-map-terrain.timer",
+    "bitcraft-claim-monitor-relay-map-roads.service",
+    "bitcraft-claim-monitor-relay-map-roads.timer",
   ]) {
     assert.match(script, new RegExp(unit.replaceAll(".", "\\.")));
   }

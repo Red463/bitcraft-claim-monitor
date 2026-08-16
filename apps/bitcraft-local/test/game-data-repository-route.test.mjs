@@ -639,6 +639,13 @@ test("game-data route accepts the provider-neutral public crafts domain", () => 
   );
 });
 
+test("game-data route accepts map resource generation events as a provider-neutral domain", () => {
+  assert.deepEqual(
+    parseDomainKeys("map-resources,map-resources,not-a-domain"),
+    ["map-resources"],
+  );
+});
+
 test("game-data route serves last-good data as stale with age and partial errors", () => {
   const rows = new Map([
     ["claim", {

@@ -26,11 +26,20 @@ export const DOMAIN_KEYS = [
   "empires",
   "deposits",
   "catalogs",
+  "map-static",
+  "map-spatial",
+  "map-resources",
 ] as const;
 
 export type DomainKey = (typeof DOMAIN_KEYS)[number];
 export type Freshness = "live" | "fresh" | "stale" | "unavailable";
 export type Confidence = "authoritative" | "joined" | "partial" | "unknown";
+
+export type MapLayerAvailability = {
+  available: boolean;
+  status: "live" | "partial" | "stale" | "loading" | "unavailable";
+  reason: string | null;
+};
 
 export type Provenance = {
   provider: "relay";

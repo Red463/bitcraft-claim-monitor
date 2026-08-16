@@ -1,0 +1,44 @@
+{
+  "verified": false,
+  "verificationGate": "Current global signed-in identities do not directly match global mobile_entity_state rows.",
+  "observedAt": "2026-08-13T07:40:38.309Z",
+  "source": {
+    "relayOrigin": "https://relay.bitcraftsync.app",
+    "globalDatabase": "bitcraft-live-global",
+    "globalSchemaFingerprint": "5e44626f1c24e9f8392ebce8bdc9de135f76a58747b208d5e4aa455dd411036a"
+  },
+  "identity": null,
+  "lowercaseIdentity": null,
+  "signedIn": null,
+  "mobile": null,
+  "worldRegions": [],
+  "failedEvidence": {
+    "selectedCount": 100,
+    "matchingUsernameAndSignedInCount": 100,
+    "matchingMobileCount": 0,
+    "matchingOverworldMobileCount": 0
+  },
+  "transitions": {
+    "logoutObserved": false,
+    "mobileDeletionObserved": false,
+    "deselectionRemovesPosition": false,
+    "disconnectRemovesPosition": false
+  },
+  "measurements": [
+    {
+      "selectedCount": 1,
+      "rowCount": 4,
+      "payloadBytes": 394
+    },
+    {
+      "selectedCount": 20,
+      "rowCount": 61,
+      "payloadBytes": 3307
+    },
+    {
+      "selectedCount": 100,
+      "rowCount": 301,
+      "payloadBytes": 15629
+    }
+  ]
+}

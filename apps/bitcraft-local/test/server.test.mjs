@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
@@ -15,6 +15,11 @@ const appDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const claimId = "1369094286777412590";
 const legalPolicy = legalPolicyForEnvironment({});
 const legalDigests = legalPolicyDigests(legalPolicy);
+const relayBindingManifest = JSON.parse(await readFile(
+  path.join(appDir, "src", "server", "game-data", "bindings", "schema-manifest.json"),
+  "utf8",
+));
+const mapResourceRegionIds = ["3", "7", "8", "9", "11", "12", "13", "14", "15", "17", "18", "19", "23"];
 
 process.env.RETIRED_TABLE_GUARD_TEST = "true";
 
@@ -207,6 +212,29 @@ test("server collection paginates listings and protects production mutations", a
   let discordAssignmentRace = null;
   const upstream = createServer(async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
+    if (url.pathname === "/health") {
+      const port = upstream.address()?.port;
+      return json(res, {
+        sources: Object.fromEntries(mapResourceRegionIds.map((regionId) => [`region:${regionId}`, {
+          database: `bitcraft-live-${regionId}`,
+          port,
+          schema_cached: true,
+          connectivity: "live",
+          tables_live: 1,
+          tables_total: 1,
+          metrics: {
+            upstream_database: `bitcraft-live-${regionId}`,
+            publisher: { fingerprint: relayBindingManifest.schemas.regional.fingerprint },
+          },
+        }])),
+      });
+    }
+    if (url.pathname === "/cache-health") {
+      return json(res, {
+        ready: true,
+        regions: mapResourceRegionIds.map((region) => ({ region, ready: true })),
+      });
+    }
     if (url.pathname === "/discord/api/v10/users/@me/channels" && req.method === "POST") {
       const body = await requestJson(req);
       const recipientId = String(body.recipient_id ?? "");
@@ -465,6 +493,7 @@ test("server collection paginates listings and protects production mutations", a
       APP_HOST: "127.0.0.1",
       APP_PORT: String(appPort),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
+      BITCRAFT_RELAY_ORIGIN: `http://127.0.0.1:${upstreamPort}`,
       EMPIRE_SCOUT_CACHE_TTL_MS: "100",
       IPAPI_BASE_URL: `http://127.0.0.1:${upstreamPort}/ipapi`,
       DISCORD_API_ORIGIN: `http://127.0.0.1:${upstreamPort}/discord/api/v10`,
@@ -648,7 +677,13 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(activeRegions.regions[0].freshness, "unavailable");
   assert.equal(regionStatusRequests, 0);
   assert.equal(regionListRequests, 0);
-
+  const mapRegionsResponse = await fetch(`${origin}/api/local/map/regions`);
+  assert.equal(mapRegionsResponse.status, 200);
+  const mapRegions = await mapRegionsResponse.json();
+  assert.deepEqual(mapRegions.regionIds, mapResourceRegionIds);
+  const mapRegion19 = mapRegions.regions.find((region) => region.regionId === "19");
+  assert.equal(mapRegion19.regionName, "Region 19");
+  assert.equal(mapRegion19.freshness, "live");
   const empireObservedAt = new Date().toISOString();
   const empireCurrentData = {
     primaryRegionId: "19",
@@ -1615,8 +1650,12 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({ kind: "basic" }),
   });
   assert.equal(anonymousDiscordSandboxTest.status, 401);
+  const isMismatchedSandboxMessage = (message) => (
+    message.channelId === "555555555555555555"
+    && message.payload?.content === "Discord integration test from Timbersteel Trade."
+  );
   const mismatchedChannelMessagesBefore = discordChannelMessages
-    .filter((message) => message.channelId === "555555555555555555")
+    .filter(isMismatchedSandboxMessage)
     .length;
   const mismatchedDiscordSandboxTest = await fetch(`${origin}/api/local/admin/discord/test`, {
     method: "POST",
@@ -1625,7 +1664,7 @@ test("server collection paginates listings and protects production mutations", a
   });
   assert.equal(mismatchedDiscordSandboxTest.status, 400);
   assert.equal(
-    discordChannelMessages.filter((message) => message.channelId === "555555555555555555").length,
+    discordChannelMessages.filter(isMismatchedSandboxMessage).length,
     mismatchedChannelMessagesBefore,
   );
   const basicDiscordSandboxTest = await fetch(`${origin}/api/local/admin/discord/test`, {

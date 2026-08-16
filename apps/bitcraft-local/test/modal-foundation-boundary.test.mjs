@@ -42,7 +42,6 @@ test("global and feature overlays delegate dialog semantics to the primitive", (
     "../src/pages/CraftPlanManagerDialog.tsx",
     "../src/pages/MembersPage.tsx",
     "../src/pages/EmpiresPage.tsx",
-    "../src/pages/MapPage.tsx",
     "../src/components/admin/AdminPopupsSection.tsx",
     "../src/pages/CraftPlanningPage.tsx",
   ];

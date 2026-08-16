@@ -160,7 +160,7 @@ async function main() {
         APP_HOST: "127.0.0.1",
         APP_PORT: port,
         SERVE_STATIC: "true",
-        BITCRAFT_PROCESS_ROLE: "web",
+        BITCRAFT_PROCESS_ROLE: process.env.BITCRAFT_SMOKE_PROCESS_ROLE ?? "all",
         ENABLE_SERVER_POLLING: "false",
         ENABLE_SCHEDULED_JOBS: "false",
         ENABLE_DISCORD_STARTUP: "false",

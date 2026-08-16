@@ -1,5 +1,4 @@
 export const DEFAULT_APP_PAGE = "dashboard";
-
 export const VALID_APP_PAGES = [
   "dashboard",
   "leaderboard",

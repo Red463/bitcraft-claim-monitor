@@ -17,6 +17,8 @@ export type CatalogDescriptionKind =
   | "buff"
   | "claim_tech";
 
+const NPC_STARTER_TOWN_BUILDING_DESCRIPTION_ID = 292245080;
+
 function record(value: unknown, label: string): WireRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object.`);
@@ -434,6 +436,8 @@ export function normalizeRegionalClaims(options: {
   claimTechRows: unknown[];
   claimTechDescriptionRows: unknown[];
   usernameRows: unknown[];
+  bankRows?: unknown[];
+  waystoneRows?: unknown[];
 }) {
   const regionId = decimalString(options.regionId, "regional claims region id");
   const warnings: string[] = [];
@@ -509,11 +513,12 @@ export function normalizeRegionalClaims(options: {
         row.ownerBuildingEntityId ?? row.owner_building_entity_id,
         `Regional claim ${entityId} owner building id`,
       );
-      if (ownerPlayerEntityId === "0" || row.neutral === true) continue;
       const local = localById.get(entityId);
+      const npc = (local?.buildingDescriptionId ?? local?.building_description_id) === NPC_STARTER_TOWN_BUILDING_DESCRIPTION_ID;
+      if ((ownerPlayerEntityId === "0" || row.neutral === true) && !npc) continue;
       if (!local) warnings.push(`Regional claim ${entityId} has no claim_local_state row.`);
       const ownerPlayerUsername = usernameById.get(ownerPlayerEntityId) || null;
-      if (!ownerPlayerUsername) {
+      if (!npc && !ownerPlayerUsername) {
         missingOwnerUsernameCount += 1;
       }
       const learnedTechIds = learnedTechIdsByClaimId.get(entityId);
@@ -531,6 +536,7 @@ export function normalizeRegionalClaims(options: {
         ownerPlayerUsername,
         name: String(row.name ?? "").trim(),
         neutral: row.neutral === true,
+        npc,
         supplies: local ? integer(local.supplies, `Regional claim ${entityId} supplies`) : null,
         treasury: local
           ? decimalString(local.treasury, `Regional claim ${entityId} treasury`)
@@ -552,11 +558,31 @@ export function normalizeRegionalClaims(options: {
   claims.sort((left, right) => (
     BigInt(String(left.entityId)) < BigInt(String(right.entityId)) ? -1 : 1
   ));
+  const operationalFeatures = (values: unknown[], kind: "bank" | "waystone") => values.map((value, index) => {
+    const row = record(value, `Regional ${kind}_state row ${index}`);
+    const coordinates = record(row.coordinates, `Regional ${kind}_state row ${index} coordinates`);
+    return {
+      entityId: decimalString(
+        row.buildingEntityId ?? row.building_entity_id,
+        `Regional ${kind}_state row ${index} building id`,
+      ),
+      claimEntityId: decimalString(
+        row.claimEntityId ?? row.claim_entity_id,
+        `Regional ${kind}_state row ${index} claim id`,
+      ),
+      regionId,
+      locationX: integer(coordinates.x, `Regional ${kind}_state row ${index} x`),
+      locationZ: integer(coordinates.z, `Regional ${kind}_state row ${index} z`),
+      locationDimension: decimalString(coordinates.dimension, `Regional ${kind}_state row ${index} dimension`),
+    };
+  });
   return {
     data: {
       regionId,
       coverage: { missingOwnerUsernameCount },
       claims,
+      banks: operationalFeatures(options.bankRows ?? [], "bank"),
+      waystones: operationalFeatures(options.waystoneRows ?? [], "waystone"),
     },
     warnings,
   };
@@ -939,6 +965,28 @@ export function normalizeRegionalEmpires(options: {
     chunkCountByNode.set(watchtowerEntityId, (chunkCountByNode.get(watchtowerEntityId) ?? 0) + 1);
     chunkCountByEmpire.set(empireEntityId, (chunkCountByEmpire.get(empireEntityId) ?? 0) + 1);
   }
+  const territory = localChunkRows.map((value, index) => {
+    const row = record(value, `Regional empire_chunk_state row ${index}`);
+    const chunkIndex = decimalString(
+      row.chunkIndex ?? row.chunk_index,
+      `Regional empire chunk row ${index} chunk index`,
+    );
+    const encoded = BigInt(chunkIndex);
+    return {
+      chunkIndex,
+      empireEntityId: decimalString(
+        row.empireEntityId ?? row.empire_entity_id,
+        `Regional empire chunk row ${index} empire id`,
+      ),
+      watchtowerEntityId: decimalString(
+        row.watchtowerEntityId ?? row.watchtower_entity_id,
+        `Regional empire chunk row ${index} watchtower id`,
+      ),
+      chunkX: Number(encoded % 1_000n),
+      chunkZ: Number(encoded / 1_000n),
+    };
+  });
+  territory.sort((left, right) => BigInt(left.chunkIndex) < BigInt(right.chunkIndex) ? -1 : 1);
 
   const nodeOwnerByBuilding = new Map<string, string>();
   for (const [index, value] of localNodeRows.entries()) {
@@ -1083,7 +1131,7 @@ export function normalizeRegionalEmpires(options: {
     BigInt(left.entityId) < BigInt(right.entityId) ? -1 : 1
   ));
   return {
-    data: { regionId, empires, members, settlements, claimMembers, nodes },
+    data: { regionId, empires, members, settlements, claimMembers, nodes, territory },
     warnings,
   };
 }

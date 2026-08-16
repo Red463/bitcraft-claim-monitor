@@ -320,6 +320,22 @@ test("regional empires retain exact identities and join proven attacker and defe
           startTimestamp: "2026-07-30T17:00:00.000Z",
         }],
       }],
+      territory: [
+        {
+          chunkIndex: "242242",
+          empireEntityId: "9007199254740993",
+          watchtowerEntityId: "1369094286736703520",
+          chunkX: 242,
+          chunkZ: 242,
+        },
+        {
+          chunkIndex: "243242",
+          empireEntityId: "9007199254740993",
+          watchtowerEntityId: "1369094286736703520",
+          chunkX: 242,
+          chunkZ: 243,
+        },
+      ],
     },
     warnings: [],
   });
@@ -477,7 +493,7 @@ test("regional empires fail closed when a current siege node has no owner identi
   }), /Regional empire node 300 empire id must be a non-negative decimal integer string/);
 });
 
-test("regional claims rank only player settlements by their exact learned Relay technology", () => {
+test("regional claims retain typed NPC starter towns while excluding other neutral POIs", () => {
   assert.deepEqual(normalizeRegionalClaims({
     regionId: "19",
     claimRows: [{
@@ -512,6 +528,20 @@ test("regional claims rank only player settlements by their exact learned Relay 
       treasury: 987654,
       buildingDescriptionId: 6020,
       location: { x: -42, z: 77, dimension: 0n },
+    }, {
+      entityId: 1369094286777412592n,
+      supplies: 0,
+      numTiles: 0,
+      treasury: 0,
+      buildingDescriptionId: 292245080,
+      location: { x: 120, z: 240, dimension: 1n },
+    }, {
+      entityId: 1369094286777412593n,
+      supplies: 1,
+      numTiles: 1,
+      treasury: 2,
+      buildingDescriptionId: 790011334,
+      location: { x: 121, z: 241, dimension: 1n },
     }],
     claimTypeRows: [{ buildingId: 6020, tier: 6, radius: 7, claimType: { tag: "Settlement" } }],
     claimTechRows: [{
@@ -536,6 +566,7 @@ test("regional claims rank only player settlements by their exact learned Relay 
         ownerPlayerUsername: "Red463",
         name: "Timbersteel Trade",
         neutral: false,
+        npc: false,
         supplies: 12345,
         treasury: "987654",
         numTiles: 49,
@@ -550,6 +581,7 @@ test("regional claims rank only player settlements by their exact learned Relay 
         ownerPlayerUsername: null,
         name: "Neighbour",
         neutral: false,
+        npc: false,
         supplies: null,
         treasury: null,
         numTiles: null,
@@ -557,7 +589,24 @@ test("regional claims rank only player settlements by their exact learned Relay 
         locationX: null,
         locationZ: null,
         locationDimension: null,
+      }, {
+        entityId: "1369094286777412592",
+        ownerPlayerEntityId: "0",
+        ownerBuildingEntityId: "1369094286778488969",
+        ownerPlayerUsername: null,
+        name: "Fernwick",
+        neutral: false,
+        npc: true,
+        supplies: 0,
+        treasury: "0",
+        numTiles: 0,
+        tier: null,
+        locationX: 120,
+        locationZ: 240,
+        locationDimension: "1",
       }],
+      banks: [],
+      waystones: [],
     },
     warnings: [
       "Regional claim 1369094286777412591 has no claim_local_state row.",
