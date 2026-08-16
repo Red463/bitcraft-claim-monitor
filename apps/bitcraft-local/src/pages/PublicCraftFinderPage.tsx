@@ -17,6 +17,7 @@ import { trackAnalyticsEvent } from "../utils/analytics";
 import type { MapFocus } from "./map/mapUtils";
 import {
   compareCraftEffort,
+  filterPublicCraftJobs,
   formatCraftEffort,
   publicCraftMapCoordinates,
   remainingCraftEffort,
@@ -69,8 +70,7 @@ export function PublicCraftFinder({ providerData, providerLoading, providerError
     ...publicJobs.map((job) => String(job.regionId)).filter(Boolean),
     ...(monitoredRegionId ? [monitoredRegionId] : []),
   ]).sort((a, b) => toNumber(a) - toNumber(b));
-  const filteredJobs = publicJobs
-    .filter((job) => regionId === "All" || String(job.regionId) === regionId)
+  const filteredJobs = filterPublicCraftJobs(publicJobs, skillId, regionId)
     .sort((a, b) => {
       const values: Record<PublicCraftSortKey, (job: AnyRecord) => string | number> = {
         output: (job) => String(job.output ?? ""),
@@ -91,7 +91,7 @@ export function PublicCraftFinder({ providerData, providerLoading, providerError
       return sortDir === "asc" ? result : -result;
     });
   const visibleJobs = filteredJobs.slice(0, 100);
-  const skillName = skillId === "All" ? "All Skills" : SKILL_NAMES[toNumber(skillId)] ?? "Selected skill";
+  const skillName = skillId === "All" ? "All Professions" : SKILL_NAMES[toNumber(skillId)] ?? "Selected profession";
   const highestTier = Math.max(...filteredJobs.map((job) => toNumber(job.tier)), 0);
   const totalAvailableXp = filteredJobs.reduce((sum, job) => sum + toNumber(job.availableXp ?? 0), 0);
   const activeSettlements = new Set(filteredJobs.map((job) => String(job.claimName ?? job.claimEntityId ?? "")).filter(Boolean)).size;
@@ -137,15 +137,15 @@ export function PublicCraftFinder({ providerData, providerLoading, providerError
       <div className="summary-grid public-craft-summary">
         <MiniStat icon={<Factory />} label="Public Jobs" value={formatNumber(filteredJobs.length)} />
         <MiniStat icon={<Globe2 />} label="Settlements" value={formatNumber(activeSettlements)} />
-        <MiniStat icon={<GraduationCap />} label="Skill Filter" value={skillName} />
+        <MiniStat icon={<GraduationCap />} label="Profession" value={skillName} />
         <MiniStat icon={<TrendingUp />} label="XP Available" value={formatNumber(totalAvailableXp)} />
       </div>
       <div className="command-filter-panel public-craft-command-panel">
         <div className="command-filter-main">
           <span className="command-filter-title"><Search size={15} /> Craft filters</span>
-          <label className="inline-field"><span>Skill</span>
+          <label className="inline-field"><span>Profession</span>
             <select className="select-control" value={skillId} onChange={(event) => { setSkillId(event.target.value); updateQueryState({ skill: event.target.value }); trackAnalyticsEvent("public_craft_skill_filter_used", { scope: event.target.value === "All" ? "all_skills" : "specific_skill" }); }}>
-              <option value="All">All Skills</option>
+              <option value="All">All Professions</option>
               {SKILL_IDS.map((id) => <option key={id} value={id}>{SKILL_NAMES[id]}</option>)}
             </select>
           </label>
@@ -164,7 +164,7 @@ export function PublicCraftFinder({ providerData, providerLoading, providerError
         </div>
       </div>
       {providerLoading ? <AsyncState kind="loading" title="Refreshing public craft jobs" detail="Current results remain visible while the next Relay generation is applied." compact /> : null}
-      {!providerLoading && visibleJobs.length === 0 ? <AsyncState kind={publicJobs.length ? "no-match" : "empty"} title={publicJobs.length ? "No public crafts match these filters" : "No public craft jobs are open"} detail={publicJobs.length ? "Choose another skill or region to broaden the results." : "Public jobs will appear here when settlements expose incomplete crafts."} /> : null}
+      {!providerLoading && visibleJobs.length === 0 ? <AsyncState kind={publicJobs.length ? "no-match" : "empty"} title={publicJobs.length ? "No public crafts match these filters" : "No public craft jobs are open"} detail={publicJobs.length ? "Choose another profession or region to broaden the results." : "Public jobs will appear here when settlements expose incomplete crafts."} /> : null}
       {visibleJobs.length ? <div className="table-wrap" tabIndex={0} aria-label="Public craft jobs table"><table><thead><tr>{columns.map(([label, key]) => <th key={key}><button className="sort-button" onClick={() => changeSort(key)}>{label}{sortKey === key ? (sortDir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />) : <ArrowUpDown size={12} />}</button></th>)}</tr></thead><tbody>{visibleJobs.map((job, index) => <tr className="data-row" key={job.entityId ?? index}>{columns.map(([label, , render]) => <td key={label}>{render(job)}</td>)}</tr>)}</tbody></table></div> : null}
     </section>
   );
