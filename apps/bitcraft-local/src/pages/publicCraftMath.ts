@@ -29,6 +29,16 @@ export function formatCraftEffort(value: unknown, locales?: string | string[]): 
   return exact == null ? "-" : exact.toLocaleString(locales);
 }
 
+export function filterPublicCraftJobs<T extends { requiredSkillId?: unknown; regionId?: unknown }>(
+  jobs: readonly T[],
+  professionId: string,
+  regionId: string,
+): T[] {
+  return jobs
+    .filter((job) => professionId === "All" || Number(job.requiredSkillId) === Number(professionId))
+    .filter((job) => regionId === "All" || String(job.regionId) === regionId);
+}
+
 function finiteCoordinate(value: unknown): number | null {
   if (value == null || String(value).trim() === "") return null;
   const parsed = Number(value);

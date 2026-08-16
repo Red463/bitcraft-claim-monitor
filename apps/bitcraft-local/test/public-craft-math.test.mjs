@@ -52,3 +52,25 @@ test("public craft map coordinates prefer the settlement and fall back to the li
   );
   assert.equal(math.publicCraftMapCoordinates({ buildingLocationX: "invalid" }), null);
 });
+
+test("public craft jobs filter by the selected profession and region", () => {
+  assert.ok(math, "public craft presentation helpers must exist");
+  const jobs = [
+    { entityId: "1", requiredSkillId: 8, regionId: "19" },
+    { entityId: "2", requiredSkillId: 4, regionId: "19" },
+    { entityId: "3", requiredSkillId: 8, regionId: "20" },
+  ];
+
+  assert.deepEqual(
+    math.filterPublicCraftJobs(jobs, "8", "19"),
+    [jobs[0]],
+  );
+  assert.deepEqual(
+    math.filterPublicCraftJobs(jobs, "All", "19"),
+    [jobs[0], jobs[1]],
+  );
+  assert.deepEqual(
+    math.filterPublicCraftJobs(jobs, "8", "All"),
+    [jobs[0], jobs[2]],
+  );
+});
