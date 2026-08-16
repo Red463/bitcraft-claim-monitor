@@ -346,7 +346,8 @@ install_native_map_product_archive() {
   install -d -o "$RUN_USER" -g "$RUN_USER" -m 0750 "$DATA_DIR"
   MAP_IMPORT_DIR="$(mktemp -d "$DATA_DIR/.map-import-${MAP_INSTALL_PRODUCT}-XXXXXX")"
   chown "$RUN_USER:$RUN_USER" "$MAP_IMPORT_DIR"
-  sudo -u "$RUN_USER" tar --no-same-owner --no-same-permissions -xzf "$MAP_IMPORT_ARCHIVE" -C "$MAP_IMPORT_DIR"
+  tar --no-same-owner --no-same-permissions -xzf "$MAP_IMPORT_ARCHIVE" -C "$MAP_IMPORT_DIR"
+  chown -R "$RUN_USER:$RUN_USER" "$MAP_IMPORT_DIR"
   run_logged "Installing verified $MAP_INSTALL_PRODUCT map product" sudo -u "$RUN_USER" node \
     "$CURRENT_LINK/apps/bitcraft-local/scripts/install-native-map-product.mjs" \
     --source-data-dir "$MAP_IMPORT_DIR" --data-dir "$DATA_DIR" --product "$MAP_INSTALL_PRODUCT"
