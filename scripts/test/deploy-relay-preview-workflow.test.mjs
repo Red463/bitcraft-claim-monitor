@@ -167,6 +167,16 @@ test("protected native map generation runs as product-isolated GitHub jobs", () 
   assert.doesNotMatch(generationWorkflow, /--generate-map all|systemctl start/);
 });
 
+test("native map generation does not request pnpm caching before Corepack is enabled", () => {
+  const setupNodeIndex = generationWorkflow.indexOf("uses: actions/setup-node@v4");
+  const enableCorepackIndex = generationWorkflow.indexOf("name: Enable Corepack");
+  const setupNodeBlock = generationWorkflow.slice(setupNodeIndex, enableCorepackIndex);
+
+  assert.ok(setupNodeIndex >= 0);
+  assert.ok(enableCorepackIndex > setupNodeIndex);
+  assert.doesNotMatch(setupNodeBlock, /cache:\s*pnpm/);
+});
+
 test("protected native map generation uploads a hashed archive for restricted atomic installation", () => {
   assert.match(generationWorkflow, /sha256sum/);
   assert.match(generationWorkflow, /scp[\s\S]*bitcraft-map-\$\{?PRODUCT\}?-/);
