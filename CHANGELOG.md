@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.56.0-beta.4] - 2026-08-16
+
+### Fixed
+
+- Fixed scheduled off-box map generation startup so road and terrain refreshes can run without VPS CPU load.
+
 ## [0.56.0-beta.3] - 2026-08-16
 
 ### Fixed
