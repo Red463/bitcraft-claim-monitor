@@ -235,7 +235,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
         unitPrice: event.price,
         totalPrice: event.total_value,
         sellerUsername: event.owner,
-        purchaserUsername: raw.purchaserUsername,
+        purchaserUsername: event.purchaserUsername ?? event.purchaser_username ?? raw.purchaserUsername,
         itemTier: event.tier ?? raw.itemTier,
         itemRarityStr: event.rarity ?? raw.itemRarityStr,
         timestamp: event.occurred_at,

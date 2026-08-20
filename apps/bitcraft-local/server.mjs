@@ -5875,6 +5875,7 @@ function marketHistory(claimId, limit, owner = "") {
   const sales = db.prepare(`
     SELECT trade_id AS id, 'sale' AS event_type, order_entity_id AS listing_key,
       item_id AS itemId, item_type AS itemType, item_name, seller_username AS owner,
+      purchaser_entity_id AS purchaserEntityId, purchaser_username AS purchaserUsername,
       quantity, unit_price AS price, total_price AS total_value, tier, rarity, occurred_at, raw_json
     FROM market_trades
     WHERE claim_id = ?${tradeOwnerClause}

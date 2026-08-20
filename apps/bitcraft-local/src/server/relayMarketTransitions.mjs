@@ -162,13 +162,22 @@ function correlateClosedListingEvidence({
     "current Relay market region id",
   );
   const claimedTransitions = new Set();
+  const claimedEvidenceIds = new Set();
+  const newClosed = currentClosed.filter((evidence) => !previousById.has(
+    decimalInteger(evidence.entityId, "current Relay closed listing entity id"),
+  ));
+  const orderedClosed = [...newClosed].sort((left, right) => {
+    const leftIsProceeds = String(left.closureKind ?? "") === "sale_proceeds";
+    const rightIsProceeds = String(right.closureKind ?? "") === "sale_proceeds";
+    return Number(rightIsProceeds) - Number(leftIsProceeds);
+  });
 
-  for (const evidence of currentClosed) {
+  for (const evidence of orderedClosed) {
     const evidenceId = decimalInteger(
       evidence.entityId,
       "current Relay closed listing entity id",
     );
-    if (previousById.has(evidenceId)) continue;
+    if (claimedEvidenceIds.has(evidenceId)) continue;
     const ownerEntityId = decimalInteger(
       evidence.ownerEntityId,
       `closed listing ${evidenceId} owner id`,
@@ -236,6 +245,109 @@ function correlateClosedListingEvidence({
 
     const candidate = candidates[0];
     claimedTransitions.add(candidate);
+    let purchaser = null;
+    if (closureKind === "sale_proceeds") {
+      const proceedsTimestamp = String(evidence.timestamp ?? "").trim();
+      const receiptCandidates = newClosed.filter((receipt) => {
+        const receiptId = decimalInteger(
+          receipt.entityId,
+          "current Relay purchase receipt entity id",
+        );
+        if (claimedEvidenceIds.has(receiptId) || receiptId === evidenceId) return false;
+        if (String(receipt.closureKind ?? "") !== "returned_item") return false;
+        const receiptOwnerId = decimalInteger(
+          receipt.ownerEntityId,
+          `closed listing ${receiptId} owner id`,
+        );
+        if (receiptOwnerId === ownerEntityId) return false;
+        const receiptClaimId = optionalDecimalInteger(
+          receipt.claimEntityId,
+          `closed listing ${receiptId} claim id`,
+        );
+        const receiptRegionId = optionalDecimalInteger(
+          receipt.regionId,
+          `closed listing ${receiptId} region id`,
+        ) ?? snapshotRegionId;
+        const receiptTimestamp = String(receipt.timestamp ?? "").trim();
+        return decimalInteger(
+          receipt.itemId,
+          `closed listing ${receiptId} item id`,
+        ) === candidate.listing.itemId
+          && (String(receipt.itemType ?? "").toLowerCase() === "cargo" ? "cargo" : "item") === candidate.listing.itemType
+          && decimalInteger(
+            receipt.quantity,
+            `closed listing ${receiptId} quantity`,
+          ) === candidate.listing.quantity
+          && Boolean(proceedsTimestamp)
+          && receiptTimestamp === proceedsTimestamp
+          && (evidenceClaimId == null || receiptClaimId == null || receiptClaimId === evidenceClaimId)
+          && receiptRegionId === evidenceRegionId;
+      });
+      if (receiptCandidates.length === 1) {
+        const receipt = receiptCandidates[0];
+        const receiptId = decimalInteger(
+          receipt.entityId,
+          "matched Relay purchase receipt entity id",
+        );
+        const receiptOwnerId = decimalInteger(
+          receipt.ownerEntityId,
+          `closed listing ${receiptId} purchaser id`,
+        );
+        const receiptClaimId = optionalDecimalInteger(
+          receipt.claimEntityId,
+          `closed listing ${receiptId} claim id`,
+        );
+        const receiptRegionId = optionalDecimalInteger(
+          receipt.regionId,
+          `closed listing ${receiptId} region id`,
+        ) ?? snapshotRegionId;
+        const matchingSaleCount = newClosed.filter((proceeds) => {
+          if (String(proceeds.closureKind ?? "") !== "sale_proceeds") return false;
+          const proceedsId = decimalInteger(
+            proceeds.entityId,
+            "current Relay sale proceeds entity id",
+          );
+          const proceedsOwnerId = decimalInteger(
+            proceeds.ownerEntityId,
+            `closed listing ${proceedsId} owner id`,
+          );
+          if (proceedsOwnerId === receiptOwnerId) return false;
+          const otherTimestamp = String(proceeds.timestamp ?? "").trim();
+          if (!otherTimestamp || otherTimestamp !== proceedsTimestamp) return false;
+          const proceedsClaimId = optionalDecimalInteger(
+            proceeds.claimEntityId,
+            `closed listing ${proceedsId} claim id`,
+          );
+          const proceedsRegionId = optionalDecimalInteger(
+            proceeds.regionId,
+            `closed listing ${proceedsId} region id`,
+          ) ?? snapshotRegionId;
+          if (proceedsClaimId != null && receiptClaimId != null && proceedsClaimId !== receiptClaimId) return false;
+          if (proceedsRegionId !== receiptRegionId) return false;
+          const proceedsValue = decimalInteger(
+            proceeds.quantity,
+            `closed listing ${proceedsId} quantity`,
+          );
+          const possibleListings = transitions.filter((entry) => (
+            ["partial_quantity_drop", "removed_or_cancelled", "sale_confirmed"].includes(entry.eventType)
+            && entry.listing.side === "sell"
+            && entry.listing.ownerEntityId === proceedsOwnerId
+            && entry.listing.itemId === candidate.listing.itemId
+            && entry.listing.itemType === candidate.listing.itemType
+            && entry.listing.quantity === candidate.listing.quantity
+            && entry.listing.totalValue === proceedsValue
+          ));
+          return possibleListings.length === 1;
+        }).length;
+        if (matchingSaleCount === 1) {
+          claimedEvidenceIds.add(receiptId);
+          purchaser = {
+            entityId: receiptOwnerId,
+            username: String(receipt.ownerUsername ?? "").trim() || null,
+          };
+        }
+      }
+    }
     const listing = {
       ...candidate.listing,
       tradeId: closureKind === "sale_proceeds"
@@ -262,6 +374,7 @@ function correlateClosedListingEvidence({
       summary: `${prefix}: ${listing.itemName} x${BigInt(listing.quantity).toLocaleString("en-US")} at ${BigInt(listing.price).toLocaleString("en-US")}g`,
       listing,
       evidence,
+      ...(purchaser ? { purchaser } : {}),
     };
   }
   return transitions;
@@ -444,8 +557,8 @@ export function createRelayMarketTransitionWriter(db, {
               listing.key,
               listing.ownerEntityId,
               listing.owner,
-              null,
-              null,
+              event.purchaser?.entityId ?? null,
+              event.purchaser?.username ?? null,
               listing.itemId,
               listing.itemType,
               listing.itemName,

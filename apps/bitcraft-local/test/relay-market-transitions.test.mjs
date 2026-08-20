@@ -261,6 +261,157 @@ test("a unique Hex Coin closure confirms an exact full or partial sell-order tra
   assert.equal(partial[0].listing.totalValue, "20");
 });
 
+test("paired item receipts identify buyers without misclassifying purchased items as returns", () => {
+  const purchaseTimestamp = "2026-08-20T17:57:26.127Z";
+  const transitions = transitionsModule.deriveRelayMarketTransitions({
+    previous: {
+      claimId: "100",
+      regionId: "19",
+      listings: [
+        sellOrder({ entityId: "90", itemId: "1020003", itemName: "Rough Plank", quantity: "2", price: "1" }),
+        sellOrder({ entityId: "91", itemId: "1020003", itemName: "Rough Plank", quantity: "5", price: "1" }),
+      ],
+      closedListings: [],
+    },
+    current: {
+      claimId: "100",
+      regionId: "19",
+      listings: [],
+      closedListings: [
+        closedListing({
+          entityId: "700",
+          ownerEntityId: "8",
+          ownerUsername: "Mosswick",
+          itemId: "1020003",
+          quantity: "2",
+          closureKind: "returned_item",
+          timestamp: purchaseTimestamp,
+        }),
+        closedListing({ entityId: "701", quantity: "2", timestamp: purchaseTimestamp }),
+        closedListing({
+          entityId: "702",
+          ownerEntityId: "8",
+          ownerUsername: "Mosswick",
+          itemId: "1020003",
+          quantity: "5",
+          closureKind: "returned_item",
+          timestamp: purchaseTimestamp,
+        }),
+        closedListing({ entityId: "703", quantity: "5", timestamp: purchaseTimestamp }),
+      ],
+    },
+    observedAt,
+  });
+
+  assert.deepEqual(
+    transitions.map((entry) => ({
+      listingKey: entry.listing.key,
+      eventType: entry.eventType,
+      purchaser: entry.purchaser,
+      evidenceId: entry.evidence?.entityId,
+    })),
+    [
+      {
+        listingKey: "90",
+        eventType: "sale_confirmed",
+        purchaser: { entityId: "8", username: "Mosswick" },
+        evidenceId: "701",
+      },
+      {
+        listingKey: "91",
+        eventType: "sale_confirmed",
+        purchaser: { entityId: "8", username: "Mosswick" },
+        evidenceId: "703",
+      },
+    ],
+  );
+});
+
+test("ambiguous item receipts do not invent a buyer", () => {
+  const purchaseTimestamp = "2026-08-20T17:57:26.127Z";
+  const transitions = transitionsModule.deriveRelayMarketTransitions({
+    previous: {
+      claimId: "100",
+      regionId: "19",
+      listings: [sellOrder({ entityId: "90", quantity: "2", price: "1" })],
+      closedListings: [],
+    },
+    current: {
+      claimId: "100",
+      regionId: "19",
+      listings: [],
+      closedListings: [
+        closedListing({ entityId: "700", ownerEntityId: "8", itemId: "42", quantity: "2", closureKind: "returned_item", timestamp: purchaseTimestamp }),
+        closedListing({ entityId: "701", ownerEntityId: "9", itemId: "42", quantity: "2", closureKind: "returned_item", timestamp: purchaseTimestamp }),
+        closedListing({ entityId: "702", quantity: "2", timestamp: purchaseTimestamp }),
+      ],
+    },
+    observedAt,
+  });
+
+  assert.equal(transitions.length, 1);
+  assert.equal(transitions[0].eventType, "sale_confirmed");
+  assert.equal(transitions[0].purchaser, undefined);
+});
+
+test("one item receipt matching multiple sales does not invent a buyer", () => {
+  const purchaseTimestamp = "2026-08-20T17:57:26.127Z";
+  const transitions = transitionsModule.deriveRelayMarketTransitions({
+    previous: {
+      claimId: "100",
+      regionId: "19",
+      listings: [
+        sellOrder({ entityId: "90", quantity: "2", price: "1" }),
+        sellOrder({ entityId: "91", ownerEntityId: "10", ownerUsername: "Forester", quantity: "2", price: "1" }),
+      ],
+      closedListings: [],
+    },
+    current: {
+      claimId: "100",
+      regionId: "19",
+      listings: [],
+      closedListings: [
+        closedListing({ entityId: "700", ownerEntityId: "8", ownerUsername: "Mosswick", itemId: "42", quantity: "2", closureKind: "returned_item", timestamp: purchaseTimestamp }),
+        closedListing({ entityId: "701", quantity: "2", timestamp: purchaseTimestamp }),
+        closedListing({ entityId: "702", ownerEntityId: "10", ownerUsername: "Forester", quantity: "2", timestamp: purchaseTimestamp }),
+      ],
+    },
+    observedAt,
+  });
+
+  assert.deepEqual(
+    transitions.map((entry) => ({ eventType: entry.eventType, purchaser: entry.purchaser })),
+    [
+      { eventType: "sale_confirmed", purchaser: undefined },
+      { eventType: "sale_confirmed", purchaser: undefined },
+    ],
+  );
+});
+
+test("buyer attribution requires timestamp evidence", () => {
+  const transitions = transitionsModule.deriveRelayMarketTransitions({
+    previous: {
+      claimId: "100",
+      regionId: "19",
+      listings: [sellOrder({ entityId: "90", quantity: "2", price: "1" })],
+      closedListings: [],
+    },
+    current: {
+      claimId: "100",
+      regionId: "19",
+      listings: [],
+      closedListings: [
+        closedListing({ entityId: "700", ownerEntityId: "8", itemId: "42", quantity: "2", closureKind: "returned_item", timestamp: undefined }),
+        closedListing({ entityId: "701", quantity: "2", timestamp: undefined }),
+      ],
+    },
+    observedAt,
+  });
+
+  assert.equal(transitions[0].eventType, "sale_confirmed");
+  assert.equal(transitions[0].purchaser, undefined);
+});
+
 test("returned item or cargo evidence confirms a non-sale without crossing item kinds", () => {
   const cargoOrder = sellOrder({
     entityId: "11",
@@ -496,10 +647,20 @@ test("Relay transition history is idempotent and needs no current-listing table"
     claimId: "100",
     regionId: "19",
     listings: [],
-    closedListings: [closedListing({
-      entityId: "690",
-      quantity: "27021597764222979",
-    })],
+    closedListings: [
+      closedListing({
+        entityId: "690",
+        quantity: "27021597764222979",
+      }),
+      closedListing({
+        entityId: "691",
+        ownerEntityId: "8",
+        ownerUsername: "Mosswick",
+        itemId: "42",
+        quantity: "3",
+        closureKind: "returned_item",
+      }),
+    ],
   };
   const sold = writer.apply({
     claimId: "100",
@@ -520,7 +681,8 @@ test("Relay transition history is idempotent and needs no current-listing table"
   );
   assert.deepEqual(
     { ...db.prepare(`
-      SELECT trade_id, order_entity_id, seller_entity_id, item_id, item_type,
+      SELECT trade_id, order_entity_id, seller_entity_id,
+             purchaser_entity_id, purchaser_username, item_id, item_type,
              quantity, unit_price, total_price, occurred_at, region_id
       FROM market_trades
     `).get() },
@@ -528,6 +690,8 @@ test("Relay transition history is idempotent and needs no current-listing table"
       trade_id: "relay_closed_listing:19:690",
       order_entity_id: "90",
       seller_entity_id: "7",
+      purchaser_entity_id: "8",
+      purchaser_username: "Mosswick",
       item_id: "42",
       item_type: "item",
       quantity: "3",

@@ -2231,6 +2231,8 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(baselineHistory.totals.confirmedSales, 1);
   assert.equal(baselineHistory.totals.confirmedUnits, 5);
   assert.equal(baselineHistory.totals.trackedValue, 50);
+  assert.equal(baselineHistory.sales[0].purchaserEntityId, null);
+  assert.equal(baselineHistory.sales[0].purchaserUsername, "Buyer");
   await writeDatabaseWithRetry(path.join(dataDir, "bitcraft-local.sqlite"), (db) => {
     db.prepare(`
       INSERT INTO activity_events (
