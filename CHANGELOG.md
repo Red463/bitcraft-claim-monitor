@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.57.1-beta.6] - 2026-08-20
+
+### Fixed
+
+- Fixed buyer attribution for newly confirmed Local Market sales.
+
 ## [0.57.1-beta.5] - 2026-08-18
 
 ### Fixed
