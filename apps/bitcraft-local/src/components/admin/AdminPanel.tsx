@@ -91,6 +91,13 @@ import {
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { BOT_SECTION_STORAGE_KEY, restoreBotSection } from "../bot/botSectionState";
 import {
+  adminSearchWithTab,
+  botSearchWithSection,
+  parseAdminLocation,
+  parseBotSectionLocation,
+  type AdminTab,
+} from "./adminNavigationState";
+import {
   buildConstructionProjects,
   toNumber,
   type AnyRecord,
@@ -125,8 +132,6 @@ import { claimPendingAction, releasePendingAction } from "../../utils/pendingAct
 const LOCAL_API = "/api/local";
 
 class FallbackMemberLoadError extends Error {}
-
-type AdminTab = "status" | "server-health" | "analytics" | "empire-membership" | "configuration" | "diagnostics" | "discord" | "database" | "users" | "accounts" | "audit" | "backups";
 
 type AdminTabMeta = {
   key: AdminTab;
@@ -223,8 +228,9 @@ export function AdminPanel({
   const [auth, setAuth] = React.useState<AnyRecord | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
   const [authLoaderMinimumActive, setAuthLoaderMinimumActive] = React.useState(true);
-  const [tab, setTab] = usePersistedState<AdminTab>(botOnly ? "bot.adminTab" : "admin.tab", botOnly ? "discord" : "status");
-  const [storedBotSection, setBotSection] = usePersistedState<BotSection>(BOT_SECTION_STORAGE_KEY, "setup");
+  const initialAdminLocation = React.useMemo(() => parseAdminLocation(window.location.search), []);
+  const [tab, setTab] = usePersistedState<AdminTab>(botOnly ? "bot.adminTab" : "admin.tab", botOnly ? "discord" : initialAdminLocation.tab);
+  const [storedBotSection, setBotSection] = usePersistedState<BotSection>(BOT_SECTION_STORAGE_KEY, parseBotSectionLocation(window.location.search));
   const botSection = restoreBotSection(storedBotSection);
   const [message, setMessage] = React.useState<string | null>(null);
   const [messageKind, setMessageKind] = React.useState<"success" | "error" | "info">("info");
@@ -510,6 +516,24 @@ export function AdminPanel({
     }).finally(() => setAuthLoading(false));
   }, []);
   React.useEffect(() => setDraft(settings), [settings]);
+  React.useEffect(() => {
+    const applyLocation = () => {
+      const params = new URLSearchParams(window.location.search);
+      const location = parseAdminLocation(window.location.search);
+      if (params.has("admin")) setTab(botOnly && !["discord", "accounts"].includes(location.tab) ? "discord" : location.tab);
+      if (botOnly && params.has("section")) setBotSection(parseBotSectionLocation(window.location.search));
+    };
+    applyLocation();
+    window.addEventListener("popstate", applyLocation);
+    return () => window.removeEventListener("popstate", applyLocation);
+  }, [botOnly, setBotSection, setTab]);
+  React.useEffect(() => {
+    let nextSearch = adminSearchWithTab(window.location.search, tab);
+    if (botOnly && tab === "discord") nextSearch = botSearchWithSection(nextSearch, botSection);
+    const nextUrl = `${window.location.pathname}${nextSearch}${window.location.hash}`;
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextUrl !== currentUrl) window.history.replaceState(window.history.state, "", nextUrl);
+  }, [botOnly, botSection, tab]);
   const hasUnsavedSettings = React.useMemo(() => JSON.stringify(draft) !== JSON.stringify(settings), [draft, settings]);
   const effectiveMembers = members.length ? members : fallbackMembers;
   const adminMemberRows = React.useMemo(() => [...effectiveMembers].sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b))), [effectiveMembers]);
@@ -1166,13 +1190,13 @@ export function AdminPanel({
           <div className="admin-section-tabs" aria-label="Admin section groups">
             {visibleTabGroups.map((group) => {
               const selected = group.label === activeTabGroup?.label;
-              return <button key={group.label} className={selected ? "active" : ""} onClick={() => setTab(group.tabs[0].key)}>{group.label}</button>;
+              return <button key={group.label} className={selected ? "active" : ""} aria-pressed={selected} onClick={() => setTab(group.tabs[0].key)}>{group.label}</button>;
             })}
           </div>
           <div className="admin-nav-divider" aria-hidden="true" />
           <div className="admin-tabs" aria-label={`${activeTabGroup?.label ?? "Admin"} pages`}>
             {(activeTabGroup?.tabs ?? tabs).map((item) => (
-              <button key={item.key} className={tab === item.key ? "active" : ""} onClick={() => setTab(item.key)} title={item.description}>
+              <button key={item.key} className={tab === item.key ? "active" : ""} aria-current={tab === item.key ? "page" : undefined} onClick={() => setTab(item.key)} title={item.description}>
                 <strong>{item.label}</strong>
               </button>
             ))}
