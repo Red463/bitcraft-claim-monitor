@@ -1,7 +1,7 @@
 import L from "leaflet";
 
 import type { BrowserResourcePartition } from "./mapResourceBinaryState.mjs";
-import { planPackedResourceDraw } from "./packedResourceCanvasPlan.mjs";
+import { planPackedResourceDrawAtZoom } from "./packedResourceCanvasPlan.mjs";
 import { RESOURCE_NODE_FALLBACK_COLOUR } from "./resourceNodeColours.mjs";
 
 export class PackedResourceCanvasLayer extends L.Layer {
@@ -59,7 +59,7 @@ export class PackedResourceCanvasLayer extends L.Layer {
     const context = this.#canvas.getContext("2d");
     if (!context) return;
     const bounds = this.#map.getBounds().pad(0.1);
-    const plan = planPackedResourceDraw(this.#partitions, this.#regions, 25_000, {
+    const plan = planPackedResourceDrawAtZoom(this.#partitions, this.#regions, this.#map.getZoom(), {
       minX: bounds.getWest(),
       minZ: bounds.getSouth(),
       maxX: bounds.getEast(),

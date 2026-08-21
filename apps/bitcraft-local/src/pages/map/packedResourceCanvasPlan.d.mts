@@ -15,6 +15,12 @@ export function planPackedResourceDraw(
   budget?: number,
   viewport?: PackedResourceViewport,
 ): { partitions: PackedResourceDrawPartition[]; pointCount: number; stride: number; viewport?: PackedResourceViewport | null };
+export function planPackedResourceDrawAtZoom(
+  partitions: ReadonlyMap<string, BrowserResourcePartition>,
+  regionIds: readonly string[] | undefined,
+  zoom: number,
+  viewport?: PackedResourceViewport,
+): { partitions: PackedResourceDrawPartition[]; pointCount: number; stride: number; viewport?: PackedResourceViewport | null };
 export function packedResourcePointCount(partitions: ReadonlyMap<string, BrowserResourcePartition>, regionIds?: readonly string[]): number;
 export function packedResourceBounds(partitions: ReadonlyMap<string, BrowserResourcePartition>, regionIds?: readonly string[]): { minX: number; minZ: number; maxX: number; maxZ: number } | null;
 export function packedResourceSamples(partitions: ReadonlyMap<string, BrowserResourcePartition>, regionIds?: readonly string[], limit?: number): PackedResourceSample[];

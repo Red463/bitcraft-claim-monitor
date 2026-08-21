@@ -8,6 +8,7 @@ import {
   packedResourceSamples,
   packedResourceSome,
   planPackedResourceDraw,
+  planPackedResourceDrawAtZoom,
 } from "../src/pages/map/packedResourceCanvasPlan.mjs";
 
 function partition(regionId, resourceId, committed, provisional = []) {
@@ -58,6 +59,45 @@ test("draws every visible node when only the global resource set exceeds the bud
   ]);
 
   const plan = planPackedResourceDraw(partitions, ["19"], 25_000, {
+    minX: 0,
+    minZ: 1_999,
+    maxX: 100,
+    maxZ: 2_001,
+  });
+
+  assert.equal(plan.pointCount, 15);
+  assert.equal(plan.stride, 1);
+});
+
+test("limits a full zoomed-out viewport to its sparse marker budget", () => {
+  const coordinates = Array.from({ length: 30_015 }, (_, index) => (
+    packResourceCoordinate(index % 500, Math.floor(index / 500))
+  ));
+  const partitions = new Map([
+    ["19|resource:2", partition("19", "2", coordinates)],
+  ]);
+
+  const plan = planPackedResourceDrawAtZoom(partitions, ["19"], -4, {
+    minX: 0,
+    minZ: 0,
+    maxX: 500,
+    maxZ: 100,
+  });
+
+  assert.equal(plan.pointCount, 30_015);
+  assert.ok(Math.ceil(plan.pointCount / plan.stride) <= 750);
+});
+
+test("keeps every visible marker at a precise close-up zoom", () => {
+  const offscreen = Array.from({ length: 30_000 }, (_, index) => (
+    packResourceCoordinate(index % 500, 1_000 + Math.floor(index / 500))
+  ));
+  const visible = Array.from({ length: 15 }, (_, index) => packResourceCoordinate(10 + index, 2_000));
+  const partitions = new Map([
+    ["19|resource:2", partition("19", "2", [...offscreen, ...visible])],
+  ]);
+
+  const plan = planPackedResourceDrawAtZoom(partitions, ["19"], 3, {
     minX: 0,
     minZ: 1_999,
     maxX: 100,

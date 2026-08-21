@@ -59,6 +59,20 @@ export function planPackedResourceDraw(partitions, regionIds = [], budget = 25_0
   return { partitions: planned, pointCount, stride: Math.max(1, Math.ceil(pointCount / budget)), viewport: visible };
 }
 
+export function planPackedResourceDrawAtZoom(partitions, regionIds = [], zoom, viewport) {
+  if (!Number.isFinite(zoom)) throw new TypeError("Packed resource zoom must be finite");
+  const level = Math.floor(zoom);
+  let budget = 25_000;
+  if (level <= -4) budget = 750;
+  else if (level === -3) budget = 1_500;
+  else if (level === -2) budget = 3_000;
+  else if (level === -1) budget = 6_000;
+  else if (level === 0) budget = 10_000;
+  else if (level === 1) budget = 15_000;
+  else if (level === 2) budget = 20_000;
+  return planPackedResourceDraw(partitions, regionIds, budget, viewport);
+}
+
 export function packedResourcePointCount(partitions, regionIds = []) {
   return planPackedResourceDraw(partitions, regionIds, Number.MAX_SAFE_INTEGER).pointCount;
 }
