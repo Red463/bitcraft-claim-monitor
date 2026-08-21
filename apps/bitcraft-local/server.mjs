@@ -36,17 +36,18 @@ import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTrans
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { mapResourceRegionCatalog, nameMapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
-import { MapResourcePageError, buildMapResourcePartitionPayload, createMapResourceCursorCodec, mapResourceSelectionLeasePlan, parseMapResourcePartitionScope, parseMapResourceSelectionScope } from "./src/server/mapResourcePages.mjs";
+import { MAP_RESOURCE_LEASE_ACQUISITION_LIMIT, MapResourcePageError, buildMapResourcePartitionPayload, createMapResourceCursorCodec, mapResourceSelectionLeasePlan, parseMapResourcePartitionScope, parseMapResourceSelectionScope } from "./src/server/mapResourcePages.mjs";
 import {
   MapResourceBinaryRouteError,
   binaryPartitionRecoveryResponse,
   binaryPartitionResponse,
+  createMapResourceEventLeaseAcquisition,
   initialMapResourcePartitionEvent,
   parseMapResourceBinaryScope,
   publicMapResourcePartitionEvent,
   runWithConcurrency,
 } from "./src/server/mapResourceBinaryRoute.mjs";
-import { MapSnapshotError, authorizedMapPlayerIds, buildMapResourcePayload, buildMapSnapshot, combineMapSpatialSnapshots, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
+import { MapSnapshotError, authorizedMapPlayerIds, buildMapSnapshot, combineMapSpatialSnapshots, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
 import { serveLocalMapTile } from "./src/server/mapTiles.mjs";
 import { createTerrainTileStore } from "./src/server/terrainTileStore.mjs";
 import { createRoadTileStore } from "./src/server/roadTileStore.mjs";
@@ -147,6 +148,7 @@ import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCache
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import {
   createCurrentStateRepository,
+  createRelayTopologyDiscoveryCache,
   buildCatalogItemDetail,
   buildResearchTierPresets,
   canonicalF32Decimal,
@@ -161,6 +163,7 @@ import {
   enrichRecruitmentWithCatalog,
   enrichResearchWithCatalog,
   gameDataResponse,
+  discoverRelayTopology,
   generationDomainsForListener,
   generationSourceDomains,
   acquireMapLeaseUnlessClosed,
@@ -171,6 +174,7 @@ import {
   mapSpatialLeaseInputs,
   mapSpatialLeaseNeedsInitialWait,
   mapRequestLogTarget,
+  mapGenerationDomainsForLayers,
   mapSnapshotStatusCode,
   publicGenerationEvent,
   mergeClaimInventoryWithBanks,
@@ -637,8 +641,10 @@ const MAP_WAYSTONE_COORDINATES_VERIFIED = false;
 // Resource/location joins are live-verified in configured region 19. Player,
 // enemy, and waystone identities remain independently gated below.
 const MAP_SPATIAL_COLLECTION_VERIFIED = true;
+const relayTopologyDiscovery = createRelayTopologyDiscoveryCache({ discover: discoverRelayTopology });
 const relayMapSpatialScopeManager = new RelayMapSpatialScopeManager({
   manifest: relayBindingManifest,
+  discoverTopology: relayTopologyDiscovery,
   // Scoped map generations are live notifications, not repository commits;
   // they must not trigger settlement/production commit side effects.
   onGeneration: (snapshot, scope) => notifyGameDataGenerationListeners({
@@ -651,6 +657,7 @@ const relayMapSpatialScopeManager = new RelayMapSpatialScopeManager({
 });
 const relayMapResourceRuntime = new RelayMapResourceRuntime({
   manifest: relayBindingManifest,
+  discoverTopology: relayTopologyDiscovery,
   cacheMaxBytes: Math.max(1, Number(process.env.MAP_RESOURCE_CACHE_MAX_BYTES ?? 536_870_912)),
   onGeneration: (snapshot) => notifyGameDataGenerationListeners({
     claimId: currentClaimId(),
@@ -663,6 +670,7 @@ const relayMapResourceRuntime = new RelayMapResourceRuntime({
 const relayMapResourceReadiness = new RelayMapResourceReadiness({
   manifest: relayBindingManifest,
   runtime: relayMapResourceRuntime,
+  discoverTopology: relayTopologyDiscovery,
 });
 const mapResourceCursorCodec = createMapResourceCursorCodec(randomBytes(32));
 const relayMarketTransitionWriter = createRelayMarketTransitionWriter(db, {
@@ -8263,16 +8271,7 @@ const server = createServer(async (req, res) => {
       } catch (error) {
         return send(res, error instanceof MapResourcePageError ? error.statusCode : 422, { error: error instanceof Error ? error.message : String(error) });
       }
-      const leases = [];
-      const unsubscribers = [];
       let requestClosed = false;
-      let released = false;
-      const releaseLeases = async () => {
-        if (released) return;
-        released = true;
-        for (const unsubscribe of unsubscribers.splice(0)) unsubscribe();
-        await Promise.allSettled(leases.splice(0).map((lease) => lease.release()));
-      };
       res.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
@@ -8285,64 +8284,68 @@ const server = createServer(async (req, res) => {
         res.write(`data: ${JSON.stringify(publicMapResourcePartitionEvent(event))}\n\n`);
       };
       res.write(`data: ${JSON.stringify({ type: "stream-ready" })}\n\n`);
+      const leasePlan = mapResourceSelectionLeasePlan(scope);
+      const acquisition = createMapResourceEventLeaseAcquisition({
+        inputs: leasePlan.inputs,
+        concurrency: leasePlan.concurrency,
+        acquire: ({ regionId, resourceId }) => relayMapResourceRuntime.acquire({ regionId, resourceId }),
+        isClosed: () => requestClosed,
+        onEvent: ({ regionId, resourceId }, event, lease) => {
+          const key = mapResourceScopeKey(regionId, resourceId);
+          if (event.type === "partition-delta" && event.additions.length + event.removals.length > 4_096) {
+            const current = lease.current();
+            if (current) writeResourceEvent({
+              type: "partition-ready",
+              key,
+              generation: current.generation,
+              pointCount: current.pointCount,
+              encodedBytes: current.encodedBytes,
+              receivedAt: current.receivedAt,
+              freshness: current.freshness,
+            });
+            return;
+          }
+          writeResourceEvent(event);
+        },
+        onInitial: ({ regionId, resourceId }, lease) => {
+          writeResourceEvent(initialMapResourcePartitionEvent(mapResourceScopeKey(regionId, resourceId), lease.current()));
+        },
+        onUnavailable: ({ regionId, resourceId }, error) => {
+          writeResourceEvent({
+            type: "partition-unavailable",
+            key: mapResourceScopeKey(regionId, resourceId),
+            warning: "Map resource partition is temporarily unavailable",
+            ...(error instanceof MapResourceAdmissionError
+              ? { retryAfterSeconds: error.retryAfterSeconds }
+              : {}),
+          });
+        },
+      });
+      const releaseLeases = () => acquisition.release();
       const heartbeat = setInterval(() => { if (!res.destroyed) res.write(": keep-alive\n\n"); }, 15_000);
       req.once("close", () => {
         requestClosed = true;
         clearInterval(heartbeat);
         void releaseLeases();
       });
-      const leasePlan = mapResourceSelectionLeasePlan(scope);
-      const tasks = [];
-      for (const { regionId, resourceId } of leasePlan.inputs) {
-        tasks.push(async () => {
-          const key = mapResourceScopeKey(regionId, resourceId);
-          try {
-            const lease = await acquireMapLeaseUnlessClosed(
-              () => relayMapResourceRuntime.acquire({ regionId, resourceId }),
-              () => requestClosed,
-              "Map resource event request closed during lease acquisition.",
-            );
-            if (requestClosed) {
-              await lease.release();
-              return;
-            }
-            leases.push(lease);
-            const unsubscribe = lease.subscribe((event) => {
-              if (event.type === "partition-delta" && event.additions.length + event.removals.length > 4_096) {
-                const current = lease.current();
-                if (current) writeResourceEvent({
-                  type: "partition-ready",
-                  key,
-                  generation: current.generation,
-                  pointCount: current.pointCount,
-                  encodedBytes: current.encodedBytes,
-                  receivedAt: current.receivedAt,
-                  freshness: current.freshness,
-                });
-                return;
-              }
-              writeResourceEvent(event);
-            });
-            unsubscribers.push(unsubscribe);
-            writeResourceEvent(initialMapResourcePartitionEvent(key, lease.current()));
-          } catch (error) {
-            if (requestClosed) return;
-            writeResourceEvent({
-              type: "partition-unavailable",
-              key,
-              warning: "Map resource partition is temporarily unavailable",
-              ...(error instanceof MapResourceAdmissionError
-                ? { retryAfterSeconds: error.retryAfterSeconds }
-                : {}),
-            });
-          }
-        });
-      }
-      void runWithConcurrency(tasks, leasePlan.concurrency).catch(() => {});
+      void relayClaimScopeFence.run(claimId, async () => {
+        await acquisition.run();
+      }).then(async (acquiredForCurrentClaim) => {
+        if (acquiredForCurrentClaim && currentClaimId() === claimId) return;
+        requestClosed = true;
+        clearInterval(heartbeat);
+        await releaseLeases();
+        if (!res.destroyed) res.end();
+      }).catch(async () => {
+        requestClosed = true;
+        clearInterval(heartbeat);
+        await releaseLeases();
+        if (!res.destroyed) res.end();
+      });
       return;
     }
-    if (req.method === "GET" && ["/api/local/map/snapshot", "/api/local/map/resources", "/api/local/map/events"].includes(url.pathname)) {
-      if (["/api/local/map/snapshot", "/api/local/map/resources"].includes(url.pathname) && !rateLimit(req, res, "map-snapshot", RATE_LIMITS.mapSnapshot)) return;
+    if (req.method === "GET" && ["/api/local/map/snapshot", "/api/local/map/events"].includes(url.pathname)) {
+      if (url.pathname === "/api/local/map/snapshot" && !rateLimit(req, res, "map-snapshot", RATE_LIMITS.mapSnapshot)) return;
       if (url.pathname === "/api/local/map/events" && !rateLimit(req, res, "map-events", RATE_LIMITS.mapEvents)) return;
       const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
       if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
@@ -8358,9 +8361,6 @@ const server = createServer(async (req, res) => {
           allowedPlayerRegionIds: readyMapRegionIds,
           allowedResourceIds: currentMapResourceIds(),
         });
-        if (url.pathname === "/api/local/map/resources" && (scope.layers.length !== 1 || scope.layers[0] !== "resources")) {
-          throw new MapSnapshotError(422, "Compact map resource requests require only the resources layer");
-        }
       } catch (error) {
         const statusCode = error instanceof MapSnapshotError ? error.statusCode : 422;
         return send(res, statusCode, { error: error instanceof Error ? error.message : String(error) });
@@ -8380,38 +8380,54 @@ const server = createServer(async (req, res) => {
       const spatialInputs = MAP_SPATIAL_COLLECTION_VERIFIED
         ? mapSpatialLeaseInputs(scope, { playerIds: permittedPlayerIds, enemyTypes: permittedEnemyTypes })
         : [];
-      const spatialLeases = [];
-      const resourceLeases = [];
+      const resourceInputs = mapResourceLeaseInputs(scope);
+      const spatialLeases = new Array(spatialInputs.length);
+      const resourceLeases = new Array(resourceInputs.length);
       let requestClosed = false;
       const releaseMapLeases = bindMapLeaseRelease(req, res, () => Promise.allSettled([
-        ...spatialLeases.map((lease) => lease.release()),
-        ...resourceLeases.map((lease) => lease.release()),
+        ...spatialLeases.filter(Boolean).map((lease) => lease.release()),
+        ...resourceLeases.filter(Boolean).map((lease) => lease.release()),
       ]));
       req.once("close", () => {
         requestClosed = true;
       });
       try {
         const acquiredForCurrentClaim = await relayClaimScopeFence.run(claimId, async () => {
-          for (const spatialInput of spatialInputs) {
-            if (requestClosed) throw new Error("Map request closed during spatial scope acquisition.");
-            spatialLeases.push(await acquireMapLeaseUnlessClosed(
-              () => relayMapSpatialScopeManager.acquire({
-                relayBaseUrl,
-                claimId,
-                scope: { claimId, regionId: spatialInput.regionId, playerIds: spatialInput.playerIds, resourceIds: [], enemyTypes: spatialInput.enemyTypes, includeClaims: spatialInput.includeClaims },
-              }),
-              () => requestClosed,
-              "Map request closed during spatial scope acquisition.",
-            ));
-          }
-          for (const resourceInput of mapResourceLeaseInputs(scope)) {
-            if (requestClosed) throw new Error("Map request closed during resource scope acquisition.");
-            resourceLeases.push(await acquireMapLeaseUnlessClosed(
-              () => relayMapResourceRuntime.acquire(resourceInput),
-              () => requestClosed,
-              "Map request closed during resource scope acquisition.",
-            ));
-          }
+          const acquisitionTasks = [
+            ...spatialInputs.map((spatialInput, index) => async () => {
+              if (requestClosed) throw new Error("Map request closed during spatial scope acquisition.");
+              const lease = await acquireMapLeaseUnlessClosed(
+                () => relayMapSpatialScopeManager.acquire({
+                  relayBaseUrl,
+                  claimId,
+                  scope: { claimId, regionId: spatialInput.regionId, playerIds: spatialInput.playerIds, resourceIds: [], enemyTypes: spatialInput.enemyTypes, includeClaims: spatialInput.includeClaims },
+                }),
+                () => requestClosed,
+                "Map request closed during spatial scope acquisition.",
+              );
+              spatialLeases[index] = lease;
+              if (requestClosed) {
+                spatialLeases[index] = undefined;
+                await lease.release();
+                throw new Error("Map request closed during spatial scope acquisition.");
+              }
+            }),
+            ...resourceInputs.map((resourceInput, index) => async () => {
+              if (requestClosed) throw new Error("Map request closed during resource scope acquisition.");
+              const lease = await acquireMapLeaseUnlessClosed(
+                () => relayMapResourceRuntime.acquire(resourceInput),
+                () => requestClosed,
+                "Map request closed during resource scope acquisition.",
+              );
+              resourceLeases[index] = lease;
+              if (requestClosed) {
+                resourceLeases[index] = undefined;
+                await lease.release();
+                throw new Error("Map request closed during resource scope acquisition.");
+              }
+            }),
+          ];
+          await runWithConcurrency(acquisitionTasks, MAP_RESOURCE_LEASE_ACQUISITION_LIMIT);
         });
         if (!acquiredForCurrentClaim || currentClaimId() !== claimId) {
           await releaseMapLeases();
@@ -8426,7 +8442,7 @@ const server = createServer(async (req, res) => {
         return send(res, 503, { error: error instanceof Error ? error.message : String(error) });
       }
       if (url.pathname === "/api/local/map/events") {
-        const domains = ["region-claims", "market", "empires", "members", "players", "map-static", "map-spatial", "map-resources"];
+        const domains = mapGenerationDomainsForLayers(scope.layers);
         res.writeHead(200, {
           "Content-Type": "text/event-stream; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
@@ -8472,14 +8488,6 @@ const server = createServer(async (req, res) => {
         const empires = currentStateRepository.read(claimId, "empires");
         const spatial = combineMapSpatialSnapshots(spatialLeases.map((lease, index) => ({ regionId: spatialInputs[index].regionId, snapshot: lease.snapshot() })));
         const resourceCollection = combineMapResourceLeases(resourceLeases);
-        if (url.pathname === "/api/local/map/resources") {
-          const payload = buildMapResourcePayload({
-            scope,
-            resourceCollection,
-            resourceCoordinatesVerified: MAP_RESOURCE_COORDINATES_VERIFIED,
-          });
-          return send(res, payload.layerAvailability.status === "unavailable" ? 503 : 200, payload);
-        }
         const payload = buildMapSnapshot({
           scope,
           excludedMemberIds: getSettings().excludedMemberIds,
