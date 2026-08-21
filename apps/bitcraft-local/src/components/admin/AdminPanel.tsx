@@ -240,7 +240,13 @@ export function AdminPanel({
   const [authLoading, setAuthLoading] = React.useState(true);
   const [authLoaderDelayElapsed, setAuthLoaderDelayElapsed] = React.useState(false);
   const initialAdminLocation = React.useMemo(() => parseAdminLocation(window.location.search), []);
-  const [tab, setStoredTab] = usePersistedState<AdminTab>(botOnly ? "bot.adminTab" : "admin.tab", botOnly ? "discord" : initialAdminLocation.tab);
+  const hasExplicitInitialAdminTab = React.useMemo(() => new URLSearchParams(window.location.search).has("admin"), []);
+  const initialAdminTab = botOnly && !["discord", "accounts"].includes(initialAdminLocation.tab) ? "discord" : initialAdminLocation.tab;
+  const [tab, setStoredTab] = usePersistedState<AdminTab>(
+    botOnly ? "bot.adminTab" : "admin.tab",
+    initialAdminTab,
+    { preferInitialValue: hasExplicitInitialAdminTab },
+  );
   const [configurationSection, setStoredConfigurationSection] = React.useState<ConfigurationSection>(initialAdminLocation.configurationSection);
   const [storedBotSection, setBotSection] = usePersistedState<BotSection>(BOT_SECTION_STORAGE_KEY, parseBotSectionLocation(window.location.search));
   const botSection = restoreBotSection(storedBotSection);
@@ -572,7 +578,6 @@ export function AdminPanel({
       if (params.has("config")) setStoredConfigurationSection(location.configurationSection);
       if (botOnly && params.has("section")) setBotSection(parseBotSectionLocation(window.location.search));
     };
-    applyLocation();
     window.addEventListener("popstate", applyLocation);
     return () => window.removeEventListener("popstate", applyLocation);
   }, [botOnly, setBotSection, setTab]);

@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.58.0-beta.2] - 2026-08-21
+
+### Fixed
+
+- Fixed explicit admin deep links repeatedly switching between the saved tab and requested tab.
+
 ## [0.58.0-beta.1] - 2026-08-21
 
 ### Added

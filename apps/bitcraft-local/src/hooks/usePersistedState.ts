@@ -2,6 +2,23 @@ import React from "react";
 
 const STORAGE_PREFIX = "claim-monitor.";
 
+export function resolvePersistedInitialValue<T>({
+  initialValue,
+  savedValue,
+  preferInitialValue = false,
+}: {
+  initialValue: T;
+  savedValue: string | null;
+  preferInitialValue?: boolean;
+}): T {
+  if (preferInitialValue || savedValue == null) return initialValue;
+  try {
+    return JSON.parse(savedValue) as T;
+  } catch {
+    return initialValue;
+  }
+}
+
 export function persistedStorageKey(key: string): string {
   return `${STORAGE_PREFIX}${key}`;
 }
@@ -11,11 +28,15 @@ export function persistedStorageKey(key: string): string {
  * filters. This intentionally uses localStorage rather than analytics cookies so
  * usability preferences still work when a visitor declines analytics tracking.
  */
-export function usePersistedState<T>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+export function usePersistedState<T>(
+  key: string,
+  initialValue: T,
+  { preferInitialValue = false }: { preferInitialValue?: boolean } = {},
+): [T, React.Dispatch<React.SetStateAction<T>>] {
   const [value, setValue] = React.useState<T>(() => {
     try {
       const saved = window.localStorage.getItem(persistedStorageKey(key));
-      return saved == null ? initialValue : JSON.parse(saved) as T;
+      return resolvePersistedInitialValue({ initialValue, savedValue: saved, preferInitialValue });
     } catch {
       return initialValue;
     }
