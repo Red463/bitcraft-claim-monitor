@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.58.0-beta.4] - 2026-08-21
+
+### Changed
+
+- Adjusted resource-marker density by zoom so distant map views remain readable while close views stay precise.
+
 ## [0.58.0-beta.3] - 2026-08-21
 
 ### Fixed
