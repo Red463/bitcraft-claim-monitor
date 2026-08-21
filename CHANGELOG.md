@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.58.0-beta.3] - 2026-08-21
+
+### Fixed
+
+- Fixed nearby resource-node clusters being thinned by nodes outside the visible map area.
+
 ## [0.58.0-beta.2] - 2026-08-21
 
 ### Fixed
