@@ -6,19 +6,57 @@ function coordinatesFor(partition) {
   return partition?.generation == null ? partition?.provisional : partition?.committed;
 }
 
-export function planPackedResourceDraw(partitions, regionIds = [], budget = 25_000) {
+function lowerBound(coordinates, target) {
+  let low = 0;
+  let high = coordinates.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (coordinates[middle] < target) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+function normalizeViewport(viewport) {
+  if (viewport == null) return null;
+  const values = [viewport.minX, viewport.minZ, viewport.maxX, viewport.maxZ];
+  if (!values.every(Number.isFinite)) throw new TypeError("Packed resource viewport must contain finite bounds");
+  return {
+    minX: Math.max(0, Math.ceil(viewport.minX)),
+    minZ: Math.max(0, Math.ceil(viewport.minZ)),
+    maxX: Math.min(0xffff, Math.floor(viewport.maxX)),
+    maxZ: Math.min(0xffff, Math.floor(viewport.maxZ)),
+  };
+}
+
+export function planPackedResourceDraw(partitions, regionIds = [], budget = 25_000, viewport) {
   if (!Number.isSafeInteger(budget) || budget < 1) throw new TypeError("Packed resource draw budget must be positive");
   const selected = visibleRegions(regionIds);
+  const visible = normalizeViewport(viewport);
   const planned = [];
   let pointCount = 0;
+  if (visible && (visible.minX > visible.maxX || visible.minZ > visible.maxZ)) {
+    return { partitions: planned, pointCount, stride: 1 };
+  }
   for (const partition of partitions?.values?.() ?? []) {
     if (selected.size && !selected.has(String(partition.regionId))) continue;
     const coordinates = coordinatesFor(partition);
     if (!(coordinates instanceof Uint32Array) || coordinates.length === 0) continue;
-    planned.push({ partition, coordinates });
-    pointCount += coordinates.length;
+    const startIndex = visible ? lowerBound(coordinates, visible.minZ * 0x1_0000) : 0;
+    const endIndex = visible ? lowerBound(coordinates, (visible.maxZ + 1) * 0x1_0000) : coordinates.length;
+    let partitionPointCount = endIndex - startIndex;
+    if (visible) {
+      partitionPointCount = 0;
+      for (let index = startIndex; index < endIndex; index += 1) {
+        const x = coordinates[index] & 0xffff;
+        if (x >= visible.minX && x <= visible.maxX) partitionPointCount += 1;
+      }
+    }
+    if (!partitionPointCount) continue;
+    planned.push({ partition, coordinates, startIndex, endIndex });
+    pointCount += partitionPointCount;
   }
-  return { partitions: planned, pointCount, stride: Math.max(1, Math.ceil(pointCount / budget)) };
+  return { partitions: planned, pointCount, stride: Math.max(1, Math.ceil(pointCount / budget)), viewport: visible };
 }
 
 export function packedResourcePointCount(partitions, regionIds = []) {

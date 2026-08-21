@@ -59,20 +59,26 @@ export class PackedResourceCanvasLayer extends L.Layer {
     const context = this.#canvas.getContext("2d");
     if (!context) return;
     const bounds = this.#map.getBounds().pad(0.1);
-    const plan = planPackedResourceDraw(this.#partitions, this.#regions, 25_000);
+    const plan = planPackedResourceDraw(this.#partitions, this.#regions, 25_000, {
+      minX: bounds.getWest(),
+      minZ: bounds.getSouth(),
+      maxX: bounds.getEast(),
+      maxZ: bounds.getNorth(),
+    });
     let pointIndex = 0;
     context.lineWidth = 1.25;
     context.strokeStyle = "rgba(3, 8, 12, .92)";
-    for (const { partition, coordinates } of plan.partitions) {
+    for (const { partition, coordinates, startIndex, endIndex } of plan.partitions) {
       context.fillStyle = this.#colours[partition.resourceId] ?? RESOURCE_NODE_FALLBACK_COLOUR;
-      for (const packed of coordinates) {
+      for (let index = startIndex; index < endIndex; index += 1) {
+        const packed = coordinates[index];
+        const x = packed & 0xffff;
+        const z = packed >>> 16;
+        if (plan.viewport && (x < plan.viewport.minX || x > plan.viewport.maxX)) continue;
         const draw = pointIndex % plan.stride === 0;
         pointIndex += 1;
         if (!draw) continue;
-        const x = packed & 0xffff;
-        const z = packed >>> 16;
         const point = L.latLng(z, x);
-        if (!bounds.contains(point)) continue;
         const pixel = this.#map.latLngToContainerPoint(point);
         context.beginPath();
         context.arc(pixel.x, pixel.y, 3, 0, Math.PI * 2);

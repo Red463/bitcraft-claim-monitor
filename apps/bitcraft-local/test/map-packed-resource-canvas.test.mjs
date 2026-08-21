@@ -47,3 +47,23 @@ test("uses a stable global stride for dense packed partitions", () => {
   assert.equal(plan.stride, 3);
   assert.equal(plan.partitions[0].coordinates, selected.committed);
 });
+
+test("draws every visible node when only the global resource set exceeds the budget", () => {
+  const offscreen = Array.from({ length: 30_000 }, (_, index) => (
+    packResourceCoordinate(index % 500, 1_000 + Math.floor(index / 500))
+  ));
+  const visible = Array.from({ length: 15 }, (_, index) => packResourceCoordinate(10 + index, 2_000));
+  const partitions = new Map([
+    ["19|resource:2", partition("19", "2", [...offscreen, ...visible])],
+  ]);
+
+  const plan = planPackedResourceDraw(partitions, ["19"], 25_000, {
+    minX: 0,
+    minZ: 1_999,
+    maxX: 100,
+    maxZ: 2_001,
+  });
+
+  assert.equal(plan.pointCount, 15);
+  assert.equal(plan.stride, 1);
+});
