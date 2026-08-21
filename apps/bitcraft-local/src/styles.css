@@ -67,6 +67,14 @@ select option:checked, select option:hover { background: var(--gold-dim); color:
 svg { flex: 0 0 auto; }
 
 .app-shell { --shell-page-gutter: 20px; display: grid; grid-template-columns: 238px minmax(0, 1fr); min-height: 100vh; height: 100vh; background: #030303; background: var(--command-page-gradient); }
+.app-shell.admin-focused-shell { display: block; padding-top: 52px; }
+.admin-focused-shell .mobile-shell-bar { position: fixed; inset: 0 0 auto; z-index: calc(var(--z-sticky) + 2); height: 52px; padding: 0 10px 0 18px; background: #080c12; border-bottom: 1px solid rgba(108,123,145,.28); display: flex; align-items: center; justify-content: space-between; }
+.admin-focused-shell .mobile-shell-bar > span { display: flex; align-items: baseline; gap: 9px; }
+.admin-focused-shell .mobile-shell-bar > button { min-width: 42px; min-height: 42px; border: 0; border-radius: 7px; background: transparent; color: var(--text); display: inline-grid; place-items: center; }
+.admin-focused-shell .app-sidebar { position: fixed; inset: 0 auto 0 0; z-index: calc(var(--z-sticky) + 3); width: min(320px, calc(100vw - 44px)); transform: translateX(-100%); }
+.admin-focused-shell .app-sidebar.mobile-open { transform: translateX(0); }
+.admin-focused-shell .mobile-navigation-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-sticky) + 2); display: block; border: 0; background: rgba(0,0,0,.58); }
+.admin-focused-shell main { height: calc(100vh - 52px); }
 .app-shell.map-dedicated-shell { grid-template-columns: minmax(0, 1fr); width: 100vw; height: 100dvh; min-height: 100dvh; padding-top: 0; }
 .app-shell.map-dedicated-shell main { width: 100vw; height: 100dvh; max-height: 100dvh; overflow: hidden; }
 .app-shell.map-dedicated-shell .page-view { flex: 1 1 auto; }

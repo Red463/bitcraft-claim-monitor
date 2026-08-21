@@ -1,5 +1,6 @@
 import { DEFAULT_THEME } from "./theme";
 import type { AppSettings, DiscordPresence, DiscordRolePanel, DiscordWelcomeFlow } from "./types/settings";
+import { createDefaultRolePanels } from "./discordRolePanelDefaults.mjs";
 export { DEFAULT_USER_TOAST_SETTINGS } from "./notifications/userToastSettings";
 
 /*
@@ -82,40 +83,7 @@ export const DEFAULT_COLOUR_ROLES = [
   { key: "white", label: "White", roleName: "White", roleId: "", color: 0xf4f4f4 },
 ];
 
-export const DEFAULT_ROLE_PANELS: DiscordRolePanel[] = [
-  {
-    key: "access",
-    label: "Access Roles",
-    channelId: "",
-    messageId: "",
-    title: "Welcome to Timbersteel Trade!",
-    description: "Choose your access role below.",
-    mode: "single",
-    showHelperText: true,
-    options: [
-      { key: "citizen", label: "Citizen", roleId: "", emoji: "1" },
-      { key: "visitor", label: "Visitor", roleId: "", emoji: "2" },
-    ],
-  },
-  {
-    key: "professions",
-    label: "Profession Roles",
-    channelId: "",
-    messageId: "",
-    title: "Choose Your Professions",
-    description: "Select as many profession interests as you like.",
-    mode: "multi",
-    showHelperText: true,
-    options: Object.keys(DEFAULT_CRAFT_ROLES).map((key) => ({
-      key,
-      label: key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1),
-      roleId: DEFAULT_CRAFT_ROLES[key],
-      emoji: "",
-    })),
-  },
-  { key: "events", label: "Event Roles", channelId: "", messageId: "", title: "Event Roles", description: "Choose event pings you want.", mode: "multi", showHelperText: true, options: [] },
-  { key: "timezones", label: "Timezone Roles", channelId: "", messageId: "", title: "Timezone Roles", description: "Choose your timezone group.", mode: "single", showHelperText: true, options: [] },
-];
+export const DEFAULT_ROLE_PANELS: DiscordRolePanel[] = createDefaultRolePanels(DEFAULT_CRAFT_ROLES);
 
 export const DEFAULT_WELCOME_FLOW: DiscordWelcomeFlow = {
   enabled: false,

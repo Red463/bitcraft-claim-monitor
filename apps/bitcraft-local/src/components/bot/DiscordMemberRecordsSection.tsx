@@ -19,7 +19,7 @@ export function DiscordMemberRecordsSection({
   renderDiscordToolResult,
   setRecordsDraft,
 }: {
-  confirmModeration: (message: string) => boolean;
+  confirmModeration: (message: string, onConfirm: () => void) => void;
   discordToolResult: Record<string, any> | null;
   memberIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
   onAddNote: () => void;
@@ -69,7 +69,7 @@ export function DiscordMemberRecordsSection({
           <button
             className="toolbar-button danger"
             disabled={!recordsDraft.userId}
-            onClick={() => confirmModeration("Clear active warnings for this member?") && onClearWarnings()}
+            onClick={() => confirmModeration("Clear active warnings for this member?", onClearWarnings)}
           >
             Clear Warnings
           </button>

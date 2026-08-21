@@ -18,13 +18,31 @@ test("AppShell delegates admin console rendering to a focused admin component", 
 
 test("AdminPanel groups admin tabs by operational purpose", () => {
   const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+  const navigation = readFileSync(new URL("../src/components/admin/AdminSectionNavigation.tsx", import.meta.url), "utf8");
 
   assert.match(adminPanel, /const ADMIN_TAB_GROUPS\s*:/);
   assert.match(adminPanel, /Operations/);
   assert.match(adminPanel, /Insights/);
   assert.match(adminPanel, /Access/);
   assert.match(adminPanel, /Maintenance/);
-  assert.match(adminPanel, /admin-tab-group/);
+  assert.match(navigation, /admin-tab-group/);
+});
+
+test("authenticated admin route uses focused chrome and distinct identities", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+  const headerUrl = new URL("../src/components/admin/AdminShellHeader.tsx", import.meta.url);
+  const navigationUrl = new URL("../src/components/admin/AdminSectionNavigation.tsx", import.meta.url);
+
+  assert.equal(existsSync(headerUrl), true);
+  assert.equal(existsSync(navigationUrl), true);
+  assert.match(appShell, /admin-focused-shell/);
+  assert.match(appShell, /active !== "admin"/);
+  assert.match(adminPanel, /<AdminShellHeader\b/);
+  assert.match(adminPanel, /<AdminSectionNavigation\b/);
+  assert.match(readFileSync(headerUrl, "utf8"), /Admin session:/);
+  assert.match(readFileSync(headerUrl, "utf8"), /Public account:/);
+  assert.match(readFileSync(headerUrl, "utf8"), /Return to app/);
 });
 test("AdminPanel keeps sensitive admin controls explicit", () => {
   const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
@@ -70,12 +88,13 @@ test("Admin diagnostics stay bounded", () => {
 });
 test("Admin console uses compact navigation and bounded audit tools", () => {
   const adminPanel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+  const navigation = readFileSync(new URL("../src/components/admin/AdminSectionNavigation.tsx", import.meta.url), "utf8");
   const analyticsUrl = new URL("../src/components/admin/AdminAnalyticsSection.tsx", import.meta.url);
   const analytics = existsSync(analyticsUrl) ? readFileSync(analyticsUrl, "utf8") : "";
   const adminCss = readFileSync(new URL("../src/styles/admin.css", import.meta.url), "utf8");
 
-  assert.match(adminPanel, /admin-section-tabs/);
-  assert.match(adminPanel, /admin-tab-overview/);
+  assert.match(navigation, /admin-section-tabs/);
+  assert.match(navigation, /admin-tab-overview/);
   assert.match(adminCss, /admin-nav-divider/);
   assert.match(analytics, /onAuditFilterChange/);
   assert.match(analytics, /filteredAuditLog/);

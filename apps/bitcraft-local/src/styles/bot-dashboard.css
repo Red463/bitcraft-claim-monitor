@@ -7,7 +7,9 @@
 .bot-overview strong { grid-column: 2; color: var(--text); font: 700 16px Rajdhani, sans-serif; line-height: 1; }
 .bot-overview span { grid-column: 2; color: var(--muted); font-size: 10.5px; line-height: 1.25; overflow-wrap: anywhere; }
 .bot-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; align-items: start; }
-.bot-section-nav { position: sticky; top: 12px; overflow: visible; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(180deg, rgba(88,101,242,.08), rgba(255,255,255,.018)); padding: 10px; display: grid; gap: 11px; box-shadow: 0 14px 28px rgba(0,0,0,.18); }
+.bot-desktop-section-nav { min-width: 0; }
+.bot-mobile-section-nav { display: none; }
+.bot-section-nav { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(180deg, rgba(88,101,242,.08), rgba(255,255,255,.018)); padding: 10px; display: grid; gap: 11px; box-shadow: 0 14px 28px rgba(0,0,0,.18); }
 .bot-nav-title { border-bottom: 1px solid rgba(255,255,255,.08); padding: 2px 4px 10px; display: grid; gap: 3px; }
 .bot-nav-title strong { color: var(--gold); font: 700 16px Rajdhani, sans-serif; line-height: 1; }
 .bot-nav-title span { color: var(--muted); font-size: 11px; }
@@ -25,20 +27,32 @@
   .bot-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .bot-overview div { min-height: 64px; padding: 9px; }
   .bot-overview span { display: none; }
+}
+
+@media (max-width: 720px) {
   .bot-layout { grid-template-columns: 1fr; }
-  .bot-section-nav { position: static; max-height: none; display: flex; overflow-x: auto; gap: 6px; padding: 8px; scroll-snap-type: x mandatory; }
-  .bot-nav-title { grid-column: 1 / -1; }
-  .bot-nav-group { display: contents; }
-  .bot-nav-group p { display: none; }
-  .bot-section-nav button { flex: 0 0 132px; min-height: 40px; padding: 6px 8px; scroll-snap-align: start; }
-  .bot-section-nav strong { font-size: 12px; }
-  .bot-section-nav small { display: none; }
+  .bot-desktop-section-nav { display: none; }
+  .bot-mobile-section-nav { display: grid; position: sticky; top: 0; z-index: 4; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: 0 10px 24px rgba(0,0,0,.22); }
+  .bot-mobile-section-nav > label { color: var(--muted); font-size: var(--font-micro); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .bot-mobile-section-nav select { width: 100%; min-height: 42px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-strong, #10151d); color: var(--text); padding: 7px 10px; font: inherit; }
+  .bot-mobile-section-current { display: grid; gap: 2px; }
+  .bot-mobile-section-current strong { font-size: 13px; }
+  .bot-mobile-section-current span { color: var(--muted); font-size: 11px; }
+  .bot-mobile-section-nav details { border-top: 1px solid var(--border); padding-top: 6px; }
+  .bot-mobile-section-nav summary { color: var(--muted); cursor: pointer; font-size: 12px; }
+  .bot-mobile-section-list { max-height: min(48vh, 360px); overflow-y: auto; padding-top: 8px; display: grid; gap: 9px; }
+  .bot-mobile-section-list > div { display: flex; flex-wrap: wrap; gap: 5px; }
+  .bot-mobile-section-list p { flex: 0 0 100%; margin: 0; color: var(--muted); font-size: var(--font-micro); font-weight: 800; text-transform: uppercase; }
+  .bot-mobile-section-list button { min-height: 36px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); padding: 6px 9px; }
+  .bot-mobile-section-list button.active { border-color: rgba(88,101,242,.62); background: rgba(88,101,242,.15); color: var(--text); }
+  .bot-overview { overflow-x: auto; grid-auto-flow: column; grid-auto-columns: minmax(220px, 82vw); grid-template-columns: none; scroll-snap-type: x mandatory; }
+  .bot-overview > div { scroll-snap-align: start; }
+  .bot-workflow-card { overflow-x: auto; grid-auto-flow: column; grid-auto-columns: minmax(250px, 86vw); grid-template-columns: none; scroll-snap-type: x mandatory; }
+  .bot-workflow-card > button { scroll-snap-align: start; }
 }
 
 @media (max-width: 520px) {
   .bot-control-page { padding: 12px; }
   .bot-console { width: 100%; }
   .bot-layout { min-width: 0; width: 100%; }
-  .bot-overview { grid-template-columns: 1fr; }
-  .bot-section-nav button { flex-basis: 124px; }
 }

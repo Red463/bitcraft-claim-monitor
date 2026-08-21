@@ -79,7 +79,7 @@ test("dedicated map mode keeps the map route while omitting optional application
   assert.match(appShell, /const dedicatedMapView = isDedicatedMapView\(routeSearch\)/);
   assert.match(appShell, /<MapPanel[^>]*dedicated=\{dedicatedMapView\}/s);
   assert.match(appShell, /!dedicatedMapView \? \([\s\S]*className="mobile-shell-bar"/);
-  assert.match(appShell, /\{!dedicatedMapView \? <footer className="app-footer">/);
+  assert.match(appShell, /\{!dedicatedMapView && active !== "admin" \? <footer className="app-footer">/);
   assert.match(appShell, /app-shell[^`]*\$\{dedicatedMapView \? "map-dedicated-shell" : ""\}/);
   assert.match(appShell, /\{!dedicatedMapView \? \([\s\S]*release-update-banner[\s\S]*floating-actions/);
   assert.match(appShell, /LegalAcceptanceDialog/);

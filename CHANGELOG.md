@@ -9,6 +9,26 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.58.0-beta.1] - 2026-08-21
+
+### Added
+
+- Added direct links to every admin section and a compact admin workspace header.
+- Added configuration categories with unsaved-change indicators and clearer save controls.
+- Added mobile navigation for Discord administration sections.
+- Added a loopback-only, read-only admin review mode for authenticated smoke testing without Discord.
+
+### Changed
+
+- Reorganized admin health information by severity and made dashboard status easier to scan.
+- Improved responsive admin tables, workflow summaries, and confirmation dialogs.
+- Reduced the admin authentication loading delay and clarified unavailable Discord configuration states.
+
+### Fixed
+
+- Fixed Discord Role Panel default emoji values.
+- Prevented destructive admin actions from relying on browser-native confirmation prompts.
+
 ## [0.57.1-beta.6] - 2026-08-20
 
 ### Fixed

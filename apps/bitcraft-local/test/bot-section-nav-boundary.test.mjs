@@ -4,6 +4,7 @@ import test from "node:test";
 import { BOT_SECTION_DEFINITIONS, BOT_SECTION_GROUPS } from "../src/components/bot/botSectionState.ts";
 
 const nav = readFileSync(new URL("../src/components/bot/BotSectionNav.tsx", import.meta.url), "utf8");
+const mobileNav = readFileSync(new URL("../src/components/bot/BotMobileSectionNav.tsx", import.meta.url), "utf8");
 
 test("Bot navigation groups settings around stable job labels", () => {
   assert.deepEqual(BOT_SECTION_GROUPS, ["Setup", "Automation", "Roles & Onboarding", "Community Content", "Moderation", "Troubleshooting"]);
@@ -18,4 +19,12 @@ test("Bot troubleshooting and community tools have distinct job descriptions", (
   assert.equal(byId.tools.description, "Reports and one-off announcements");
   assert.equal(byId.tests.description, "Preview commands before publishing; compare Diagnostics when delivery fails");
   assert.equal(byId.diagnostics.description, "Inspect delivery logs; use Tests to reproduce command issues");
+});
+
+test("Bot mobile navigation exposes one labelled grouped section picker", () => {
+  assert.match(mobileNav, /Discord tool/);
+  assert.match(mobileNav, /<optgroup/);
+  assert.match(mobileNav, /BOT_SECTION_GROUPS\.map/);
+  assert.match(mobileNav, /aria-current/);
+  assert.match(nav, /aria-current/);
 });

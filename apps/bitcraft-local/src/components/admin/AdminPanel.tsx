@@ -19,11 +19,9 @@ import {
   Command,
   Crown,
   Database,
-  ExternalLink,
   FileText,
   KeyRound,
   Lock,
-  LogOut,
   Map as MapIcon,
   MapPin,
   MessageCircle,
@@ -61,7 +59,9 @@ import {
   DiscordYouTubeMonitorSection,
 } from "../bot/lazySections";
 import { TablePanel, ToolbarButton } from "../main/AppChrome";
+import { BotMobileSectionNav } from "../bot/BotMobileSectionNav";
 import { AdminPopupsSection } from "./AdminPopupsSection";
+import { AdminConfigurationNav } from "./AdminConfigurationNav";
 import { AdminAccessSection } from "./AdminAccessSection";
 import { loadAdminSettlementMembers } from "./adminSettlementMembers";
 import { AdminAnalyticsSection } from "./AdminAnalyticsSection";
@@ -96,7 +96,16 @@ import {
   parseAdminLocation,
   parseBotSectionLocation,
   type AdminTab,
+  type ConfigurationSection,
 } from "./adminNavigationState";
+import { shouldConfirmConfigurationNavigation } from "./adminConfigurationState";
+import { AdminShellHeader } from "./AdminShellHeader";
+import { AdminSectionNavigation } from "./AdminSectionNavigation";
+import { AdminStatusOverview } from "./AdminStatusOverview";
+import { scheduledJobTimingLabel } from "./adminStatusPresentation";
+import { ConfirmAdminActionDialog } from "./ConfirmAdminActionDialog";
+import type { AdminActionConfirmation } from "./adminActionConfirmation";
+import { adminLoadingStage } from "./adminLoadingState";
 import {
   buildConstructionProjects,
   toNumber,
@@ -214,6 +223,7 @@ export type AdminPanelProps = {
   botOnly?: boolean;
   headingLevel?: 1 | 2;
   onAuthChanged?: (auth: AnyRecord) => void;
+  publicAccount?: AnyRecord | null;
 };
 
 export function AdminPanel({
@@ -223,20 +233,54 @@ export function AdminPanel({
   botOnly = false,
   headingLevel = 2,
   onAuthChanged,
+  publicAccount,
 }: AdminPanelProps) {
   const Heading = headingLevel === 1 ? "h1" : "h2";
   const [auth, setAuth] = React.useState<AnyRecord | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
-  const [authLoaderMinimumActive, setAuthLoaderMinimumActive] = React.useState(true);
+  const [authLoaderDelayElapsed, setAuthLoaderDelayElapsed] = React.useState(false);
   const initialAdminLocation = React.useMemo(() => parseAdminLocation(window.location.search), []);
-  const [tab, setTab] = usePersistedState<AdminTab>(botOnly ? "bot.adminTab" : "admin.tab", botOnly ? "discord" : initialAdminLocation.tab);
+  const [tab, setStoredTab] = usePersistedState<AdminTab>(botOnly ? "bot.adminTab" : "admin.tab", botOnly ? "discord" : initialAdminLocation.tab);
+  const [configurationSection, setStoredConfigurationSection] = React.useState<ConfigurationSection>(initialAdminLocation.configurationSection);
   const [storedBotSection, setBotSection] = usePersistedState<BotSection>(BOT_SECTION_STORAGE_KEY, parseBotSectionLocation(window.location.search));
   const botSection = restoreBotSection(storedBotSection);
   const [message, setMessage] = React.useState<string | null>(null);
   const [messageKind, setMessageKind] = React.useState<"success" | "error" | "info">("info");
+  const [actionConfirmation, setActionConfirmation] = React.useState<AdminActionConfirmation | null>(null);
   const pendingActionsRef = React.useRef(new Set<string>());
   const [pendingActions, setPendingActions] = React.useState<Set<string>>(() => new Set());
   const [draft, setDraft] = React.useState<AppSettings>(settings);
+  const hasUnsavedSettings = React.useMemo(() => JSON.stringify(draft) !== JSON.stringify(settings), [draft, settings]);
+  const requestDiscardSettings = React.useCallback((onDiscard: () => void) => {
+    if (!hasUnsavedSettings) {
+      onDiscard();
+      return;
+    }
+    setActionConfirmation({
+      title: "Discard unsaved configuration changes?",
+      target: "Current configuration draft",
+      impact: "Changes made since the last save will be lost before navigation continues.",
+      reversible: false,
+      confirmLabel: "Discard changes",
+      tone: "warning",
+      onConfirm: () => { setDraft(settings); onDiscard(); },
+    });
+  }, [hasUnsavedSettings, settings]);
+  const setTab = React.useCallback((next: AdminTab | ((current: AdminTab) => AdminTab)) => {
+    const resolved = typeof next === "function" ? next(tab) : next;
+    if (tab === "configuration" && resolved !== tab) {
+      requestDiscardSettings(() => setStoredTab(resolved));
+      return;
+    }
+    setStoredTab(resolved);
+  }, [requestDiscardSettings, setStoredTab, tab]);
+  const selectConfigurationSection = React.useCallback((next: ConfigurationSection) => {
+    if (shouldConfirmConfigurationNavigation({ dirty: hasUnsavedSettings, current: configurationSection, next })) {
+      requestDiscardSettings(() => setStoredConfigurationSection(next));
+      return;
+    }
+    setStoredConfigurationSection(next);
+  }, [configurationSection, hasUnsavedSettings, requestDiscardSettings]);
   const [status, setStatus] = React.useState<AnyRecord | null>(null);
   const [scheduledJobs, setScheduledJobs] = React.useState<AnyRecord | null>(null);
   const [expandedScheduledJobKey, setExpandedScheduledJobKey] = React.useState<string | null>(null);
@@ -505,9 +549,13 @@ export function AdminPanel({
   }
 
   React.useEffect(() => {
-    const timer = window.setTimeout(() => setAuthLoaderMinimumActive(false), 3000);
+    if (!authLoading) {
+      setAuthLoaderDelayElapsed(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setAuthLoaderDelayElapsed(true), 250);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [authLoading]);
   React.useEffect(() => {
     api("/admin/me").then(setAdminAuthState).catch((error) => {
       setAdminAuthState({ authenticated: false, setupRequired: false, error: error instanceof Error ? error.message : String(error) });
@@ -521,6 +569,7 @@ export function AdminPanel({
       const params = new URLSearchParams(window.location.search);
       const location = parseAdminLocation(window.location.search);
       if (params.has("admin")) setTab(botOnly && !["discord", "accounts"].includes(location.tab) ? "discord" : location.tab);
+      if (params.has("config")) setStoredConfigurationSection(location.configurationSection);
       if (botOnly && params.has("section")) setBotSection(parseBotSectionLocation(window.location.search));
     };
     applyLocation();
@@ -528,13 +577,18 @@ export function AdminPanel({
     return () => window.removeEventListener("popstate", applyLocation);
   }, [botOnly, setBotSection, setTab]);
   React.useEffect(() => {
-    let nextSearch = adminSearchWithTab(window.location.search, tab);
+    let nextSearch = adminSearchWithTab(window.location.search, tab, tab === "configuration" ? configurationSection : undefined);
     if (botOnly && tab === "discord") nextSearch = botSearchWithSection(nextSearch, botSection);
     const nextUrl = `${window.location.pathname}${nextSearch}${window.location.hash}`;
     const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (nextUrl !== currentUrl) window.history.replaceState(window.history.state, "", nextUrl);
-  }, [botOnly, botSection, tab]);
-  const hasUnsavedSettings = React.useMemo(() => JSON.stringify(draft) !== JSON.stringify(settings), [draft, settings]);
+  }, [botOnly, botSection, configurationSection, tab]);
+  React.useEffect(() => {
+    if (!hasUnsavedSettings) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsavedSettings]);
   const effectiveMembers = members.length ? members : fallbackMembers;
   const adminMemberRows = React.useMemo(() => [...effectiveMembers].sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b))), [effectiveMembers]);
   React.useEffect(() => {
@@ -768,13 +822,16 @@ export function AdminPanel({
     setDiscordToolResult({ ...result, __type: "moderationAction" });
   }
 
-  function confirmDanger(message: string, phrase = "CONFIRM") {
-    const response = window.prompt(`${message}\n\nType ${phrase} to continue.`);
-    return response === phrase;
-  }
-
-  function confirmModeration(message: string) {
-    return confirmDanger(message);
+  function confirmModeration(message: string, onConfirm: () => void) {
+    setActionConfirmation({
+      title: "Confirm Discord action",
+      target: moderationDraft.userId || moderationDraft.channelId || "Discord server",
+      impact: message,
+      reversible: message.startsWith("Unlock") || message.startsWith("Remove this Discord server ban"),
+      confirmLabel: "Confirm action",
+      tone: "danger",
+      onConfirm,
+    });
   }
 
   async function runBotEndpoint(path: string, payload: AnyRecord, type: string) {
@@ -820,7 +877,6 @@ export function AdminPanel({
   const visibleTabGroups = React.useMemo(() => (botOnly ? BOT_CONSOLE_TAB_GROUPS : ADMIN_TAB_GROUPS).map((group) => ({ ...group, tabs: group.tabs.filter((item) => item.key !== "server-health" || canViewServerHealth) })).filter((group) => group.tabs.length), [botOnly, canViewServerHealth]);
   const tabs = React.useMemo<AdminTabMeta[]>(() => visibleTabGroups.flatMap((group) => group.tabs), [visibleTabGroups]);
   const activeTabMeta = tabs.find((item) => item.key === tab);
-  const activeTabGroup = activeTabMeta ? visibleTabGroups.find((group) => group.tabs.some((item) => item.key === activeTabMeta.key)) : null;
   const extractedTabOwnsMessage = tab === "analytics" || tab === "empire-membership" || tab === "database" || tab === "users" || tab === "accounts" || tab === "audit" || tab === "backups";
   const tabLoadPending = [...pendingActions].some((key) => key.startsWith(`tab-load:${tab}:`));
   React.useEffect(() => { if (tab === "server-health" && !canViewServerHealth) setTab("status"); }, [tab, canViewServerHealth, setTab]);
@@ -838,7 +894,11 @@ export function AdminPanel({
     ["supplies", "Supplies"],
     ["appUpdate", "App Update"],
   ] as const;
-  if (authLoading || authLoaderMinimumActive) return (
+  const authLoadingPresentation = adminLoadingStage({ authLoading, delayElapsed: authLoaderDelayElapsed });
+  if (authLoadingPresentation === "pending-hidden") return (
+    <div className="panel admin-login admin-loading-delay" aria-busy="true" aria-label="Checking administrator session" />
+  );
+  if (authLoadingPresentation === "pending-visible") return (
     <div className="panel admin-login admin-loading-panel">
       <section className="admin-session-loader" role="status" aria-live="polite" aria-label="Checking administrator session">
         <div className="admin-loader-orb" aria-hidden="true">
@@ -1159,56 +1219,27 @@ export function AdminPanel({
   }
   return (
     <div className={`panel admin-console ${botOnly ? "bot-console" : "admin-page"}`}>
-      {botOnly ? (
-        <div className="split-header">
-          <div className="section-header"><div><Heading>Discord Bot Control</Heading><p>Manage bot setup, notifications, self-assign roles, tools and diagnostics</p></div></div>
-          <div className="toolbar">
-            <a className="toolbar-button" href="/"><ExternalLink size={15} /> Open App</a>
-            <button className="toolbar-button" disabled={isBusyAction("logout")} onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAdminAuthState({ authenticated: false, setupRequired: false }); }, undefined, "logout")}><LogOut size={15} /> Sign out</button>
-          </div>
-        </div>
-      ) : (
-        <header className="members-topbar admin-topbar">
-          <div>
-            <Heading>Admin Console</Heading>
-            <p>Configuration and operational controls for this installation</p>
-          </div>
-          <div className="dashboard-top-meta" aria-label="Admin status">
-            <div className="dashboard-meta-cluster">
-              <span><Server size={15} /> {status?.environment ?? "Local"}</span>
-              <span>{status?.polling?.enabled ? "Reconciliation enabled" : "Reconciliation disabled"}</span>
-            </div>
-            <div className="toolbar">
-              <a className="toolbar-button" href="/bot" target="_blank" rel="noreferrer"><MessageCircle size={15} /> Bot Dashboard</a>
-              <button className="toolbar-button" disabled={isBusyAction("logout")} onClick={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAdminAuthState({ authenticated: false, setupRequired: false }); }, undefined, "logout")}><LogOut size={15} /> Sign out</button>
-            </div>
-          </div>
-        </header>
-      )}
+      <AdminShellHeader
+        heading={botOnly ? "Discord Bot Control" : "Admin Console"}
+        description={botOnly ? "Manage bot setup, notifications, self-assign roles, tools and diagnostics" : "Configuration and operational controls for this installation"}
+        admin={auth.user}
+        publicAccount={publicAccount}
+        environment={status?.environment}
+        reconciliationEnabled={Boolean(status?.polling?.enabled)}
+        botOnly={botOnly}
+        logoutPending={isBusyAction("logout")}
+        onLogout={() => run(async () => { await api("/admin/logout", { method: "POST", body: "{}" }); setAdminAuthState({ authenticated: false, setupRequired: false }); }, undefined, "logout")}
+      />
       {tabs.length && activeTabMeta ? (
-        <nav className="admin-tab-groups" aria-label="Admin sections">
-          <div className="admin-section-tabs" aria-label="Admin section groups">
-            {visibleTabGroups.map((group) => {
-              const selected = group.label === activeTabGroup?.label;
-              return <button key={group.label} className={selected ? "active" : ""} aria-pressed={selected} onClick={() => setTab(group.tabs[0].key)}>{group.label}</button>;
-            })}
-          </div>
-          <div className="admin-nav-divider" aria-hidden="true" />
-          <div className="admin-tabs" aria-label={`${activeTabGroup?.label ?? "Admin"} pages`}>
-            {(activeTabGroup?.tabs ?? tabs).map((item) => (
-              <button key={item.key} className={tab === item.key ? "active" : ""} aria-current={tab === item.key ? "page" : undefined} onClick={() => setTab(item.key)} title={item.description}>
-                <strong>{item.label}</strong>
-              </button>
-            ))}
-          </div>
-          <div className="admin-tab-overview" aria-label={`${activeTabMeta.label} overview`}>
-            <span>Admin / {activeTabGroup?.label ?? "General"}</span>
-            <h3>{activeTabMeta.label}</h3>
-            <p>{activeTabMeta.description}</p>
-          </div>
-        </nav>
+        <AdminSectionNavigation groups={visibleTabGroups} active={tab} onSelect={setTab} />
       ) : null}
       {message && !extractedTabOwnsMessage ? <div className={`admin-message ${messageKind}`} role={messageKind === "error" ? "alert" : "status"} aria-live={messageKind === "error" ? "assertive" : "polite"}>{message}</div> : null}
+
+      {botOnly && tab === "discord" && discordDiscovery?.available === false ? (
+        <div className="admin-message info discord-availability-notice" role="status">
+          <strong>Discord connection unavailable.</strong> {discordDiscovery.message}
+        </div>
+      ) : null}
 
       {tab === "server-health" && canViewServerHealth ? <ServerHealthSection /> : null}
 
@@ -1232,6 +1263,12 @@ export function AdminPanel({
               ))}
             </div>
           </section>
+          <AdminStatusOverview conditions={[
+            { label: "Relay provider", detail: status?.gameDataProvider?.running ? "Current provider generation is available." : "The Relay provider is not running in this process.", configured: true, ok: Boolean(status?.gameDataProvider?.running), critical: true },
+            { label: "Relay cache", detail: status?.gameDataProvider?.cacheReady ? "Last-good data is ready to serve." : "Cache is unavailable or still starting.", configured: true, ok: Boolean(status?.gameDataProvider?.cacheReady), critical: true },
+            { label: "Discord delivery", detail: draft.discord.botTokenConfigured ? discordDeliveryLabel : "Optional: add a bot token in Discord Setup.", configured: Boolean(draft.discord.botTokenConfigured), ok: status?.discord?.mode === "live", optional: !draft.discord.botTokenConfigured },
+            { label: "Reconciliation", detail: status?.polling?.enabled ? "Scheduled reconciliation is enabled." : status?.environment === "production" ? "Reconciliation is disabled." : "Unavailable in this local development process.", configured: Boolean(status?.polling?.enabled), ok: Boolean(status?.polling?.enabled), optional: status?.environment !== "production", localDevelopment: status?.environment !== "production" },
+          ]} />
           <div className="metric-grid admin-metrics">
             <Stat icon={<Server />} label="Environment" value={status?.environment ?? "-"} />
             <Stat icon={<Database />} label="Database" value={bytesLabel(status?.databaseSize)} />
@@ -1240,6 +1277,8 @@ export function AdminPanel({
           </div>
           <section className="form-card">
             <div className="split-header"><div><h3><Server size={17} /> Health Summary</h3><p className="legend">Committed Relay generations serve current data immediately, with last-good snapshots retained during an outage.</p></div><div className="toolbar"><button className={busyButtonClass("status-refresh")} disabled={isBusyAction("status-refresh")} onClick={() => run(refreshStatus, undefined, "status-refresh")}><RefreshCw size={15} /> {isBusyAction("status-refresh") ? "Refreshing..." : "Refresh"}</button><button className={busyButtonClass("collect-now", "toolbar-button primary")} disabled={isBusyAction("collect-now")} onClick={() => run(collectNowWithLiveStatus, "Reconciliation run completed.", "collect-now")}><RefreshCw size={15} /> {isBusyAction("collect-now") ? "Reconciling..." : "Run Reconciliation"}</button></div></div>
+            <details className="admin-operational-details">
+              <summary>Provider, scheduler, and storage details</summary>
             <div className="status-detail">
               <Info label="Game data provider" value={status?.gameDataProvider?.running ? `Relay generation ${formatNumber(status.gameDataProvider.generation)}` : "Relay provider not running in this process"} />
               <Info label="Relay cache" value={status?.gameDataProvider?.cacheReady ? "Ready" : "Unavailable or starting"} />
@@ -1280,6 +1319,7 @@ export function AdminPanel({
                 />
               ))}
             </div>
+            </details>
           </section>
           <section className="form-card scheduled-jobs-card">
             <div className="split-header">
@@ -1319,7 +1359,7 @@ export function AdminPanel({
                         {" | "}
                         Last success {dateLabel(job.lastSuccessAt)}
                         {" | "}
-                        Next run {dateLabel(job.nextRunAt)}
+                        Next run {scheduledJobTimingLabel(job, Boolean(scheduledJobs?.enabled))}
                       </small>
                       {job.running && job.metadata?.stage ? (
                         <small>
@@ -1467,7 +1507,7 @@ export function AdminPanel({
             error={messageKind === "error" ? message : null}
             result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
             onAnalyticsDaysChange={(days) => { setAnalyticsDays(days); setSecurityEventPage(1); }}
-            onClearAnalytics={() => { if (confirmDanger("Delete all collected usage analytics? This cannot be undone.")) run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted.", "analytics-clear"); }}
+            onClearAnalytics={() => setActionConfirmation({ title: "Clear usage analytics", target: "All opt-in usage analytics", impact: "Deletes all collected usage analytics records. Security request logs are not affected.", reversible: false, confirmLabel: "Clear analytics", tone: "danger", onConfirm: () => run(async () => { await api("/admin/analytics", { method: "DELETE", body: "{}" }); await refreshAnalytics(); }, "Usage analytics deleted.", "analytics-clear") })}
             onSecurityEventSearchChange={(search) => { setSecurityEventSearch(search); setSecurityEventPage(1); }}
             onSecurityEventPageChange={setSecurityEventPage}
             onSecurityEventPageSizeChange={(pageSize) => { setSecurityEventPageSize(pageSize); setSecurityEventPage(1); }}
@@ -1558,8 +1598,11 @@ export function AdminPanel({
       ) : null}
 
       {tab === "configuration" ? (
-        <div className="admin-grid">
+        <>
+        <AdminConfigurationNav active={configurationSection} onSelect={selectConfigurationSection} />
+        <div className={`admin-grid configuration-category configuration-category-${configurationSection}`}>
           <section className="form-card">
+            {configurationSection === "general" ? <>
             <h3><Shield size={17} /> Settlement Defaults</h3>
             <label className="field"><span>Settlement ID</span><input value={draft.claimId} onChange={(event) => updateDraft("claimId", event.target.value)} /></label>
             <label className="field"><span>BitCraft Sync URL</span><input value={draft.syncUrl} onChange={(event) => updateDraft("syncUrl", event.target.value)} /></label>
@@ -1577,6 +1620,11 @@ export function AdminPanel({
                 <div className="unit-input"><input type="number" min={15} max={300} value={draft.serverRefreshSeconds} onChange={(event) => updateDraft("serverRefreshSeconds", Number(event.target.value))} /><em>seconds</em></div>
                 <small>Cadence only for the two blocked evidence imports and independent maintenance; it never refreshes current page data.</small>
               </label>
+            </div>
+            </> : null}
+            {configurationSection === "privacy" ? <>
+            <h3><Lock size={17} /> Access & Privacy</h3>
+            <div className="configuration-timing-grid">
               <label className="field unit-field">
                 <span>Full IP retention</span>
                 <div className="unit-input"><input type="number" min={1} max={30} value={draft.visitorSecurity.fullIpRetentionDays} onChange={(event) => updateVisitorSecuritySetting({ fullIpRetentionDays: Number(event.target.value) })} /><em>days</em></div>
@@ -1593,6 +1641,8 @@ export function AdminPanel({
                 <small>How long third-party IP location lookups are cached locally.</small>
               </label>
             </div>
+            </> : null}
+            {configurationSection === "notifications" ? (
             <div className="form-card nested-card">
               <h3><Bell size={17} /> In-app notification defaults</h3>
               <p className="legend">Global switches for browser toast notifications. Users keep their own preferences, but disabled types are blocked until re-enabled here.</p>
@@ -1609,6 +1659,8 @@ export function AdminPanel({
                 ))}
               </div>
             </div>
+            ) : null}
+            {configurationSection === "privacy" ? (
             <div className="form-card nested-card access-control-card">
               <div className="split-header">
                 <div>
@@ -1674,7 +1726,9 @@ export function AdminPanel({
                 </div>
               )}
             </div>
-            <AdminCraftPlanSection />
+            ) : null}
+            {configurationSection === "integrations" ? <AdminCraftPlanSection /> : null}
+            {configurationSection === "privacy" ? (
             <div className="form-card nested-card">
               <h3><MapPin size={17} /> GeoIP Location Source</h3>
               <p className="legend">Choose how visitor IPs are converted into approximate country/city statistics. ipapi.co is queried server-side only when a cached location is missing.</p>
@@ -1714,6 +1768,8 @@ export function AdminPanel({
               ) : null}
               {draft.visitorSecurity.geoipProvider === "disabled" ? <p className="legend">Location statistics will show Unknown while request logging and abuse-prevention records continue.</p> : null}
             </div>
+            ) : null}
+            {configurationSection === "notifications" ? (
             <div className="form-card nested-card">
               <h3><ShoppingCart size={17} /> Market Deal Watch</h3>
               <p className="legend">Discord-signed-in users can watch live regional sell orders. Every committed Relay generation is checked immediately; the scheduled job is reconciliation only.</p>
@@ -1736,10 +1792,12 @@ export function AdminPanel({
                 <span><strong>Send Discord DMs when possible</strong><small>In-app alerts are still recorded if a DM cannot be delivered.</small></span>
               </label>
             </div>
-            <button className="toolbar-button primary" onClick={saveSettings}><Save size={15} /> Save Configuration</button>
+            ) : null}
           </section>
-          <AdminPopupsSection api={api} />
+          {configurationSection === "notifications" ? <AdminPopupsSection api={api} /> : null}
+          {configurationSection === "integrations" || configurationSection === "branding" ? (
           <div className="admin-section">
+            {configurationSection === "integrations" ? (
             <section className="form-card member-tracking-card">
               <div className="split-header">
                 <div>
@@ -1769,6 +1827,8 @@ export function AdminPanel({
                 }) : <p className="legend">Member data has not loaded yet. Wait for the Relay member generation, then return here to configure per-player tracking.</p>}
               </div>
             </section>
+            ) : null}
+            {configurationSection === "branding" ? (
             <section className="form-card">
               <h3><Upload size={17} /> Branding</h3>
               {(["logo", "favicon"] as const).map((type) => {
@@ -1777,8 +1837,20 @@ export function AdminPanel({
               })}
               <p className="legend">PNG, JPG or WebP up to 1 MB. The logo is shown in the app chrome and the favicon is used by the browser tab.</p>
             </section>
+            ) : null}
           </div>
+          ) : null}
+          {hasUnsavedSettings ? (
+            <div className="configuration-save-bar" role="status" aria-live="polite">
+              <span><strong>Unsaved changes</strong> in {configurationSection === "privacy" ? "Access & Privacy" : configurationSection[0].toUpperCase() + configurationSection.slice(1)}.</span>
+              <div className="toolbar-row">
+                <button className="toolbar-button" type="button" onClick={revertSettings}>Discard</button>
+                <button className="toolbar-button primary" type="button" disabled={isBusyAction("settings-save")} onClick={saveSettings}><Save size={15} /> Save changes</button>
+              </div>
+            </div>
+          ) : null}
         </div>
+        </>
       ) : null}
 
       {tab === "discord" ? (
@@ -1805,7 +1877,12 @@ export function AdminPanel({
           <div className={botOnly ? "bot-layout" : ""}>
           <React.Suspense fallback={<div className="loading">Loading Discord controls...</div>}>
           {botOnly ? (
-            <BotSectionNav active={botSection} onSelect={setBotSection} />
+            <>
+              <div className="bot-desktop-section-nav">
+                <BotSectionNav active={botSection} onSelect={setBotSection} />
+              </div>
+              <BotMobileSectionNav active={botSection} onSelect={setBotSection} />
+            </>
           ) : null}
         <div className={`admin-grid discord-admin${botOnly ? ` bot-admin-section bot-section-${botSection}` : ""}`}>
           {(!botOnly || botSection === "setup") ? (
@@ -1976,7 +2053,7 @@ export function AdminPanel({
                 <div className="toolbar">
                   <button className="toolbar-button primary" disabled={!commandDraft.name.trim() || !commandDraft.response.trim() || isBusyAction("discord-command-save")} onClick={() => run(async () => { await api("/admin/discord/custom-commands", { method: "PUT", body: JSON.stringify(commandDraft) }); await refreshCustomCommands(); }, "Custom command saved. Re-register slash commands to publish it.", "discord-command-save")}><Save size={14} /> Save Command</button>
                   <button className="toolbar-button" onClick={() => setCommandDraft({ name: "", description: "", response: "" })}><Plus size={14} /> New</button>
-                  <button className="toolbar-button danger" disabled={!commandDraft.name.trim() || isBusyAction("discord-command-delete")} onClick={() => confirmModeration("Delete this custom command?") && run(async () => { await api(`/admin/discord/custom-commands?name=${encodeURIComponent(commandDraft.name)}`, { method: "DELETE" }); setCommandDraft({ name: "", description: "", response: "" }); await refreshCustomCommands(); }, "Custom command deleted.", "discord-command-delete")}><X size={14} /> Delete</button>
+                  <button className="toolbar-button danger" disabled={!commandDraft.name.trim() || isBusyAction("discord-command-delete")} onClick={() => confirmModeration("Delete this custom command?", () => run(async () => { await api(`/admin/discord/custom-commands?name=${encodeURIComponent(commandDraft.name)}`, { method: "DELETE" }); setCommandDraft({ name: "", description: "", response: "" }); await refreshCustomCommands(); }, "Custom command deleted.", "discord-command-delete"))}><X size={14} /> Delete</button>
                   <button className="toolbar-button bot-post-button" disabled={isBusyAction("discord-commands-register")} onClick={() => run(async () => { const commands = await api("/admin/discord/register-commands", { method: "POST", body: "{}" }); setDiscordToolResult({ ...commands, __type: "botReport" }); }, "Slash commands registered.", "discord-commands-register")}><Command size={14} /> Register Slash Commands</button>
                 </div>
               </div>
@@ -2141,8 +2218,8 @@ export function AdminPanel({
           onNewUserChange={setNewUser}
           onAddUser={() => run(async () => { await api("/admin/users", { method: "POST", body: JSON.stringify(newUser) }); setNewUser({ discordId: "", displayName: "", role: "admin" }); await refreshUsers(); }, "Discord administrator added.", "admin-user-add")}
           onRoleChange={(entry, role) => run(async () => { const result = await api("/admin/user/role", { method: "PUT", body: JSON.stringify({ userId: entry.id, role }) }); if (result.signedOut) setAdminAuthState({ authenticated: false, setupRequired: false }); else await refreshUsers(); }, "Administrator role updated and sessions cleared.", `admin-user-role:${entry.id}`)}
-          onClearSessions={(entry) => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.", `admin-user-sessions:${entry.id}`)}
-          onToggleStatus={(entry) => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: !entry.active }) }); await refreshUsers(); }, "Account status updated.", `admin-user-status:${entry.id}`)}
+          onClearSessions={(entry) => setActionConfirmation({ title: "Clear administrator sessions", target: entry.username || `Administrator ${entry.id}`, impact: "Signs this administrator out of every active admin session.", reversible: true, confirmLabel: "Clear sessions", tone: "warning", onConfirm: () => run(async () => { await api("/admin/sessions/clear", { method: "POST", body: JSON.stringify({ userId: entry.id }) }); await refreshUsers(); }, "Sessions cleared.", `admin-user-sessions:${entry.id}`) })}
+          onToggleStatus={(entry) => entry.active ? setActionConfirmation({ title: "Disable administrator", target: entry.username || `Administrator ${entry.id}`, impact: "Prevents future administrator sign-in and ends the account's active access.", reversible: true, confirmLabel: "Disable administrator", tone: "danger", onConfirm: () => run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: false }) }); await refreshUsers(); }, "Account status updated.", `admin-user-status:${entry.id}`) }) : run(async () => { await api("/admin/user/status", { method: "PUT", body: JSON.stringify({ userId: entry.id, active: true }) }); await refreshUsers(); }, "Account status updated.", `admin-user-status:${entry.id}`)}
           onRefreshLinkedAccounts={() => run(refreshLinkedAccountsAndFallbackMembers, undefined, "linked-accounts-refresh")}
           onAccountApproval={(account, status) => run(async () => { const result = await api("/admin/user-accounts/approval", { method: "PUT", body: JSON.stringify({ userId: account.id, status }) }); setLinkedAccounts(result.accounts ?? []); }, `Account marked ${status}.`, `account-approval:${account.id}`)}
           onCharacterAssignment={(account, member) => run(async () => {
@@ -2229,6 +2306,7 @@ export function AdminPanel({
           <button className="toolbar-button primary" disabled={isBusyAction("settings-save")} onClick={saveSettings}><Save size={14} /> Save Changes</button>
         </div>
       ) : null}
+      <ConfirmAdminActionDialog confirmation={actionConfirmation} onClose={() => setActionConfirmation(null)} />
     </div>
   );
 }

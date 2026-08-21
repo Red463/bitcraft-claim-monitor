@@ -80,6 +80,7 @@ import { createGameCatalogRepository } from "./src/server/gameCatalog.mjs";
 import { createProviderCatalogRepository } from "./src/server/catalogRepository.mjs";
 import { buildProbabilityWorkbookBuffer } from "./src/server/probabilityWorkbook.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
+import { unavailableDiscordDiscovery } from "./src/server/discordDiscoveryAvailability.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
 import {
@@ -212,6 +213,7 @@ import { processRoleCapabilities, resolveProcessRole } from "./src/server/proces
 import { assertCanonicalDiscordGatewayReady, resolveDeploymentRuntime } from "./src/server/deploymentRuntime.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
+import { resolveSmokeAdminReviewMode, smokeAdminReviewMutationRejection } from "./src/server/smokeAdminReview.mjs";
 import { runSettlementStateTransaction, settlementStateActivityChanges } from "./src/server/settlementState.mjs";
 import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
 import {
@@ -449,6 +451,12 @@ const ipHash = createIpHasher(appIdentifier);
 const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor-relay/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
 const repoRoot = path.resolve(root, "..", "..");
+const smokeAdminReviewMode = resolveSmokeAdminReviewMode({
+  env: process.env,
+  isProduction,
+  repoRoot,
+  dataDir,
+});
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
 const geoipDir = path.join(dataDir, "geoip");
@@ -1508,6 +1516,7 @@ function collectorFailure(key, startedAt, error) {
 }
 
 function getSessionUser(req) {
+  if (smokeAdminReviewMode.enabled) return smokeAdminReviewMode.user;
   return lookupHttpSessionUser({
     req,
     cookieName: ADMIN_SESSION_COOKIE_NAME,
@@ -3322,7 +3331,7 @@ function requireRecentAppUserReauthentication(req, res, user, now = new Date()) 
 }
 
 function adminStatus(req) {
-  const setupRequired = toNumber(statements.adminCount.get()?.count) === 0;
+  const setupRequired = !smokeAdminReviewMode.enabled && toNumber(statements.adminCount.get()?.count) === 0;
   const user = getSessionUser(req);
   const discordConfig = discordOAuthConfig(req);
   return {
@@ -4471,6 +4480,9 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
   return {
+    available: true,
+    reason: null,
+    message: "",
     guild: { id: guildId, name: String(guild?.name ?? guildId) },
     bot: { id: botUserId, username: String(botUser?.username ?? "Bot"), highestRolePosition: botHighestRolePosition },
     channels: sortedChannels,
@@ -8506,6 +8518,8 @@ const server = createServer(async (req, res) => {
       if (!asset) return send(res, 404, { error: "Brand asset not configured" });
       return sendBinary(res, 200, await readFile(asset.filePath), asset.contentType);
     }
+    const smokeReviewRejection = smokeAdminReviewMutationRejection({ method: req.method, url: url.pathname }, smokeAdminReviewMode);
+    if (smokeReviewRejection) return send(res, 403, { error: smokeReviewRejection });
     if (req.method === "GET" && url.pathname === "/api/local/admin/me") return send(res, 200, adminStatus(req));
     if (req.method === "POST" && url.pathname === "/api/local/admin/setup") {
       if (!legacyAdminPasswordAuth) return send(res, 410, { error: "Password administrator setup has been replaced by Discord administrator access" });
@@ -8654,7 +8668,12 @@ const server = createServer(async (req, res) => {
         return send(res, 200, discordYouTubeStatus({ result }));
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/discord/discovery") {
-        const discovery = await discordGuildDiscovery();
+        const settings = getDiscordSettingsRaw();
+        const discovery = !settings.botToken
+          ? unavailableDiscordDiscovery("token_missing", "Add a bot token in Setup.")
+          : !discordStartupEnabled
+            ? unavailableDiscordDiscovery("startup_disabled", "Discord startup is disabled in this environment.")
+            : await discordGuildDiscovery(settings);
         audit(user, "discord.discovery", { channels: discovery.channels.length, roles: discovery.roles.length, emojis: discovery.emojis.length, members: discovery.memberCount });
         return send(res, 200, discovery);
       }

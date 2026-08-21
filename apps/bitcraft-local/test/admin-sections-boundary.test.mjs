@@ -9,6 +9,7 @@ const sectionUrls = {
   data: new URL("../src/components/admin/AdminDataSection.tsx", import.meta.url),
   empireMembership: new URL("../src/components/admin/AdminEmpireMembershipSection.tsx", import.meta.url),
 };
+const configurationNavUrl = new URL("../src/components/admin/AdminConfigurationNav.tsx", import.meta.url);
 
 const sourceIfPresent = (url) => existsSync(url) ? readFileSync(url, "utf8") : "";
 
@@ -52,4 +53,20 @@ test("feature sections expose explicit data, pending, error, and action props", 
     assert.match(source, /\berror\??:/, `Admin ${name} section should receive errors explicitly`);
     assert.match(source, /\bon[A-Z][A-Za-z]+\??:/, `Admin ${name} section should receive actions explicitly`);
   }
+});
+
+test("configuration uses a labelled responsive category navigator", () => {
+  const source = sourceIfPresent(configurationNavUrl);
+  assert.equal(existsSync(configurationNavUrl), true);
+  assert.match(source, /aria-label="Configuration categories"/);
+  assert.match(source, /Configuration category/);
+  assert.match(source, /aria-current/);
+  assert.match(source, /CONFIGURATION_SECTIONS\.map/);
+});
+
+test("dirty configuration navigation uses the shared in-app confirmation", () => {
+  const adminPanel = readFileSync(adminPanelUrl, "utf8");
+  assert.match(adminPanel, /requestDiscardSettings/);
+  assert.match(adminPanel, /<ConfirmAdminActionDialog\b/);
+  assert.doesNotMatch(adminPanel, /window\.confirm/);
 });

@@ -3,12 +3,13 @@ import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const panel = readFileSync(new URL("../src/components/admin/AdminPanel.tsx", import.meta.url), "utf8");
+const navigationState = readFileSync(new URL("../src/components/admin/adminNavigationState.ts", import.meta.url), "utf8");
 const componentUrl = new URL("../src/components/admin/AdminEmpireMembershipSection.tsx", import.meta.url);
 const stylesUrl = new URL("../src/styles/admin-empire-membership.css", import.meta.url);
 
 test("AdminPanel exposes a focused Empire Membership Insights tab", () => {
   assert.equal(existsSync(componentUrl), true);
-  assert.match(panel, /type AdminTab = [^;]*"empire-membership"/);
+  assert.match(navigationState, /"empire-membership"/);
   assert.match(panel, /key: "empire-membership", label: "Empire Membership"/);
   assert.match(panel, /<AdminEmpireMembershipSection\b/);
 });

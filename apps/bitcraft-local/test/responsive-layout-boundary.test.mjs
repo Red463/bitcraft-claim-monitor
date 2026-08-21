@@ -9,6 +9,7 @@ const dashboardCss = readFileSync(new URL("../src/styles/dashboard.css", import.
 const constructionCss = readFileSync(new URL("../src/styles/construction.css", import.meta.url), "utf8");
 const craftcalcCss = readFileSync(new URL("../src/styles/craftcalc.css", import.meta.url), "utf8");
 const researchCss = readFileSync(new URL("../src/styles/research.css", import.meta.url), "utf8");
+const botCss = readFileSync(new URL("../src/styles/bot-dashboard.css", import.meta.url), "utf8");
 
 test("narrow shell separates brand from route and reserves no expanded tool rail", () => {
   assert.match(appShell, /className="mobile-shell-brand"/);
@@ -38,4 +39,12 @@ test("remaining operational summaries and lookup controls own their phone layout
   assert.match(researchCss, /@media \(max-width:\s*700px\)[\s\S]*\.research-panel \.dashboard-top-meta\s*\{[^}]*flex-wrap:\s*wrap/s);
   assert.match(craftcalcCss, /@media \(max-width:\s*700px\)[\s\S]*\.craftcalc-control-grid[\s\S]*grid-template-columns:\s*1fr/s);
   assert.match(craftcalcCss, /@media \(max-width:\s*700px\)[\s\S]*\.craftcalc-summary\s*\{[^}]*grid-template-columns:\s*1fr/s);
+});
+
+test("Discord admin uses a compact mobile picker and horizontal summary rails", () => {
+  assert.match(botCss, /\.bot-mobile-section-nav\s*\{[^}]*display:\s*none/s);
+  assert.match(botCss, /@media \(max-width:\s*720px\)[\s\S]*\.bot-desktop-section-nav\s*\{[^}]*display:\s*none/s);
+  assert.match(botCss, /@media \(max-width:\s*720px\)[\s\S]*\.bot-mobile-section-nav\s*\{[^}]*display:\s*grid/s);
+  assert.match(botCss, /@media \(max-width:\s*720px\)[\s\S]*\.bot-overview\s*\{[^}]*overflow-x:\s*auto[^}]*grid-auto-flow:\s*column/s);
+  assert.match(botCss, /@media \(max-width:\s*720px\)[\s\S]*\.bot-workflow-card\s*\{[^}]*overflow-x:\s*auto[^}]*grid-auto-flow:\s*column/s);
 });
