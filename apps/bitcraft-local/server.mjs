@@ -75,6 +75,7 @@ import {
   regionalMarketCatalogView,
   regionalMarketDealsView,
   regionalMarketFavoriteQuotesView,
+  regionalMarketFavoriteItemsView,
   regionalMarketOverviewView,
   regionalMarketOrderBookView,
   regionalMarketPriceHistoryView,
@@ -10021,6 +10022,9 @@ const server = createServer(async (req, res) => {
           generation: current?.generation ?? 0,
           regionId,
           allowedRegionIds,
+        }),
+        items: regionalMarketFavoriteItemsView(items, {
+          getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
         }),
       }));
       return send(res, 200, body);

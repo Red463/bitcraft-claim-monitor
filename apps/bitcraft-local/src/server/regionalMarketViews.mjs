@@ -574,15 +574,22 @@ function emptyFavoriteQuote() {
   return { bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 };
 }
 
-function estimateFavoriteQuoteIndexBytes(scopeKey, index) {
-  let bytes = Buffer.byteLength(scopeKey) + 16;
-  for (const [key, quote] of index) {
-    bytes += Buffer.byteLength(key)
-      + Buffer.byteLength(quote.bestSell ?? "")
-      + Buffer.byteLength(quote.bestBuy ?? "")
-      + 32;
-  }
-  return bytes;
+const FAVORITE_QUOTE_CACHE_BASE_BYTES = 1_024;
+const FAVORITE_QUOTE_CACHE_ENTRY_OVERHEAD_BYTES = 1_024;
+
+function conservativeRetainedStringBytes(value) {
+  // V8 may store Latin-1 strings compactly, but two bytes per UTF-16 code unit
+  // plus allocator/header slack safely estimates either representation.
+  return 64 + String(value).length * 2;
+}
+
+function estimateFavoriteQuoteCacheEntryBytes(cacheKey, serializedIndex) {
+  // The retained form is deliberately one serialized string rather than a Map
+  // of nested objects. One KiB of per-entry slack covers the Map slot, entry
+  // object, number field, alignment, and allocator bookkeeping.
+  return FAVORITE_QUOTE_CACHE_ENTRY_OVERHEAD_BYTES
+    + conservativeRetainedStringBytes(cacheKey)
+    + conservativeRetainedStringBytes(serializedIndex);
 }
 
 export function createRegionalMarketFavoriteQuotesView({
@@ -590,9 +597,12 @@ export function createRegionalMarketFavoriteQuotesView({
   maxEstimatedBytes = 2 * 1024 * 1024,
 } = {}) {
   const entryLimit = Math.max(1, Math.floor(Number(maxEntries) || 8));
-  const byteLimit = Math.max(1, Math.floor(Number(maxEstimatedBytes) || (2 * 1024 * 1024)));
+  const byteLimit = Math.max(
+    FAVORITE_QUOTE_CACHE_BASE_BYTES,
+    Math.floor(Number(maxEstimatedBytes) || (2 * 1024 * 1024)),
+  );
   const cache = new Map();
-  let estimatedBytes = 0;
+  let estimatedBytes = FAVORITE_QUOTE_CACHE_BASE_BYTES;
 
   function buildIndex(snapshot, scope) {
     const source = record(snapshot);
@@ -623,23 +633,25 @@ export function createRegionalMarketFavoriteQuotesView({
     const scope = favoriteQuoteScope(options);
     const generation = String(options.generation ?? "").trim();
     const cacheKey = generation ? `${generation}:${scope.key}` : null;
-    let index = cacheKey ? cache.get(cacheKey)?.index : null;
-    if (index && cacheKey) {
+    const cachedEntry = cacheKey ? cache.get(cacheKey) : null;
+    let index = cachedEntry ? new Map(JSON.parse(cachedEntry.serializedIndex)) : null;
+    if (cachedEntry && cacheKey) {
       const entry = cache.get(cacheKey);
       cache.delete(cacheKey);
       cache.set(cacheKey, entry);
     } else {
       index = buildIndex(snapshot, scope);
       if (cacheKey) {
-        const entryBytes = estimateFavoriteQuoteIndexBytes(scope.key, index);
-        if (entryBytes <= byteLimit) {
+        const serializedIndex = JSON.stringify([...index]);
+        const entryBytes = estimateFavoriteQuoteCacheEntryBytes(cacheKey, serializedIndex);
+        if (FAVORITE_QUOTE_CACHE_BASE_BYTES + entryBytes <= byteLimit) {
           while (cache.size >= entryLimit || estimatedBytes + entryBytes > byteLimit) {
             const oldestKey = cache.keys().next().value;
             if (oldestKey == null) break;
             estimatedBytes -= cache.get(oldestKey).estimatedBytes;
             cache.delete(oldestKey);
           }
-          cache.set(cacheKey, { index, estimatedBytes: entryBytes });
+          cache.set(cacheKey, { serializedIndex, estimatedBytes: entryBytes });
           estimatedBytes += entryBytes;
         }
       }
@@ -660,6 +672,20 @@ export function createRegionalMarketFavoriteQuotesView({
 }
 
 export const regionalMarketFavoriteQuotesView = createRegionalMarketFavoriteQuotesView();
+
+export function regionalMarketFavoriteItemsView(favorites, options = {}) {
+  const getEntity = typeof options.getEntity === "function" ? options.getEntity : () => null;
+  return Object.fromEntries((Array.isArray(favorites) ? favorites : []).map((favorite) => {
+    const normalizedItemType = itemType(favorite?.itemType);
+    const itemId = decimal(favorite?.itemId);
+    const key = `${normalizedItemType}:${itemId}`;
+    const catalogKey = `${normalizedItemType === "cargo" ? "cargo" : "items"}:${itemId}`;
+    return [key, catalogItem(getEntity(catalogKey) ?? {
+      itemType: normalizedItemType,
+      targetId: itemId,
+    })];
+  }));
+}
 
 function exactMedian(values) {
   const sorted = values

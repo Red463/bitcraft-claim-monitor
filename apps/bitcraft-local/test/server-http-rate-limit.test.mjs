@@ -69,6 +69,29 @@ test("named client profiles record would-limit decisions without blocking in rep
   assert.equal(sent.length, 0);
 });
 
+test("favorite quotes sustained 60-per-minute limit remains report-only", () => {
+  const decisions = [];
+  const sent = [];
+  const rateLimit = createRateLimiter({
+    now: () => 1_000,
+    onDecision: (decision) => decisions.push(decision),
+    sendJson: (...args) => sent.push(args),
+  });
+  const req = { headers: {}, socket: { remoteAddress: "198.51.100.61" } };
+
+  for (let index = 0; index < 61; index += 1) {
+    assert.equal(rateLimit(req, {}, "favoriteQuotesRead", RATE_LIMITS.favoriteQuotesRead), true);
+  }
+
+  assert.equal(sent.length, 0);
+  assert.deepEqual(decisions.at(-1), {
+    name: "favoriteQuotesRead",
+    reportOnly: true,
+    wouldLimit: true,
+    limitedBy: ["burst", "sustained"],
+  });
+});
+
 test("named client profiles return 429 only when explicitly enforced", () => {
   const sent = [];
   const rateLimit = createRateLimiter({

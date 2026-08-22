@@ -760,6 +760,22 @@ test("favorite quotes index one scoped generation once without colliding typed i
   });
   assert.deepEqual(second, first);
   assert.equal(orderReads, 1, "a cache hit must not scan the snapshot again");
+
+  for (const favorite of favorites.slice(0, 2)) {
+    const key = `${favorite.itemType}:${favorite.itemId}`;
+    const book = views.regionalMarketOrderBookView(liveSnapshot, null, {
+      ...options,
+      ...favorite,
+    });
+    const sellPrices = book.sellOrders.map((order) => BigInt(order.price));
+    const buyPrices = book.buyOrders.map((order) => BigInt(order.price));
+    assert.deepEqual(first[key], {
+      bestSell: sellPrices.length ? String(sellPrices.reduce((best, price) => price < best ? price : best)) : null,
+      bestBuy: buyPrices.length ? String(buyPrices.reduce((best, price) => price > best ? price : best)) : null,
+      sellCount: book.sellOrders.length,
+      buyCount: book.buyOrders.length,
+    }, `${key} must match the existing order-book projection`);
+  }
 });
 
 test("favorite quote cache is bounded and oversized indexes are returned without retention", () => {
@@ -778,18 +794,63 @@ test("favorite quote cache is bounded and oversized indexes are returned without
   assert.ok(bounded.cacheStats().estimatedBytes <= 2 * 1024 * 1024);
 
   let oversizedReads = 0;
-  const oversized = views.createRegionalMarketFavoriteQuotesView({ maxEntries: 8, maxEstimatedBytes: 1 });
+  const oversized = views.createRegionalMarketFavoriteQuotesView({ maxEntries: 8, maxEstimatedBytes: 2_500 });
+  const oversizedPrice = "9".repeat(1_000);
   const oversizedSnapshot = {
     get orders() {
       oversizedReads += 1;
-      return [{ side: "sell", regionId: "19", itemType: "item", itemId: "30", price: "11" }];
+      return [{ side: "sell", regionId: "19", itemType: "item", itemId: "30", price: oversizedPrice }];
     },
   };
-  assert.equal(oversized(oversizedSnapshot, favorite, { generation: 1, regionId: "19", allowedRegionIds: ["19"] })["item:30"].bestSell, "11");
-  assert.equal(oversized(oversizedSnapshot, favorite, { generation: 1, regionId: "19", allowedRegionIds: ["19"] })["item:30"].bestSell, "11");
+  assert.equal(oversized(oversizedSnapshot, favorite, { generation: 1, regionId: "19", allowedRegionIds: ["19"] })["item:30"].bestSell, oversizedPrice);
+  assert.equal(oversized(oversizedSnapshot, favorite, { generation: 1, regionId: "19", allowedRegionIds: ["19"] })["item:30"].bestSell, oversizedPrice);
   assert.equal(oversizedReads, 2, "an oversized index must not be retained");
   assert.equal(oversized.cacheStats().entries, 0);
-  assert.equal(oversized.cacheStats().estimatedBytes, 0);
+  assert.ok(oversized.cacheStats().estimatedBytes <= 2_500);
+});
+
+test("favorite quote cache evicts entries before its conservative aggregate byte budget is exceeded", () => {
+  const project = views.createRegionalMarketFavoriteQuotesView({ maxEntries: 8, maxEstimatedBytes: 2_500 });
+  let orderReads = 0;
+  const liveSnapshot = {
+    get orders() {
+      orderReads += 1;
+      return [];
+    },
+  };
+  const favorite = [{ itemType: "item", itemId: "30" }];
+  project(liveSnapshot, favorite, { generation: 1, regionId: "19", allowedRegionIds: ["19"] });
+  project(liveSnapshot, favorite, { generation: 2, regionId: "19", allowedRegionIds: ["19"] });
+  assert.equal(project.cacheStats().entries, 1);
+  assert.ok(project.cacheStats().estimatedBytes <= 2_500);
+  project(liveSnapshot, favorite, { generation: 1, regionId: "19", allowedRegionIds: ["19"] });
+  assert.equal(orderReads, 3, "the first generation must have been evicted by the aggregate byte cap");
+});
+
+test("favorite metadata is projected from the current catalog outside the quote cache", () => {
+  assert.equal(typeof views.regionalMarketFavoriteItemsView, "function");
+  let catalogReads = 0;
+  const getEntity = (key) => {
+    catalogReads += 1;
+    return key === "items:30" ? {
+      kind: "items",
+      targetId: "30",
+      name: "Leather",
+      tag: "Hide",
+      tier: 3,
+      rarity: "Rare",
+      iconAssetName: "leather.webp",
+    } : null;
+  };
+  const favorites = [{ itemType: "item", itemId: "30" }, { itemType: "cargo", itemId: "30" }];
+  const first = views.regionalMarketFavoriteItemsView(favorites, { getEntity });
+  const second = views.regionalMarketFavoriteItemsView(favorites, { getEntity });
+  assert.equal(catalogReads, 4, "metadata must be read at request time rather than retained in the quote cache");
+  assert.deepEqual(first["item:30"], {
+    id: "30", itemId: "30", itemType: "item", name: "Leather", category: "Hide", tag: "Hide",
+    tier: 3, rarity: "Rare", rarityStr: "Rare", iconAssetName: "leather.webp",
+  });
+  assert.deepEqual(second, first);
 });
 
 test("favorite quote cache rebuilds when generation or normalized region scope changes", () => {

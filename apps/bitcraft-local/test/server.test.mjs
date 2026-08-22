@@ -1326,6 +1326,24 @@ test("server collection paginates listings and protects production mutations", a
     "cargo:30": { bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 },
     "item:9007199254740993": { bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 },
   });
+  assert.deepEqual(favoriteQuotePayload.items["item:30"], {
+    id: "30",
+    itemId: "30",
+    itemType: "item",
+    name: "Leather",
+    category: "Leather",
+    tag: "Leather",
+    tier: 1,
+    rarity: "Common",
+    rarityStr: "Common",
+    iconAssetName: null,
+  });
+  const foreignFavoriteQuote = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ regionId: "9", items: [{ itemType: "item", itemId: "30" }] }),
+  });
+  assert.equal(foreignFavoriteQuote.status, 403);
   const favoriteQuoteRefreshes = await Promise.all(Array.from({ length: 8 }, () => fetch(
     `${origin}/api/local/market/favorite-quotes`,
     {
@@ -2306,7 +2324,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.ok(gameDataPerformance.responseBytes.p99 > 0);
   assert.equal(gameDataPerformance.status429, 0);
   assert.deepEqual(routePerformance.rateLimits.orderBookRead, { reportOnly: true, wouldLimit: 2 });
-  assert.deepEqual(routePerformance.rateLimits.favoriteQuotesRead, { reportOnly: true, wouldLimit: 5 });
+  assert.deepEqual(routePerformance.rateLimits.favoriteQuotesRead, { reportOnly: true, wouldLimit: 6 });
   assert.deepEqual(routePerformance.rateLimits.gameDataRead, { reportOnly: true, wouldLimit: 1 });
   assert.deepEqual(routePerformance.gates.gameData, { active: 0, queued: 0, rejected: 0, maxConcurrent: 8, maxQueued: 16 });
   assert.deepEqual(routePerformance.gates.market, { active: 0, queued: 0, rejected: 0, maxConcurrent: 8, maxQueued: 16 });

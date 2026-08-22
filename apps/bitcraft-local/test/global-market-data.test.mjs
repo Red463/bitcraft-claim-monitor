@@ -151,7 +151,7 @@ test("favorite parsing rejects malformed entries and preserves exact decimal ids
   assert.deepEqual(marketFavoriteKeys("not json"), []);
 });
 
-test("favorite quote request and response mapping preserve typed decimal identities", () => {
+test("favorite quote mapping preserves typed decimals and opens Leather with its catalog metadata", () => {
   const favorites = [
     { itemType: "item", itemId: "30" },
     { itemType: "cargo", itemId: "30" },
@@ -162,6 +162,20 @@ test("favorite quote request and response mapping preserve typed decimal identit
     body: JSON.stringify({ regionId: "19", items: favorites }),
   });
   assert.deepEqual(marketFavoriteQuoteRows(favorites, {
+    items: {
+      "item:30": {
+        id: "30",
+        itemId: "30",
+        itemType: "item",
+        name: "Leather",
+        category: "Hide",
+        tag: "Hide",
+        tier: 3,
+        rarity: "Rare",
+        rarityStr: "Rare",
+        iconAssetName: "leather.webp",
+      },
+    },
     quotes: {
       "item:30": { bestSell: "9007199254740995", bestBuy: "9007199254740994", sellCount: 2, buyCount: 1 },
       "cargo:30": { bestSell: "17", bestBuy: null, sellCount: 1, buyCount: 0 },
@@ -172,9 +186,15 @@ test("favorite quote request and response mapping preserve typed decimal identit
     bestBuy: row.bestBuy,
     sellCount: row.sellCount,
     buyCount: row.buyCount,
+    name: row.name,
+    itemName: row.itemName,
+    category: row.category,
+    tier: row.tier,
+    rarity: row.rarity,
+    iconAssetName: row.iconAssetName,
   })), [
-    { key: "item:30", bestSell: "9007199254740995", bestBuy: "9007199254740994", sellCount: 2, buyCount: 1 },
-    { key: "cargo:30", bestSell: "17", bestBuy: null, sellCount: 1, buyCount: 0 },
-    { key: "item:9007199254740993", bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 },
+    { key: "item:30", bestSell: "9007199254740995", bestBuy: "9007199254740994", sellCount: 2, buyCount: 1, name: "Leather", itemName: "Leather", category: "Hide", tier: 3, rarity: "Rare", iconAssetName: "leather.webp" },
+    { key: "cargo:30", bestSell: "17", bestBuy: null, sellCount: 1, buyCount: 0, name: undefined, itemName: "Cargo 30", category: undefined, tier: undefined, rarity: undefined, iconAssetName: undefined },
+    { key: "item:9007199254740993", bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0, name: undefined, itemName: "Item 9007199254740993", category: undefined, tier: undefined, rarity: undefined, iconAssetName: undefined },
   ]);
 });
