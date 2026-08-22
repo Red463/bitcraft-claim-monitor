@@ -104,8 +104,9 @@ entrypoint. The monitored claim, active regions, and most Discord operational
 settings are managed through authenticated Admin and stored in SQLite. The bot
 token can be stored as a protected application secret; environment variables
 can override the token and Discord identity fields. Provider, process,
-data-directory, OAuth-secret, delivery-mode, startup, and network safeguards are
-environment configuration. Never commit credentials or player tokens.
+data-directory, delivery-mode, startup, and bot-network safeguards are
+environment configuration. OAuth has the separate fallback rules described
+below. Never commit credentials or player tokens.
 
 Preview mode forces normal Discord delivery to record mode and disables gateway
 startup:
@@ -121,14 +122,34 @@ Automatic channel delivery and DMs are recorded, the gateway is disabled, and
 command registration requires live mode. This is not a global outbound-network
 block: `ENABLE_DISCORD_NETWORK` defaults to enabled, and an authenticated manual
 test can call Discord when an exact valid `DISCORD_SANDBOX_CHANNEL_ID` is
-configured. For a fully isolated preview or maintenance window, also set:
+configured. To block bot delivery, manual bot API calls, and Discord interaction
+handling, also set:
 
 ```text
 ENABLE_DISCORD_NETWORK=false
 ```
 
-That disables the manual sandbox exception and Discord interaction traffic.
-Routine tests use record mode or a loopback fake Discord service, never a real
+That setting does not guard Discord OAuth start, callback, token, or profile
+requests. OAuth is enabled whenever both a client ID and secret resolve:
+
+- client ID: `DISCORD_OAUTH_CLIENT_ID` when defined, otherwise the resolved bot
+  application ID (`DISCORD_APPLICATION_ID` when defined, otherwise Admin's
+  stored `discord_json.applicationId`); a defined blank value masks the
+  lower-priority client-ID source;
+- client secret: non-empty `DISCORD_OAUTH_CLIENT_SECRET`, otherwise protected
+  SQLite secret `discord_oauth_client_secret`;
+- redirect URI: non-empty `DISCORD_OAUTH_REDIRECT_URI`, otherwise the request
+  origin's `/api/local/auth/discord/callback` (canonical mode forces
+  `https://app.timbersteeltrade.com/api/local/auth/discord/callback`).
+
+The redirect alone does not enable OAuth. To isolate a preview from every
+Discord network path, use `ENABLE_DISCORD_NETWORK=false` and leave/clear every
+client-ID and client-secret source above so `discordOAuthConfig.enabled` is
+false. In particular, a blank environment client secret does not mask a stored
+SQLite secret. Clear the stored application ID through authenticated Admin;
+clearing the protected OAuth secret requires an approved database-secret
+procedure because the ordinary Discord settings form does not write it. Routine
+tests use record mode or a loopback fake Discord service, never a real
 destination.
 
 Operational-history retention is also safe by default: deletion is disabled,

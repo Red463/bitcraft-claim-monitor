@@ -127,8 +127,19 @@ SQLite owns:
 Most Discord operational configuration is stored in `discord_json` and managed
 through authenticated Admin. The bot token is stored in the protected secret
 store unless an environment override is present. Environment variables can
-override the token and Discord identity fields and own OAuth secrets, delivery
-mode, gateway startup, sandbox-channel, and network safeguards.
+override the token and Discord identity fields and own delivery mode, gateway
+startup, sandbox-channel, and bot-network safeguards.
+
+OAuth resolves separately. When defined, `DISCORD_OAUTH_CLIENT_ID` is the client
+ID; otherwise the server uses the resolved bot application ID—defined
+`DISCORD_APPLICATION_ID`, or stored `discord_json.applicationId`. A defined
+blank client-ID value masks its lower-priority source. A non-empty
+`DISCORD_OAUTH_CLIENT_SECRET` wins; otherwise the server reads protected SQLite
+secret `discord_oauth_client_secret`. Preview redirect URI comes from
+non-empty `DISCORD_OAUTH_REDIRECT_URI` or the request origin; canonical mode
+forces `https://app.timbersteeltrade.com/api/local/auth/discord/callback`.
+Redirect configuration alone does not enable OAuth—the resolved client ID and
+secret must both be present.
 
 In separated production, the worker owns long-running Relay acquisition,
 reconciliation, history work, transition dispatch, scheduled jobs, and Discord
@@ -147,8 +158,14 @@ one transaction.
 Preview mode records automatic delivery and disables the gateway. It does not
 disable all Discord HTTP by itself: authenticated exact-channel sandbox tests
 can use the live API while `ENABLE_DISCORD_NETWORK` is enabled (the default).
-Set `ENABLE_DISCORD_NETWORK=false` when the preview must be fully isolated from
-Discord, including manual sandbox tests and interaction traffic.
+Setting it to `false` blocks bot delivery, manual bot API calls, and Discord
+interaction handling, but not OAuth start/callback/token/profile traffic. To
+remove every Discord network path, also leave or clear every OAuth client-ID and
+client-secret source above so `discordOAuthConfig.enabled` is false. A blank
+environment secret does not mask a stored SQLite secret. The stored application
+ID is managed through authenticated Admin; the protected OAuth secret requires
+an approved database-secret procedure because the ordinary Discord settings
+form does not write it.
 
 Operational-history rollups and dry-run diagnostics exist, but destructive
 retention is disabled: the runtime default is off, the approved table allowlist

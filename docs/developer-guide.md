@@ -108,8 +108,23 @@ or complete a reclaimed row.
 Most Discord operational settings are stored in `discord_json` through
 authenticated Admin. The token uses the protected secret store unless an
 environment override is present; identity fields also allow environment
-overrides. OAuth credentials and delivery/startup/network safeguards remain
-environment-owned.
+overrides. Delivery mode, gateway startup, sandbox channel, and bot-network
+safeguards remain environment-owned.
+
+OAuth is a separate resolution path:
+
+- client ID uses `DISCORD_OAUTH_CLIENT_ID` when defined; otherwise it uses the
+  resolved bot application ID—`DISCORD_APPLICATION_ID` when defined, otherwise
+  stored `discord_json.applicationId`; a defined blank value masks the
+  lower-priority client-ID source;
+- client secret uses a non-empty `DISCORD_OAUTH_CLIENT_SECRET`, then protected
+  SQLite secret `discord_oauth_client_secret`; and
+- redirect URI uses non-empty `DISCORD_OAUTH_REDIRECT_URI` or the request origin
+  in preview, while canonical mode forces
+  `https://app.timbersteeltrade.com/api/local/auth/discord/callback`.
+
+OAuth is enabled only when both the resolved ID and secret are present. A
+redirect URI alone does not enable it.
 
 Preview protects automatic delivery and gateway startup with:
 
@@ -123,16 +138,23 @@ DISCORD_SANDBOX_CHANNEL_ID=<optional-exact-test-channel>
 Automatic jobs and DMs are recorded, gateway startup is disabled, and command
 registration requires live mode. `ENABLE_DISCORD_NETWORK` defaults to enabled,
 so an authenticated manual test can still call the live Discord API for the
-exact configured sandbox channel. Use the additional setting below for a fully
-isolated preview or maintenance process:
+exact configured sandbox channel. Use the additional setting below to block bot
+delivery, manual bot API calls, and Discord interaction handling:
 
 ```text
 ENABLE_DISCORD_NETWORK=false
 ```
 
-This disables manual sandbox sends and Discord interaction traffic. Automated
-tests use record mode or a loopback fake Discord origin; never aim them at a
-real destination.
+This does not disable OAuth start/callback/token/profile traffic. To remove every
+Discord network path, also unset or clear `DISCORD_OAUTH_CLIENT_ID`,
+`DISCORD_APPLICATION_ID`, and stored `discord_json.applicationId`, and unset or
+clear both `DISCORD_OAUTH_CLIENT_SECRET` and protected SQLite secret
+`discord_oauth_client_secret`. A blank environment secret still falls back to
+the stored secret. Confirm `discordOAuthConfig.enabled` is false. Clear the
+stored application ID through authenticated Admin; clearing the OAuth secret
+requires an approved database-secret procedure because the ordinary Discord
+settings form does not write it. Automated tests use record mode or a loopback
+fake Discord origin; never aim them at a real destination.
 
 Operational-history deletion remains disabled and has an empty approved table
 allowlist. Do not enable or expand it without owner/dependency approval, raw and
