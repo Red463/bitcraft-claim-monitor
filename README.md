@@ -1,209 +1,160 @@
 # BitCraft Claim Monitor
 
 BitCraft Claim Monitor is a local-first settlement operations dashboard for
-BitCraft. This standalone repository uses the public
-[BitCraft Sync Relay](https://relay.bitcraftsync.app/) for current game data and
-does not expose an upstream API to React.
+BitCraft. The maintained application is [`apps/bitcraft-local`](./apps/bitcraft-local/).
+Historical exports are not maintained application code; material under
+`docs/relay-migration/` and older changelog entries is retained as migration and
+release evidence.
 
-Repository: [Red463/bitcraft-claim-monitor-relay](https://github.com/Red463/bitcraft-claim-monitor-relay)
+Public repository: [Red463/bitcraft-claim-monitor-relay](https://github.com/Red463/bitcraft-claim-monitor-relay)
 
 Preview: [relay.timbersteeltrade.com](https://relay.timbersteeltrade.com)
 
-The maintained application is `apps/bitcraft-local`. Its public product name
-remains “BitCraft Claim Monitor”; Relay-specific names are used for repository,
-deployment, data, backup, and service isolation.
+## What it provides
 
-## Data architecture
+- Settlement status, members, professions, inventory, crafts, construction,
+  research, recruitment, equipment, activity, and planning tools.
+- Settlement and regional market views, favorites, price/history views, deal
+  watches, and locally observed trade reporting.
+- Region, empire, public-craft, deposit, and map views.
+- Authenticated administration plus Discord configuration, notifications, and
+  bot controls.
+- Server-owned collection, history, diagnostics, and delivery work that
+  continues without a browser open.
 
-`RelayBitCraftProvider` is the current server-side provider. It combines:
+## Runtime and data boundaries
 
-- bounded Relay HTTP-cache reads for joined claim, membership, inventory,
-  craft, storage-log, and deposit data;
-- official typed SpacetimeDB subscriptions for global catalogs and regional
-  state;
-- normalizers that are the only code allowed to understand Relay field names,
-  wire timestamps, or numeric encodings;
-- atomic committed Relay generations in the current-state repository.
+The server-owned ingestion process (the worker role in separated production)
+discovers Relay topology and acquires current game state through two paths:
 
-React uses provider-neutral local routes, primarily:
+- bounded Relay HTTP-cache reads for joined claim, member, inventory, craft,
+  deposit, and storage-log data; and
+- generated, typed SpacetimeDB subscriptions for global catalogs and regional
+  state.
 
-```http
-GET /api/local/game-data?claimId=<decimal-id>&domains=claim,members
-```
+Relay-specific field names, nullable shapes, timestamps, and numeric encodings
+are normalized under `apps/bitcraft-local/src/server/game-data/`. Wire records
+do not enter React or history tables. IDs and large amounts remain decimal
+strings, and item/cargo kind remains part of each identity.
 
-The browser never calls Relay or SpacetimeDB directly. Open pages listen for
-provider generation events and refetch the domains they own, so healthy updates
-normally appear quickly without waiting for a broad scheduled acquisition job.
-A bounded poll remains a recovery path if an event is missed.
+Each validated domain is published atomically to the current-state repository.
+SQLite retains the durable last-good domain boundary, locally observed history,
+provider transitions, notification/outbox state, settings, accounts, privacy
+records, and diagnostics. Current-state publication is independent of slower
+history, analytics, and Discord work. Claim-market transitions are committed
+durably with the winning market generation and dispatched by the worker after
+publication.
 
-Each domain envelope includes freshness, confidence, age, warnings, and source
-provenance. During an outage, the server returns last-good data marked stale
-when available. It returns `503` only when none of the requested domains has
-ever loaded.
+The web process serves same-origin, provider-neutral `/api/local/*` routes.
+React never connects to Relay or SpacetimeDB directly. Multi-domain responses
+include per-domain status and `meta.coherence`; `coherent` means the known local
+application generations and declared enrichment dependencies agree. It does
+not mean that every upstream source observed the game at the same instant.
+Domains may deliberately be mixed, stale, partial, or unavailable while other
+last-good domains remain usable.
 
-The `GameDataProvider` seam keeps React, local routes, and persistence
-transport-neutral. A later `DirectBitCraftProvider` can implement the same
-interface without another UI or database rewrite.
+Open provider-neutral pages watch only their claim and owned domains through
+local generation events. SSE is the low-latency path. Craft Monitor uses a
+one-second recovery poll; other interval provider pages use a 30-second recovery
+poll. Hidden tabs do not poll and catch up once when visible. Manual-only and
+non-provider pages do not create a generation watcher. These recovery polls are
+separate from the normal page refresh schedule.
 
-## SQLite ownership
+Discord outbox delivery uses durable SQLite leases and is intentionally
+at-least-once: a process failure after Discord accepts a request but before the
+local acknowledgement can still produce a duplicate retry.
 
-SQLite is not a substitute for live provider reads. It owns only:
+See the [application overview](./docs/application-overview.md) for the complete
+runtime flow and the [developer guide](./docs/developer-guide.md) for code
+boundaries.
 
-- normalized current-domain and catalog projections needed for atomic
-  generations, joins, and restart recovery;
-- durable history and events used by charts, analytics, notifications, storage
-  activity, and locally observed market transitions;
-- user, admin, legal, analytics-consent, and Discord state;
-- operational health, outbox, deduplication, backup, and audit records.
-
-Retired snapshot/catalog acquisition tables and browser-submitted snapshots do
-not populate live views. See
-[`docs/relay-migration/table-inventory.md`](./docs/relay-migration/table-inventory.md)
-for the current table-by-table ownership decision.
-
-## Features
-
-The application provides settlement dashboards for claim status, members,
-professions, production, public crafts, inventory, construction, research,
-recruitment, equipment, market, region, empires, map/layout, deposits, activity,
-planning tools, and administration. Background collection, history,
-notifications, and Discord outbox processing continue without a browser.
-
-IDs remain decimal strings across browser and persistence boundaries. Item and
-cargo identities include their kind so equal numeric IDs never collide.
-Historical charts clearly describe their locally observed time window.
-
-## Local icons and provenance
-
-Runtime game icons prefer local files under
-`apps/bitcraft-local/public/game-icons/`; the browser never requests a remote
-icon host. If a verified local icon is unavailable, the browser may request the
-bounded same-origin `/api/local/game-icon/:itemType/:itemId` fallback.
-`apps/bitcraft-local/assets/game-icons-manifest.json` is the one
-intentional historical-source exception: it records immutable build-time
-provenance including the original URL, local path, digest, retrieval time,
-catalog identity, and permission reference. Original URLs in that manifest are
-not used as a runtime URL source.
-
-The build validates the manifest, SHA-256 digests, missing files, and duplicate
-catalog identities.
-
-## Development
-
-Requirements:
+## Requirements and local development
 
 - Node.js 24 or newer
 - Corepack
-- the pinned pnpm version from `package.json`
+- pnpm `11.1.3`, pinned by the root `packageManager` field
+
+Run from the repository root:
 
 ```powershell
 corepack pnpm install
 corepack pnpm --filter @workspace/bitcraft-local run dev
 ```
 
-Default Relay-clone development addresses:
+The development command starts:
 
-- frontend: `http://localhost:19428`
-- local API: `http://127.0.0.1:19430`
+- Vite at `http://localhost:19428`
+- the local Node API at `http://127.0.0.1:19430`
 
-Verification:
+Build and test:
 
 ```powershell
-corepack pnpm run typecheck
 corepack pnpm --filter @workspace/bitcraft-local run build
 corepack pnpm --filter @workspace/bitcraft-local test
 ```
 
-The Vite server proxies same-origin `/api/*` requests only to the local Node
-server on port `19430`.
+The optional built smoke server uses `http://127.0.0.1:18449`; it is not a
+third normal development service. See the [developer guide](./docs/developer-guide.md#testing-boundaries)
+for its commands.
 
-## Configuration
+## Configuration and Discord safety
 
-Start with [`.env.example`](./.env.example). Important groups are:
+Use [`.env.example`](./.env.example) as the configuration entrypoint. The
+monitored claim and active regions are managed in the application; provider,
+process, data-directory, OAuth, and Discord settings come from the environment.
+Never commit credentials or player tokens.
 
-- `BITCRAFT_RELAY_ORIGIN`, `ENABLE_RELAY_PROVIDER`, and
-  `ENABLE_RELAY_GLOBAL_CATALOG` for provider topology;
-- `RELAY_*` pool, refresh, rotation, and stale thresholds for bounded regional
-  work;
-- `BITCRAFT_LOCAL_DATA_DIR` for the fresh standalone SQLite data directory;
-- `DISCORD_DELIVERY_MODE=record` and `ENABLE_DISCORD_STARTUP=false` for
-  preview-safe shadow delivery. Authenticated Admin manual tests may send only
-  to the exact `DISCORD_SANDBOX_CHANNEL_ID`; automatic work remains recorded
-  and cannot use this exception.
+Preview mode is fail-closed for Discord:
 
-Do not commit credentials or player tokens.
+```text
+BITCRAFT_DEPLOYMENT_MODE=preview
+DISCORD_DELIVERY_MODE=record
+ENABLE_DISCORD_STARTUP=false
+DISCORD_SANDBOX_CHANNEL_ID=
+```
 
-## Deployment
+Automatic delivery, DMs, gateway startup, and command registration remain
+recorded or disabled. An authenticated administrator can send a manual test
+only to the exact configured sandbox channel. Routine tests use record mode or
+a loopback fake Discord service, never a real destination.
 
-The Relay clone runs beside the maintained application with isolated
-identities:
+Operational-history retention is also safe by default: deletion is disabled,
+the approved table allowlist is empty, and Admin/scheduled execution is dry-run
+only. Do not enable pruning without the documented ownership, parity, backup,
+and observation evidence.
 
-- install: `/opt/bitcraft-claim-monitor-relay`
-- data: `/var/lib/bitcraft-claim-monitor-relay`
-- backups: `/var/backups/bitcraft-claim-monitor-relay`
-- environment: `/etc/bitcraft-claim-monitor-relay.env`
-- updater: `/usr/local/bin/update-bitcraft-claim-monitor-relay`
-- web: `bitcraft-claim-monitor-relay.service`
-- worker: `bitcraft-claim-monitor-relay-worker.service`
-- preview API port: `19430`
-- preview host: `relay.timbersteeltrade.com`
+## Known data limits
 
-The **Deploy Relay preview** workflow uses the `relay-preview` GitHub
-environment to deploy exact tested SHAs. Preview units
-force Discord record mode and disable startup/command registration. Only an
-authenticated manual test can post to the configured sandbox Discord channel.
-Caddy routing is a one-time supervised bootstrap and the updater never
-overwrites the live Caddyfile.
+- Typed ingestion is tied to checked-in schema fingerprints. A mismatch stops
+  the affected generation and preserves last-good data until matching bindings
+  are generated, tested, and deployed.
+- A response's receipt age is not necessarily upstream observation age; some
+  sources do not provide an observation timestamp.
+- Siege cancellation is not distinguishable from a removed or unknown state.
+- Confirmed marketplace sales do not expose purchaser identity.
+- Regional trade totals cover confirmed sales observed locally since the shown
+  `observedSince`; they are not a complete upstream historical aggregate.
+- A disappearing market order is not automatically a sale, and an unknown
+  deposit state is not treated as active or harvestable.
 
-Production has two fail-closed modes. `preview` is record-only and has no
-Discord gateway. `canonical` uses live Discord delivery, exactly one worker
-gateway, and the exact OAuth callback
-`https://app.timbersteeltrade.com/api/local/auth/discord/callback`. Routine
-deployment stays in preview; it cannot change the installed mode. Canonical
-activation is available only from `main` through the protected cutover workflow:
-prepare uses the `relay-preview` GitHub environment and apply uses the separate
-`relay-cutover` environment with its required reviewer.
+The evidence and required product wording are recorded in
+[known Relay semantic limits](./docs/relay-migration/unresolved-semantics-2026-08-02.md).
 
-The operator types `app.timbersteeltrade.com` exactly. Prepare takes the
-cutover -> deploy -> backup locks, enters maintenance, stops writers, freezes
-the profession repair and selective migration manifests, and validates an
-encrypted recovery set. Apply has a 10-minute target and a 15-minute watchdog;
-it migrates only approved account/configuration data, forces re-login, merges
-and replays privacy deletions, starts canonical Relay services, and opens Caddy.
-Abort is available only before admission; post-admission recovery is
-fix-forward. Pre-admission abort restores the saved routing and service state;
-post-admission fix-forward resumes the exact admitted revision. The exactly-once no-mentions cutover announcement waits for the
-30-minute intensive soak. A schedulable 24-hour follow-up then runs without a
-browser. The stopped and masked legacy installation remains for 14-day forensic
-retention. Legacy deletion requires a separate approval and final encrypted
-archive; no cleanup command is part of this release.
+## Deployment and documentation
 
-Workflow summaries stay non-secret: prepare reports only revision-bound frozen
-counts/hashes, encrypted-backup identifiers, and watchdog deadline; apply
-reports revision plus success/failed; abort reports revision plus
-restored/failed-or-admitted. Detailed diagnostics and protected state remain on
-the VPS.
+- [Deployment guide](./DEPLOYMENT.md) — preview, canonical cutover, backups,
+  diagnostics, and rollback
+- [Application overview](./docs/application-overview.md) — whole-app runtime
+  architecture and data ownership
+- [Developer guide](./docs/developer-guide.md) — contribution rules and
+  verification commands
+- [Notification system](./docs/notification-system.md) — notification and
+  delivery behavior
+- [Privacy operations runbook](./docs/privacy-operations-runbook.md) — privacy
+  and deletion operations
+- [Changelog](./CHANGELOG.md) and [versioning policy](./VERSIONING.md)
 
-See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for setup, diagnostics, backups, rollback,
-and cutover gates.
-
-## Documentation
-
-- [`docs/application-overview.md`](./docs/application-overview.md) — runtime
-  architecture and data flow
-- [`docs/developer-guide.md`](./docs/developer-guide.md) — implementation rules
-  and commands
-- [`docs/relay-migration/parity-matrix.md`](./docs/relay-migration/parity-matrix.md)
-  — page, collector, job, and notification parity
-- [`docs/relay-migration/table-inventory.md`](./docs/relay-migration/table-inventory.md)
-  — SQLite ownership and retired tables
-- [`CHANGELOG.md`](./CHANGELOG.md) — historical release record
-
-Historical migration evidence and changelog entries retain source names for
-auditability; they are not active runtime configuration.
-
-## License and legal
-
-This is an unofficial community application and is not affiliated with Clockwork
-Labs. BitCraft game names and assets belong to their respective owners. Review
-the in-app Terms and Privacy pages before any public deployment.
+The application is unofficial and is not affiliated with Clockwork Labs.
+BitCraft names and assets belong to their respective owners. Repository code is
+licensed under [AGPL-3.0-only](./LICENSE); see [NOTICE](./NOTICE) and
+[trademark guidance](./TRADEMARKS.md).
