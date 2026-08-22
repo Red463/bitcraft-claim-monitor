@@ -6,6 +6,7 @@ import {
   additiveColumnMigrations,
   applyAdditiveColumnMigrations,
   applyLegacySchemaCleanup,
+  applyOperationalHistoryRetentionMigration,
   applyMarketHistoryExactAmountMigration,
   applyMarketTradeRegionBackfill,
   applyProductionContributionExactAmountMigration,
@@ -19,6 +20,34 @@ import {
 import { installRetiredTableAuthorizer } from "../src/server/retiredTableAuthorizer.mjs";
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import { createCurrentStateRepository } from "../src/server/game-data/currentStateRepository.ts";
+
+test("operational history retention migration is additive, narrow, and idempotent", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  db.prepare(`
+    INSERT INTO market_trades (
+      trade_id, claim_id, item_name, quantity, unit_price, total_price,
+      occurred_at, imported_at, raw_json
+    ) VALUES ('kept', '1', 'Timber', '1', '2', '2', '2026-08-21T00:00:00.000Z', '2026-08-21T00:00:01.000Z', '{}')
+  `).run();
+
+  applyOperationalHistoryRetentionMigration(db);
+  applyOperationalHistoryRetentionMigration(db);
+
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM market_trades").get().count, 1);
+  for (const table of [
+    "operational_history_market_trade_daily",
+    "operational_history_market_event_daily",
+    "operational_history_activity_daily",
+    "operational_history_rollup_watermarks",
+    "operational_history_retention_runs",
+    "operational_history_backup_verifications",
+  ]) {
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table).count, 1);
+    assert.equal(db.prepare(`PRAGMA table_info("${table}")`).all().some((column) => column.name === "raw_json"), false);
+  }
+  db.close();
+});
 
 test("provider transition lease migration is additive and preserves pending rows", () => {
   const db = new DatabaseSync(":memory:");

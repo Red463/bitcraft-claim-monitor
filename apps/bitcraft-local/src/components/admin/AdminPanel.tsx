@@ -613,13 +613,13 @@ export function AdminPanel({
       if (botOnly && tab === "discord" && botSection === "commands") await refreshCustomCommands();
       if (tab === "analytics") await refreshAnalytics();
       if (tab === "empire-membership") await refreshEmpireMembership();
-      if (tab === "database") await refreshTables();
+      if (tab === "database") await Promise.all([refreshTables(), refreshStatus()]);
       if (tab === "users") await refreshUsers();
       if (tab === "accounts") await refreshLinkedAccountsAndFallbackMembers();
       if (tab === "configuration") await refreshAccessControl();
       if (tab === "audit") await refreshAudit();
       if (tab === "diagnostics") { await refreshStatus(); await refreshPopupDiagnostics(); }
-      if (tab === "backups") await refreshBackups();
+      if (tab === "backups") await Promise.all([refreshBackups(), refreshStatus()]);
     }, undefined, `tab-load:${tab}:${botSection}:${analyticsDays}:${securityEventSearch}:${securityEventPage}:${securityEventPageSize}:${settings.claimId}:${members.length}`);
   }, [auth?.authenticated, tab, analyticsDays, botSection, securityEventSearch, securityEventPage, securityEventPageSize, settings.claimId, members.length]);
   const scheduledJobsRunning = Boolean((scheduledJobs?.jobs ?? []).some((job: AnyRecord) => job.running));
@@ -2210,7 +2210,7 @@ export function AdminPanel({
       {tab === "database" ? (
         <AdminDataSection
           tab="database"
-          data={{ tables, selectedTable, tableResult, tableSearch, tableOffset, backups }}
+          data={{ tables, selectedTable, tableResult, tableSearch, tableOffset, backups, operationalHistory: status?.operationalHistory }}
           pending={isBusyAction}
           error={messageKind === "error" ? message : null}
           result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
@@ -2219,6 +2219,7 @@ export function AdminPanel({
           onPreviousTablePage={() => setTableOffset(Math.max(0, tableOffset - 50))}
           onNextTablePage={() => setTableOffset(tableOffset + 50)}
           onCreateBackup={() => undefined}
+          onRunRetentionDryRun={() => run(async () => { await api("/admin/operational-history-retention/dry-run", { method: "POST", body: "{}" }); await refreshStatus(); }, "Retention dry-run completed without deleting rows.", "retention-dry-run")}
           tableExportHref={(format) => `${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=${format}&search=${encodeURIComponent(tableSearch)}`}
           backupDownloadHref={(name) => `${LOCAL_API}/admin/backup?name=${encodeURIComponent(name)}`}
         />
@@ -2304,7 +2305,7 @@ export function AdminPanel({
       {tab === "backups" ? (
         <AdminDataSection
           tab="backups"
-          data={{ tables, selectedTable, tableResult, tableSearch, tableOffset, backups }}
+          data={{ tables, selectedTable, tableResult, tableSearch, tableOffset, backups, operationalHistory: status?.operationalHistory }}
           pending={isBusyAction}
           error={messageKind === "error" ? message : null}
           result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
@@ -2312,7 +2313,8 @@ export function AdminPanel({
           onTableSearchChange={(value) => { setTableSearch(value); setTableOffset(0); }}
           onPreviousTablePage={() => setTableOffset(Math.max(0, tableOffset - 50))}
           onNextTablePage={() => setTableOffset(tableOffset + 50)}
-          onCreateBackup={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await refreshBackups(); }, "Backup created.", "backup-create")}
+          onCreateBackup={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await Promise.all([refreshBackups(), refreshStatus()]); }, "Backup created and verified.", "backup-create")}
+          onRunRetentionDryRun={() => run(async () => { await api("/admin/operational-history-retention/dry-run", { method: "POST", body: "{}" }); await refreshStatus(); }, "Retention dry-run completed without deleting rows.", "retention-dry-run")}
           tableExportHref={(format) => `${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=${format}&search=${encodeURIComponent(tableSearch)}`}
           backupDownloadHref={(name) => `${LOCAL_API}/admin/backup?name=${encodeURIComponent(name)}`}
         />

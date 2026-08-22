@@ -1,3 +1,5 @@
+import { operationalHistoryRetentionSchemaSql } from "./operationalHistoryRetention.mjs";
+
 export const schemaBootstrapSql = `
   PRAGMA journal_mode = WAL;
   CREATE TABLE IF NOT EXISTS settlement_state_current (
@@ -812,6 +814,7 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_game_catalog_item_list_possibility_outputs_output ON game_catalog_item_list_possibility_outputs (output_key, item_list_id);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_resource_completion_outputs_output ON game_catalog_resource_completion_outputs (output_key, resource_id);
   CREATE INDEX IF NOT EXISTS idx_domain_payload_claim ON domain_payload_current (claim_id, domain);
+  ${operationalHistoryRetentionSchemaSql}
 `;
 
 export function applySchemaBootstrap(db) {

@@ -17,7 +17,7 @@ test("defaultAppSettingRows preserves bootstrap app settings and timestamps", ()
     updatedAt: "2026-06-29T12:00:00.000Z",
   });
 
-  assert.equal(rows.length, 18);
+  assert.equal(rows.length, 21);
   assert.deepEqual(rows.map((row) => row.key), [
     "claim_id",
     "bitcraft_sync_url",
@@ -32,6 +32,9 @@ test("defaultAppSettingRows preserves bootstrap app settings and timestamps", ()
     "branding_json",
     "app_popups_json",
     "visitor_security_json",
+    "operational_history_retention_enabled",
+    "operational_history_retention_days",
+    "operational_history_retention_tables_json",
     "discord_json",
     "discord_last_announced_version",
     "discord_last_supply_report_at",
@@ -68,6 +71,9 @@ test("defaultAppSettingRows preserves JSON defaults used by admin and notificati
     geoipAccountId: "",
     geoipLicenseKey: "",
   });
+  assert.equal(rows.operational_history_retention_enabled, "false");
+  assert.equal(rows.operational_history_retention_days, "365");
+  assert.deepEqual(JSON.parse(rows.operational_history_retention_tables_json), []);
   const discord = JSON.parse(rows.discord_json);
   assert.equal(discord.enabled, false);
   assert.equal(discord.notify.marketListings, true);
@@ -123,7 +129,7 @@ test("applyDefaultAppSettings derives default rows when rows are not supplied", 
     updatedAt: "2026-06-29T12:45:00.000Z",
   });
 
-  assert.equal(inserted.length, 18);
+  assert.equal(inserted.length, 21);
   assert.deepEqual(inserted.find(([key]) => key === "server_refresh_seconds"), ["server_refresh_seconds", "75", "2026-06-29T12:45:00.000Z"]);
   assert.deepEqual(deleted, [["analytics_json"], ["collector_settings_json"], ["map_renderer_mode"]]);
 });

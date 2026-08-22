@@ -1,4 +1,9 @@
 import { addDecimal } from "../../dist-server/game-data/exactDecimal.js";
+import { applyOperationalHistoryRetentionSchema } from "./operationalHistoryRetention.mjs";
+
+export function applyOperationalHistoryRetentionMigration(db) {
+  applyOperationalHistoryRetentionSchema(db);
+}
 
 export const additiveColumnMigrations = [
   { table: "market_events", column: "owner_entity_id", definition: "TEXT" },

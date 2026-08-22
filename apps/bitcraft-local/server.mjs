@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 import { setDefaultResultOrder } from "node:dns";
@@ -24,9 +24,9 @@ import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySe
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
 import { projectCraftContributionEnvelope } from "./src/server/craftContributionProjection.mjs";
 import { projectCraftContributionLeaderboard } from "./src/server/craftContributionLeaderboard.mjs";
-import { partitionCraftContributionRows } from "./src/server/craftContributionVisibility.mjs";
+import { partitionCraftContributionRows, readCraftContributionDiagnostics } from "./src/server/craftContributionVisibility.mjs";
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
-import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
+import { createOperationalHistoryRetentionDryRunJob, nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { gameTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
 import { currentMarketListings, marketLeaderboardFromCurrent } from "./src/server/currentMarketViews.mjs";
 import {
@@ -149,6 +149,7 @@ import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/se
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
+import { APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES, buildOperationalHistoryRollups, latestOperationalHistoryBackupVerification, normalizeOperationalHistoryRetentionSettings, operationalHistoryRetentionPreview, readOperationalMarketTradeDaily, recordOperationalHistoryBackupVerification, runOperationalHistoryRetention, validateOperationalHistoryRetentionEnableGate } from "./src/server/operationalHistoryRetention.mjs";
 import { installRetiredTableAuthorizer } from "./src/server/retiredTableAuthorizer.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
 import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, publicRoutePerformanceHealth, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
@@ -218,7 +219,7 @@ import {
   relayEmpireMembershipObservation,
 } from "./src/server/empireMembership.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
-import { applyAdditiveColumnMigrations, applyDiscordOutboxLeaseMigration, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyProductionContributionExactAmountMigration, applyProviderTransitionLeaseMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
+import { applyAdditiveColumnMigrations, applyDiscordOutboxLeaseMigration, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyOperationalHistoryRetentionMigration, applyProductionContributionExactAmountMigration, applyProviderTransitionLeaseMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { assertCanonicalDiscordGatewayReady, resolveDeploymentRuntime } from "./src/server/deploymentRuntime.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
@@ -333,11 +334,7 @@ async function serverHealthResponse(url, { includeDiagnosticBundle = false } = {
   const overall = serverHealthState(files.snapshot, application);
   const logs = filterServerHealthLogs(files.snapshot?.logs ?? [], { service: url.searchParams.get("service") ?? "", severity: url.searchParams.get("severity") ?? "", search: url.searchParams.get("search") ?? "", cursor: url.searchParams.get("cursor") ?? 0, limit: url.searchParams.get("limit") ?? 50 });
   const incidents = db.prepare("SELECT * FROM server_health_incidents ORDER BY last_observed_at DESC LIMIT 100").all();
-  const contributionRows = db.prepare(`
-    SELECT contributor_entity_id, attribution_confidence
-    FROM production_contribution_events
-  `).all();
-  const craftContributionDiagnostics = partitionCraftContributionRows(contributionRows).adminDiagnostics;
+  const craftContributionDiagnostics = readCraftContributionDiagnostics(db);
   const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), craftContributionDiagnostics, incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: "not-retained", requestIdentifiers: "not-retained" }, version: appVersion, buildId: currentAppBuildId() };
   return buildServerHealthResponse(response, { includeDiagnosticBundle });
 }
@@ -578,6 +575,7 @@ applyProviderTransitionLeaseMigration(db);
 applyMarketHistoryExactAmountMigration(db);
 applyMarketTradeRegionBackfill(db);
 applyProductionContributionExactAmountMigration(db);
+applyOperationalHistoryRetentionMigration(db);
 applySchemaIndexStatements(db);
 
 const now = new Date().toISOString();
@@ -1214,6 +1212,13 @@ async function runPrivacyRetentionJob() {
   });
 }
 
+const runOperationalHistoryRetentionDryRunJob = createOperationalHistoryRetentionDryRunJob({
+  db,
+  readSettings: operationalHistoryRetentionSettings,
+  buildRollups: buildOperationalHistoryRollups,
+  runRetention: runOperationalHistoryRetention,
+});
+
 // Scheduled jobs are registered here rather than scattered through route
 // handlers so Admin can expose a consistent enable/run/status surface for each
 // background task. Jobs should report progress in metadata when they can run for
@@ -1253,6 +1258,13 @@ const scheduledJobRegistry = {
     schedule: "daily@02:30",
     enabled: true,
     run: runPrivacyRetentionJob,
+  },
+  operational_history_retention_dry_run: {
+    label: "Operational history retention preview",
+    description: "Builds narrow daily rollups and reports eligible history rows. Deletion remains disabled.",
+    schedule: "daily@03:00",
+    enabled: true,
+    run: runOperationalHistoryRetentionDryRunJob,
   },
 };
 
@@ -4175,6 +4187,14 @@ function enqueueDiscordActivityRow(eventType, summary, occurredAt, metadata = {}
   return { ok: true, queued: true, sourceKey };
 }
 
+function operationalHistoryRetentionSettings() {
+  return normalizeOperationalHistoryRetentionSettings({
+    enabled: statements.getSetting.get("operational_history_retention_enabled")?.value === "true",
+    days: Number(statements.getSetting.get("operational_history_retention_days")?.value ?? 365),
+    tables: safeJson(statements.getSetting.get("operational_history_retention_tables_json")?.value, []),
+  }, { approvedTables: new Set(APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES) });
+}
+
 async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata = {}, options = {}) {
   return enqueueDiscordActivityRow(eventType, summary, occurredAt, metadata, options);
 }
@@ -6129,14 +6149,19 @@ function marketHistory(claimId, limit, owner = "") {
     ORDER BY unitsSold DESC, totalValue DESC
     LIMIT 20
   `).all(...tradeArgs);
-  const daily = db.prepare(`
-    SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue
-    FROM market_trades
-    WHERE claim_id = ?${tradeOwnerClause}
-    GROUP BY day
-    ORDER BY day DESC
-    LIMIT ?
-  `).all(...tradeArgs, MARKET_DAILY_HISTORY_LIMIT).reverse();
+  const rollupDaily = selectedOwner ? null : readOperationalMarketTradeDaily(db, {
+    claimId,
+    startDay: marketRangeStart.slice(0, 10),
+    endDay: new Date(new Date(marketRangeEnd).getTime() - 1).toISOString().slice(0, 10),
+  });
+  const daily = rollupDaily?.daily ?? db.prepare(`
+      SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue
+      FROM market_trades
+      WHERE claim_id = ?${tradeOwnerClause}
+      GROUP BY day
+      ORDER BY day DESC
+      LIMIT ?
+    `).all(...tradeArgs, MARKET_DAILY_HISTORY_LIMIT).reverse();
   const lifecycleTotals = db.prepare(`
     SELECT
       SUM(CASE WHEN event_type = 'new_listing' THEN 1 ELSE 0 END) AS newListings,
@@ -6157,7 +6182,7 @@ function marketHistory(claimId, limit, owner = "") {
     ORDER BY occurred_at DESC
     LIMIT 30
   `).all(...args);
-  return { liveListings, events, sales, topItems, daily, totals, pending };
+  return { liveListings, events, sales, topItems, daily, totals, pending, observedSince: rollupDaily?.observedSince ?? daily[0]?.day ?? null };
 }
 
 function currentBuyOrderBaselineKeys(snapshot, regionId, allowedRegionIds) {
@@ -6645,12 +6670,14 @@ function activityLeaderboard(claimId) {
 }
 
 function marketLeaderboard(claimId) {
+  const historyStart = new Date(Date.now() - 365 * 86_400_000).toISOString();
+  const historyEnd = new Date().toISOString();
   const trades = db.prepare(`
     SELECT seller_username, seller_entity_id, quantity, total_price, occurred_at
     FROM market_trades
-    WHERE claim_id = ?
+    WHERE claim_id = ? AND occurred_at >= ? AND occurred_at < ?
     ORDER BY occurred_at DESC, trade_id DESC
-  `).all(claimId);
+  `).all(claimId, historyStart, historyEnd);
   const currentMarket = currentMarketProjection(claimId);
   return marketLeaderboardFromCurrent({
     snapshot: currentMarket.data,
@@ -6771,12 +6798,19 @@ function databaseStatus() {
     metadata: safeJson(row.metadata_json, {}),
     response: row.response_json ? safeJson(row.response_json, {}) : null,
   }));
+  const retentionSettings = operationalHistoryRetentionSettings();
+  const operationalHistory = operationalHistoryRetentionPreview(db, {
+    ...retentionSettings,
+    databasePath,
+  });
   return {
     version: appVersion,
     environment: isProduction ? "production" : "development",
     storageLabel: isProduction ? "Production persistent storage" : "Local development storage",
     databaseSize: existsSync(databasePath) ? statSync(databasePath).size : 0,
+    walSize: existsSync(`${databasePath}-wal`) ? statSync(`${databasePath}-wal`).size : 0,
     counts,
+    operationalHistory,
     polling: collectorStatusPayload(),
     gameDataProvider: gameDataProviderHealth(),
     discord: {
@@ -6928,12 +6962,57 @@ function backupNames() {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : [];
 }
 
+function sha256File(filePath) {
+  const hash = createHash("sha256");
+  const descriptor = openSync(filePath, "r");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    for (;;) {
+      const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+      if (!bytesRead) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+  return hash.digest("hex");
+}
+
 function createBackup() {
   const name = `bitcraft-local-${new Date().toISOString().replaceAll(":", "-").replace(/\.\d{3}Z$/, "Z")}.sqlite`;
   const filePath = path.join(backupDir, name);
   db.exec(`VACUUM INTO '${filePath.replaceAll("'", "''")}'`);
   const info = statSync(filePath);
-  return { name, size: info.size, createdAt: info.mtime.toISOString() };
+  const createdAt = info.mtime.toISOString();
+  const databaseSha256 = sha256File(filePath);
+  const manifest = JSON.stringify({ name, size: info.size, createdAt, databaseSha256 });
+  const manifestSha256 = createHash("sha256").update(manifest).digest("hex");
+  const restoredPath = `${filePath}.restore-verification-${process.pid}-${randomBytes(8).toString("hex")}`;
+  let integrityCheck = "unavailable";
+  try {
+    copyFileSync(filePath, restoredPath);
+    const restored = new DatabaseSync(restoredPath, { readOnly: true });
+    try {
+      integrityCheck = String(restored.prepare("PRAGMA integrity_check").get()?.integrity_check ?? "unavailable");
+    } finally {
+      restored.close();
+    }
+  } finally {
+    if (existsSync(restoredPath)) unlinkSync(restoredPath);
+  }
+  if (integrityCheck !== "ok") throw new Error(`Backup temporary restore integrity_check failed: ${integrityCheck}`);
+  const verifiedAt = new Date().toISOString();
+  const verification = recordOperationalHistoryBackupVerification(db, {
+    backupName: name,
+    backupCreatedAt: createdAt,
+    verifiedAt,
+    manifestSha256,
+    databaseSha256,
+    restoredTemporaryDatabase: true,
+    integrityCheck,
+    backupBytes: info.size,
+  });
+  return { name, size: info.size, createdAt, verification };
 }
 
 
@@ -9626,6 +9705,47 @@ const server = createServer(async (req, res) => {
         return send(res, 200, { removed });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/tables") return send(res, 200, { tables: tableInfo() });
+      if (req.method === "GET" && url.pathname === "/api/local/admin/operational-history-retention") {
+        return send(res, 200, operationalHistoryRetentionPreview(db, {
+          ...operationalHistoryRetentionSettings(),
+          databasePath,
+        }));
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/operational-history-retention/dry-run") {
+        const result = runOperationalHistoryRetentionDryRunJob();
+        audit(user, "operational_history_retention.dry_run", { eligibleRows: result.eligibleRows, deletedRows: result.deletedRows });
+        return send(res, 200, {
+          result,
+          preview: operationalHistoryRetentionPreview(db, { ...operationalHistoryRetentionSettings(), databasePath }),
+        });
+      }
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/operational-history-retention") {
+        const body = await readJson(req, BODY_LIMITS.settings);
+        try {
+          const next = normalizeOperationalHistoryRetentionSettings({
+            enabled: body.enabled === true,
+            days: body.days,
+            tables: body.tables,
+          }, { approvedTables: new Set(APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES) });
+          if (next.enabled) {
+            validateOperationalHistoryRetentionEnableGate({
+              now: new Date(),
+              approvedTables: new Set(APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES),
+              tables: next.tables,
+              explicitConfirmation: String(body.confirmation ?? ""),
+              backupVerification: latestOperationalHistoryBackupVerification(db),
+            });
+          }
+          const updatedAt = new Date().toISOString();
+          statements.upsertSetting.run("operational_history_retention_enabled", next.enabled ? "true" : "false", updatedAt);
+          statements.upsertSetting.run("operational_history_retention_days", String(next.days), updatedAt);
+          statements.upsertSetting.run("operational_history_retention_tables_json", JSON.stringify(next.tables), updatedAt);
+          audit(user, "operational_history_retention.settings", { enabled: next.enabled, days: next.days, tables: next.tables });
+          return send(res, 200, operationalHistoryRetentionPreview(db, { ...next, databasePath }));
+        } catch (error) {
+          return send(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
+      }
       if (req.method === "GET" && url.pathname === "/api/local/admin/table") {
         const table = url.searchParams.get("name") ?? "";
         return send(res, 200, tableQuery(table, Object.fromEntries(url.searchParams.entries())));

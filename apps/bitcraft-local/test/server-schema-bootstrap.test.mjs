@@ -24,6 +24,12 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "discord_channel_id TEXT",
     "CREATE TABLE IF NOT EXISTS discord_youtube_videos",
     "CREATE TABLE IF NOT EXISTS provider_transition_outbox",
+    "CREATE TABLE IF NOT EXISTS operational_history_market_trade_daily",
+    "CREATE TABLE IF NOT EXISTS operational_history_market_event_daily",
+    "CREATE TABLE IF NOT EXISTS operational_history_activity_daily",
+    "CREATE TABLE IF NOT EXISTS operational_history_rollup_watermarks",
+    "CREATE TABLE IF NOT EXISTS operational_history_retention_runs",
+    "CREATE TABLE IF NOT EXISTS operational_history_backup_verifications",
     "locked_by TEXT",
     "lease_token TEXT",
     "locked_at TEXT",
@@ -58,6 +64,7 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS empire_hexite_/);
   assert.doesNotMatch(schemaBootstrapSql, /idx_provider_transition_lease/);
   assert.match(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_trades[\s\S]*region_id TEXT/);
+  assert.doesNotMatch(schemaBootstrapSql, /operational_history_[\s\S]*raw_json/);
 });
 
 test("applySchemaBootstrap executes the complete bootstrap SQL once", () => {
