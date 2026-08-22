@@ -160,12 +160,19 @@ disable all Discord HTTP by itself: authenticated exact-channel sandbox tests
 can use the live API while `ENABLE_DISCORD_NETWORK` is enabled (the default).
 Setting it to `false` blocks bot delivery, manual bot API calls, and Discord
 interaction handling, but not OAuth start/callback/token/profile traffic. To
-remove every Discord network path, also leave or clear every OAuth client-ID and
-client-secret source above so `discordOAuthConfig.enabled` is false. A blank
-environment secret does not mask a stored SQLite secret. The stored application
-ID is managed through authenticated Admin; the protected OAuth secret requires
-an approved database-secret procedure because the ordinary Discord settings
-form does not write it.
+suppress server-side Discord bot/API/OAuth traffic, also leave or clear all
+OAuth client-ID and client-secret sources above so
+`discordOAuthConfig.enabled` is false. A blank environment secret does not mask
+a stored SQLite secret. The stored application ID is managed through
+authenticated Admin; the protected OAuth secret requires an approved
+database-secret procedure because the ordinary Discord settings form does not
+write it.
+
+That scope does not include browser asset requests. Authenticated views render
+stored Discord avatar URLs from `cdn.discordapp.com`, and the Content Security
+Policy allows that host, so browsers may fetch those avatars directly. Remote
+avatar assets must be suppressed separately when required; there is no single
+documented setting for that behavior.
 
 Operational-history rollups and dry-run diagnostics exist, but destructive
 retention is disabled: the runtime default is off, the approved table allowlist

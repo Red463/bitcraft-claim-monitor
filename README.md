@@ -142,15 +142,20 @@ requests. OAuth is enabled whenever both a client ID and secret resolve:
   origin's `/api/local/auth/discord/callback` (canonical mode forces
   `https://app.timbersteeltrade.com/api/local/auth/discord/callback`).
 
-The redirect alone does not enable OAuth. To isolate a preview from every
-Discord network path, use `ENABLE_DISCORD_NETWORK=false` and leave/clear every
-client-ID and client-secret source above so `discordOAuthConfig.enabled` is
+The redirect alone does not enable OAuth. To suppress server-side Discord
+bot/API/OAuth traffic, use `ENABLE_DISCORD_NETWORK=false` and leave/clear all
+client-ID and client-secret sources above so `discordOAuthConfig.enabled` is
 false. In particular, a blank environment client secret does not mask a stored
 SQLite secret. Clear the stored application ID through authenticated Admin;
 clearing the protected OAuth secret requires an approved database-secret
-procedure because the ordinary Discord settings form does not write it. Routine
-tests use record mode or a loopback fake Discord service, never a real
-destination.
+procedure because the ordinary Discord settings form does not write it.
+
+This is not whole-browser network isolation. Authenticated UI can render stored
+Discord avatar URLs from `cdn.discordapp.com`, which the Content Security Policy
+allows, so a browser may fetch those assets directly. Suppress remote avatar
+assets separately when that matters; the application does not document a single
+setting that disables them. Routine tests use record mode or a loopback fake
+Discord service, never a real destination.
 
 Operational-history retention is also safe by default: deletion is disabled,
 the approved table allowlist is empty, and Admin/scheduled execution is dry-run

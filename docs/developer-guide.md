@@ -145,8 +145,9 @@ delivery, manual bot API calls, and Discord interaction handling:
 ENABLE_DISCORD_NETWORK=false
 ```
 
-This does not disable OAuth start/callback/token/profile traffic. To remove every
-Discord network path, also unset or clear `DISCORD_OAUTH_CLIENT_ID`,
+This does not disable OAuth start/callback/token/profile traffic. To suppress
+server-side Discord bot/API/OAuth traffic, also unset or clear
+`DISCORD_OAUTH_CLIENT_ID`,
 `DISCORD_APPLICATION_ID`, and stored `discord_json.applicationId`, and unset or
 clear both `DISCORD_OAUTH_CLIENT_SECRET` and protected SQLite secret
 `discord_oauth_client_secret`. A blank environment secret still falls back to
@@ -155,6 +156,12 @@ stored application ID through authenticated Admin; clearing the OAuth secret
 requires an approved database-secret procedure because the ordinary Discord
 settings form does not write it. Automated tests use record mode or a loopback
 fake Discord origin; never aim them at a real destination.
+
+This does not suppress browser asset requests. Authenticated UI renders stored
+Discord avatar URLs from `cdn.discordapp.com`, and the Content Security Policy
+allows that host, so a browser may fetch those avatars directly. If an
+environment must suppress remote avatar assets, handle that separately; no
+single application setting is documented for it.
 
 Operational-history deletion remains disabled and has an empty approved table
 allowlist. Do not enable or expand it without owner/dependency approval, raw and
