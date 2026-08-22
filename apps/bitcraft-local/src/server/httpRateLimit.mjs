@@ -32,52 +32,74 @@ export function requestAddress(req, { trustedProxyAddresses = [] } = {}) {
   return trustedPeers.has(peerAddress) && forwardedAddress ? forwardedAddress : peerAddress;
 }
 
-export function createRateLimiter({ buckets = new Map(), sendJson, now = () => Date.now(), addressForRequest = requestAddress, onDecision = () => {}, maxBuckets = 20_000, pruneIntervalMs = 60_000 } = {}) {
+export function createRateLimiter({ buckets = new Map(), reportOnlyBuckets = new Map(), sendJson, now = () => Date.now(), addressForRequest = requestAddress, onDecision = () => {}, maxBuckets = 20_000, enforcedBucketReserve = Math.floor(maxBuckets / 2), pruneIntervalMs = 60_000 } = {}) {
   const bucketLimit = Math.max(1, Math.floor(Number(maxBuckets) || 20_000));
+  const enforcedBucketLimit = Math.min(bucketLimit, Math.max(1, Math.floor(Number(enforcedBucketReserve) || Math.floor(bucketLimit / 2) || 1)));
+  const reportOnlyBucketLimit = bucketLimit - enforcedBucketLimit;
   const pruneInterval = Math.max(1, Math.floor(Number(pruneIntervalMs) || 60_000));
   let nextPruneAt = 0;
   let pruned = 0;
-  let evicted = 0;
+  let reportOnlyEvicted = 0;
+  let enforcedCapacityRejected = 0;
 
   function pruneExpired(currentTime) {
     if (currentTime < nextPruneAt) return;
     nextPruneAt = currentTime + pruneInterval;
-    for (const [key, bucket] of buckets) {
-      if (bucket.resetAt <= currentTime) {
-        buckets.delete(key);
-        pruned += 1;
+    for (const partition of [buckets, reportOnlyBuckets]) {
+      for (const [key, bucket] of partition) {
+        if (bucket.resetAt <= currentTime) {
+          partition.delete(key);
+          pruned += 1;
+        }
       }
     }
   }
 
-  function enforceBucketLimit() {
-    while (buckets.size > bucketLimit) {
-      const oldestKey = buckets.keys().next().value;
+  function enforceReportOnlyBucketLimit() {
+    while (reportOnlyBuckets.size > reportOnlyBucketLimit) {
+      const oldestKey = reportOnlyBuckets.keys().next().value;
       if (oldestKey === undefined) break;
-      buckets.delete(oldestKey);
-      evicted += 1;
+      reportOnlyBuckets.delete(oldestKey);
+      reportOnlyEvicted += 1;
     }
+  }
+
+  function rejectEnforcedCapacity(res, name, windows) {
+    enforcedCapacityRejected += 1;
+    const retryAfter = Math.max(1, ...windows.map(([, policy]) => Math.ceil(policy.windowMs / 1000)));
+    onDecision({ name, reportOnly: false, wouldLimit: true, limitedBy: ["capacity"] });
+    sendJson(res, 429, {
+      error: "Too many requests. Please slow down and try again shortly.",
+      source: "local-rate-limit",
+      retryAfter,
+    }, { "retry-after": String(retryAfter), "x-rate-limit-source": "local" });
+    return false;
   }
 
   function rateLimit(req, res, name, policy = RATE_LIMITS.expensiveLocal) {
     const currentTime = now();
     pruneExpired(currentTime);
     const address = addressForRequest(req) || "unknown";
+    const reportOnly = policy.reportOnly === true;
     const windows = policy.burst && policy.sustained
       ? [["burst", policy.burst], ["sustained", policy.sustained]]
       : [["window", policy]];
+    const partition = reportOnly ? reportOnlyBuckets : buckets;
+    if (!reportOnly) {
+      const newBucketCount = windows.reduce((count, [windowName]) => count + (partition.has(`${name}:${address}:${windowName}`) ? 0 : 1), 0);
+      if (partition.size + newBucketCount > enforcedBucketLimit) return rejectEnforcedCapacity(res, name, windows);
+    }
     const limited = [];
     for (const [windowName, windowPolicy] of windows) {
       const key = `${name}:${address}:${windowName}`;
-      const current = buckets.get(key);
+      const current = partition.get(key);
       const bucket = current && current.resetAt > currentTime ? current : { count: 0, resetAt: currentTime + windowPolicy.windowMs };
       bucket.count += 1;
-      buckets.set(key, bucket);
-      enforceBucketLimit();
+      partition.set(key, bucket);
+      if (reportOnly) enforceReportOnlyBucketLimit();
       if (bucket.count > windowPolicy.max) limited.push({ windowName, resetAt: bucket.resetAt });
     }
     if (!limited.length) return true;
-    const reportOnly = policy.reportOnly === true;
     onDecision({ name, reportOnly, wouldLimit: true, limitedBy: limited.map(({ windowName }) => windowName) });
     if (reportOnly) return true;
     const retryAfter = Math.max(1, ...limited.map(({ resetAt }) => Math.ceil((resetAt - currentTime) / 1000)));
@@ -89,6 +111,12 @@ export function createRateLimiter({ buckets = new Map(), sendJson, now = () => D
     return false;
   }
 
-  rateLimit.stats = () => ({ size: buckets.size, maxBuckets: bucketLimit, pruned, evicted });
+  rateLimit.stats = () => ({
+    size: buckets.size + reportOnlyBuckets.size,
+    maxBuckets: bucketLimit,
+    pruned,
+    enforced: { size: buckets.size, maxBuckets: enforcedBucketLimit, capacityRejected: enforcedCapacityRejected },
+    reportOnly: { size: reportOnlyBuckets.size, maxBuckets: reportOnlyBucketLimit, evicted: reportOnlyEvicted },
+  });
   return rateLimit;
 }

@@ -122,32 +122,110 @@ test("createRateLimiter prunes expired client buckets without exposing bucket ke
     now: () => now,
     pruneIntervalMs: 1,
     maxBuckets: 10,
+    enforcedBucketReserve: 4,
     addressForRequest: (req) => req.address,
     sendJson: () => {},
   });
   const policy = { windowMs: 10, max: 100 };
 
   rateLimit({ address: "client-a" }, {}, "public-read", policy);
-  assert.deepEqual(rateLimit.stats(), { size: 1, maxBuckets: 10, pruned: 0, evicted: 0 });
+  assert.deepEqual(rateLimit.stats(), {
+    size: 1,
+    maxBuckets: 10,
+    pruned: 0,
+    enforced: { size: 1, maxBuckets: 4, capacityRejected: 0 },
+    reportOnly: { size: 0, maxBuckets: 6, evicted: 0 },
+  });
   now = 11;
   rateLimit({ address: "client-b" }, {}, "public-read", policy);
 
-  assert.deepEqual(rateLimit.stats(), { size: 1, maxBuckets: 10, pruned: 1, evicted: 0 });
+  assert.deepEqual(rateLimit.stats(), {
+    size: 1,
+    maxBuckets: 10,
+    pruned: 1,
+    enforced: { size: 1, maxBuckets: 4, capacityRejected: 0 },
+    reportOnly: { size: 0, maxBuckets: 6, evicted: 0 },
+  });
 });
 
-test("createRateLimiter enforces a hard bucket cap across distributed addresses", () => {
+test("createRateLimiter sheds only report-only state within partition and global caps", () => {
   const rateLimit = createRateLimiter({
     now: () => 1_000,
     pruneIntervalMs: 60_000,
     maxBuckets: 8,
+    enforcedBucketReserve: 3,
     addressForRequest: (req) => req.address,
     sendJson: () => {},
   });
-  const policy = { windowMs: 60_000, max: 100 };
+  const policy = { reportOnly: true, windowMs: 60_000, max: 100 };
 
   for (let index = 0; index < 100; index += 1) {
     rateLimit({ address: `client-${index}` }, {}, "public-read", policy);
   }
 
-  assert.deepEqual(rateLimit.stats(), { size: 8, maxBuckets: 8, pruned: 0, evicted: 92 });
+  assert.deepEqual(rateLimit.stats(), {
+    size: 5,
+    maxBuckets: 8,
+    pruned: 0,
+    enforced: { size: 0, maxBuckets: 3, capacityRejected: 0 },
+    reportOnly: { size: 5, maxBuckets: 5, evicted: 95 },
+  });
+});
+
+test("distributed report-only churn cannot evict an active enforced bucket", () => {
+  const sent = [];
+  const rateLimit = createRateLimiter({
+    now: () => 2_000,
+    maxBuckets: 6,
+    enforcedBucketReserve: 2,
+    addressForRequest: (req) => req.address,
+    sendJson: (_res, status) => sent.push(status),
+  });
+  const authPolicy = { windowMs: 60_000, max: 1 };
+  const reportOnlyPolicy = { reportOnly: true, windowMs: 60_000, max: 100 };
+
+  assert.equal(rateLimit({ address: "auth-client" }, {}, "auth", authPolicy), true);
+  for (let index = 0; index < 50; index += 1) {
+    assert.equal(rateLimit({ address: `public-${index}` }, {}, "gameDataRead", reportOnlyPolicy), true);
+  }
+  assert.equal(rateLimit({ address: "auth-client" }, {}, "auth", authPolicy), false);
+
+  assert.deepEqual(sent, [429]);
+  assert.deepEqual(rateLimit.stats(), {
+    size: 5,
+    maxBuckets: 6,
+    pruned: 0,
+    enforced: { size: 1, maxBuckets: 2, capacityRejected: 0 },
+    reportOnly: { size: 4, maxBuckets: 4, evicted: 46 },
+  });
+});
+
+test("new enforced clients fail closed when the enforced partition is full", () => {
+  const sent = [];
+  const rateLimit = createRateLimiter({
+    now: () => 3_000,
+    maxBuckets: 5,
+    enforcedBucketReserve: 2,
+    addressForRequest: (req) => req.address,
+    sendJson: (_res, status, body, headers) => sent.push({ status, body, headers }),
+  });
+  const policy = { windowMs: 60_000, max: 2 };
+
+  assert.equal(rateLimit({ address: "client-a" }, {}, "auth", policy), true);
+  assert.equal(rateLimit({ address: "client-b" }, {}, "auth", policy), true);
+  assert.equal(rateLimit({ address: "client-c" }, {}, "auth", policy), false);
+  assert.equal(rateLimit({ address: "client-a" }, {}, "auth", policy), true);
+  assert.equal(rateLimit({ address: "client-a" }, {}, "auth", policy), false);
+
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].status, 429);
+  assert.equal(sent[0].headers["retry-after"], "60");
+  assert.equal(sent[1].status, 429);
+  assert.deepEqual(rateLimit.stats(), {
+    size: 2,
+    maxBuckets: 5,
+    pruned: 0,
+    enforced: { size: 2, maxBuckets: 2, capacityRejected: 1 },
+    reportOnly: { size: 0, maxBuckets: 3, evicted: 0 },
+  });
 });
