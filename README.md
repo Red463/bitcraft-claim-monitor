@@ -8,7 +8,7 @@ release evidence.
 
 Public repository: [Red463/bitcraft-claim-monitor-relay](https://github.com/Red463/bitcraft-claim-monitor-relay)
 
-Preview: [relay.timbersteeltrade.com](https://relay.timbersteeltrade.com)
+Canonical application: [app.timbersteeltrade.com](https://app.timbersteeltrade.com)
 
 ## What it provides
 
@@ -99,12 +99,16 @@ for its commands.
 
 ## Configuration and Discord safety
 
-Use [`.env.example`](./.env.example) as the configuration entrypoint. The
-monitored claim and active regions are managed in the application; provider,
-process, data-directory, OAuth, and Discord settings come from the environment.
-Never commit credentials or player tokens.
+Use [`.env.example`](./.env.example) as the process and secret configuration
+entrypoint. The monitored claim, active regions, and most Discord operational
+settings are managed through authenticated Admin and stored in SQLite. The bot
+token can be stored as a protected application secret; environment variables
+can override the token and Discord identity fields. Provider, process,
+data-directory, OAuth-secret, delivery-mode, startup, and network safeguards are
+environment configuration. Never commit credentials or player tokens.
 
-Preview mode is fail-closed for Discord:
+Preview mode forces normal Discord delivery to record mode and disables gateway
+startup:
 
 ```text
 BITCRAFT_DEPLOYMENT_MODE=preview
@@ -113,10 +117,19 @@ ENABLE_DISCORD_STARTUP=false
 DISCORD_SANDBOX_CHANNEL_ID=
 ```
 
-Automatic delivery, DMs, gateway startup, and command registration remain
-recorded or disabled. An authenticated administrator can send a manual test
-only to the exact configured sandbox channel. Routine tests use record mode or
-a loopback fake Discord service, never a real destination.
+Automatic channel delivery and DMs are recorded, the gateway is disabled, and
+command registration requires live mode. This is not a global outbound-network
+block: `ENABLE_DISCORD_NETWORK` defaults to enabled, and an authenticated manual
+test can call Discord when an exact valid `DISCORD_SANDBOX_CHANNEL_ID` is
+configured. For a fully isolated preview or maintenance window, also set:
+
+```text
+ENABLE_DISCORD_NETWORK=false
+```
+
+That disables the manual sandbox exception and Discord interaction traffic.
+Routine tests use record mode or a loopback fake Discord service, never a real
+destination.
 
 Operational-history retention is also safe by default: deletion is disabled,
 the approved table allowlist is empty, and Admin/scheduled execution is dry-run
@@ -154,7 +167,13 @@ The evidence and required product wording are recorded in
   and deletion operations
 - [Changelog](./CHANGELOG.md) and [versioning policy](./VERSIONING.md)
 
+## License metadata warning
+
 The application is unofficial and is not affiliated with Clockwork Labs.
-BitCraft names and assets belong to their respective owners. Repository code is
-licensed under [AGPL-3.0-only](./LICENSE); see [NOTICE](./NOTICE) and
+BitCraft names and assets belong to their respective owners.
+
+The canonical legal files, [LICENSE](./LICENSE) and [NOTICE](./NOTICE), state
+AGPL-3.0-only. The root `package.json` currently declares `MIT`; that package
+metadata is stale and contradicts the legal files pending maintainer/legal
+correction. Do not infer licensing from the package field. See also the
 [trademark guidance](./TRADEMARKS.md).

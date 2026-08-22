@@ -105,7 +105,13 @@ Discord delivery uses durable SQLite leases and remains at-least-once. Every
 network path must retain the current lease guard; a stale worker must not send
 or complete a reclaimed row.
 
-Preview and tests are no-send by default:
+Most Discord operational settings are stored in `discord_json` through
+authenticated Admin. The token uses the protected secret store unless an
+environment override is present; identity fields also allow environment
+overrides. OAuth credentials and delivery/startup/network safeguards remain
+environment-owned.
+
+Preview protects automatic delivery and gateway startup with:
 
 ```text
 BITCRAFT_DEPLOYMENT_MODE=preview
@@ -114,9 +120,19 @@ ENABLE_DISCORD_STARTUP=false
 DISCORD_SANDBOX_CHANNEL_ID=<optional-exact-test-channel>
 ```
 
-Only an authenticated manual test may use the exact sandbox channel. Automatic
-jobs, DMs, gateway startup, and command registration cannot use that exception.
-Tests use record mode or a loopback fake Discord origin.
+Automatic jobs and DMs are recorded, gateway startup is disabled, and command
+registration requires live mode. `ENABLE_DISCORD_NETWORK` defaults to enabled,
+so an authenticated manual test can still call the live Discord API for the
+exact configured sandbox channel. Use the additional setting below for a fully
+isolated preview or maintenance process:
+
+```text
+ENABLE_DISCORD_NETWORK=false
+```
+
+This disables manual sandbox sends and Discord interaction traffic. Automated
+tests use record mode or a loopback fake Discord origin; never aim them at a
+real destination.
 
 Operational-history deletion remains disabled and has an empty approved table
 allowlist. Do not enable or expand it without owner/dependency approval, raw and
@@ -151,6 +167,14 @@ corepack pnpm --filter @workspace/bitcraft-local run verify:relay-region-live
 ```
 
 Never use live Discord delivery during routine verification.
+
+## Contributor metadata warning
+
+[LICENSE](../LICENSE) and [NOTICE](../NOTICE) are the canonical legal files and
+state AGPL-3.0-only. The root `package.json` currently declares `MIT`, which is
+stale contradictory metadata pending maintainer/legal correction. Do not infer
+the repository license from the package field or silently reconcile the files
+as part of an unrelated engineering task.
 
 ## Source map and operations
 

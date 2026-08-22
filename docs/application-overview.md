@@ -124,6 +124,12 @@ SQLite owns:
 - Discord outbox/deduplication, user/admin settings, sessions, legal/privacy,
   audit, backup, and operational metadata.
 
+Most Discord operational configuration is stored in `discord_json` and managed
+through authenticated Admin. The bot token is stored in the protected secret
+store unless an environment override is present. Environment variables can
+override the token and Discord identity fields and own OAuth secrets, delivery
+mode, gateway startup, sandbox-channel, and network safeguards.
+
 In separated production, the worker owns long-running Relay acquisition,
 reconciliation, history work, transition dispatch, scheduled jobs, and Discord
 delivery. The web process owns HTTP assets, provider-neutral routes,
@@ -137,6 +143,12 @@ for those effects.
 Discord outbox rows use durable leases. External delivery is at-least-once, not
 exactly-once, because Discord acknowledgement and SQLite completion cannot be
 one transaction.
+
+Preview mode records automatic delivery and disables the gateway. It does not
+disable all Discord HTTP by itself: authenticated exact-channel sandbox tests
+can use the live API while `ENABLE_DISCORD_NETWORK` is enabled (the default).
+Set `ENABLE_DISCORD_NETWORK=false` when the preview must be fully isolated from
+Discord, including manual sandbox tests and interaction traffic.
 
 Operational-history rollups and dry-run diagnostics exist, but destructive
 retention is disabled: the runtime default is off, the approved table allowlist

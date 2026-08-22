@@ -15,8 +15,9 @@ The development command starts Vite at `http://localhost:19428` and the local
 Node API at `http://127.0.0.1:19430`. Vite proxies same-origin `/api/*` requests
 to that API. Set `BITCRAFT_LOCAL_DATA_DIR` to use an isolated SQLite directory.
 
-Configuration starts at [`.env.example`](../../.env.example). Do not put real
-credentials in the repository.
+Process and secret configuration starts at [`.env.example`](../../.env.example).
+The monitored claim, active regions, and most Discord settings are managed in
+authenticated Admin. Do not put real credentials in the repository.
 
 ## Checks
 
