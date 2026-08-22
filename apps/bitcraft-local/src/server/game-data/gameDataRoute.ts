@@ -275,6 +275,7 @@ export function gameDataResponse(options: {
   const availableGenerations = new Set<number>();
   const partialErrors: string[] = [];
   let availableCount = 0;
+  let unknownDependencyGeneration = false;
   let regionId = "";
 
   for (const domain of options.domains) {
@@ -329,7 +330,12 @@ export function gameDataResponse(options: {
       ...(snapshot.lastError ? [snapshot.lastError] : []),
     ])];
     for (const dependency of Object.values(dependencies)) {
-      if (dependency) availableGenerations.add(dependency.generation);
+      if (!dependency) continue;
+      if (dependency.generation == null) {
+        unknownDependencyGeneration = true;
+      } else {
+        availableGenerations.add(dependency.generation);
+      }
     }
     const freshness = live ? "live" : stale ? "stale" : "fresh";
     domains[domain] = {
@@ -374,7 +380,7 @@ export function gameDataResponse(options: {
       meta: {
         coherence: sortedGenerations.length === 0
           ? "unavailable"
-          : sortedGenerations.length === 1 ? "coherent" : "mixed",
+          : unknownDependencyGeneration || sortedGenerations.length > 1 ? "mixed" : "coherent",
         availableGenerations: sortedGenerations,
         newestGeneration: sortedGenerations.at(-1) ?? null,
         oldestGeneration: sortedGenerations[0] ?? null,

@@ -436,10 +436,20 @@ export function createProviderCatalogRepository(db) {
     getSourceState() {
       return mapSourceState(statements.getSourceState.get(SOURCE_KEY));
     },
-    getRevision() {
+    getRevision(publicationSnapshot = null) {
       const source = mapSourceState(statements.getSourceState.get(SOURCE_KEY));
+      const publication = publicationSnapshot?.provenance;
+      const linkedPublication = source
+        && Number.isSafeInteger(publicationSnapshot?.generation)
+        && publicationSnapshot.generation > 0
+        && publication?.provider === source.provider
+        && publication?.sourceKey === SOURCE_KEY
+        && publication?.database === source.database
+        && publication?.schemaFingerprint === source.schemaFingerprint
+        && publication?.receivedAt === source.receivedAt;
       return source ? {
-        generation: source.generation,
+        generation: linkedPublication ? publicationSnapshot.generation : null,
+        sourceGeneration: source.generation,
         sourceKey: SOURCE_KEY,
         receivedAt: source.receivedAt,
       } : null;

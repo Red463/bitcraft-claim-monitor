@@ -99,11 +99,46 @@ test("domain quality summaries include stale age and grouped warning counts", ()
     warnings: repeatedWarnings,
     provenance: null,
     dependencies: {},
-  } }), [{
-    key: "market:Market listing # is missing a catalog label.",
-    domain: "market",
-    message: "Market listing # is missing a catalog label.",
-    count: 88,
-    examples: repeatedWarnings.slice(0, 3),
-  }]);
+  } }), {
+    groups: [{
+      key: "market:Market listing # is missing a catalog label.",
+      domain: "market",
+      message: "Market listing # is missing a catalog label.",
+      count: 88,
+      examples: repeatedWarnings.slice(0, 3),
+    }],
+    totalGroupCount: 1,
+    omittedGroupCount: 0,
+    omittedWarningCount: 0,
+    totalWarningCount: 88,
+  });
+});
+
+test("warning detail model groups embedded identifiers and hard-caps high-cardinality output", () => {
+  const identifierWarnings = Array.from(
+    { length: 20 },
+    (_, index) => `Market order-a${index}b${index + 1} is missing a catalog label.`,
+  );
+  const uniqueWarnings = Array.from(
+    { length: 30 },
+    (_, index) => `Distinct warning ${String.fromCharCode(65 + Math.floor(index / 26))}${String.fromCharCode(65 + (index % 26))}`,
+  );
+  const result = groupDomainWarnings({ market: {
+    generation: 8,
+    freshness: "fresh",
+    confidence: "partial",
+    ageMs: 1_000,
+    warnings: [...identifierWarnings, ...uniqueWarnings],
+    provenance: null,
+    dependencies: {},
+  } });
+
+  assert.equal(result.groups.length, 12);
+  assert.equal(result.groups[0].message, "Market # is missing a catalog label.");
+  assert.equal(result.groups[0].count, 20);
+  assert.deepEqual(result.groups[0].examples, identifierWarnings.slice(0, 3));
+  assert.equal(result.totalGroupCount, 31);
+  assert.equal(result.omittedGroupCount, 19);
+  assert.equal(result.omittedWarningCount, 19);
+  assert.equal(result.totalWarningCount, 50);
 });

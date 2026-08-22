@@ -174,7 +174,7 @@ function GameDataQualityNotice({
   responseMeta: GameDataResponseMeta | null;
 }) {
   const summaries = gameDataQualitySummaries(activePanel, domainStatus);
-  const warningGroups = groupDomainWarnings(domainStatus);
+  const warningDetails = groupDomainWarnings(domainStatus);
   const coherenceIssue = responseMeta?.coherence === "mixed"
     ? "Mixed local generations"
     : responseMeta?.coherence === "unavailable" && summaries.length === 0
@@ -202,17 +202,20 @@ function GameDataQualityNotice({
                 ? `${status.provenance.sourceKey} received ${status.provenance.receivedAt}`
                 : "No source provenance available"}</small>
               {Object.keys(status.dependencies).length ? <small>Dependencies: {Object.entries(status.dependencies).map(([name, dependency]) => (
-                `${name} generation ${dependency?.generation ?? "unavailable"} (${dependency?.sourceKey ?? "unknown"}, ${dependency?.receivedAt ?? "unknown"})`
+                `${name} generation ${dependency?.generation ?? "unavailable"}${dependency?.sourceGeneration == null ? "" : `, source generation ${dependency.sourceGeneration}`} (${dependency?.sourceKey ?? "unknown"}, ${dependency?.receivedAt ?? "unknown"})`
               )).join("; ")}</small> : null}
             </div>
           ))}
         </div>
-        {warningGroups.length ? <div className="game-data-warning-groups">
+        {warningDetails.groups.length ? <div className="game-data-warning-groups">
           <strong>Grouped warnings</strong>
-          {warningGroups.map((group) => <div key={group.key}>
+          {warningDetails.groups.map((group) => <div key={group.key}>
             <span>{group.domain}: {group.message} <b>×{group.count}</b></span>
             {group.examples.length ? <ul>{group.examples.map((example) => <li key={example}>{example}</li>)}</ul> : null}
           </div>)}
+          {warningDetails.omittedGroupCount ? <small>
+            {warningDetails.omittedGroupCount} additional warning group{warningDetails.omittedGroupCount === 1 ? "" : "s"} omitted ({warningDetails.omittedWarningCount} warning{warningDetails.omittedWarningCount === 1 ? "" : "s"}).
+          </small> : null}
         </div> : null}
       </details>
     </section>

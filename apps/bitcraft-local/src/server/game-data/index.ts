@@ -11,6 +11,7 @@ export * from "./empireRegionSession.ts";
 export * from "./empireRuntime.ts";
 export * from "./currentStateRepository.ts";
 export * from "./gameDataRoute.ts";
+export * from "./gameDataComposition.ts";
 export * from "./globalCatalogRuntime.ts";
 export * from "./globalCatalogSession.ts";
 export * from "./http.ts";

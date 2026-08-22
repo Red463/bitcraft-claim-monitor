@@ -61,7 +61,8 @@ export type DomainEnvelope<T> = {
 };
 
 export type GenerationDependency = {
-  generation: number;
+  generation: number | null;
+  sourceGeneration?: number | null;
   sourceKey: string;
   receivedAt: string;
 };

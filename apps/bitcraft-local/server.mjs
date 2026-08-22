@@ -161,6 +161,7 @@ import {
   enrichPublicCraftsWithCatalog,
   enrichRecruitmentWithCatalog,
   enrichResearchWithCatalog,
+  createGameDataCompositionDependencies,
   gameDataResponse,
   generationDomainsForListener,
   generationSourceDomains,
@@ -7740,18 +7741,11 @@ const server = createServer(async (req, res) => {
           // The route below deliberately serves last-good envelopes when present.
         }
       }
-      const snapshotDependency = (snapshot) => snapshot ? {
-        generation: snapshot.generation,
-        sourceKey: snapshot.provenance.sourceKey,
-        receivedAt: snapshot.provenance.receivedAt,
-      } : null;
-      let catalogDependencies;
-      const currentCatalogDependencies = () => {
-        if (catalogDependencies) return catalogDependencies;
-        const catalogDependency = providerCatalogRepository.getRevision();
-        catalogDependencies = catalogDependency ? { catalog: catalogDependency } : {};
-        return catalogDependencies;
-      };
+      const compositionDependencies = createGameDataCompositionDependencies({
+        claimId,
+        repository: currentStateRepository,
+        catalogRepository: providerCatalogRepository,
+      });
       const result = await runHeavyProjection(gameDataHeavyRouteGate, routeMeasurement, () => gameDataResponse({
         configuredClaimId: currentClaimId(),
         claimId,
@@ -7776,10 +7770,9 @@ const server = createServer(async (req, res) => {
                 confidence: "partial",
                 warnings: bankWarnings,
               } : {}),
-              dependencies: {
-                ...currentCatalogDependencies(),
-                ...(bankSnapshot ? { "inventory-banks": snapshotDependency(bankSnapshot) } : {}),
-              },
+              dependencies: compositionDependencies.forDomain(domain, {
+                inventoryBankSnapshot: bankSnapshot,
+              }),
             };
           }
           if (domain === "crafts") {
@@ -7791,10 +7784,9 @@ const server = createServer(async (req, res) => {
                 (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
                 (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
               ),
-              dependencies: {
-                ...currentCatalogDependencies(),
-                ...(publicCraftSnapshot ? { "public-crafts": snapshotDependency(publicCraftSnapshot) } : {}),
-              },
+              dependencies: compositionDependencies.forDomain(domain, {
+                publicCraftSnapshot,
+              }),
             };
           }
           if (domain === "contributions") {
@@ -7812,7 +7804,7 @@ const server = createServer(async (req, res) => {
             return {
               ...projected,
               ...(projected.warnings.length ? { confidence: "partial" } : {}),
-              dependencies: currentCatalogDependencies(),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           if (domain === "market") {
@@ -7823,7 +7815,7 @@ const server = createServer(async (req, res) => {
             return {
               ...projected,
               ...(projected.warnings.length ? { confidence: "partial" } : {}),
-              dependencies: currentCatalogDependencies(),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           if (domain === "equipment") {
@@ -7833,7 +7825,7 @@ const server = createServer(async (req, res) => {
                 (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
                 (kind, id) => providerCatalogRepository.getDescription(kind, id),
               ),
-              dependencies: currentCatalogDependencies(),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           if (domain === "construction") {
@@ -7845,7 +7837,7 @@ const server = createServer(async (req, res) => {
             return {
               ...projected,
               ...(projected.warnings.length ? { confidence: "partial" } : {}),
-              dependencies: currentCatalogDependencies(),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           if (domain === "research") {
@@ -7856,7 +7848,7 @@ const server = createServer(async (req, res) => {
             return {
               ...projected,
               ...(projected.warnings.length ? { confidence: "partial" } : {}),
-              dependencies: currentCatalogDependencies(),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           if (domain === "recruitment") {
@@ -7867,7 +7859,7 @@ const server = createServer(async (req, res) => {
             return {
               ...projected,
               ...(projected.warnings.length ? { confidence: "partial" } : {}),
-              dependencies: currentCatalogDependencies(),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           return { data };

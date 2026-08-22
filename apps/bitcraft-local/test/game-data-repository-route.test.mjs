@@ -798,7 +798,12 @@ test("game-data route includes catalog and composed-domain generation dependenci
       warnings: [],
     }],
   ]);
-  const catalog = { generation: 31, sourceKey: "global", receivedAt: "2026-07-29T10:59:00.000Z" };
+  const catalog = {
+    generation: 31,
+    sourceGeneration: 908,
+    sourceKey: "global",
+    receivedAt: "2026-07-29T10:59:00.000Z",
+  };
   const inventoryBanks = { generation: 31, sourceKey: "region:19", receivedAt: "2026-07-29T11:00:00.000Z" };
   const publicCrafts = { generation: 31, sourceKey: "region:19", receivedAt: "2026-07-29T11:00:00.000Z" };
   const result = gameDataResponse({
@@ -824,6 +829,74 @@ test("game-data route includes catalog and composed-domain generation dependenci
     "public-crafts": publicCrafts,
   });
   assert.equal(result.body.meta.coherence, "coherent");
+});
+
+test("game-data route does not treat a coincidentally equal catalog source generation as coherent", () => {
+  const snapshot = {
+    data: { marketplaces: [], listings: [] },
+    confidence: "authoritative",
+    generation: 31,
+    lastError: null,
+    provenance: relayProvenance("2026-07-29T11:00:00.000Z"),
+    warnings: [],
+  };
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["market"],
+    repository: { read: () => snapshot },
+    transformDomain: (_domain, data) => ({
+      data,
+      dependencies: {
+        catalog: {
+          generation: null,
+          sourceGeneration: 31,
+          sourceKey: "global",
+          receivedAt: "2026-07-29T10:59:00.000Z",
+        },
+      },
+    }),
+    now: new Date("2026-07-29T11:00:01.000Z"),
+  });
+
+  assert.deepEqual(result.body.meta, {
+    coherence: "mixed",
+    availableGenerations: [31],
+    newestGeneration: 31,
+    oldestGeneration: 31,
+  });
+  assert.equal(result.body.domainStatus.market.dependencies.catalog.sourceGeneration, 31);
+});
+
+test("game-data route marks a legacy catalog dependency with unknown publication generation as mixed", () => {
+  const snapshot = {
+    data: { marketplaces: [], listings: [] },
+    confidence: "authoritative",
+    generation: 44,
+    lastError: null,
+    provenance: relayProvenance("2026-07-29T11:00:00.000Z"),
+    warnings: [],
+  };
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["market"],
+    repository: { read: () => snapshot },
+    transformDomain: (_domain, data) => ({
+      data,
+      dependencies: {
+        catalog: {
+          generation: null,
+          sourceKey: "global",
+          receivedAt: "2026-07-29T10:59:00.000Z",
+        },
+      },
+    }),
+    now: new Date("2026-07-29T11:00:01.000Z"),
+  });
+
+  assert.equal(result.body.meta.coherence, "mixed");
+  assert.deepEqual(result.body.meta.availableGenerations, [44]);
 });
 
 test("game-data route marks a matching primary envelope with a different enrichment revision as mixed", () => {

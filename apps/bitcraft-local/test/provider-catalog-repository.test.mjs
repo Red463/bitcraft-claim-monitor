@@ -59,7 +59,38 @@ test("provider catalog snapshot atomically preserves item/cargo identity and rem
     rowCount: 2,
   });
   assert.deepEqual(repository.getRevision(), {
+    generation: null,
+    sourceGeneration: 8,
+    sourceKey: "global",
+    receivedAt: "2026-07-29T20:05:00.000Z",
+  });
+  assert.deepEqual(repository.getRevision({
+    generation: 41,
+    provenance: {
+      provider: "relay",
+      sourceKey: "global",
+      database: "relay-mirror-bc-global",
+      schemaFingerprint: "global-v1",
+      receivedAt: "2026-07-29T20:05:00.000Z",
+    },
+  }), {
+    generation: 41,
+    sourceGeneration: 8,
+    sourceKey: "global",
+    receivedAt: "2026-07-29T20:05:00.000Z",
+  });
+  assert.deepEqual(repository.getRevision({
     generation: 8,
+    provenance: {
+      provider: "relay",
+      sourceKey: "global",
+      database: "relay-mirror-bc-global",
+      schemaFingerprint: "global-v1",
+      receivedAt: "2026-07-29T20:04:00.000Z",
+    },
+  }), {
+    generation: null,
+    sourceGeneration: 8,
     sourceKey: "global",
     receivedAt: "2026-07-29T20:05:00.000Z",
   });
