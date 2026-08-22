@@ -8,6 +8,12 @@ release evidence.
 
 Public repository: [Red463/bitcraft-claim-monitor-relay](https://github.com/Red463/bitcraft-claim-monitor-relay)
 
+Repository review snapshot (22 August 2026): the repository was public, its
+default branch was `main`, the maintained remote was
+`Red463/bitcraft-claim-monitor-relay`, and GitHub showed zero open issues and
+zero open pull requests. This is a dated observation, not a permanent status
+guarantee.
+
 Canonical application: [app.timbersteeltrade.com](https://app.timbersteeltrade.com)
 
 ## What it provides
@@ -37,6 +43,13 @@ are normalized under `apps/bitcraft-local/src/server/game-data/`. Wire records
 do not enter React or history tables. IDs and large amounts remain decimal
 strings, and item/cargo kind remains part of each identity.
 
+`RelayBitCraftProvider` is the Relay HTTP-cache implementation of the shared
+provider contract; typed global and regional runtimes publish through the same
+normalized current-state boundary. `https://relay.timbersteeltrade.com` was the
+isolated preview hostname and now permanently redirects to the canonical
+application origin above; the deployment paths and services remain isolated as
+detailed in [DEPLOYMENT.md](./DEPLOYMENT.md).
+
 Each validated domain is published atomically to the current-state repository.
 SQLite retains the durable last-good domain boundary, locally observed history,
 provider transitions, notification/outbox state, settings, accounts, privacy
@@ -45,6 +58,10 @@ history, analytics, and Discord work. Claim-market transitions are committed
 durably with the winning market generation and dispatched by the worker after
 publication.
 
+The provider generation recorded for each domain is local application
+provenance. It does not claim that independently acquired upstream sources were
+observed at the same instant.
+
 The web process serves same-origin, provider-neutral `/api/local/*` routes.
 React never connects to Relay or SpacetimeDB directly. Multi-domain responses
 include per-domain status and `meta.coherence`; `coherent` means the known local
@@ -52,6 +69,11 @@ application generations and declared enrichment dependencies agree. It does
 not mean that every upstream source observed the game at the same instant.
 Domains may deliberately be mixed, stale, partial, or unavailable while other
 last-good domains remain usable.
+
+Bundled game-icon manifests preserve build-time provenance. The only runtime
+fallback is the audited, server-only, same-origin
+`/api/local/game-icon/:itemType/:itemId` route; browsers never receive a remote
+upstream URL to fetch directly.
 
 Open provider-neutral pages watch only their claim and owned domains through
 local generation events. SSE is the low-latency path. Craft Monitor uses a
@@ -120,10 +142,11 @@ DISCORD_SANDBOX_CHANNEL_ID=
 
 Automatic channel delivery and DMs are recorded, the gateway is disabled, and
 command registration requires live mode. This is not a global outbound-network
-block: `ENABLE_DISCORD_NETWORK` defaults to enabled, and an authenticated manual
-test can call Discord when an exact valid `DISCORD_SANDBOX_CHANNEL_ID` is
-configured. To block bot delivery, manual bot API calls, and Discord interaction
-handling, also set:
+block: `ENABLE_DISCORD_NETWORK` defaults to enabled.
+Manual test delivery is restricted to the sandbox Discord channel. Discord is
+called only when an exact valid `DISCORD_SANDBOX_CHANNEL_ID` is configured. To
+block bot delivery,
+manual bot API calls, and Discord interaction handling, also set:
 
 ```text
 ENABLE_DISCORD_NETWORK=false
@@ -181,8 +204,23 @@ The evidence and required product wording are recorded in
 
 ## Deployment and documentation
 
+The maintained Relay deployment is isolated under these production identities:
+
+```text
+/opt/bitcraft-claim-monitor-relay
+/var/lib/bitcraft-claim-monitor-relay
+/var/backups/bitcraft-claim-monitor-relay
+/etc/bitcraft-claim-monitor-relay.env
+/usr/local/bin/update-bitcraft-claim-monitor-relay
+bitcraft-claim-monitor-relay.service
+```
+
 - [Deployment guide](./DEPLOYMENT.md) — preview, canonical cutover, backups,
   diagnostics, and rollback
+- [Whole-app developer guide and technical review](./output/pdf/bitcraft-claim-monitor-whole-app-developer-guide.pdf)
+  — printable junior-developer handoff
+- [Performance and reliability improvement plan](./docs/superpowers/plans/2026-08-21-app-performance-reliability-improvements.md)
+  — implemented work and remaining rollout gates
 - [Application overview](./docs/application-overview.md) — whole-app runtime
   architecture and data ownership
 - [Developer guide](./docs/developer-guide.md) — contribution rules and

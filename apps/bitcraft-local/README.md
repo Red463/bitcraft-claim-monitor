@@ -4,6 +4,11 @@ This is the maintained application package. Run commands from the repository
 root with Node.js 24+, Corepack, and the pnpm version pinned in the root
 `package.json`.
 
+The worker publishes committed Relay generations and the web process exposes
+them through same-origin, provider-neutral local routes. Current contribution
+attribution is derived from positive regional craft-progress transactions; it
+is not reconstructed by a scheduled browser-facing acquisition job.
+
 ## Local development
 
 ```powershell

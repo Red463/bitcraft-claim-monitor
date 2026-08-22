@@ -617,13 +617,25 @@ AppShell owns:
 
 Most modals use src/components/main/Dialog.tsx, which provides portals, focus placement and return, a focus trap, Escape, stacking, backdrop behavior, and body scroll locking.
 
-AppPopupManager.tsx renders its own aria-modal tree instead. It lacks the shared focus, Escape, restoration, and scroll behavior. It should use Dialog. It also fetches /api/local/popups only once per mount, so urgent popups added by an administrator do not appear in already-open sessions. A low-frequency visibility refresh or generation event would better match an operational announcement feature.
+AppPopupManager.tsx now renders operational messages through that shared Dialog
+primitive. Dismissible announcements receive the same focus trap, Escape,
+restoration, stacking, and scroll-lock behavior as other application dialogs;
+required operational messages explicitly disable dismissal. The popup manager
+loads on mount, refreshes when the document becomes visible, and uses a
+coalesced five-minute visible-tab refresh so an already-open session can receive
+new announcements without polling while hidden.
 
 ### 7.3 Access and auth
 
 The server remains authoritative. Browser access state controls navigation and presentation, while protected routes enforce sessions, permissions, origin, and CSRF. Do not treat a hidden tab or disabled button as security.
 
-The sidebar Admin action appears only after adminAuth.authenticated succeeds. A direct Admin route can still mount AdminPanel, which then performs its own /api/local/admin/me check and displays its loading, login, setup, or authorized state. The bot route reuses the same admin shell with botOnly presentation. Legal and privacy routes remain publicly available.
+The sidebar Admin action appears only after the AppShell-owned administrator
+session resolves as authenticated. A direct Admin route reuses that resolved
+session in AdminPanel rather than performing a second `/api/local/admin/me`
+request. The bot route performs one protected-session load, then gates every
+save-capable control on authenticated `/api/local/admin/settings`; signed-out or
+failed protected-settings states stay fail-closed. Legal and privacy routes
+remain publicly available.
 
 ## 8. Page-by-page developer handbook
 
@@ -1013,7 +1025,13 @@ guessing data.
 
 **Purpose.** Authenticated operations for status, health, configuration, diagnostics, analytics, empire membership, database inspection, administrators, linked accounts, audit, backups, popups, and Discord settings.
 
-**Data.** AdminPanel first requests /api/local/admin/me. Entering a tab then loads only that tab's resources, including /admin/status, /admin/jobs, /admin/settings, /admin/analytics, /admin/tables, /admin/users, /admin/user-accounts, or /admin/backups. Mutations require permissions, same-origin checks, and CSRF. The console preserves unsaved configuration and displays shared success/error feedback.
+**Data.** AppShell resolves the administrator session and passes it to
+AdminPanel, avoiding a duplicate `/api/local/admin/me` request. Entering a tab
+then loads only that tab's resources, including /admin/status, /admin/jobs,
+/admin/settings, /admin/analytics, /admin/tables, /admin/users,
+/admin/user-accounts, or /admin/backups. Mutations require permissions,
+same-origin checks, and CSRF. The console preserves unsaved configuration and
+displays shared success/error feedback.
 
 **Tabs.**
 
@@ -1027,7 +1045,16 @@ guessing data.
 **Main files.**
 
 - src/components/admin/AdminPanel.tsx
-- src/components/admin/*
+- Status: src/components/admin/AdminStatusOverview.tsx and AdminPanel.tsx
+- Server Health: src/components/admin/ServerHealthSection.tsx
+- Configuration: src/components/admin/AdminConfigurationNav.tsx,
+  src/components/admin/AdminPopupsSection.tsx, and the focused inline sections
+  in src/components/admin/AdminPanel.tsx
+- Diagnostics: src/components/admin/AdminPanel.tsx
+- Analytics and Audit: src/components/admin/AdminAnalyticsSection.tsx
+- Empire Membership: src/components/admin/AdminEmpireMembershipSection.tsx
+- Database and Backups: src/components/admin/AdminDataSection.tsx
+- Administrators and Linked Accounts: src/components/admin/AdminAccessSection.tsx
 - src/styles/admin.css
 - src/styles/server-health.css
 - src/styles/discord-admin.css
@@ -1065,7 +1092,20 @@ Retention controls remain deletion-disabled and report-only.
 - src/components/admin/AdminPanel.tsx in botOnly mode
 - src/components/bot/botSectionState.ts
 - src/components/bot/lazySections.tsx
-- remaining src/components/bot modules
+- Setup: src/components/bot/DiscordSetupSection.tsx
+- Channels: src/components/bot/DiscordChannelsSection.tsx
+- Notifications: src/components/bot/DiscordNotificationsSection.tsx
+- YouTube Monitor: src/components/bot/DiscordYouTubeMonitorSection.tsx
+- Role Manager: src/components/bot/DiscordRoleManagerSection.tsx
+- Craft Watch: src/components/bot/DiscordCraftWatchRolesSection.tsx
+- Colour Roles: src/components/bot/DiscordColourRolesSection.tsx
+- Role Panels: src/components/bot/DiscordRolePanelsSection.tsx
+- Moderation: src/components/bot/DiscordModerationSection.tsx
+- Safety Rules: src/components/bot/DiscordSafetySection.tsx
+- Member Records: src/components/bot/DiscordMemberRecordsSection.tsx
+- Posts & Events, Commands, and Community Tools: src/components/admin/AdminPanel.tsx
+- Command Tests: src/components/bot/DiscordTestsPanel.tsx
+- Delivery Diagnostics: src/components/bot/DiscordDiagnosticsPanel.tsx
 - src/styles/bot-dashboard.css
 - src/styles/discord-admin.css
 - src/server/discordSettings.mjs
