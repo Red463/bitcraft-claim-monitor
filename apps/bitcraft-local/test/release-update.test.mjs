@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   LAST_LOADED_RELEASE_BUILD_KEY,
   normalizeReleaseBuildId,
+  observeReleaseBuild,
   readLastLoadedReleaseBuild,
   releaseUpdateDecision,
   writeLastLoadedReleaseBuild,
@@ -87,4 +88,27 @@ test("last loaded build storage is normalized and best effort", () => {
   };
   assert.equal(readLastLoadedReleaseBuild(unavailable), "");
   assert.equal(writeLastLoadedReleaseBuild(unavailable, "abc123"), false);
+});
+
+test("release observations remember the first health build and report a later loaded update", () => {
+  const storage = memoryStorage();
+  const firstLoad = observeReleaseBuild({
+    currentBuildId: "",
+    nextBuildId: "build-a",
+    documentHidden: false,
+    storage,
+  });
+  assert.equal(firstLoad.decision, "remember");
+  assert.equal(firstLoad.showUpdatedNotice, false);
+  assert.equal(storage.getItem(LAST_LOADED_RELEASE_BUILD_KEY), "build-a");
+
+  const nextPageLoad = observeReleaseBuild({
+    currentBuildId: "",
+    nextBuildId: "build-b",
+    documentHidden: false,
+    storage,
+  });
+  assert.equal(nextPageLoad.decision, "updated");
+  assert.equal(nextPageLoad.showUpdatedNotice, true);
+  assert.equal(storage.getItem(LAST_LOADED_RELEASE_BUILD_KEY), "build-b");
 });

@@ -20,4 +20,6 @@ test("DealWatchlist owns standalone watch management on the live Relay market ge
   assert.match(dealWatchlist, /Disable/);
   assert.match(dealWatchlist, /Remove/);
   assert.match(dealWatchlist, /Sign in with Discord/);
+  assert.doesNotMatch(dealWatchlist, /\/auth\/me/);
+  assert.match(dealWatchlist, /auth: UserAuthState/);
 });

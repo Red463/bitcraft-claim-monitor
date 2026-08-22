@@ -10,6 +10,7 @@ import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { unique } from "../../utils/array";
 import type { LoadState } from "../../types/app";
+import type { UserAuthState } from "../../types/settings";
 import { createDelayedRefreshTask } from "../../refresh/pageRefresh.mjs";
 import { marketDealWatchSearchUrl, marketRegionScopeUrl, type MarketRefreshProps } from "./globalMarket";
 
@@ -19,9 +20,10 @@ function numericItemType(value: unknown): number {
   return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo" ? 1 : 0;
 }
 
-export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, refreshHeaders, trackRefresh, onDiscordLogin }: MarketRefreshProps & {
+export function DealWatchlist({ claimId, monitoredRegionId, auth, refreshSequence, refreshHeaders, trackRefresh, onDiscordLogin }: MarketRefreshProps & {
   claimId: string;
   monitoredRegionId: string;
+  auth: UserAuthState;
   onDiscordLogin: (returnTo?: string) => void;
 }) {
   const defaultRegion = monitoredRegionId;
@@ -31,7 +33,6 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
   const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
   const [regionChoice, setRegionChoice] = usePersistedState("market.dealWatch.region", defaultRegion);
   const [activeRegions, setActiveRegions] = React.useState<ActiveRegion[]>([]);
-  const [authState, setAuthState] = React.useState<AnyRecord>({ user: null, discordLoginEnabled: false });
   const [watchState, setWatchState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
   const [watchBusy, setWatchBusy] = React.useState("");
   const [thresholdDraft, setThresholdDraft] = React.useState("30");
@@ -93,17 +94,6 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
     return () => controller.abort();
   }, [refreshSequence]);
 
-  React.useEffect(() => {
-    const controller = new AbortController();
-    trackRefresh("global-market-auth", fetch(`${LOCAL_API}/auth/me`, { headers: refreshHeaders, signal: controller.signal }))
-      .then((response) => response.ok ? response.json() : { user: null, discordLoginEnabled: false })
-      .then((payload) => setAuthState(payload ?? { user: null, discordLoginEnabled: false }))
-      .catch(() => {
-        if (!controller.signal.aborted) setAuthState({ user: null, discordLoginEnabled: false });
-      });
-    return () => controller.abort();
-  }, [refreshSequence]);
-
   React.useEffect(() => refreshDealWatches(), [refreshDealWatches]);
 
   React.useEffect(() => {
@@ -156,7 +146,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-csrf-token": String(authState.csrfToken ?? "") },
+        headers: { "content-type": "application/json", "x-csrf-token": String(auth.csrfToken ?? "") },
         body: JSON.stringify({
           regionId: activeRegion,
           itemId: selectedItem.id,
@@ -193,7 +183,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json", "x-csrf-token": String(authState.csrfToken ?? "") },
+        headers: { "content-type": "application/json", "x-csrf-token": String(auth.csrfToken ?? "") },
         body: JSON.stringify(patch),
       });
       if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
@@ -212,7 +202,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, {
         method: "DELETE",
-        headers: { "x-csrf-token": String(authState.csrfToken ?? "") },
+        headers: { "x-csrf-token": String(auth.csrfToken ?? "") },
       });
       if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
       refreshDealWatches();
@@ -279,7 +269,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
             <div className="unit-input"><input type="number" min={1} max={95} step={1} value={thresholdDraft} onChange={(event) => setThresholdDraft(event.target.value)} /><em>% below live median</em></div>
           </label>
         </div>
-        {!authState.user ? (
+        {!auth.user ? (
           <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
         ) : (
           <div className="toolbar-row">
@@ -292,9 +282,9 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
       </section>
 
       <section className="deal-watchlist-section">
-        <h3><Bell size={17} /> Deal Watchlist <small>{authState.user ? `${formatNumber(dealWatches.length)} watched items` : "Discord sign-in required"}</small></h3>
+        <h3><Bell size={17} /> Deal Watchlist <small>{auth.user ? `${formatNumber(dealWatches.length)} watched items` : "Discord sign-in required"}</small></h3>
         {watchState.error ? <div className="error">Deal watchlist: {watchState.error}</div> : null}
-        {!authState.user ? (
+        {!auth.user ? (
           <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
         ) : dealWatches.length ? (
           <div className="deal-watch-list">

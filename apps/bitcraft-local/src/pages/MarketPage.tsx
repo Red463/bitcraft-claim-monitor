@@ -11,6 +11,7 @@ import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import "../styles/market.css";
 import type { ActivePanel } from "../types/app";
+import type { UserAuthState } from "../types/settings";
 import type { MapFocus } from "./map/mapUtils";
 import { BuyOrderFinder } from "./market/BuyOrderFinder";
 import { DealWatchlist } from "./market/DealWatchlist";
@@ -37,6 +38,7 @@ export function Market({
   locationSearch,
   fallbackRegionId,
   activeRegionScopeKey,
+  auth,
   onQueryStateChange,
   onNavigate,
   onShowMap,
@@ -47,6 +49,7 @@ export function Market({
   locationSearch: string;
   fallbackRegionId: string;
   activeRegionScopeKey?: string;
+  auth: UserAuthState;
   onQueryStateChange: () => void;
   onNavigate: (panel: ActivePanel, tab?: string) => void;
   onShowMap: (focus: NonNullable<MapFocus>, regionId?: string) => void;
@@ -146,7 +149,7 @@ export function Market({
       {currentView === "browse" ? <MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
       {currentView === "deals" ? <MarketDeals {...marketRefresh} claimId={claimId} sharedRegionId={regionId} activeRegions={activeRegions} /> : null}
       {currentView === "buy-orders" ? <BuyOrderFinder {...marketRefresh} claimId={claimId} regionId={regionId} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
-      {currentView === "deal-watch" ? <DealWatchlist {...marketRefresh} claimId={claimId} monitoredRegionId={regionId || fallbackRegionId} onDiscordLogin={onDiscordLogin} /> : null}
+      {currentView === "deal-watch" ? <DealWatchlist {...marketRefresh} claimId={claimId} monitoredRegionId={regionId || fallbackRegionId} auth={auth} onDiscordLogin={onDiscordLogin} /> : null}
       {currentView === "stalls" ? <MarketStalls {...marketRefresh} claimId={claimId} regionId={regionId} onShowMap={onShowMap} /> : null}
       <footer className="global-market-source"><CircleDollarSign size={14} /><span>Search, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data. Confirmed-sale charts contain only authoritative closures observed locally and mature progressively.</span></footer>
     </div>

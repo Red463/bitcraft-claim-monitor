@@ -10,6 +10,7 @@ test("operational popups delegate modal interaction and labelling to the shared 
   assert.match(source, /titleElementId="app-popup-title"/);
   assert.match(source, /<h2 id="app-popup-title">/);
   assert.match(source, /onClose=\{[^}]*dismiss\("ok"\)/);
+  assert.match(source, /dismissible=\{activePopup\.type !== "danger"\}/);
   assert.doesNotMatch(source, /role="dialog"|aria-modal=/);
 });
 

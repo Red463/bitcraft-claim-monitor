@@ -57,9 +57,7 @@ import { settlementNavigationLabel } from "./navigation/navigationLabels";
 import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, withdrawAnalyticsConsent, type AnalyticsConsent } from "./utils/analytics";
 import {
   normalizeReleaseBuildId,
-  readLastLoadedReleaseBuild,
-  releaseUpdateDecision,
-  writeLastLoadedReleaseBuild,
+  observeReleaseBuild,
 } from "./utils/releaseUpdate";
 import { normalizeAppSettings } from "./utils/appSettings";
 import { applyMemberTrackingFilter } from "./utils/memberTracking";
@@ -306,8 +304,8 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
   const defaultPageAppliedRef = React.useRef(false);
   const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
   const [appSettings, setAppSettings] = React.useState<AppSettings>(() => normalizeAppSettings(initialBootstrap.config));
-  const [appBuildId, setAppBuildId] = React.useState(initialBootstrap.build.buildSha);
-  const appBuildIdRef = React.useRef(initialBootstrap.build.buildSha);
+  const [appBuildId, setAppBuildId] = React.useState("");
+  const appBuildIdRef = React.useRef("");
   const releaseUpdateBuildIdRef = React.useRef("");
   const [releaseUpdateBuildId, setReleaseUpdateBuildId] = React.useState("");
   const [releaseUpdatedNotice, setReleaseUpdatedNotice] = React.useState(false);
@@ -727,21 +725,19 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
       try {
         const response = await fetch(`${LOCAL_API}/health`, { cache: "no-store" });
         const nextBuildId = normalizeReleaseBuildId(response.ok ? await response.json() : null);
-        const lastLoadedBuildId = readLastLoadedReleaseBuild(window.localStorage);
-        const decision = releaseUpdateDecision({
+        const observation = observeReleaseBuild({
           currentBuildId: appBuildIdRef.current,
-          lastLoadedBuildId,
           nextBuildId,
           documentHidden: document.hidden,
+          storage: window.localStorage,
         });
+        const { decision } = observation;
         if (decision === "remember") {
           rememberBuildId(nextBuildId);
-          writeLastLoadedReleaseBuild(window.localStorage, nextBuildId);
         }
         if (decision === "updated") {
           rememberBuildId(nextBuildId);
-          writeLastLoadedReleaseBuild(window.localStorage, nextBuildId);
-          if (!cancelled) setReleaseUpdatedNotice(true);
+          if (!cancelled && observation.showUpdatedNotice) setReleaseUpdatedNotice(true);
         }
         if (decision === "prompt") showReleaseUpdate(nextBuildId);
         if (decision === "reload") reloadForReleaseUpdate();
@@ -911,7 +907,7 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     research: <Research data={data} />,
-    market: <Market claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} fallbackRegionId={String(data.claim.regionId ?? "")} activeRegionScopeKey={activeRegionScopeKey} onQueryStateChange={syncRouteSearch} onNavigate={navigate} onShowMap={(focus, regionId) => { const target = { ...focus, regionId }; setMapFocus(target); navigate("map", undefined, target); }} onDiscordLogin={discordLogin} />,
+    market: <Market claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} fallbackRegionId={String(data.claim.regionId ?? "")} activeRegionScopeKey={activeRegionScopeKey} auth={userAuth} onQueryStateChange={syncRouteSearch} onNavigate={navigate} onShowMap={(focus, regionId) => { const target = { ...focus, regionId }; setMapFocus(target); navigate("map", undefined, target); }} onDiscordLogin={discordLogin} />,
     "settlement-market": <SettlementMarket data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} listingsLoading={state.loading} listingError={state.error} onQueryStateChange={syncRouteSearch} />,
     region: <Region data={data} />,
     empires: <Empires monitoredClaimId={claimId} monitoredRegionId={String(data.claim.regionId ?? "")} activeRegionScopeKey={activeRegionScopeKey} providerData={data.raw} providerLoading={state.loading} providerError={state.error} access={effectiveAccess} />,
@@ -1273,11 +1269,15 @@ function DedicatedLegalApp({ type }: { type: "terms" | "privacy" }) {
  * This keeps bot administration separate from the public app while still using
  * the same AdminPanel implementation and server-side admin permissions.
  */
-function BotControlApp() {
-  const [settings, setSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
-  const [loading, setLoading] = React.useState(true);
+export function BotControlApp({ initialConfig }: { initialConfig?: BootstrapPayload["config"] }) {
+  const [settings, setSettings] = React.useState<AppSettings>(() => normalizeAppSettings(initialConfig ?? DEFAULT_SETTINGS));
+  const [loading, setLoading] = React.useState(!initialConfig);
   React.useEffect(() => {
     document.title = "Discord Bot Control — BitCraft Claim Monitor";
+    if (initialConfig) {
+      applyTheme(normalizeAppSettings(initialConfig).theme);
+      return;
+    }
     fetch(`${LOCAL_API}/config`)
       .then((response) => response.ok ? response.json() : null)
       .then((config) => {
@@ -1287,7 +1287,7 @@ function BotControlApp() {
       })
       .catch(() => applyTheme(DEFAULT_THEME))
       .finally(() => setLoading(false));
-  }, []);
+  }, [initialConfig]);
   return loading ? <main><AppSkeleton /></main> : (
     <main className="bot-control-page">
       <AdminPanel settings={settings} onSettingsSaved={(next) => {
@@ -1304,6 +1304,6 @@ export default function App({ initialBootstrap }: { initialBootstrap: BootstrapP
   // Route-level branching happens before mounting DashboardApp so legal pages
   // and the bot console do not initialise public page data unnecessarily.
   if (dedicatedLegalPath) return <DedicatedLegalApp type={dedicatedLegalPath} />;
-  if (dedicatedBotPath) return <BotControlApp />;
+  if (dedicatedBotPath) return <BotControlApp initialConfig={initialBootstrap.config} />;
   return <DashboardApp initialBootstrap={initialBootstrap} />;
 }

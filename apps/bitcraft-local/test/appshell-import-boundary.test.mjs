@@ -71,6 +71,8 @@ test("main gates AppShell on bootstrap and AppShell consumes the resolved initia
   assert.match(appShell, /useState\<AppSettings\>\(\(\) => normalizeAppSettings\(initialBootstrap\.config\)\)/);
   assert.match(appShell, /useState\(initialBootstrap\.config\.claimId\)/);
   assert.doesNotMatch(appShell, /useState\(DEFAULT_CLAIM_ID\)/);
+  assert.match(appShell, /<Market[^>]*auth=\{userAuth\}/);
+  assert.match(appShell, /<BotControlApp initialConfig=\{initialBootstrap\.config\}/);
 });
 
 test("administrator settings stay behind authenticated admin loading instead of public bootstrap", () => {

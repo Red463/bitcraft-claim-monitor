@@ -91,6 +91,7 @@ export function AppPopupManager({ activePage = "dashboard", enabled = true }: { 
       title={activePopup.title}
       titleElementId="app-popup-title"
       closeOnBackdrop={false}
+      dismissible={activePopup.type !== "danger"}
       onClose={() => dismiss("ok")}
       className={`app-popup app-popup-${activePopup.type}`}
       backdropClassName="app-popup-backdrop"
