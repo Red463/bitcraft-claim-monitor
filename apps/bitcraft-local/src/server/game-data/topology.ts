@@ -298,11 +298,25 @@ export async function discoverRelayTopologyWithClient(
     const target = sourceKey === "global"
       ? topology.global
       : topology.regions.get(sourceKey.slice("region:".length));
-    if (!target?.ready || target.schemaFingerprint) continue;
-    const url = schemaUrl(baseUrl, source, target.database);
-    const diagnosticUrl = operationalRelaySchemaUrl(baseUrl, target.port, target.database);
+    if (!target?.ready) continue;
     const expectedKind = sourceKey === "global" ? "global" : "regional";
     const expected = String(options.expectedFingerprints?.[expectedKind] ?? "").trim() || null;
+    const diagnosticUrl = operationalRelaySchemaUrl(baseUrl, target.port, target.database);
+    if (target.schemaFingerprint) {
+      if (expected != null) {
+        const mismatch = expected.toLowerCase() !== target.schemaFingerprint.toLowerCase();
+        target.schemaFingerprintDiagnostic = sanitizeSchemaFingerprintDiagnostic({
+          sourceKey,
+          schemaUrl: diagnosticUrl,
+          expected,
+          observed: target.schemaFingerprint,
+          attemptedAt: topology.discoveredAt,
+          status: mismatch ? "mismatch" : "verified",
+          error: mismatch ? `Relay ${expectedKind} schema fingerprint mismatch` : null,
+        });
+      }
+      continue;
+    }
     fingerprintTasks.push(
       cachedSchemaFingerprint(baseUrl, source, target.database, fetcher, options)
         .then(({ fingerprint, attemptedAt }) => {

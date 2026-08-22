@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 let runtimeModule = null;
@@ -7,6 +8,10 @@ try {
 } catch {
   // The first TDD run proves the runtime coordinator is absent.
 }
+const { discoverRelayTopology } = await import("../src/server/game-data/topology.ts");
+const { createCurrentStateRepository } = await import("../src/server/game-data/currentStateRepository.ts");
+const { applySchemaBootstrap } = await import("../src/server/schemaBootstrap.mjs");
+const { applyAdditiveColumnMigrations } = await import("../src/server/schemaMigrations.mjs");
 
 test("global catalog runtime discovers topology and atomically publishes repository/domain state", async () => {
   assert.ok(runtimeModule, "global catalog runtime module must exist");
@@ -331,6 +336,105 @@ test("global catalog runtime persists a truthful blocked-by-schema diagnostic be
   }]);
   assert.deepEqual(runtime.health().schemaDiagnostic, diagnostic);
   assert.equal(runtime.health().subscription.typedState, "blocked_by_schema");
+});
+
+test("publisher-fingerprint startup replaces a stale blocker with an explicit verified diagnostic", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const repository = createCurrentStateRepository(db);
+  await repository.recordHealth({
+    provider: "relay",
+    running: true,
+    topologyReady: true,
+    cacheReady: true,
+    generation: 1,
+    lastRefreshAt: "2026-08-22T09:00:00.000Z",
+    lastError: null,
+    sources: {
+      global: {
+        ready: true,
+        database: "bitcraft-live-global",
+        schemaFingerprint: "global-v0",
+      },
+    },
+  }, "2026-08-22T09:00:00.000Z");
+  await repository.recordSchemaFingerprintDiagnostic({
+    diagnostic: {
+      sourceKey: "global",
+      schemaUrl: "https://old-user:old-password@relay.example:3000/v1/database/bitcraft-live-global/schema?version=9",
+      expected: "global-v1",
+      observed: "global-v0",
+      attemptedAt: "2026-08-22T09:00:00.000Z",
+      status: "mismatch",
+      error: "Relay global schema fingerprint mismatch",
+    },
+    database: "bitcraft-live-global",
+    ready: true,
+  });
+  assert.equal(
+    repository.readHealth()?.sources.global?.schemaFingerprintDiagnostic?.status,
+    "mismatch",
+  );
+  let schemaRequests = 0;
+  const fetcher = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/health")) {
+      return new Response(JSON.stringify({
+        sources: {
+          global: {
+            database: "bitcraft-live-global",
+            port: 3000,
+            schema_cached: true,
+            metrics: {
+              initial_subscribe_complete: true,
+              publisher: { fingerprint: "global-v1" },
+              upstream: { state: "up" },
+            },
+          },
+        },
+      }), { status: 200 });
+    }
+    if (url.endsWith("/cache-health")) {
+      return new Response(JSON.stringify({ ready: true, regions: [] }), { status: 200 });
+    }
+    schemaRequests += 1;
+    return new Response("unexpected schema request", { status: 500 });
+  };
+  const runtime = new runtimeModule.RelayGlobalCatalogRuntime({
+    manifest: { schemas: { global: { fingerprint: "global-v1", bindingsGenerated: true } } },
+    discoverTopology: (baseUrl, options) => discoverRelayTopology(baseUrl, fetcher, options),
+    createSession: () => ({
+      start: async () => {},
+      stop: async () => {},
+      health: () => ({ connected: true, applied: true, lastAppliedAt: null, lastError: null }),
+    }),
+    catalogRepository: {
+      getSourceState: () => ({ generation: 12 }),
+      replaceCatalogSnapshot: () => {},
+    },
+    currentStateRepository: repository,
+  });
+
+  await runtime.start({
+    relayBaseUrl: "https://relay-user:relay-password@relay.example",
+    claimId: "1",
+  });
+
+  assert.equal(schemaRequests, 0, "publisher fingerprint must avoid a redundant schema download");
+  const storedDiagnostic = repository.readHealth()?.sources.global?.schemaFingerprintDiagnostic;
+  assert.match(storedDiagnostic?.attemptedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual({ ...storedDiagnostic, attemptedAt: "observed" }, {
+    sourceKey: "global",
+    schemaUrl: "https://relay.example:3000/v1/database/bitcraft-live-global/schema?version=9",
+    expected: "global-v1",
+    observed: "global-v1",
+    attemptedAt: "observed",
+    status: "verified",
+    error: null,
+  });
+  await runtime.stop();
+  db.close();
 });
 
 test("global catalog runtime sanitizes fallback diagnostics for publisher fingerprint mismatches", async () => {
