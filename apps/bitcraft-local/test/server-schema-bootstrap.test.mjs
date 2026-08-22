@@ -117,6 +117,27 @@ test("fresh Relay schema keeps market history without a duplicate current-listin
   db.close();
 });
 
+test("fresh Relay subscription health starts explicitly disconnected", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+
+  db.prepare(`
+    INSERT INTO provider_subscription_health (
+      provider, source_key, domain, connected, updated_at
+    ) VALUES ('relay', 'global', 'region', 0, '2026-08-22T09:40:00.000Z')
+  `).run();
+
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT connected, runtime_state
+      FROM provider_subscription_health
+      WHERE provider = 'relay' AND source_key = 'global' AND domain = 'region'
+    `).get() },
+    { connected: 0, runtime_state: "disconnected" },
+  );
+  db.close();
+});
+
 test("legal acceptance schema enforces one exact document snapshot per user", () => {
   const db = new DatabaseSync(":memory:");
   applySchemaBootstrap(db);

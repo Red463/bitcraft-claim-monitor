@@ -151,6 +151,8 @@ export const schemaBootstrapSql = `
     domain TEXT NOT NULL,
     generation INTEGER NOT NULL DEFAULT 0,
     connected INTEGER NOT NULL DEFAULT 0,
+    runtime_state TEXT NOT NULL DEFAULT 'disconnected'
+      CHECK (runtime_state IN ('connected', 'disconnected', 'blocked_by_schema')),
     apply_duration_ms INTEGER,
     lag_ms INTEGER,
     reconnects INTEGER NOT NULL DEFAULT 0,

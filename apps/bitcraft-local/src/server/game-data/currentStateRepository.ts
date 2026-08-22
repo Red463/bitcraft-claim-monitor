@@ -4,6 +4,7 @@ import type {
   DomainSnapshotBatch,
   ProviderSink,
   ProviderHealth,
+  SchemaFingerprintDiagnostic,
   StoredDomainSnapshot,
 } from "./contracts.ts";
 import { addDecimal, canonicalNonNegativeDecimal } from "./exactDecimal.ts";
@@ -52,6 +53,7 @@ export function createCurrentStateRepository(
     domain: DomainKey;
     generation: number;
     connected: boolean;
+    runtimeState?: "connected" | "disconnected" | "blocked_by_schema";
     applyDurationMs?: number | null;
     lagMs?: number | null;
     reconnects?: number;
@@ -63,6 +65,7 @@ export function createCurrentStateRepository(
     domain: DomainKey;
     generation: number;
     connected: boolean;
+    runtimeState: "connected" | "disconnected" | "blocked_by_schema";
     applyDurationMs: number | null;
     lagMs: number | null;
     reconnects: number;
@@ -70,6 +73,11 @@ export function createCurrentStateRepository(
     lastError: string | null;
     updatedAt: string;
   } | null;
+  recordSchemaFingerprintDiagnostic(value: {
+    diagnostic: SchemaFingerprintDiagnostic;
+    database: string | null;
+    ready: boolean;
+  }): Promise<void>;
   nextGeneration(claimId: string): number;
   commitGenerationWithTransition(
     batch: DomainSnapshotBatch,
@@ -136,12 +144,13 @@ export function createCurrentStateRepository(
   const readHealth = db.prepare("SELECT * FROM provider_source_health WHERE provider = ? ORDER BY source_key");
   const upsertSubscriptionHealth = db.prepare(`
     INSERT INTO provider_subscription_health (
-      provider, source_key, domain, generation, connected, apply_duration_ms,
+      provider, source_key, domain, generation, connected, runtime_state, apply_duration_ms,
       lag_ms, reconnects, malformed_rows, last_error, updated_at
-    ) VALUES ('relay', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES ('relay', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(provider, source_key, domain) DO UPDATE SET
       generation = excluded.generation,
       connected = excluded.connected,
+      runtime_state = excluded.runtime_state,
       apply_duration_ms = excluded.apply_duration_ms,
       lag_ms = excluded.lag_ms,
       reconnects = excluded.reconnects,
@@ -458,7 +467,9 @@ export function createCurrentStateRepository(
             source.schemaFingerprint,
             health.lastRefreshAt,
             health.lastError,
-            "{}",
+            JSON.stringify({
+              schemaFingerprintDiagnostic: source.schemaFingerprintDiagnostic ?? null,
+            }),
             observedAt,
           );
         }
@@ -481,6 +492,9 @@ export function createCurrentStateRepository(
           ready: Number(row.ready) === 1,
           database: row.database_name == null ? null : String(row.database_name),
           schemaFingerprint: row.schema_fingerprint == null ? null : String(row.schema_fingerprint),
+          schemaFingerprintDiagnostic: (
+            JSON.parse(String(row.details_json ?? "{}")) as Record<string, unknown>
+          ).schemaFingerprintDiagnostic as SchemaFingerprintDiagnostic | undefined,
         };
       }
       return {
@@ -500,6 +514,7 @@ export function createCurrentStateRepository(
         health.domain,
         health.generation,
         health.connected ? 1 : 0,
+        health.runtimeState ?? (health.connected ? "connected" : "disconnected"),
         health.applyDurationMs ?? null,
         health.lagMs ?? null,
         health.reconnects ?? 0,
@@ -516,6 +531,7 @@ export function createCurrentStateRepository(
         domain: String(row.domain) as DomainKey,
         generation: Number(row.generation ?? 0),
         connected: Number(row.connected) === 1,
+        runtimeState: String(row.runtime_state ?? "disconnected") as "connected" | "disconnected" | "blocked_by_schema",
         applyDurationMs: row.apply_duration_ms == null ? null : Number(row.apply_duration_ms),
         lagMs: row.lag_ms == null ? null : Number(row.lag_ms),
         reconnects: Number(row.reconnects ?? 0),
@@ -523,6 +539,19 @@ export function createCurrentStateRepository(
         lastError: row.last_error == null ? null : String(row.last_error),
         updatedAt: String(row.updated_at),
       };
+    },
+    async recordSchemaFingerprintDiagnostic({ diagnostic, database, ready }) {
+      upsertHealth.run(
+        "relay",
+        diagnostic.sourceKey,
+        ready ? 1 : 0,
+        database,
+        diagnostic.observed,
+        diagnostic.attemptedAt,
+        diagnostic.error,
+        JSON.stringify({ schemaFingerprintDiagnostic: diagnostic }),
+        diagnostic.attemptedAt,
+      );
     },
     nextGeneration(claimId) {
       return Number(maxGeneration.get(claimId)?.generation ?? 0) + 1;

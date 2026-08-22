@@ -482,11 +482,13 @@ test("repository persists provider health for the separate web process", async (
         ready: true,
         database: "relay-global",
         schemaFingerprint: "global-fingerprint",
+        schemaFingerprintDiagnostic: null,
       },
       "region:19": {
         ready: true,
         database: "relay-region-19",
         schemaFingerprint: "regional-fingerprint",
+        schemaFingerprintDiagnostic: null,
       },
     },
   });
@@ -516,6 +518,7 @@ test("repository persists subscription-specific health for split worker/web read
     domain: "region",
     generation: 12,
     connected: true,
+    runtimeState: "connected",
     applyDurationMs: 18,
     lagMs: 4,
     reconnects: 2,

@@ -325,6 +325,7 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "user_sessions", column: "reauthenticated_at", definition: "TEXT" },
     { table: "user_accounts", column: "inactivity_warning_sent_at", definition: "TEXT" },
     { table: "production_jobs", column: "start_notified", definition: "INTEGER NOT NULL DEFAULT 0" },
+    { table: "provider_subscription_health", column: "runtime_state", definition: "TEXT NOT NULL DEFAULT 'disconnected' CHECK (runtime_state IN ('connected', 'disconnected', 'blocked_by_schema'))" },
     { table: "domain_payload_current", column: "updated_at", definition: "TEXT" },
     { table: "domain_payload_current", column: "provider", definition: "TEXT NOT NULL DEFAULT 'legacy'" },
     { table: "domain_payload_current", column: "source_key", definition: "TEXT" },
@@ -349,6 +350,46 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "game_catalog_recipe_outputs", column: "guaranteed_quantity", definition: "REAL" },
     { table: "game_catalog_item_list_possibility_outputs", column: "nested_item_list_id", definition: "TEXT" },
   ]);
+});
+
+test("typed subscription runtime state migrates additively without losing its heartbeat", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE provider_subscription_health (
+      provider TEXT NOT NULL,
+      source_key TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
+      connected INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (provider, source_key, domain)
+    );
+    INSERT INTO provider_subscription_health (
+      provider, source_key, domain, generation, connected, updated_at
+    ) VALUES (
+      'relay', 'global', 'region', 7, 1, '2026-08-22T09:45:00.000Z'
+    );
+  `);
+
+  applyAdditiveColumnMigrations(db, [{
+    table: "provider_subscription_health",
+    column: "runtime_state",
+    definition: "TEXT NOT NULL DEFAULT 'disconnected' CHECK (runtime_state IN ('connected', 'disconnected', 'blocked_by_schema'))",
+  }]);
+
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT generation, connected, runtime_state, updated_at
+      FROM provider_subscription_health
+    `).get() },
+    {
+      generation: 7,
+      connected: 1,
+      runtime_state: "disconnected",
+      updated_at: "2026-08-22T09:45:00.000Z",
+    },
+  );
+  db.close();
 });
 
 test("reauthentication timestamp migrates existing user sessions without losing them", () => {

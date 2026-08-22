@@ -18,6 +18,7 @@ export const additiveColumnMigrations = [
   { table: "user_sessions", column: "reauthenticated_at", definition: "TEXT" },
   { table: "user_accounts", column: "inactivity_warning_sent_at", definition: "TEXT" },
   { table: "production_jobs", column: "start_notified", definition: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "provider_subscription_health", column: "runtime_state", definition: "TEXT NOT NULL DEFAULT 'disconnected' CHECK (runtime_state IN ('connected', 'disconnected', 'blocked_by_schema'))" },
   { table: "domain_payload_current", column: "updated_at", definition: "TEXT" },
   { table: "domain_payload_current", column: "provider", definition: "TEXT NOT NULL DEFAULT 'legacy'" },
   { table: "domain_payload_current", column: "source_key", definition: "TEXT" },

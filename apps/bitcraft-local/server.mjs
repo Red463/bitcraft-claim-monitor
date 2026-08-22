@@ -809,44 +809,79 @@ const relayClaimScopeFence = createRelayClaimScopeFence([
 function gameDataProviderHealth() {
   const processHealth = relayProvider.health();
   const health = processHealth.running ? processHealth : currentStateRepository.readHealth() ?? processHealth;
+  const catalogSnapshot = currentStateRepository.read(currentClaimId(), "catalogs");
   const globalCatalog = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayGlobalCatalogRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "catalogs"),
-    providerHealth: health,
+    snapshot: catalogSnapshot,
+    subscriptionHealth: currentStateRepository.readSubscriptionHealth(
+      catalogSnapshot?.provenance?.sourceKey ?? "global",
+      "catalogs",
+    ),
   });
+  const playerSnapshot = currentStateRepository.read(currentClaimId(), "players");
   const primaryRegion = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayPrimaryRegionRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "players"),
-    providerHealth: health,
+    snapshot: playerSnapshot,
+    subscriptionHealth: playerSnapshot
+      ? currentStateRepository.readSubscriptionHealth(playerSnapshot.provenance.sourceKey, "players")
+      : null,
   });
+  const publicCraftSnapshot = currentStateRepository.read(currentClaimId(), "public-crafts");
   const publicCrafts = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayPublicCraftRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "public-crafts"),
-    providerHealth: health,
+    snapshot: publicCraftSnapshot,
+    subscriptionHealth: publicCraftSnapshot
+      ? currentStateRepository.readSubscriptionHealth(publicCraftSnapshot.provenance.sourceKey, "public-crafts")
+      : null,
   });
+  const claimMarketSnapshot = currentStateRepository.read(currentClaimId(), "market");
   const claimMarket = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayClaimMarketRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "market"),
-    providerHealth: health,
+    snapshot: claimMarketSnapshot,
+    subscriptionHealth: claimMarketSnapshot
+      ? currentStateRepository.readSubscriptionHealth(claimMarketSnapshot.provenance.sourceKey, "market")
+      : null,
   });
+  const regionalMarketSnapshot = currentStateRepository.read(currentClaimId(), "regional-market");
   const regionalMarket = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayRegionalMarketRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "regional-market"),
-    providerHealth: health,
+    snapshot: regionalMarketSnapshot,
+    subscriptionHealth: regionalMarketSnapshot
+      ? currentStateRepository.readSubscriptionHealth(regionalMarketSnapshot.provenance.sourceKey, "regional-market")
+      : null,
   });
+  const regionClaimsSnapshot = currentStateRepository.read(currentClaimId(), "region-claims");
   const regionClaims = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayRegionClaimsRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "region-claims"),
-    providerHealth: health,
+    snapshot: regionClaimsSnapshot,
+    subscriptionHealth: regionClaimsSnapshot
+      ? currentStateRepository.readSubscriptionHealth(regionClaimsSnapshot.provenance.sourceKey, "region-claims")
+      : null,
   });
+  const empireSnapshot = currentStateRepository.read(currentClaimId(), "empires");
   const empires = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayEmpireRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "empires"),
-    providerHealth: health,
+    snapshot: empireSnapshot,
+    subscriptionHealth: empireSnapshot
+      ? currentStateRepository.readSubscriptionHealth(empireSnapshot.provenance.sourceKey, "empires")
+      : null,
   });
+  const diagnostic = globalCatalog.schemaDiagnostic
+    ?? health.sources?.global?.schemaFingerprintDiagnostic
+    ?? null;
   return {
     ...health,
-    globalCatalog,
+    globalCatalog: {
+      ...globalCatalog,
+      schemaHealth: {
+        source: "global",
+        typedState: globalCatalog.subscription?.typedState ?? "disconnected",
+        expectedFingerprint: String(relayBindingManifest.schemas?.global?.fingerprint ?? "") || null,
+        observedFingerprint: diagnostic?.observed ?? health.sources?.global?.schemaFingerprint ?? null,
+        attemptedAt: diagnostic?.attemptedAt ?? null,
+        error: diagnostic?.error ?? null,
+      },
+    },
     primaryRegion,
     publicCrafts,
     claimMarket,
@@ -867,14 +902,16 @@ function globalRegionSubscriptionHealth() {
     && Date.now() - observedAtMs <= heartbeatFreshForMs;
   const lastError = persisted.lastError
     ?? (heartbeatFresh ? null : "Relay global region subscription heartbeat is stale.");
+  const typedState = persisted.runtimeState ?? "disconnected";
   return {
     ...runtime,
     persisted: true,
     subscription: {
-      connected: heartbeatFresh && persisted.connected && !lastError,
+      connected: typedState === "connected" && heartbeatFresh && persisted.connected && !lastError,
       applied: persisted.generation > 0,
       lastAppliedAt: persisted.updatedAt,
       lastError,
+      typedState,
     },
     lastError,
   };
@@ -895,6 +932,10 @@ async function persistGlobalRegionSubscriptionHealth() {
         && subscription.applied === true
         && !subscription.lastError
         && !runtime.lastError,
+      runtimeState: subscription.typedState
+        ?? (runtime.running && subscription.connected === true
+          ? "connected"
+          : "disconnected"),
       lastError: subscription.lastError ?? runtime.lastError ?? null,
     }, observedAt);
   }
@@ -925,6 +966,8 @@ async function persistRelayRuntimeDomainHeartbeats(runtimeHealth, domains) {
       domain,
       generation: snapshot.generation,
       connected,
+      runtimeState: runtimeHealth?.subscription?.typedState
+        ?? (connected ? "connected" : "disconnected"),
       lastError,
     }, observedAt);
   }

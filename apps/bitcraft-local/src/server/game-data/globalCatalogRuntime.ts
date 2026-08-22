@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { DomainSnapshotBatch } from "./contracts.ts";
+import type { SchemaFingerprintDiagnostic } from "./contracts.ts";
 import {
   normalizeEmpireNotificationScope,
   RelayGlobalCatalogSession,
@@ -10,6 +11,7 @@ import {
   type RelayTopology,
   type RelayTopologyDiscoveryOptions,
 } from "./topology.ts";
+import { assertSchemaFingerprint } from "./schemaManifest.ts";
 
 type BindingManifest = Parameters<RelayGlobalCatalogSession["start"]>[0]["manifest"];
 
@@ -39,8 +41,14 @@ type CurrentStateRepository = {
     domain: "region";
     generation: number;
     connected: boolean;
+    runtimeState?: "connected" | "disconnected" | "blocked_by_schema";
     lastError: string | null;
   }, observedAt: string): Promise<void> | void;
+  recordSchemaFingerprintDiagnostic?(value: {
+    diagnostic: SchemaFingerprintDiagnostic;
+    database: string | null;
+    ready: boolean;
+  }): Promise<void> | void;
 };
 
 type CatalogSession = {
@@ -85,10 +93,15 @@ function relayWebSocketUri(baseUrl: string, port: number): string {
   return url.href.replace(/\/$/, "");
 }
 
-function globalSourceFromTopology(baseUrl: string, topology: RelayTopology) {
+function globalSourceFromTopology(
+  baseUrl: string,
+  topology: RelayTopology,
+  manifest: BindingManifest,
+) {
   if (!topology.global?.ready || !topology.global.schemaFingerprint) {
     throw new Error("Relay global source is not ready or has no schema fingerprint");
   }
+  assertSchemaFingerprint(manifest, "global", topology.global.schemaFingerprint);
   return {
     database: topology.global.database,
     schemaFingerprint: topology.global.schemaFingerprint,
@@ -127,6 +140,7 @@ export class RelayGlobalCatalogRuntime {
     uri: string;
   } | null = null;
   #lastError: string | null = null;
+  #schemaDiagnostic: SchemaFingerprintDiagnostic | null = null;
   #notificationLastError: string | null = null;
   #empireNotificationScope: string[] = [];
   #reconcileInFlight: Promise<boolean> | null = null;
@@ -161,11 +175,25 @@ export class RelayGlobalCatalogRuntime {
     const lifecycleGeneration = ++this.#lifecycleGeneration;
     this.#relayBaseUrl = config.relayBaseUrl.replace(/\/+$/, "");
     this.#claimId = String(config.claimId).trim();
+    let topology: RelayTopology | null = null;
+    let diagnosticPersisted = false;
     try {
-      const topology = await this.#discoverTopology(this.#relayBaseUrl, {
+      topology = await this.#discoverTopology(this.#relayBaseUrl, {
         sourceKeys: new Set(["global"]),
+        expectedFingerprints: {
+          global: String(this.#manifest.schemas?.global?.fingerprint ?? "").trim(),
+        },
       });
-      this.#source = globalSourceFromTopology(this.#relayBaseUrl, topology);
+      this.#schemaDiagnostic = topology.global?.schemaFingerprintDiagnostic ?? null;
+      if (this.#schemaDiagnostic) {
+        await this.#currentStateRepository.recordSchemaFingerprintDiagnostic?.({
+          diagnostic: this.#schemaDiagnostic,
+          database: topology.global?.database ?? null,
+          ready: topology.global?.ready === true,
+        });
+        diagnosticPersisted = true;
+      }
+      this.#source = globalSourceFromTopology(this.#relayBaseUrl, topology, this.#manifest);
       this.#lastTopologyCheckedAt = this.#now();
       const generation = Number(this.#catalogRepository.getSourceState()?.generation ?? 0) + 1;
       this.#session = this.#createSession({
@@ -181,8 +209,43 @@ export class RelayGlobalCatalogRuntime {
       }
       if (lifecycleGeneration === this.#lifecycleGeneration) this.#lastError = null;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!this.#schemaDiagnostic && /schema fingerprint mismatch/i.test(message)) {
+        const expected = String(this.#manifest.schemas?.global?.fingerprint ?? "").trim() || null;
+        const observed = topology?.global?.schemaFingerprint ?? null;
+        this.#schemaDiagnostic = {
+          sourceKey: "global",
+          schemaUrl: topology?.global
+            ? `${this.#relayBaseUrl}:${topology.global.port}/v1/database/${encodeURIComponent(topology.global.database)}/schema?version=9`
+            : `${this.#relayBaseUrl}/v1/database/unknown/schema?version=9`,
+          expected,
+          observed,
+          attemptedAt: topology?.discoveredAt ?? new Date(this.#now()).toISOString(),
+          status: "mismatch",
+          error: "Relay global schema fingerprint mismatch",
+        };
+      }
       if (lifecycleGeneration === this.#lifecycleGeneration) {
-        this.#lastError = error instanceof Error ? error.message : String(error);
+        this.#lastError = message;
+      }
+      if (this.#schemaDiagnostic && !diagnosticPersisted) {
+        await this.#currentStateRepository.recordSchemaFingerprintDiagnostic?.({
+          diagnostic: this.#schemaDiagnostic,
+          database: topology?.global?.database ?? null,
+          ready: topology?.global?.ready === true,
+        });
+      }
+      const schemaBlocked = this.#schemaDiagnostic?.status === "mismatch"
+        || this.#schemaDiagnostic?.status === "download_error";
+      if (schemaBlocked && this.#schemaDiagnostic) {
+        await this.#currentStateRepository.recordSubscriptionHealth?.({
+          sourceKey: "global",
+          domain: "region",
+          generation: Number(this.#catalogRepository.getSourceState()?.generation ?? 0),
+          connected: false,
+          runtimeState: "blocked_by_schema",
+          lastError: this.#schemaDiagnostic.error,
+        }, this.#schemaDiagnostic.attemptedAt);
       }
       try {
         await this.#session?.stop();
@@ -233,8 +296,15 @@ export class RelayGlobalCatalogRuntime {
       if (healthy) {
         const topology = await this.#discoverTopology(normalized.relayBaseUrl, {
           sourceKeys: new Set(["global"]),
+          expectedFingerprints: {
+            global: String(this.#manifest.schemas?.global?.fingerprint ?? "").trim(),
+          },
         });
-        const discoveredSource = globalSourceFromTopology(normalized.relayBaseUrl, topology);
+        const discoveredSource = globalSourceFromTopology(
+          normalized.relayBaseUrl,
+          topology,
+          this.#manifest,
+        );
         this.#lastTopologyCheckedAt = this.#now();
         if (sameGlobalSource(this.#source, discoveredSource)) return false;
       }
@@ -399,25 +469,33 @@ export class RelayGlobalCatalogRuntime {
   }
 
   health() {
+    const subscription = this.#session?.health() ?? {
+      state: "stopped",
+      connected: false,
+      applied: false,
+      lastAppliedAt: null,
+      lastError: null,
+      notifications: {
+        applied: this.#empireNotificationScope.length === 0,
+        requestedEmpireIds: [...this.#empireNotificationScope],
+        appliedEmpireIds: [],
+        lastAppliedAt: null,
+        lastError: this.#notificationLastError,
+      },
+    };
+    const typedState = this.#session
+      ? (subscription.connected === true ? "connected" : "disconnected")
+      : (this.#schemaDiagnostic?.status === "mismatch"
+          || this.#schemaDiagnostic?.status === "download_error")
+        ? "blocked_by_schema"
+        : "disconnected";
     return {
       running: this.#session != null,
       claimId: this.#claimId,
       source: this.#source ? { ...this.#source } : null,
       sourceState: this.#catalogRepository.getSourceState(),
-      subscription: this.#session?.health() ?? {
-        state: "stopped",
-        connected: false,
-        applied: false,
-        lastAppliedAt: null,
-        lastError: null,
-        notifications: {
-          applied: this.#empireNotificationScope.length === 0,
-          requestedEmpireIds: [...this.#empireNotificationScope],
-          appliedEmpireIds: [],
-          lastAppliedAt: null,
-          lastError: this.#notificationLastError,
-        },
-      },
+      subscription: { ...subscription, typedState },
+      schemaDiagnostic: this.#schemaDiagnostic ? { ...this.#schemaDiagnostic } : null,
       lastError: this.#lastError,
       notificationLastError: this.#notificationLastError,
     };

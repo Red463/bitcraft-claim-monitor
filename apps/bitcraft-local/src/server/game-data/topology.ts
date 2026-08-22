@@ -1,13 +1,18 @@
 import { createHash } from "node:crypto";
 
-import type { RegionId } from "./contracts.ts";
+import type { RegionId, SchemaFingerprintDiagnostic } from "./contracts.ts";
+export type { SchemaFingerprintDiagnostic } from "./contracts.ts";
 import { RelayHttpClient } from "./http.ts";
 
 type Fetcher = typeof fetch;
 const SCHEMA_VERSION = "9";
 const DEFAULT_SCHEMA_FINGERPRINT_CACHE_MS = 45_000;
+type SchemaFingerprintResult = {
+  fingerprint: string;
+  attemptedAt: string;
+};
 type SchemaFingerprintCacheEntry = {
-  promise: Promise<string>;
+  promise: Promise<SchemaFingerprintResult>;
   expiresAt: number;
   settled: boolean;
 };
@@ -18,6 +23,7 @@ const schemaFingerprintCaches = new WeakMap<
 
 export type RelayTopologyDiscoveryOptions = {
   sourceKeys?: ReadonlySet<string>;
+  expectedFingerprints?: Partial<Record<"global" | "regional", string>>;
   schemaFingerprintCacheMs?: number;
   now?: () => number;
 };
@@ -27,6 +33,7 @@ export type RelaySourceTopology = {
   database: string;
   port: number;
   schemaFingerprint: string | null;
+  schemaFingerprintDiagnostic?: SchemaFingerprintDiagnostic;
   ready: boolean;
 };
 
@@ -91,7 +98,19 @@ function schemaUrl(baseUrl: string, source: Record<string, unknown>, database: s
   return url.href;
 }
 
-async function fetchSchemaFingerprint(url: string, fetcher: Fetcher): Promise<string> {
+function operationalSchemaUrl(value: string): string {
+  const url = new URL(value);
+  url.username = "";
+  url.password = "";
+  return url.href;
+}
+
+async function fetchSchemaFingerprint(
+  url: string,
+  fetcher: Fetcher,
+  attemptedAt: string,
+): Promise<SchemaFingerprintResult> {
+  const diagnosticUrl = operationalSchemaUrl(url);
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let response: Response;
@@ -102,22 +121,25 @@ async function fetchSchemaFingerprint(url: string, fetcher: Fetcher): Promise<st
       continue;
     }
     if (!response.ok) {
-      const error = new Error(`Relay schema ${url} returned HTTP ${response.status}`);
+      const error = new Error(`Relay schema ${diagnosticUrl} returned HTTP ${response.status}`);
       if (response.status !== 429 && response.status < 500) throw error;
       lastError = error;
       continue;
     }
     try {
       const schema = await response.text();
-      if (!schema) throw new Error(`Relay schema ${url} was empty`);
-      return createHash("sha256").update(schema).digest("hex");
+      if (!schema) throw new Error(`Relay schema ${diagnosticUrl} was empty`);
+      return {
+        fingerprint: createHash("sha256").update(schema).digest("hex"),
+        attemptedAt,
+      };
     } catch (error) {
       lastError = error;
     }
   }
   throw lastError instanceof Error
     ? lastError
-    : new Error(`Relay schema ${url} could not be fingerprinted`);
+    : new Error(`Relay schema ${diagnosticUrl} could not be fingerprinted`);
 }
 
 function cachedSchemaFingerprint(
@@ -150,11 +172,11 @@ function cachedSchemaFingerprint(
     return cached.promise;
   }
   const entry: SchemaFingerprintCacheEntry = {
-    promise: Promise.resolve(""),
+    promise: Promise.resolve({ fingerprint: "", attemptedAt: new Date(now()).toISOString() }),
     expiresAt: Number.POSITIVE_INFINITY,
     settled: false,
   };
-  const promise = fetchSchemaFingerprint(url, fetcher);
+  const promise = fetchSchemaFingerprint(url, fetcher, new Date(now()).toISOString());
   entry.promise = promise;
   cache.set(cacheKey, entry);
   void promise.then(
@@ -249,12 +271,35 @@ export async function discoverRelayTopologyWithClient(
       ? topology.global
       : topology.regions.get(sourceKey.slice("region:".length));
     if (!target?.ready || target.schemaFingerprint) continue;
+    const url = schemaUrl(baseUrl, source, target.database);
+    const expectedKind = sourceKey === "global" ? "global" : "regional";
+    const expected = String(options.expectedFingerprints?.[expectedKind] ?? "").trim() || null;
     fingerprintTasks.push(
       cachedSchemaFingerprint(baseUrl, source, target.database, fetcher, options)
-        .then((fingerprint) => {
+        .then(({ fingerprint, attemptedAt }) => {
           target.schemaFingerprint = fingerprint;
+          if (expected == null) return;
+          const mismatch = expected != null && expected.toLowerCase() !== fingerprint.toLowerCase();
+          target.schemaFingerprintDiagnostic = {
+            sourceKey,
+            schemaUrl: operationalSchemaUrl(url),
+            expected,
+            observed: fingerprint,
+            attemptedAt,
+            status: mismatch ? "mismatch" : "verified",
+            error: mismatch ? `Relay ${expectedKind} schema fingerprint mismatch` : null,
+          };
         })
-        .catch(() => {
+        .catch((error) => {
+          target.schemaFingerprintDiagnostic = {
+            sourceKey,
+            schemaUrl: operationalSchemaUrl(url),
+            expected,
+            observed: null,
+            attemptedAt: new Date((options.now ?? Date.now)()).toISOString(),
+            status: "download_error",
+            error: error instanceof Error ? error.message : String(error),
+          };
           // A source can remain topology-ready while its schema is unavailable.
           // Subscription runtimes require a non-null fingerprint and preserve
           // their last-good generation until the schema can be verified.

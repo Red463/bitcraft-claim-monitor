@@ -100,6 +100,16 @@ export type RefreshResult = {
   failed: Partial<Record<DomainKey, string>>;
 };
 
+export type SchemaFingerprintDiagnostic = {
+  sourceKey: "global" | `region:${number}`;
+  schemaUrl: string;
+  expected: string | null;
+  observed: string | null;
+  attemptedAt: string;
+  status: "verified" | "mismatch" | "download_error";
+  error: string | null;
+};
+
 export type ProviderHealth = {
   provider: "relay";
   running: boolean;
@@ -112,6 +122,7 @@ export type ProviderHealth = {
     ready: boolean;
     database: string | null;
     schemaFingerprint: string | null;
+    schemaFingerprintDiagnostic?: SchemaFingerprintDiagnostic;
   }>;
 };
 
