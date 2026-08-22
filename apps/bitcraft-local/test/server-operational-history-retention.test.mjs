@@ -16,6 +16,7 @@ import {
   normalizeOperationalHistoryRetentionSettings,
   operationalHistoryRetentionPreview,
   readOperationalMarketTradeDaily,
+  readOperationalMarketTradeDailyReport,
   recordOperationalHistoryBackupVerification,
   runOperationalHistoryRetention,
   validateOperationalHistoryRetentionEnableGate,
@@ -419,6 +420,175 @@ test("a covered mutation after partial prune fails closed instead of serving a s
   assert.throws(
     () => readOperationalMarketTradeDaily(db, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }),
     /parity is invalid/i,
+  );
+  db.close();
+});
+
+test("a migration-invalidated watermark after partial prune makes retained history explicitly unavailable", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "pruned", occurredAt: "2025-08-21T01:00:00.000Z" });
+  insertTrade(db, { tradeId: "retained", occurredAt: "2025-08-21T02:00:00.000Z", quantity: "2", totalPrice: "4" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  const result = runOperationalHistoryRetention(db, {
+    now: NOW,
+    enabled: true,
+    dryRun: false,
+    days: 365,
+    tables: ["market_trades"],
+    approvedTables: new Set(["market_trades"]),
+    explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+    backupVerification: verifiedBackup(),
+    approvedBackupRoot: BACKUP_FIXTURE_ROOT,
+    batchSize: 1,
+  });
+  assert.equal(result.deletedRows, 1);
+
+  db.exec("DROP TRIGGER operational_history_market_trade_ingestion_id");
+  insertTrade(db, { tradeId: "trigger-gap", occurredAt: "2025-08-21T00:30:00.000Z", quantity: "3", totalPrice: "6" });
+  applyOperationalHistoryRetentionSchema(db);
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT completion_state, pruned_row_count
+      FROM operational_history_rollup_watermarks
+      WHERE source_table = 'market_trades' AND claim_id = 'claim-a' AND utc_day = '2025-08-21'
+    `).get() },
+    { completion_state: "failed", pruned_row_count: 1 },
+  );
+
+  const diagnostics = [];
+  assert.throws(
+    () => readOperationalMarketTradeDaily(db, {
+      claimId: "claim-a",
+      startDay: "2025-08-21",
+      endDay: "2025-08-21",
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    }),
+    (error) => error?.code === "operational_history_unavailable"
+      && error?.reason === "watermark_not_complete"
+      && error?.utcDay === "2025-08-21",
+  );
+  assert.deepEqual(diagnostics, [{
+    code: "operational_history_unavailable",
+    claimId: "claim-a",
+    utcDay: "2025-08-21",
+    reason: "watermark_not_complete",
+    prunedRowCount: 1,
+  }]);
+  db.close();
+});
+
+test("an incomplete coverage record after partial prune makes retained history explicitly unavailable", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "pruned", occurredAt: "2025-08-21T01:00:00.000Z" });
+  insertTrade(db, { tradeId: "retained", occurredAt: "2025-08-21T02:00:00.000Z" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  runOperationalHistoryRetention(db, {
+    now: NOW,
+    enabled: true,
+    dryRun: false,
+    days: 365,
+    tables: ["market_trades"],
+    approvedTables: new Set(["market_trades"]),
+    explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+    backupVerification: verifiedBackup(),
+    approvedBackupRoot: BACKUP_FIXTURE_ROOT,
+    batchSize: 1,
+  });
+  db.prepare(`
+    UPDATE operational_history_rollup_watermarks
+    SET remaining_source_fingerprint = ''
+    WHERE source_table = 'market_trades'
+  `).run();
+  const diagnostics = [];
+  assert.throws(
+    () => readOperationalMarketTradeDaily(db, {
+      claimId: "claim-a",
+      startDay: "2025-08-21",
+      endDay: "2025-08-21",
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    }),
+    (error) => error?.code === "operational_history_unavailable"
+      && error?.reason === "watermark_coverage_incomplete",
+  );
+  assert.equal(diagnostics[0]?.reason, "watermark_coverage_incomplete");
+  db.close();
+});
+
+test("a legacy watermark without ingestion boundaries after partial prune fails closed", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "pruned", occurredAt: "2025-08-21T01:00:00.000Z" });
+  insertTrade(db, { tradeId: "retained", occurredAt: "2025-08-21T02:00:00.000Z" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  runOperationalHistoryRetention(db, {
+    now: NOW,
+    enabled: true,
+    dryRun: false,
+    days: 365,
+    tables: ["market_trades"],
+    approvedTables: new Set(["market_trades"]),
+    explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+    backupVerification: verifiedBackup(),
+    approvedBackupRoot: BACKUP_FIXTURE_ROOT,
+    batchSize: 1,
+  });
+  db.prepare(`
+    UPDATE operational_history_rollup_watermarks
+    SET source_max_ingestion_id = NULL, source_max_mutation_id = NULL
+    WHERE source_table = 'market_trades'
+  `).run();
+  const diagnostics = [];
+  assert.throws(
+    () => readOperationalMarketTradeDaily(db, {
+      claimId: "claim-a",
+      startDay: "2025-08-21",
+      endDay: "2025-08-21",
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    }),
+    (error) => error?.code === "operational_history_unavailable"
+      && error?.reason === "watermark_coverage_incomplete",
+  );
+  assert.equal(diagnostics[0]?.prunedRowCount, 1);
+  db.close();
+});
+
+test("a failed but unpruned watermark safely falls back to complete raw history", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "raw-a", occurredAt: "2025-08-21T01:00:00.000Z" });
+  insertTrade(db, { tradeId: "raw-b", occurredAt: "2025-08-21T02:00:00.000Z", quantity: "2", totalPrice: "4" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  db.prepare(`
+    UPDATE operational_history_rollup_watermarks
+    SET completion_state = 'failed', last_error = 'fixture invalidation'
+    WHERE source_table = 'market_trades'
+  `).run();
+  assert.deepEqual(
+    readOperationalMarketTradeDaily(db, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }),
+    { daily: [{ day: "2025-08-21", salesCount: 2, unitsSold: "3", totalValue: "6" }], observedSince: "2025-08-21T01:00:00.000Z" },
+  );
+  db.close();
+});
+
+test("the market report boundary contains an unavailable retained-history error", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "raw-a", occurredAt: "2025-08-21T01:00:00.000Z" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  db.prepare(`
+    UPDATE operational_history_rollup_watermarks
+    SET completion_state = 'failed', pruned_row_count = 1
+    WHERE source_table = 'market_trades'
+  `).run();
+
+  assert.deepEqual(
+    readOperationalMarketTradeDailyReport(db, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }),
+    {
+      daily: [],
+      observedSince: null,
+      historyWarning: {
+        code: "operational_history_unavailable",
+        message: "Retained market history is temporarily unavailable.",
+        utcDay: "2025-08-21",
+      },
+    },
   );
   db.close();
 });

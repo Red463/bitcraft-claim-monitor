@@ -727,6 +727,30 @@ export function buildOperationalHistoryRollups(db, {
   return { completedDays, failedDays };
 }
 
+export class OperationalHistoryUnavailableError extends Error {
+  constructor({ claimId, utcDay, reason, prunedRowCount }) {
+    super(`Operational market history parity is invalid for ${utcDay}; retained history is unavailable`);
+    this.name = "OperationalHistoryUnavailableError";
+    this.code = "operational_history_unavailable";
+    this.claimId = String(claimId);
+    this.utcDay = String(utcDay);
+    this.reason = String(reason);
+    this.prunedRowCount = prunedRowCount;
+  }
+}
+
+function rejectUnavailablePrunedMarketHistory(onDiagnostic, watermark, reason) {
+  const diagnostic = {
+    code: "operational_history_unavailable",
+    claimId: String(watermark.claim_id),
+    utcDay: String(watermark.utc_day),
+    reason,
+    prunedRowCount: watermark.pruned_row_count == null ? null : Number(watermark.pruned_row_count),
+  };
+  onDiagnostic(diagnostic);
+  throw new OperationalHistoryUnavailableError(diagnostic);
+}
+
 export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay, onDiagnostic = () => {} }) {
   if (![startDay, endDay].every((value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value)))) {
     throw new TypeError("Market trade daily history requires explicit UTC day bounds");
@@ -742,9 +766,20 @@ export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay,
   };
   const coverageByDay = new Map();
   const watermarks = db.prepare(`
-    SELECT claim_id, utc_day, source_row_count, source_max_key, source_max_occurred_at,
-      source_max_ingestion_id, source_max_mutation_id, source_fingerprint,
-      remaining_source_fingerprint, pruned_row_count,
+    SELECT claim_id, utc_day, completion_state,
+      CAST(source_row_count AS TEXT) AS source_row_count,
+      source_max_key, source_max_occurred_at,
+      CAST(source_max_ingestion_id AS TEXT) AS source_max_ingestion_id,
+      CAST(source_max_mutation_id AS TEXT) AS source_max_mutation_id,
+      source_fingerprint, remaining_source_fingerprint,
+      CAST(pruned_row_count AS TEXT) AS pruned_row_count,
+      EXISTS (
+        SELECT 1
+        FROM operational_history_market_trade_daily AS daily
+        WHERE daily.claim_id = watermark.claim_id
+          AND daily.utc_day = watermark.utc_day
+        LIMIT 1
+      ) AS has_rollup,
       EXISTS (
         SELECT 1
         FROM operational_history_source_mutations AS mutation
@@ -757,22 +792,39 @@ export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay,
       ) AS has_covered_mutation
     FROM operational_history_rollup_watermarks AS watermark
     WHERE watermark.source_table = 'market_trades' AND watermark.claim_id = ?
-      AND watermark.utc_day >= ? AND watermark.utc_day <= ? AND watermark.completion_state = 'complete'
+      AND watermark.utc_day >= ? AND watermark.utc_day <= ?
     ORDER BY watermark.utc_day
   `).all(String(claimId), startDay, endDay);
   for (const watermark of watermarks) {
+    const sourceRowCount = Number(watermark.source_row_count);
     const sourceMaxIngestionId = Number(watermark.source_max_ingestion_id);
     const sourceMaxMutationId = Number(watermark.source_max_mutation_id);
-    if (watermark.source_max_ingestion_id == null
+    const prunedRowCount = Number(watermark.pruned_row_count);
+    let unusableReason = null;
+    if (watermark.completion_state !== "complete") {
+      unusableReason = "watermark_not_complete";
+    } else if (!Number.isSafeInteger(sourceRowCount) || sourceRowCount <= 0
+      || !Number.isSafeInteger(prunedRowCount) || prunedRowCount < 0 || prunedRowCount > sourceRowCount) {
+      unusableReason = "watermark_counts_invalid";
+    } else if (watermark.source_max_ingestion_id == null
       || !Number.isSafeInteger(sourceMaxIngestionId)
       || sourceMaxIngestionId <= 0
       || watermark.source_max_mutation_id == null
       || !Number.isSafeInteger(sourceMaxMutationId)
       || sourceMaxMutationId < 0
-      || String(watermark.source_fingerprint).length !== 64) continue;
-    if (Number(watermark.has_covered_mutation) > 0) {
-      if (Number(watermark.pruned_row_count) > 0) {
-        throw new Error(`Operational market history parity is invalid for ${watermark.utc_day}`);
+      || !String(watermark.source_max_key ?? "")
+      || !String(watermark.source_max_occurred_at ?? "")
+      || !/^[a-f0-9]{64}$/i.test(String(watermark.source_fingerprint ?? ""))
+      || !/^[a-f0-9]{64}$/i.test(String(watermark.remaining_source_fingerprint ?? ""))) {
+      unusableReason = "watermark_coverage_incomplete";
+    } else if (!Number(watermark.has_rollup)) {
+      unusableReason = "rollup_missing";
+    } else if (Number(watermark.has_covered_mutation) > 0) {
+      unusableReason = "covered_source_mutation";
+    }
+    if (unusableReason) {
+      if (watermark.pruned_row_count == null || !Number.isSafeInteger(prunedRowCount) || prunedRowCount !== 0) {
+        rejectUnavailablePrunedMarketHistory(onDiagnostic, watermark, unusableReason);
       }
       continue;
     }
@@ -836,6 +888,23 @@ export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay,
     daily: daily.map(({ oldestOccurredAt: ignored, ...row }) => row),
     observedSince: daily.reduce((oldest, row) => !oldest || (row.oldestOccurredAt && row.oldestOccurredAt < oldest) ? row.oldestOccurredAt : oldest, null),
   };
+}
+
+export function readOperationalMarketTradeDailyReport(db, options) {
+  try {
+    return { ...readOperationalMarketTradeDaily(db, options), historyWarning: null };
+  } catch (error) {
+    if (!(error instanceof OperationalHistoryUnavailableError)) throw error;
+    return {
+      daily: [],
+      observedSince: null,
+      historyWarning: {
+        code: error.code,
+        message: "Retained market history is temporarily unavailable.",
+        utcDay: error.utcDay,
+      },
+    };
+  }
 }
 
 function sha256File(filePath) {

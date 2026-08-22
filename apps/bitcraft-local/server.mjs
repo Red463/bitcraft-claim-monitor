@@ -149,7 +149,7 @@ import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/se
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
-import { APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES, latestOperationalHistoryBackupVerification, normalizeOperationalHistoryRetentionSettings, operationalHistoryRetentionPreview, readOperationalMarketTradeDaily, recordOperationalHistoryBackupVerification, runOperationalHistoryRetention, validateOperationalHistoryRetentionEnableGate } from "./src/server/operationalHistoryRetention.mjs";
+import { APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES, latestOperationalHistoryBackupVerification, normalizeOperationalHistoryRetentionSettings, operationalHistoryRetentionPreview, readOperationalMarketTradeDailyReport, recordOperationalHistoryBackupVerification, runOperationalHistoryRetention, validateOperationalHistoryRetentionEnableGate } from "./src/server/operationalHistoryRetention.mjs";
 import { installRetiredTableAuthorizer } from "./src/server/retiredTableAuthorizer.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
 import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, publicRoutePerformanceHealth, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
@@ -6153,15 +6153,15 @@ function marketHistory(claimId, limit, owner = "") {
     ORDER BY unitsSold DESC, totalValue DESC
     LIMIT 20
   `).all(...tradeArgs);
-  const rollupDaily = selectedOwner ? null : readOperationalMarketTradeDaily(db, {
+  const rollupDaily = selectedOwner ? null : readOperationalMarketTradeDailyReport(db, {
     claimId,
     startDay: marketRangeStart.slice(0, 10),
     endDay: new Date(new Date(marketRangeEnd).getTime() - 1).toISOString().slice(0, 10),
     onDiagnostic: (diagnostic) => console.warn(
-      `Operational market history diagnostic: ${diagnostic.code} claim=${diagnostic.claimId} rows=${diagnostic.rowCount}`,
+      `Operational market history diagnostic: ${diagnostic.code} claim=${diagnostic.claimId} day=${diagnostic.utcDay ?? "n/a"} rows=${diagnostic.rowCount ?? "n/a"}`,
     ),
   });
-  const daily = rollupDaily?.daily ?? db.prepare(`
+  const daily = rollupDaily?.historyWarning ? [] : rollupDaily?.daily ?? db.prepare(`
       SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue
       FROM market_trades
       WHERE claim_id = ?${tradeOwnerClause}
@@ -6189,7 +6189,17 @@ function marketHistory(claimId, limit, owner = "") {
     ORDER BY occurred_at DESC
     LIMIT 30
   `).all(...args);
-  return { liveListings, events, sales, topItems, daily, totals, pending, observedSince: rollupDaily?.observedSince ?? daily[0]?.day ?? null };
+  return {
+    liveListings,
+    events,
+    sales,
+    topItems,
+    daily,
+    totals,
+    pending,
+    observedSince: rollupDaily?.historyWarning ? null : rollupDaily?.observedSince ?? daily[0]?.day ?? null,
+    historyWarning: rollupDaily?.historyWarning ?? null,
+  };
 }
 
 function currentBuyOrderBaselineKeys(snapshot, regionId, allowedRegionIds) {
