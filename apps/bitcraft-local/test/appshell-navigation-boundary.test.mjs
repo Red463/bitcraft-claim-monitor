@@ -92,6 +92,15 @@ test("AppShell composes game data only from the active claim and page scope", ()
   assert.match(appShell, /state\.loading && !state\.data/);
 });
 
+test("AppShell owns one page-scoped provider generation watcher", () => {
+  assert.match(appShell, /createPageGameDataGenerationWatcher\(\{/);
+  assert.match(appShell, /activePanel:\s*active/);
+  assert.match(appShell, /claimId,/);
+  assert.match(appShell, /onGeneration:\s*\(\) => pageRefreshController\.invalidateGeneration\(\)/);
+  assert.match(appShell, /return \(\) => watcher\?\.stop\(\)/);
+  assert.doesNotMatch(appShell, /active !== "craft-monitor"/);
+});
+
 test("sidebar and command palette consume the same effective page access", () => {
   assert.match(appShell, /<CommandPalette adminAuthenticated=\{Boolean\(adminAuth\.authenticated\)\} access=\{effectiveAccess\}/);
   assert.match(commandPalette, /visiblePagePaletteItems\(NAV, adminAuthenticated\)/);

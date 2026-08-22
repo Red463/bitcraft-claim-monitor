@@ -29,8 +29,10 @@ local server.
    repository.
 3. `RelayBitCraftProvider` populates generations from bounded Relay HTTP-cache
    adapters and official typed SpacetimeDB subscriptions.
-4. Provider generation events invalidate the owned domains of open pages; a
-   bounded poll is only recovery.
+4. Provider generation events invalidate the claim-scoped owned domains of open
+   provider-neutral pages. SSE is primary; the recovery poll is one second for
+   Craft Monitor and 30 seconds for other interval provider pages. Hidden tabs
+   do not poll, and manual or non-provider pages create no watcher.
 5. Missing live inputs preserve and label last-good data as stale.
 
 Never import Relay wire DTOs into React. Never put raw wire records directly
@@ -91,6 +93,16 @@ For `/api/local/game-data`:
 - return `200` with stale last-good envelopes;
 - return `503` only when no requested domain has ever loaded;
 - use the existing refresh coordinator for manual refresh.
+
+Generation refreshes use the same coordinator with single-flight coalescing and
+at most one trailing cycle. Only generation-triggered failures use the bounded
+5/10/20/30-second retry; an ordinary interval failure waits for the next normal
+interval, and success resets generation backoff.
+
+For `/api/local/history`, keep ownership narrow: Dashboard owns
+`activity,market,dashboard`, Activity owns `activity`, and Local Market owns
+`market`. An empty include means no fetch and no refresh-task enrollment; do not
+clear retained owned history while a same-scope refresh is in flight.
 
 Admin mutations require authenticated permissions, same-origin validation, and
 CSRF. Never expose tokens, setup keys, OAuth secrets, or protected settings.

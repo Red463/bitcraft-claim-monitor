@@ -26,7 +26,7 @@ test("local page history joins the same active page cycle", () => {
   const history = source("../src/api/localHistory.ts");
 
   assert.match(history, /pageRefreshHeaders\(pageRefreshCycle, activePanel\)/);
-  assert.match(history, /trackPageRefreshPromise\("local-history", load\(\)\)/);
+  assert.match(history, /trackPageRefreshPromise\("local-history", load\(request\)\)/);
   assert.match(history, /pageRefreshCycle\?\.sequence/);
 });
 

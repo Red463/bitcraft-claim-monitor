@@ -28,7 +28,6 @@ import { useFeaturebase } from "featurebase-js/react";
 import { useGameData } from "./api/gameDataLoader";
 import { gameDataScopeKey } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
-import { pageDomains } from "./api/pageDomains";
 import {
   gameDataQualitySummaries,
   groupDomainWarnings,
@@ -78,7 +77,7 @@ import { ACCESS_CONTROL_TARGETS, effectiveTargetAllowed, targetIdForPage, type E
 import { restrictedAccessGuidance } from "./access/restrictedAccess";
 import { PageRefreshProvider } from "./refresh/ManualRefreshContext";
 import { cooldownRemainingMs } from "./refresh/manualRefresh.mjs";
-import { createGameDataGenerationWatcher } from "./refresh/generationWatcher.mjs";
+import { createPageGameDataGenerationWatcher } from "./refresh/generationWatcher.mjs";
 import {
   createPageRefreshController,
   createPageRefreshTaskCoordinator,
@@ -846,14 +845,13 @@ function DashboardApp() {
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [pageRefreshController]);
   React.useEffect(() => {
-    if (active !== "craft-monitor" || !claimId) return;
-    const watcher = createGameDataGenerationWatcher({
+    const watcher = createPageGameDataGenerationWatcher({
+      activePanel: active,
       claimId,
-      domains: pageDomains(active),
       isVisible: () => document.visibilityState !== "hidden",
-      onGeneration: () => pageRefreshController.invalidateNearLive(),
+      onGeneration: () => pageRefreshController.invalidateGeneration(),
     });
-    return () => watcher.stop();
+    return () => watcher?.stop();
   }, [active, claimId, pageRefreshController]);
   React.useEffect(() => {
     const intervalMs = appSettings.refreshSeconds * 1000;

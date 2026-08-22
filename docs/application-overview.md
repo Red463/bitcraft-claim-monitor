@@ -83,10 +83,22 @@ restricted to configured active regions. Last-good data returns `200` with
 stale metadata; `503` is reserved for requests where no requested domain has
 ever loaded.
 
-Open pages subscribe to provider generation events and refetch only their owned
-domains through `/api/local/game-data`. A short bounded poll recovers missed
-events. Users therefore see committed Relay generations quickly rather than
-waiting for broad scheduled acquisition jobs.
+Open provider-neutral pages subscribe to provider generation events for their
+claim and owned domains, then refetch through `/api/local/game-data`. SSE is the
+low-latency path. Craft Monitor uses a one-second recovery poll; other interval
+provider pages use a 30-second recovery poll. Polling pauses while the tab is
+hidden and visibility restoration produces one catch-up cycle. Manual and
+non-provider pages create no generation watcher.
+
+Generation invalidations are single-flight and coalesced to one trailing cycle.
+Generation-triggered failures retry after 5, 10, 20, then at most 30 seconds;
+a successful cycle resets that backoff. Ordinary interval failures retain their
+normal next-interval cadence.
+
+Durable `/api/local/history` projections also have exact page ownership:
+Dashboard requests activity, market, and dashboard history; Activity requests
+activity; Local Market requests market. Other pages issue no history request and
+do not enroll a history task in the page refresh cycle.
 
 ## Domain ownership
 

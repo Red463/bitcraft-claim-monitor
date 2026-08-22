@@ -11,7 +11,9 @@ import {
   pageRefreshPolicy,
   pageRefreshShowsRetainedDataProgress,
 } from "../src/refresh/pageRefresh.mjs";
-import { createGameDataGenerationWatcher } from "../src/refresh/generationWatcher.mjs";
+import * as generationWatcherModule from "../src/refresh/generationWatcher.mjs";
+
+const { createGameDataGenerationWatcher } = generationWatcherModule;
 
 function createFakeClock(start = 0) {
   let now = start;
@@ -125,6 +127,36 @@ test("Craft Monitor coalesces generation changes and queues one trailing cycle",
   assert.equal(cycles[2].reason, "near-live");
 });
 
+test("Dashboard coalesces generation changes and queues one trailing generation cycle", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `dashboard-generation-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.invalidateGeneration();
+  controller.invalidateGeneration();
+  clock.advance(1_999);
+  assert.equal(cycles.length, 1);
+  clock.advance(1);
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation"]);
+
+  controller.invalidateGeneration();
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  assert.equal(cycles.length, 2, "an active request remains single-flight");
+  controller.complete(cycles[1].id, true);
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation", "generation"]);
+});
+
 test("Craft Monitor failures retry with bounded 5-30 second exponential backoff", () => {
   const clock = createFakeClock();
   const cycles = [];
@@ -151,6 +183,134 @@ test("Craft Monitor failures retry with bounded 5-30 second exponential backoff"
   controller.complete(cycles.at(-1).id, true);
   clock.advance(30_000);
   assert.equal(cycles.length, id, "success clears the failure retry");
+});
+
+test("generation-triggered failures retry at 5, 10, 20, then capped 30 seconds without accumulation", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `generation-backoff-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  assert.equal(cycles[1].reason, "generation");
+
+  for (const delay of [5_000, 10_000, 20_000, 30_000, 30_000]) {
+    const beforeRetry = cycles.length;
+    controller.invalidateGeneration();
+    controller.invalidateGeneration();
+    controller.complete(cycles.at(-1).id, false);
+    clock.advance(delay - 1);
+    assert.equal(cycles.length, beforeRetry, `no request starts before ${delay} ms`);
+    clock.advance(1);
+    assert.equal(cycles.length, beforeRetry + 1);
+    assert.equal(cycles.at(-1).reason, "generation");
+  }
+});
+
+test("a successful generation cycle resets the failure retry to five seconds", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `generation-reset-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles[1].id, false);
+  clock.advance(5_000);
+  controller.complete(cycles[2].id, true);
+
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles[3].id, false);
+  clock.advance(4_999);
+  assert.equal(cycles.length, 4);
+  clock.advance(1);
+  assert.equal(cycles.length, 5);
+  assert.equal(cycles[4].reason, "generation");
+});
+
+test("ordinary interval failures wait for the ordinary next interval", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `ordinary-interval-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, false);
+  clock.advance(29_999);
+  assert.equal(cycles.length, 1);
+  clock.advance(1);
+  assert.equal(cycles.length, 2);
+  assert.equal(cycles[1].reason, "interval");
+});
+
+test("generation invalidation does not overwrite a queued manual refresh", () => {
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    createId: () => `manual-priority-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.requestManual();
+  controller.invalidateGeneration();
+  controller.invalidateGeneration();
+  controller.complete(cycles[0].id, true);
+
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "manual"]);
+});
+
+test("generation failure retry preserves a queued manual refresh", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `manual-after-retry-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.requestManual();
+  controller.complete(cycles[1].id, false);
+  clock.advance(5_000);
+  controller.complete(cycles[2].id, true);
+
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation", "generation", "manual"]);
 });
 
 test("cold-start failures are sealed outside the data branch and enter Craft Monitor backoff", async () => {
@@ -310,6 +470,7 @@ test("retained-data progress is visible for manual cycles and silent for automat
   assert.equal(pageRefreshShowsRetainedDataProgress(cycle("manual")), true);
   assert.equal(pageRefreshShowsRetainedDataProgress(cycle("initial")), false);
   assert.equal(pageRefreshShowsRetainedDataProgress(cycle("interval")), false);
+  assert.equal(pageRefreshShowsRetainedDataProgress(cycle("generation")), false);
   assert.equal(pageRefreshShowsRetainedDataProgress(cycle("near-live")), false);
   assert.equal(pageRefreshShowsRetainedDataProgress(cycle("visibility-catch-up")), false);
   assert.equal(pageRefreshShowsRetainedDataProgress(null), false);
@@ -406,6 +567,92 @@ test("generation watcher combines SSE with a 1000 ms poll and deduplicates gener
   assert.deepEqual(observed, [1, 2, 3, 4]);
 });
 
+test("generation watcher ignores events outside its claim and domain scope", async () => {
+  const clock = createFakeClock();
+  const observed = [];
+  let source;
+  class FakeEventSource {
+    constructor() { source = this; }
+    close() {}
+  }
+  const watcher = createGameDataGenerationWatcher({
+    claimId: "20",
+    domains: ["claim", "market"],
+    fetch: async () => ({ ok: false }),
+    EventSource: FakeEventSource,
+    setInterval: clock.setInterval,
+    clearInterval: clock.clearInterval,
+    onGeneration: (generation) => observed.push(generation),
+  });
+  await Promise.resolve();
+
+  source.onmessage({ data: JSON.stringify({ claimId: "20", generation: 90, changedDomains: ["members"] }) });
+  source.onmessage({ data: JSON.stringify({ claimId: "21", generation: 91, changedDomains: ["market"] }) });
+  source.onmessage({ data: JSON.stringify({ claimId: "20", generation: 2, changedDomains: ["market"] }) });
+
+  assert.deepEqual(observed, [2], "ignored high generations must not poison the watched scope");
+  watcher.stop();
+});
+
+test("page generation watcher enrolls only provider pages with page-specific recovery polling and prompt SSE", async () => {
+  assert.equal(typeof generationWatcherModule.createPageGameDataGenerationWatcher, "function");
+  const clock = createFakeClock();
+  const sources = [];
+  const pollDelays = [];
+  const activePolls = new Set();
+  const observed = [];
+  class FakeEventSource {
+    constructor(url) {
+      this.url = url;
+      this.closed = false;
+      sources.push(this);
+    }
+    close() { this.closed = true; }
+  }
+  const setInterval = (callback, delay) => {
+    pollDelays.push(delay);
+    const timer = clock.setInterval(callback, delay);
+    activePolls.add(timer);
+    return timer;
+  };
+  const clearInterval = (timer) => {
+    activePolls.delete(timer);
+    clock.clearInterval(timer);
+  };
+  const create = (activePanel) => generationWatcherModule.createPageGameDataGenerationWatcher({
+    activePanel,
+    claimId: "20",
+    fetch: async () => ({ ok: false }),
+    EventSource: FakeEventSource,
+    setInterval,
+    clearInterval,
+    onGeneration: (generation) => observed.push(generation),
+  });
+
+  assert.equal(create("craftcalc"), null);
+  assert.equal(create("sync"), null);
+  assert.equal(create("market"), null, "interval pages without provider-neutral data do not watch");
+  assert.equal(sources.length, 0);
+  assert.equal(activePolls.size, 0);
+
+  const dashboard = create("dashboard");
+  assert.equal(activePolls.size, 1);
+  assert.equal(pollDelays.at(-1), 30_000);
+  assert.match(sources.at(-1).url, /claimId=20/);
+  assert.match(sources.at(-1).url, /domains=.*market/);
+  sources.at(-1).onmessage({ data: JSON.stringify({ claimId: "20", generation: 7, changedDomains: ["market"] }) });
+  assert.deepEqual(observed, [7], "SSE invalidation does not wait for the recovery poll");
+
+  dashboard.stop();
+  assert.equal(sources[0].closed, true);
+  assert.equal(activePolls.size, 0);
+  const craftMonitor = create("craft-monitor");
+  assert.equal(activePolls.size, 1, "navigation leaves one watcher poll enrolled");
+  assert.equal(pollDelays.at(-1), 1_000);
+  craftMonitor.stop();
+  assert.equal(activePolls.size, 0);
+});
+
 test("hidden Craft Monitor defers generation invalidation to one visible catch-up", () => {
   const clock = createFakeClock();
   const cycles = [];
@@ -430,6 +677,30 @@ test("hidden Craft Monitor defers generation invalidation to one visible catch-u
   controller.complete(cycles.at(-1).id, true);
   clock.advance(2_000);
   assert.equal(cycles.length, 2);
+});
+
+test("hidden interval provider pages defer generation invalidation to one visible catch-up", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `hidden-provider-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.setVisible(false);
+  controller.invalidateGeneration();
+  clock.advance(60_000);
+  assert.equal(cycles.length, 1);
+  controller.setVisible(true);
+  controller.setVisible(true);
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "visibility-catch-up"]);
 });
 
 test("Craft Monitor visibility catch-up preserves the two-second coalescing deadline", () => {
@@ -492,6 +763,43 @@ test("Craft Monitor visibility catch-up preserves an active failure-backoff dead
   assert.equal(cycles[1].reason, "visibility-catch-up");
   clock.advance(5_000);
   assert.equal(cycles.length, 2, "one hidden invalidation produces one retry catch-up");
+});
+
+test("interval-page visibility catch-up preserves a generation failure-backoff deadline", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `hidden-generation-backoff-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles[1].id, false);
+  controller.setVisible(false);
+  controller.invalidateGeneration();
+  clock.advance(1_000);
+  controller.setVisible(true);
+
+  assert.equal(cycles.length, 2, "visibility restoration must not bypass generation backoff");
+  clock.advance(3_999);
+  assert.equal(cycles.length, 2);
+  clock.advance(1);
+  assert.equal(cycles.length, 3);
+  assert.equal(cycles[2].reason, "visibility-catch-up");
+  controller.complete(cycles[2].id, false);
+  clock.advance(9_999);
+  assert.equal(cycles.length, 3);
+  clock.advance(1);
+  assert.equal(cycles.length, 4);
+  assert.equal(cycles[3].reason, "generation");
 });
 
 test("tracked non-OK HTTP responses fail the whole-page cycle", async () => {

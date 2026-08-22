@@ -1,6 +1,6 @@
 import type { ActivePanel } from "../types/app.ts";
 
-export type PageRefreshReason = "initial" | "near-live" | "interval" | "manual" | "visibility-catch-up";
+export type PageRefreshReason = "initial" | "near-live" | "generation" | "interval" | "manual" | "visibility-catch-up";
 
 export type PageRefreshPolicy =
   | { mode: "near-live"; coalesceMs: number }
@@ -68,6 +68,7 @@ export type PageRefreshController = {
   setVisible: (visible: boolean) => void;
   requestManual: () => PageRefreshCycle | null;
   invalidateNearLive: () => void;
+  invalidateGeneration: () => void;
   complete: (cycleId: string, succeeded: boolean) => void;
 };
 
