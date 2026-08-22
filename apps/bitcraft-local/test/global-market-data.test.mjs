@@ -6,6 +6,8 @@ import * as globalMarket from "../src/pages/market/globalMarket.ts";
 const {
   bestMarketDealPotential,
   filterMarketDeals,
+  marketFavoriteQuoteRows,
+  marketFavoriteQuotesRequest,
   marketFavoriteKeys,
   normalizeMarketOrders,
 } = globalMarket;
@@ -147,4 +149,32 @@ test("favorite parsing rejects malformed entries and preserves exact decimal ids
     { itemType: "item", itemId: "9007199254740993" },
   ]);
   assert.deepEqual(marketFavoriteKeys("not json"), []);
+});
+
+test("favorite quote request and response mapping preserve typed decimal identities", () => {
+  const favorites = [
+    { itemType: "item", itemId: "30" },
+    { itemType: "cargo", itemId: "30" },
+    { itemType: "item", itemId: "9007199254740993" },
+  ];
+  assert.deepEqual(marketFavoriteQuotesRequest("19", favorites), {
+    url: "/api/local/market/favorite-quotes",
+    body: JSON.stringify({ regionId: "19", items: favorites }),
+  });
+  assert.deepEqual(marketFavoriteQuoteRows(favorites, {
+    quotes: {
+      "item:30": { bestSell: "9007199254740995", bestBuy: "9007199254740994", sellCount: 2, buyCount: 1 },
+      "cargo:30": { bestSell: "17", bestBuy: null, sellCount: 1, buyCount: 0 },
+    },
+  }).map((row) => ({
+    key: `${row.itemType}:${row.itemId}`,
+    bestSell: row.bestSell,
+    bestBuy: row.bestBuy,
+    sellCount: row.sellCount,
+    buyCount: row.buyCount,
+  })), [
+    { key: "item:30", bestSell: "9007199254740995", bestBuy: "9007199254740994", sellCount: 2, buyCount: 1 },
+    { key: "cargo:30", bestSell: "17", bestBuy: null, sellCount: 1, buyCount: 0 },
+    { key: "item:9007199254740993", bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 },
+  ]);
 });

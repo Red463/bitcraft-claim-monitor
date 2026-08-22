@@ -74,6 +74,7 @@ import {
   regionalBuyOrdersView,
   regionalMarketCatalogView,
   regionalMarketDealsView,
+  regionalMarketFavoriteQuotesView,
   regionalMarketOverviewView,
   regionalMarketOrderBookView,
   regionalMarketPriceHistoryView,
@@ -6384,6 +6385,36 @@ function regionalMarketResponseStatus(current, regionId, allowedRegionIds) {
   );
 }
 
+function favoriteQuoteRequestBody(value) {
+  const body = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const regionId = String(body.regionId ?? "all").trim().toLowerCase() || "all";
+  if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+    throw Object.assign(new Error("Region id must be numeric or all"), { statusCode: 400 });
+  }
+  if (!Array.isArray(body.items)) {
+    throw Object.assign(new Error("Items must be an array"), { statusCode: 400 });
+  }
+  if (body.items.length > 20) {
+    throw Object.assign(new Error("At most 20 favorite items may be requested"), { statusCode: 400 });
+  }
+  const seen = new Set();
+  const items = body.items.map((rawItem) => {
+    const item = rawItem && typeof rawItem === "object" && !Array.isArray(rawItem) ? rawItem : {};
+    const itemType = String(item.itemType ?? "").trim().toLowerCase();
+    const itemId = String(item.itemId ?? "").trim();
+    if ((itemType !== "item" && itemType !== "cargo") || !/^\d+$/.test(itemId)) {
+      throw Object.assign(new Error("Each favorite must have itemType item or cargo and a decimal itemId"), { statusCode: 400 });
+    }
+    const key = `${itemType}:${itemId}`;
+    if (seen.has(key)) {
+      throw Object.assign(new Error("Favorite typed identities must be unique"), { statusCode: 400 });
+    }
+    seen.add(key);
+    return { itemType, itemId };
+  });
+  return { regionId, items };
+}
+
 function regionalMarketObservedTrades(claimId, regionId, allowedRegionIds, options = {}) {
   const allowed = new Set(allowedRegionIds.map(String));
   const requestedItemId = String(options.itemId ?? "").trim();
@@ -9974,6 +10005,25 @@ const server = createServer(async (req, res) => {
         ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
         generatedAt: current?.provenance?.receivedAt ?? null,
       });
+    }
+    if (req.method === "POST" && url.pathname === "/api/local/market/favorite-quotes") {
+      if (!rateLimit(req, res, "favoriteQuotesRead", RATE_LIMITS.favoriteQuotesRead)) return;
+      const { regionId, items } = favoriteQuoteRequestBody(await readJson(req, 16 * 1024));
+      const configuredClaimId = currentClaimId();
+      const { current, allowedRegionIds } = regionalMarketReadScope(configuredClaimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const body = await runHeavyProjection(marketHeavyRouteGate, routeMeasurement, () => ({
+        generation: current?.generation ?? 0,
+        ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
+        quotes: regionalMarketFavoriteQuotesView(current?.data, items, {
+          generation: current?.generation ?? 0,
+          regionId,
+          allowedRegionIds,
+        }),
+      }));
+      return send(res, 200, body);
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/order-book") {
       if (!rateLimit(req, res, "orderBookRead", RATE_LIMITS.orderBookRead)) return;

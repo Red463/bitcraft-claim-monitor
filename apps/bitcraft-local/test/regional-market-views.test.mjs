@@ -687,6 +687,128 @@ test("regional market order-book view preserves exact prices and scopes regions"
   });
 });
 
+test("favorite quotes index one scoped generation once without colliding typed identities", () => {
+  assert.equal(
+    typeof views.regionalMarketFavoriteQuotesView,
+    "function",
+    "regional market favorite-quotes view must exist",
+  );
+  const orders = [{
+    entityId: "1",
+    side: "sell",
+    regionId: "19",
+    itemType: "item",
+    itemId: "30",
+    price: "9007199254740995",
+  }, {
+    entityId: "2",
+    side: "sell",
+    regionId: "19",
+    itemType: "item",
+    itemId: "30",
+    price: "9007199254740993",
+  }, {
+    entityId: "3",
+    side: "buy",
+    regionId: "19",
+    itemType: "item",
+    itemId: "30",
+    price: "9007199254740994",
+  }, {
+    entityId: "4",
+    side: "sell",
+    regionId: "19",
+    itemType: "cargo",
+    itemId: "30",
+    price: "17",
+  }, {
+    entityId: "5",
+    side: "buy",
+    regionId: "19",
+    itemType: "cargo",
+    itemId: "30",
+    price: "15",
+  }, {
+    entityId: "6",
+    side: "buy",
+    regionId: "7",
+    itemType: "item",
+    itemId: "30",
+    price: "999999999999999999999",
+  }];
+  let orderReads = 0;
+  const liveSnapshot = {
+    get orders() {
+      orderReads += 1;
+      return orders;
+    },
+  };
+  const favorites = [
+    { itemType: "item", itemId: "30" },
+    { itemType: "cargo", itemId: "30" },
+    { itemType: "item", itemId: "9007199254740997" },
+  ];
+  const options = { generation: 123, regionId: "19", allowedRegionIds: ["7", "19"] };
+
+  const first = views.regionalMarketFavoriteQuotesView(liveSnapshot, favorites, options);
+  const second = views.regionalMarketFavoriteQuotesView(liveSnapshot, favorites, options);
+
+  assert.deepEqual(first, {
+    "item:30": { bestSell: "9007199254740993", bestBuy: "9007199254740994", sellCount: 2, buyCount: 1 },
+    "cargo:30": { bestSell: "17", bestBuy: "15", sellCount: 1, buyCount: 1 },
+    "item:9007199254740997": { bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 },
+  });
+  assert.deepEqual(second, first);
+  assert.equal(orderReads, 1, "a cache hit must not scan the snapshot again");
+});
+
+test("favorite quote cache is bounded and oversized indexes are returned without retention", () => {
+  assert.equal(typeof views.createRegionalMarketFavoriteQuotesView, "function");
+  const favorite = [{ itemType: "item", itemId: "30" }];
+  const bounded = views.createRegionalMarketFavoriteQuotesView({ maxEntries: 8, maxEstimatedBytes: 2 * 1024 * 1024 });
+  for (let generation = 1; generation <= 9; generation += 1) {
+    bounded({ orders: [] }, favorite, { generation, regionId: "all", allowedRegionIds: ["19"] });
+  }
+  assert.deepEqual(bounded.cacheStats(), {
+    entries: 8,
+    estimatedBytes: bounded.cacheStats().estimatedBytes,
+    maxEntries: 8,
+    maxEstimatedBytes: 2 * 1024 * 1024,
+  });
+  assert.ok(bounded.cacheStats().estimatedBytes <= 2 * 1024 * 1024);
+
+  let oversizedReads = 0;
+  const oversized = views.createRegionalMarketFavoriteQuotesView({ maxEntries: 8, maxEstimatedBytes: 1 });
+  const oversizedSnapshot = {
+    get orders() {
+      oversizedReads += 1;
+      return [{ side: "sell", regionId: "19", itemType: "item", itemId: "30", price: "11" }];
+    },
+  };
+  assert.equal(oversized(oversizedSnapshot, favorite, { generation: 1, regionId: "19", allowedRegionIds: ["19"] })["item:30"].bestSell, "11");
+  assert.equal(oversized(oversizedSnapshot, favorite, { generation: 1, regionId: "19", allowedRegionIds: ["19"] })["item:30"].bestSell, "11");
+  assert.equal(oversizedReads, 2, "an oversized index must not be retained");
+  assert.equal(oversized.cacheStats().entries, 0);
+  assert.equal(oversized.cacheStats().estimatedBytes, 0);
+});
+
+test("favorite quote cache rebuilds when generation or normalized region scope changes", () => {
+  const project = views.createRegionalMarketFavoriteQuotesView();
+  let orderReads = 0;
+  const liveSnapshot = {
+    get orders() {
+      orderReads += 1;
+      return [{ side: "sell", regionId: "19", itemType: "item", itemId: "30", price: "11" }];
+    },
+  };
+  const favorite = [{ itemType: "item", itemId: "30" }];
+  project(liveSnapshot, favorite, { generation: 1, regionId: "all", allowedRegionIds: ["19", "7"] });
+  project(liveSnapshot, favorite, { generation: 1, regionId: "all", allowedRegionIds: ["7", "19"] });
+  project(liveSnapshot, favorite, { generation: 2, regionId: "all", allowedRegionIds: ["7", "19"] });
+  project(liveSnapshot, favorite, { generation: 2, regionId: "19", allowedRegionIds: ["7", "19"] });
+  assert.equal(orderReads, 3, "equivalent scopes reuse while generation and selected-region changes rebuild");
+});
+
 test("regional market price quote derives exact live order statistics without sale history", () => {
   assert.equal(
     typeof views.regionalMarketPriceQuote,

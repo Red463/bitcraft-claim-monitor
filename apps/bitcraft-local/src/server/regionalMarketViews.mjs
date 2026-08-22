@@ -560,6 +560,107 @@ export function regionalMarketOrderBookView(snapshot, catalogRow, options = {}) 
   };
 }
 
+function favoriteQuoteScope(options = {}) {
+  const selectedRegion = String(options.regionId ?? "all").trim().toLowerCase() || "all";
+  const allowedRegionIds = regionIds(options.allowedRegionIds).sort(compareText);
+  return {
+    selectedRegion,
+    allowedRegionIds,
+    key: `${selectedRegion}:${allowedRegionIds.join(",")}`,
+  };
+}
+
+function emptyFavoriteQuote() {
+  return { bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 };
+}
+
+function estimateFavoriteQuoteIndexBytes(scopeKey, index) {
+  let bytes = Buffer.byteLength(scopeKey) + 16;
+  for (const [key, quote] of index) {
+    bytes += Buffer.byteLength(key)
+      + Buffer.byteLength(quote.bestSell ?? "")
+      + Buffer.byteLength(quote.bestBuy ?? "")
+      + 32;
+  }
+  return bytes;
+}
+
+export function createRegionalMarketFavoriteQuotesView({
+  maxEntries = 8,
+  maxEstimatedBytes = 2 * 1024 * 1024,
+} = {}) {
+  const entryLimit = Math.max(1, Math.floor(Number(maxEntries) || 8));
+  const byteLimit = Math.max(1, Math.floor(Number(maxEstimatedBytes) || (2 * 1024 * 1024)));
+  const cache = new Map();
+  let estimatedBytes = 0;
+
+  function buildIndex(snapshot, scope) {
+    const source = record(snapshot);
+    const allowed = new Set(scope.allowedRegionIds);
+    const index = new Map();
+    const orders = source.orders;
+    for (const rawOrder of Array.isArray(orders) ? orders : []) {
+      const order = record(rawOrder);
+      const regionId = decimal(order.regionId);
+      if ((allowed.size && !allowed.has(regionId))
+        || (scope.selectedRegion !== "all" && scope.selectedRegion !== regionId)) continue;
+      const key = `${itemType(order.itemType)}:${decimal(order.itemId)}`;
+      const quote = index.get(key) ?? emptyFavoriteQuote();
+      const price = decimal(order.price ?? order.priceThreshold);
+      if (String(order.side ?? "buy").toLowerCase() === "sell") {
+        quote.sellCount += 1;
+        if (quote.bestSell == null || compareBigInt(price, quote.bestSell) < 0) quote.bestSell = price;
+      } else {
+        quote.buyCount += 1;
+        if (quote.bestBuy == null || compareBigInt(price, quote.bestBuy) > 0) quote.bestBuy = price;
+      }
+      index.set(key, quote);
+    }
+    return index;
+  }
+
+  function view(snapshot, favorites, options = {}) {
+    const scope = favoriteQuoteScope(options);
+    const generation = String(options.generation ?? "").trim();
+    const cacheKey = generation ? `${generation}:${scope.key}` : null;
+    let index = cacheKey ? cache.get(cacheKey)?.index : null;
+    if (index && cacheKey) {
+      const entry = cache.get(cacheKey);
+      cache.delete(cacheKey);
+      cache.set(cacheKey, entry);
+    } else {
+      index = buildIndex(snapshot, scope);
+      if (cacheKey) {
+        const entryBytes = estimateFavoriteQuoteIndexBytes(scope.key, index);
+        if (entryBytes <= byteLimit) {
+          while (cache.size >= entryLimit || estimatedBytes + entryBytes > byteLimit) {
+            const oldestKey = cache.keys().next().value;
+            if (oldestKey == null) break;
+            estimatedBytes -= cache.get(oldestKey).estimatedBytes;
+            cache.delete(oldestKey);
+          }
+          cache.set(cacheKey, { index, estimatedBytes: entryBytes });
+          estimatedBytes += entryBytes;
+        }
+      }
+    }
+    return Object.fromEntries((Array.isArray(favorites) ? favorites : []).map((favorite) => {
+      const key = `${itemType(favorite?.itemType)}:${decimal(favorite?.itemId)}`;
+      return [key, index.get(key) ?? emptyFavoriteQuote()];
+    }));
+  }
+
+  view.cacheStats = () => ({
+    entries: cache.size,
+    estimatedBytes,
+    maxEntries: entryLimit,
+    maxEstimatedBytes: byteLimit,
+  });
+  return view;
+}
+
+export const regionalMarketFavoriteQuotesView = createRegionalMarketFavoriteQuotesView();
+
 function exactMedian(values) {
   const sorted = values
     .map(decimal)

@@ -186,3 +186,35 @@ export function marketFavoriteKeys(value: string | null): MarketItemKey[] {
     return [];
   }
 }
+
+export function marketFavoriteQuotesRequest(regionId: string, items: MarketItemKey[]) {
+  return {
+    url: "/api/local/market/favorite-quotes",
+    body: JSON.stringify({
+      regionId: String(regionId).trim() || "all",
+      items,
+    }),
+  };
+}
+
+export function marketFavoriteQuoteRows(items: MarketItemKey[], payload: AnyRecord): AnyRecord[] {
+  const quotes = payload?.quotes && typeof payload.quotes === "object" && !Array.isArray(payload.quotes)
+    ? payload.quotes as AnyRecord
+    : {};
+  return items.map((favorite) => {
+    const quote = quotes[`${favorite.itemType}:${favorite.itemId}`];
+    const bestSell = quote?.bestSell == null ? null : decimalInteger(quote.bestSell);
+    const bestBuy = quote?.bestBuy == null ? null : decimalInteger(quote.bestBuy);
+    const sellCount = Math.max(0, Math.floor(Number(quote?.sellCount) || 0));
+    const buyCount = Math.max(0, Math.floor(Number(quote?.buyCount) || 0));
+    return {
+      ...favorite,
+      itemName: `${favorite.itemType === "cargo" ? "Cargo" : "Item"} ${favorite.itemId}`,
+      bestSell,
+      bestBuy,
+      sellCount,
+      buyCount,
+      currentOrderCount: sellCount + buyCount,
+    };
+  });
+}

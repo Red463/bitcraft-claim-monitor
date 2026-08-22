@@ -7,7 +7,7 @@ import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
 import type { AnyRecord } from "../../main-app-data";
 import { formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
 import type { MarketItemKey, MarketRefreshProps } from "./globalMarket";
-import { marketFreshnessNotice } from "./globalMarket";
+import { marketFavoriteQuoteRows, marketFavoriteQuotesRequest, marketFreshnessNotice } from "./globalMarket";
 
 type Props = MarketRefreshProps & {
   claimId: string;
@@ -28,15 +28,6 @@ function itemShape(row: AnyRecord) {
     name: row.itemName ?? row.name,
     itemType: row.itemType === "cargo" ? 1 : row.itemType,
   };
-}
-
-function bestPrice(rows: AnyRecord[], direction: "low" | "high"): string | null {
-  return rows.reduce<string | null>((best, row) => {
-    const price = String(row.price ?? row.priceThreshold ?? row.unitPrice ?? "0");
-    if (best == null) return price;
-    if (direction === "low") return decimalBigInt(price) < decimalBigInt(best) ? price : best;
-    return decimalBigInt(price) > decimalBigInt(best) ? price : best;
-  }, null);
 }
 
 export function MarketOverview({
@@ -86,34 +77,24 @@ export function MarketOverview({
 
   React.useEffect(() => {
     const controller = new AbortController();
-    trackRefresh("global-market-favorites", Promise.all(favorites.slice(0, 20).map(async (favorite) => {
-      const search = new URLSearchParams({
-        claimId,
-        regionId: regionId || "all",
-        itemType: favorite.itemType,
-        itemId: favorite.itemId,
-      });
-      const response = await fetch(`/api/local/market/order-book?${search}`, {
-        headers: refreshHeaders,
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`favorite order book HTTP ${response.status}`);
-      const detail = await response.json();
-      const sells = Array.isArray(detail.sellOrders) ? detail.sellOrders : [];
-      const buys = Array.isArray(detail.buyOrders) ? detail.buyOrders : [];
-      return {
-        ...favorite,
-        ...(detail.item ?? {}),
-        itemName: detail.item?.name ?? `Item ${favorite.itemId}`,
-        bestSell: bestPrice(sells, "low"),
-        bestBuy: bestPrice(buys, "high"),
-        currentQuantity: [...sells, ...buys]
-          .reduce((total, order) => total + decimalBigInt(order.quantity), 0n)
-          .toString(),
-      };
-    })))
-      .then((rows) => {
-        if (!controller.signal.aborted) setFavoriteRows(rows);
+    const selectedFavorites = favorites.slice(0, 20);
+    const request = marketFavoriteQuotesRequest(regionId || "all", selectedFavorites);
+    trackRefresh("global-market-favorites", fetch(request.url, {
+      method: "POST",
+      headers: {
+        ...refreshHeaders,
+        "content-type": "application/json",
+      },
+      body: request.body,
+      signal: controller.signal,
+    }).then((response) => {
+      if (!response.ok) throw new Error(`favorite quotes HTTP ${response.status}`);
+      return response.json();
+    }))
+      .then((payload) => {
+        if (!controller.signal.aborted) {
+          setFavoriteRows(marketFavoriteQuoteRows(selectedFavorites, payload));
+        }
       })
       .catch(() => {});
     return () => controller.abort();
@@ -145,7 +126,7 @@ export function MarketOverview({
           const spread = row.bestSell != null && row.bestBuy != null
             ? (decimalBigInt(row.bestSell) - decimalBigInt(row.bestBuy)).toString()
             : null;
-          return <button key={`${row.itemType}:${row.itemId}`} onClick={() => onOpenItem(itemShape(row))}><ItemLabel item={itemShape(row)} /><span>Sell <b>{row.bestSell == null ? "—" : formatGoldAmount(row.bestSell)}</b></span><span>Buy <b>{row.bestBuy == null ? "—" : formatGoldAmount(row.bestBuy)}</b></span><span>Spread <b>{spread == null ? "—" : formatGoldAmount(spread)}</b></span><small>{formatNumber(row.currentQuantity)} units in current orders</small></button>;
+          return <button key={`${row.itemType}:${row.itemId}`} onClick={() => onOpenItem(itemShape(row))}><ItemLabel item={itemShape(row)} /><span>Sell <b>{row.bestSell == null ? "—" : formatGoldAmount(row.bestSell)}</b></span><span>Buy <b>{row.bestBuy == null ? "—" : formatGoldAmount(row.bestBuy)}</b></span><span>Spread <b>{spread == null ? "—" : formatGoldAmount(spread)}</b></span><small>{formatNumber(row.currentOrderCount)} current orders</small></button>;
         })}</div> : <div className="empty-state compact"><Star size={22} /><span>Star items in Browse and their current Relay order books will appear here.</span></div>}
       </section>
       <div className="market-overview-grid">

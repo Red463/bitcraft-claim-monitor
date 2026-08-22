@@ -1305,6 +1305,60 @@ test("server collection paginates listings and protects production mutations", a
   assert.deepEqual(marketOrderBook.buyOrders.map((order) => order.entityId), ["3001"]);
   assert.equal(marketOrderBook.sellOrders[0].price, "15");
   assert.equal(marketOrderBook.item.name, "Leather");
+  const favoriteQuoteResponse = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      regionId: "19",
+      items: [
+        { itemType: "item", itemId: "30" },
+        { itemType: "cargo", itemId: "30" },
+        { itemType: "item", itemId: "9007199254740993" },
+      ],
+    }),
+  });
+  assert.equal(favoriteQuoteResponse.status, 200, "read-only favorite quotes do not require CSRF");
+  const favoriteQuotePayload = await favoriteQuoteResponse.json();
+  assert.equal(favoriteQuotePayload.generation, 99);
+  assert.equal(favoriteQuotePayload.freshness, "stale");
+  assert.deepEqual(favoriteQuotePayload.quotes, {
+    "item:30": { bestSell: "15", bestBuy: "20", sellCount: 1, buyCount: 1 },
+    "cargo:30": { bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 },
+    "item:9007199254740993": { bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 },
+  });
+  const favoriteQuoteRefreshes = await Promise.all(Array.from({ length: 8 }, () => fetch(
+    `${origin}/api/local/market/favorite-quotes`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ regionId: "19", items: [{ itemType: "item", itemId: "30" }] }),
+    },
+  )));
+  assert.equal(favoriteQuoteRefreshes.every((response) => response.status === 200), true);
+  const duplicateFavoriteQuote = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ regionId: "19", items: [{ itemType: "item", itemId: "30" }, { itemType: "item", itemId: "30" }] }),
+  });
+  assert.equal(duplicateFavoriteQuote.status, 400);
+  const tooManyFavoriteQuotes = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ regionId: "19", items: Array.from({ length: 21 }, (_, index) => ({ itemType: "item", itemId: String(index + 1) })) }),
+  });
+  assert.equal(tooManyFavoriteQuotes.status, 400);
+  const invalidFavoriteQuote = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ regionId: "not-a-region", items: [{ itemType: "other", itemId: "30" }] }),
+  });
+  assert.equal(invalidFavoriteQuote.status, 400);
+  const oversizedFavoriteQuote = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ regionId: "19", items: [], padding: "x".repeat(17 * 1024) }),
+  });
+  assert.equal(oversizedFavoriteQuote.status, 413);
   const reportOnlyOrderBooks = await Promise.all(Array.from({ length: 26 }, () => fetch(
     `${origin}/api/local/market/order-book?claimId=${claimId}&regionId=19&itemType=item&itemId=30`,
     { headers: { "x-manual-refresh-id": "normal-browser-refresh" } },
@@ -2239,14 +2293,20 @@ test("server collection paginates listings and protects production mutations", a
   const routeHealth = await routeHealthResponse.json();
   const routePerformance = routeHealth.application.routePerformance;
   const orderBookPerformance = routePerformance.routes.find((route) => route.path === "/api/local/market/order-book");
+  const favoriteQuotesPerformance = routePerformance.routes.find((route) => route.path === "/api/local/market/favorite-quotes");
   const gameDataPerformance = routePerformance.routes.find((route) => route.path === "/api/local/game-data");
   assert.ok(orderBookPerformance.sampleCount >= 26);
   assert.ok(orderBookPerformance.responseBytes.p99 > 0);
   assert.equal(orderBookPerformance.status429, 0);
+  assert.ok(favoriteQuotesPerformance.sampleCount >= 13);
+  assert.ok(favoriteQuotesPerformance.responseBytes.p99 > 0);
+  assert.ok(favoriteQuotesPerformance.projectionMs.p99 >= 0);
+  assert.equal(favoriteQuotesPerformance.status429, 0);
   assert.ok(gameDataPerformance.sampleCount >= 13);
   assert.ok(gameDataPerformance.responseBytes.p99 > 0);
   assert.equal(gameDataPerformance.status429, 0);
   assert.deepEqual(routePerformance.rateLimits.orderBookRead, { reportOnly: true, wouldLimit: 2 });
+  assert.deepEqual(routePerformance.rateLimits.favoriteQuotesRead, { reportOnly: true, wouldLimit: 5 });
   assert.deepEqual(routePerformance.rateLimits.gameDataRead, { reportOnly: true, wouldLimit: 1 });
   assert.deepEqual(routePerformance.gates.gameData, { active: 0, queued: 0, rejected: 0, maxConcurrent: 8, maxQueued: 16 });
   assert.deepEqual(routePerformance.gates.market, { active: 0, queued: 0, rejected: 0, maxConcurrent: 8, maxQueued: 16 });
