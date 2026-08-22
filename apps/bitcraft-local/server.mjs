@@ -88,6 +88,7 @@ import {
   canonicalCutoverDiscordDelivery,
 } from "./src/server/canonicalCutoverAnnouncement.mjs";
 import { completeDiscordOutboxFailure, createDiscordOutboxLeaser } from "./src/server/discordOutboxLease.mjs";
+import { fetchDiscordWithLease } from "./src/server/discordRequestLease.mjs";
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import {
@@ -4166,7 +4167,6 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
               id: row.id,
               leaseToken: row.leaseToken,
               leaseMs: discordNotificationLeaseMs,
-              at: new Date().toISOString(),
             });
           },
         };
@@ -4241,18 +4241,11 @@ function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata 
   }).catch((error) => console.warn(`Discord notification enqueue failed: ${error instanceof Error ? error.message : String(error)}`));
 }
 
-function requireDiscordDeliveryLease(deliveryLease) {
-  if (deliveryLease && !deliveryLease.beforeRequest()) {
-    throw new Error("Discord outbox lease ownership was lost before network delivery");
-  }
-}
-
 async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId, deliveryLease = null) {
   if (!settings.enabled || !settings.botToken || !channelId) throw new Error("Discord integration is not fully configured");
   if (configuredDiscordDeliveryMode === "record") return recordedDiscordResponse(channelId, payload);
   assertDiscordNetworkEnabled();
-  requireDiscordDeliveryLease(deliveryLease);
-  const response = await fetch(`${discordApiOrigin}/channels/${encodeURIComponent(channelId)}/messages`, {
+  const response = await fetchDiscordWithLease(`${discordApiOrigin}/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     signal: AbortSignal.timeout(discordRequestTimeoutMs),
     headers: {
@@ -4260,7 +4253,7 @@ async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), c
       "content-type": "application/json",
     },
     body: JSON.stringify(payload),
-  });
+  }, { deliveryLease });
   if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
   return response.json();
 }
@@ -4358,15 +4351,14 @@ async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
 async function discordApiRequest(pathname, options = {}, settings = getDiscordSettingsRaw(), deliveryLease = null) {
   assertDiscordNetworkEnabled();
   if (!settings.botToken) throw new Error("Discord bot token is not configured");
-  requireDiscordDeliveryLease(deliveryLease);
-  const response = await fetch(`${discordApiOrigin}${pathname}`, {
+  const response = await fetchDiscordWithLease(`${discordApiOrigin}${pathname}`, {
     ...options,
     signal: options.signal ?? AbortSignal.timeout(discordRequestTimeoutMs),
     headers: {
       authorization: `Bot ${settings.botToken}`,
       ...(options.headers ?? {}),
     },
-  });
+  }, { deliveryLease });
   if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
   if (response.status === 204) return null;
   const text = await response.text();

@@ -163,19 +163,32 @@ export function createDiscordOutboxLeaser(db, {
     },
 
     renewLease({ id, leaseToken, leaseMs: requestedLeaseMs, at }) {
-      const renewedAt = timestamp(at, "Discord outbox renewal time");
       const requestedDurationMs = Number(requestedLeaseMs);
       if (!Number.isFinite(requestedDurationMs) || requestedDurationMs <= 0) {
         throw new TypeError("Discord outbox renewal leaseMs must be a positive number");
       }
-      const expiresAt = new Date(Date.parse(renewedAt) + requestedDurationMs).toISOString();
-      return changed(renewClaim.run(
-        expiresAt,
-        renewedAt,
-        id,
-        String(leaseToken ?? ""),
-        renewedAt,
-      ));
+      let transactionOpen = false;
+      try {
+        db.exec("BEGIN IMMEDIATE");
+        transactionOpen = true;
+        const postLockNow = timestamp(now(), "Discord outbox renewal time");
+        const requestedAt = at == null ? postLockNow : timestamp(at, "Discord outbox requested renewal time");
+        const renewedAt = Date.parse(requestedAt) > Date.parse(postLockNow) ? requestedAt : postLockNow;
+        const expiresAt = new Date(Date.parse(renewedAt) + requestedDurationMs).toISOString();
+        const renewed = changed(renewClaim.run(
+          expiresAt,
+          renewedAt,
+          id,
+          String(leaseToken ?? ""),
+          renewedAt,
+        ));
+        db.exec("COMMIT");
+        transactionOpen = false;
+        return renewed;
+      } catch (error) {
+        if (transactionOpen) db.exec("ROLLBACK");
+        throw error;
+      }
     },
 
     markSkipped({ id, leaseToken, reason, finishedAt }) {

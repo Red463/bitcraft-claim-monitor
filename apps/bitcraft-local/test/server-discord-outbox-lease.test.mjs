@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { Worker } from "node:worker_threads";
 
 import {
   completeDiscordOutboxFailure,
@@ -28,7 +29,51 @@ function fixture(t) {
     secondDb.close();
     rmSync(directory, { recursive: true, force: true });
   });
-  return { firstDb, secondDb };
+  return { databasePath, firstDb, secondDb };
+}
+
+function writerLock(databasePath, clock, postLockClockMs, holdMs = 150) {
+  const controlBuffer = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
+  const control = new Int32Array(controlBuffer);
+  const worker = new Worker(`
+    const { parentPort, workerData } = require("node:worker_threads");
+    const { DatabaseSync } = require("node:sqlite");
+    const control = new Int32Array(workerData.controlBuffer);
+    const clock = new Int32Array(workerData.clockBuffer);
+    const db = new DatabaseSync(workerData.databasePath, { timeout: 5000 });
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      Atomics.store(clock, 0, workerData.postLockClockMs);
+      Atomics.store(control, 0, 1);
+      Atomics.notify(control, 0);
+      Atomics.wait(control, 0, 1, workerData.holdMs);
+      db.exec("COMMIT");
+      db.close();
+      parentPort.postMessage({ ok: true });
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch {}
+      db.close();
+      Atomics.store(control, 0, -1);
+      Atomics.notify(control, 0);
+      parentPort.postMessage({ ok: false, error: error.message });
+    }
+  `, {
+    eval: true,
+    workerData: {
+      databasePath,
+      controlBuffer,
+      clockBuffer: clock.buffer,
+      postLockClockMs,
+      holdMs,
+    },
+  });
+  const done = new Promise((resolve, reject) => {
+    worker.once("message", (message) => message.ok ? resolve() : reject(new Error(message.error)));
+    worker.once("error", reject);
+  });
+  assert.ok(["ok", "not-equal"].includes(Atomics.wait(control, 0, 0, 5_000)));
+  assert.equal(Atomics.load(control, 0), 1);
+  return done;
 }
 
 function enqueue(db, {
@@ -323,6 +368,78 @@ test("a slow multi-recipient delivery renews before every network step and canno
     at: clock,
   }), false);
   assert.equal(firstDb.prepare("SELECT lease_expires_at FROM discord_notification_outbox WHERE id = ?").get(claim.id).lease_expires_at, "2026-08-22T09:01:04.600Z");
+});
+
+test("renewal samples time only after acquiring the writer lock and installs a full lease", async (t) => {
+  const { databasePath, firstDb, secondDb } = fixture(t);
+  enqueue(firstDb, { sourceKey: "writer-lock-success" });
+  const epoch = Date.parse("2026-08-22T09:01:00.000Z");
+  const clock = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  const now = () => new Date(epoch + Atomics.load(clock, 0));
+  const owner = createDiscordOutboxLeaser(firstDb, { workerId: "worker-a", leaseMs: 1_000, now });
+  const competitor = createDiscordOutboxLeaser(secondDb, { workerId: "worker-b", leaseMs: 1_000, now });
+  const claim = owner.claimNext({ maxAttempts: 8 });
+  Atomics.store(clock, 0, 100);
+  const lockReleased = writerLock(databasePath, clock, 900);
+
+  assert.equal(owner.renewLease({
+    id: claim.id,
+    leaseToken: claim.leaseToken,
+    leaseMs: 1_000,
+    at: "2026-08-22T09:01:00.100Z",
+  }), true);
+  await lockReleased;
+  assert.equal(firstDb.prepare("SELECT lease_expires_at FROM discord_notification_outbox WHERE id = ?").get(claim.id).lease_expires_at, "2026-08-22T09:01:01.900Z");
+  assert.equal(competitor.recoverExpiredLeases("2026-08-22T09:01:01.100Z").recovered, 0);
+});
+
+test("renewal rejects ownership expired while waiting for the writer lock", async (t) => {
+  const { databasePath, firstDb } = fixture(t);
+  enqueue(firstDb, { sourceKey: "writer-lock-expired" });
+  const epoch = Date.parse("2026-08-22T09:01:00.000Z");
+  const clock = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  const owner = createDiscordOutboxLeaser(firstDb, {
+    workerId: "worker-a",
+    leaseMs: 1_000,
+    now: () => new Date(epoch + Atomics.load(clock, 0)),
+  });
+  const claim = owner.claimNext({ maxAttempts: 8 });
+  Atomics.store(clock, 0, 100);
+  const lockReleased = writerLock(databasePath, clock, 1_100);
+
+  assert.equal(owner.renewLease({
+    id: claim.id,
+    leaseToken: claim.leaseToken,
+    leaseMs: 1_000,
+    at: "2026-08-22T09:01:00.100Z",
+  }), false);
+  await lockReleased;
+  assert.equal(firstDb.prepare("SELECT lease_expires_at FROM discord_notification_outbox WHERE id = ?").get(claim.id).lease_expires_at, "2026-08-22T09:01:01.000Z");
+});
+
+test("renewal rolls back its writer transaction when the post-lock clock fails", (t) => {
+  const { firstDb, secondDb } = fixture(t);
+  enqueue(firstDb, { sourceKey: "renewal-clock-error" });
+  let failClock = false;
+  const owner = createDiscordOutboxLeaser(firstDb, {
+    workerId: "worker-a",
+    leaseMs: 1_000,
+    now() {
+      if (failClock) throw new Error("clock failed");
+      return new Date("2026-08-22T09:01:00.000Z");
+    },
+  });
+  const claim = owner.claimNext({ maxAttempts: 8 });
+  failClock = true;
+  assert.throws(() => owner.renewLease({
+    id: claim.id,
+    leaseToken: claim.leaseToken,
+    leaseMs: 1_000,
+  }), /clock failed/);
+  assert.doesNotThrow(() => {
+    secondDb.exec("BEGIN IMMEDIATE");
+    secondDb.exec("ROLLBACK");
+  });
 });
 
 test("a stale failure cannot overwrite a craft occurrence completed by the replacement owner", (t) => {

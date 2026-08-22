@@ -183,3 +183,68 @@ The three skips remain environment-specific Windows skips. No test sent a real D
 ### Updated delivery-semantics caveat
 
 Delivery remains deliberately **at-least-once**, not exactly-once. Conditional renewal prevents a legitimate multi-request fan-out from losing its lease simply because the full attempt is longer than one request. It cannot make SQLite and Discord one atomic system: if Discord accepts a request and the worker loses the response or stops before its token-conditioned completion, recovery may retry and duplicate that request. The recovery errors and health aggregates expose this risk. Canonical cutover announcements continue to suppress automatic retry when their outcome is unknown.
+
+## Reviewer fix round 2 (2026-08-22)
+
+### RED evidence
+
+Production code was unchanged for this round when the writer-lock and behavioral request-guard tests first ran:
+
+```text
+corepack pnpm --filter @workspace/bitcraft-local exec node --experimental-strip-types --test test/server-discord-outbox-lease.test.mjs test/server-discord-request-lease.test.mjs test/server-notification-outbox-boundary.test.mjs
+
+tests 17, pass 12, fail 5
+```
+
+The lock-contention witness held a SQLite writer lock from a worker-thread connection while advancing a shared fake clock. The old renewal installed `2026-08-22T09:01:01.100Z`, derived from the stale pre-lock instant, instead of the required full lease through `2026-08-22T09:01:01.900Z`. A second witness showed renewal incorrectly returned `true` after ownership had expired during the writer-lock wait. The rollback witness could not reach the injected post-lock clock because renewal had no transaction. The behavioral request-helper test failed because the server-used seam did not exist, and its boundary wiring test was also RED.
+
+### GREEN implementation
+
+- `renewLease({ id, leaseToken, leaseMs, at })` now validates duration, acquires `BEGIN IMMEDIATE`, and only then samples the injected clock. A supplied `at` can move the effective instant forward but can never make it earlier than the post-lock clock sample.
+- The same transaction conditionally updates only the current token on a still-`sending` lease whose expiry is strictly later than that post-lock instant. A lease that expires while waiting for the writer lock is rejected.
+- A successful renewal installs the complete requested `leaseMs` from the effective post-lock instant and commits. Every error after the transaction opens rolls back; a second connection immediately acquiring `BEGIN IMMEDIATE` proves the lock is released.
+- Added `fetchDiscordWithLease`, a small injected request seam used by both server Discord fetch sites. It evaluates the delivery lease before invoking `fetch` and throws on lost ownership.
+- The behavioral local-origin test permits the first recipient's two requests, makes the next renewal fail, and proves the second recipient's request and the rest of the fan-out never reach the fake origin.
+
+### Verification evidence
+
+Focused Task 4 gate, including two-connection writer contention, the behavioral fake-origin request test, storage diagnostics, and existing fake Discord sandbox integration:
+
+```text
+corepack pnpm --filter @workspace/bitcraft-local exec node --experimental-strip-types --test test/server-discord-outbox-lease.test.mjs test/server-discord-request-lease.test.mjs test/server-discord-outbox-storage.test.mjs test/server-discord-sandbox-integration.test.mjs test/server-notification-outbox-boundary.test.mjs test/server-prepared-statements.test.mjs
+
+tests 24, pass 24, fail 0
+```
+
+Production build:
+
+```text
+corepack pnpm --filter @workspace/bitcraft-local run build
+
+exit 0
+```
+
+Single fresh full-suite run:
+
+```text
+corepack pnpm --filter @workspace/bitcraft-local test
+
+tests 2418, pass 2415, fail 0, skipped 3
+```
+
+The three skips remain environment-specific Windows skips. All Discord request behavior was tested against loopback fake origins or record mode; no real Discord destination was contacted.
+
+### Fix-round self-review
+
+- Confirmed the authoritative renewal time is sampled only after SQLite grants the writer transaction.
+- Confirmed stale caller-supplied time cannot shorten the post-lock lease interval.
+- Confirmed the unexpired predicate uses the same post-lock effective instant used to calculate the new expiry.
+- Confirmed renewal retains id, unique token, and `sending` status ownership predicates and never changes attempts.
+- Confirmed both success and false-result paths commit their short transaction, while thrown clock/update errors roll back.
+- Confirmed both actual server Discord fetch sites use the behaviorally tested guard seam and pass the same fan-out lease through both requests per DM.
+- Confirmed failed renewal throws before fetch, so no subsequent recipient request or dependent outbox completion work proceeds under lost ownership.
+- Confirmed no schema changes, secrets, Relay behavior, controller documents, real Discord traffic, changelog, or version changes were introduced.
+
+### Delivery-semantics caveat
+
+This remains **at-least-once**, never exactly-once. Post-lock time sampling and renewal remove a local lock-wait race; they do not create a distributed transaction with Discord. Discord may accept a request immediately before a response is lost or the worker stops, and expiry recovery may then retry it. Duplicate-risk diagnostics continue to expose that possibility, while canonical cutover unknown outcomes remain terminally suppressed.

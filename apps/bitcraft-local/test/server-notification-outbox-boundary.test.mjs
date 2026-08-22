@@ -51,4 +51,6 @@ test("Discord outbox renews ownership before each network request and gates fail
   assert.match(server, /sendDiscordMessage\(payload, settings, channel\.id, deliveryLease\)/);
   assert.match(server, /completeDiscordOutboxFailure\(\{[\s\S]*?afterCompletion\(\)/);
   assert.match(server, /if \(completed\) \{[\s\S]*?skipped \+= 1[\s\S]*?failed \+= 1/);
+  assert.match(server, /fetchDiscordWithLease\(/);
+  assert.equal(server.match(/await fetchDiscordWithLease\(/g)?.length, 2);
 });
