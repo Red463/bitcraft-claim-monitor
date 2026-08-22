@@ -1,4 +1,9 @@
 import type { AnyRecord } from "../main-app-data";
+import type {
+  DomainKey,
+  DomainStatus,
+  GameDataResponseMeta,
+} from "../server/game-data/contracts";
 
 export type ActivePanel =
   | "dashboard"
@@ -21,7 +26,17 @@ export type ActivePanel =
   | "activity"
   | "admin";
 
-export type LoadState<T> = { data: T | null; error: string | null; loading: boolean; scopeKey?: string; updatedAt?: string | null; cacheState?: string | null; stale?: boolean };
+export type LoadState<T> = {
+  data: T | null;
+  error: string | null;
+  loading: boolean;
+  scopeKey?: string;
+  updatedAt?: string | null;
+  cacheState?: string | null;
+  stale?: boolean;
+  domainStatus?: Partial<Record<DomainKey, DomainStatus>>;
+  responseMeta?: GameDataResponseMeta | null;
+};
 
 export type LocalHistoryState = {
   market: AnyRecord | null;

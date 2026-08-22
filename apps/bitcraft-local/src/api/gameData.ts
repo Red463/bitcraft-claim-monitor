@@ -2,6 +2,8 @@ import type { AnyRecord } from "../main-app-data.ts";
 import type {
   DomainEnvelope,
   DomainKey,
+  DomainStatus,
+  GameDataResponseMeta,
 } from "../server/game-data/contracts.ts";
 export { pageDomains, usesProviderNeutralGameData } from "./pageDomains.ts";
 
@@ -10,6 +12,8 @@ type GameDataResponse = {
   regionId: string;
   generatedAt: string;
   domains: Partial<Record<DomainKey, DomainEnvelope<unknown>>>;
+  domainStatus: Partial<Record<DomainKey, DomainStatus>>;
+  meta: GameDataResponseMeta;
   partialErrors: string[];
 };
 
@@ -32,13 +36,21 @@ export async function loadGameData(
     claimId: payload.claimId,
     regionId: payload.regionId,
     partialErrors: payload.partialErrors,
+    domainStatus: payload.domainStatus ?? {},
+    responseMeta: payload.meta ?? null,
   };
-  let stale = false;
+  const requestedStatuses = domains.flatMap((domain) => {
+    const status = payload.domainStatus?.[domain];
+    return status ? [status] : [];
+  });
+  let stale = requestedStatuses.some((status) => (
+    status.generation != null && status.freshness === "stale"
+  ));
   let oldestReceivedAt = payload.generatedAt;
   for (const [domain, envelope] of Object.entries(payload.domains)) {
     if (!envelope) continue;
     flattened[domain] = envelope.data;
-    stale ||= envelope.freshness === "stale" || envelope.freshness === "unavailable";
+    if (!requestedStatuses.length) stale ||= envelope.freshness === "stale";
     const receivedAt = envelope.provenance?.receivedAt;
     if (receivedAt && Date.parse(receivedAt) < Date.parse(oldestReceivedAt)) oldestReceivedAt = receivedAt;
   }

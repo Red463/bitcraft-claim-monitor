@@ -29,7 +29,12 @@ import { useGameData } from "./api/gameDataLoader";
 import { gameDataScopeKey } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
 import { pageDomains } from "./api/pageDomains";
-import { pageGameDataWarnings, staleDataWarning } from "./api/pageGameDataWarnings";
+import {
+  gameDataQualitySummaries,
+  groupDomainWarnings,
+  pageGameDataWarnings,
+  staleDataWarning,
+} from "./api/pageGameDataWarnings";
 import { ApiErrorState, AppSkeleton, RefreshStatus, type ApiStatusDiagnostics } from "./components/main/AppChrome";
 import { RouteLoadingState } from "./components/main/RouteLoadingState";
 import { CommandPalette } from "./components/main/CommandPalette";
@@ -63,6 +68,7 @@ import { getTrackedOwnerName } from "./utils/ownership";
 import { normalizeData } from "./utils/normalize";
 import { urlMapFocus } from "./utils/mapFocus";
 import type { ActivePanel, LoadState } from "./types/app";
+import type { DomainKey, DomainStatus, GameDataResponseMeta } from "./server/game-data/contracts";
 import type { AppSettings, AppUser, UserAuthState, UserToastSettings } from "./types/settings";
 import type { MapFocus } from "./pages/map/mapUtils";
 import { accountPlayerMarkerColourOverrides, normalizePlayerMarkerColourOverrides, withPlayerMarkerColourOverride } from "./map/playerMarkerColours.mjs";
@@ -156,6 +162,61 @@ class RouteErrorBoundary extends React.Component<{ routeKey: string; children: R
 
 function hasProductionPayload(raw: AnyRecord | null): boolean {
   return Boolean(raw && Object.prototype.hasOwnProperty.call(raw, "crafts"));
+}
+
+function GameDataQualityNotice({
+  activePanel,
+  domainStatus,
+  responseMeta,
+}: {
+  activePanel: ActivePanel;
+  domainStatus: Partial<Record<DomainKey, DomainStatus>>;
+  responseMeta: GameDataResponseMeta | null;
+}) {
+  const summaries = gameDataQualitySummaries(activePanel, domainStatus);
+  const warningGroups = groupDomainWarnings(domainStatus);
+  const coherenceIssue = responseMeta?.coherence === "mixed"
+    ? "Mixed local generations"
+    : responseMeta?.coherence === "unavailable" && summaries.length === 0
+      ? "Requested data unavailable"
+      : null;
+  const concise = [...(coherenceIssue ? [coherenceIssue] : []), ...summaries];
+  if (!concise.length) return null;
+  return (
+    <section className="game-data-quality" aria-label="Game data quality">
+      <strong role="status">{concise.join("; ")}</strong>
+      <details>
+        <summary>Warning and provenance details</summary>
+        <p>
+          Local coherence: <strong>{responseMeta?.coherence ?? "unknown"}</strong>
+          {responseMeta?.availableGenerations?.length
+            ? ` (generations ${responseMeta.availableGenerations.join(", ")})`
+            : ""}. Coherence compares local application generations and declared enrichment dependencies only; source receive times remain authoritative.
+        </p>
+        <div className="game-data-provenance-list">
+          {(Object.entries(domainStatus) as Array<[DomainKey, DomainStatus]>).map(([domain, status]) => (
+            <div key={domain}>
+              <strong>{domain}</strong>
+              <span>{status.freshness} · generation {status.generation ?? "unavailable"}</span>
+              <small>{status.provenance
+                ? `${status.provenance.sourceKey} received ${status.provenance.receivedAt}`
+                : "No source provenance available"}</small>
+              {Object.keys(status.dependencies).length ? <small>Dependencies: {Object.entries(status.dependencies).map(([name, dependency]) => (
+                `${name} generation ${dependency?.generation ?? "unavailable"} (${dependency?.sourceKey ?? "unknown"}, ${dependency?.receivedAt ?? "unknown"})`
+              )).join("; ")}</small> : null}
+            </div>
+          ))}
+        </div>
+        {warningGroups.length ? <div className="game-data-warning-groups">
+          <strong>Grouped warnings</strong>
+          {warningGroups.map((group) => <div key={group.key}>
+            <span>{group.domain}: {group.message} <b>×{group.count}</b></span>
+            {group.examples.length ? <ul>{group.examples.map((example) => <li key={example}>{example}</li>)}</ul> : null}
+          </div>)}
+        </div> : null}
+      </details>
+    </section>
+  );
 }
 
 function useScopedGameData(
@@ -1073,6 +1134,11 @@ function DashboardApp() {
         <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{routeStatus}</p>
         <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{manualRefreshStatusText}</p>
         <div className={`page-refresh-line ${visibleRefreshProgress ? "is-visible" : ""}`} aria-hidden="true" />
+        <GameDataQualityNotice
+          activePanel={active}
+          domainStatus={state.domainStatus ?? {}}
+          responseMeta={state.responseMeta ?? null}
+        />
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? (
           <>
             <ApiErrorState message={state.error} />

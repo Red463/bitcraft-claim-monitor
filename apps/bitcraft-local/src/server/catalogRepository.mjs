@@ -436,6 +436,14 @@ export function createProviderCatalogRepository(db) {
     getSourceState() {
       return mapSourceState(statements.getSourceState.get(SOURCE_KEY));
     },
+    getRevision() {
+      const source = mapSourceState(statements.getSourceState.get(SOURCE_KEY));
+      return source ? {
+        generation: source.generation,
+        sourceKey: SOURCE_KEY,
+        receivedAt: source.receivedAt,
+      } : null;
+    },
     listDescriptions(kind) {
       return statements.listDescriptions.all(String(kind ?? ""))
         .map((row) => JSON.parse(String(row.data_json)));

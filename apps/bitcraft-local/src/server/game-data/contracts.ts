@@ -60,6 +60,34 @@ export type DomainEnvelope<T> = {
   warnings: string[];
 };
 
+export type GenerationDependency = {
+  generation: number;
+  sourceKey: string;
+  receivedAt: string;
+};
+
+export type DomainDependencies = Partial<Record<
+  "catalog" | "inventory-banks" | "public-crafts",
+  GenerationDependency
+>>;
+
+export type DomainStatus = {
+  generation: number | null;
+  freshness: Freshness;
+  confidence: Confidence;
+  ageMs: number | null;
+  warnings: string[];
+  provenance: Provenance | null;
+  dependencies: DomainDependencies;
+};
+
+export type GameDataResponseMeta = {
+  coherence: "coherent" | "mixed" | "unavailable";
+  availableGenerations: number[];
+  newestGeneration: number | null;
+  oldestGeneration: number | null;
+};
+
 export type PendingDomainSnapshot<T = unknown> = {
   data: T;
   confidence: Confidence;

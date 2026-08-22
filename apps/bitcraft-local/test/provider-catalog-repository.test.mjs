@@ -58,6 +58,11 @@ test("provider catalog snapshot atomically preserves item/cargo identity and rem
     receivedAt: "2026-07-29T20:05:00.000Z",
     rowCount: 2,
   });
+  assert.deepEqual(repository.getRevision(), {
+    generation: 8,
+    sourceKey: "global",
+    receivedAt: "2026-07-29T20:05:00.000Z",
+  });
   assert.deepEqual(
     repository.searchEntities("timber", 10).map((row) => row.catalogKey).sort(),
     ["cargo:42", "items:42"],

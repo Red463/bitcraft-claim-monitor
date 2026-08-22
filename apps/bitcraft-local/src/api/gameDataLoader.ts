@@ -43,6 +43,19 @@ function stateFreshness(freshness?: Partial<PageFreshness>): Partial<PageFreshne
   };
 }
 
+function qualityState(data: unknown): Pick<LoadState<unknown>, "domainStatus" | "responseMeta"> {
+  if (!data || typeof data !== "object") return {};
+  const payload = data as AnyRecord;
+  return {
+    ...(payload.domainStatus && typeof payload.domainStatus === "object"
+      ? { domainStatus: payload.domainStatus }
+      : {}),
+    ...(payload.responseMeta && typeof payload.responseMeta === "object"
+      ? { responseMeta: payload.responseMeta }
+      : {}),
+  };
+}
+
 export function beginGameDataScope<T>(
   previous: LoadState<T>,
   scopeKey: string,
@@ -57,6 +70,7 @@ export function beginGameDataScope<T>(
     loading: true,
     scopeKey,
     ...stateFreshness(cached),
+    ...qualityState(cached?.data),
   };
 }
 
@@ -73,6 +87,7 @@ export function completeGameDataScope<T>(
     loading: false,
     scopeKey,
     ...stateFreshness(freshness),
+    ...qualityState(data),
   };
 }
 
