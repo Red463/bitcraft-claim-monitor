@@ -6,14 +6,12 @@ function toNumber(value) {
 export function createOperationalHistoryRetentionDryRunJob({
   db,
   readSettings,
-  buildRollups,
   runRetention,
   now = () => new Date(),
 }) {
   return function runOperationalHistoryRetentionDryRunJob() {
     const current = now();
     const settings = readSettings();
-    const rollups = buildRollups(db, { beforeDay: current.toISOString().slice(0, 10), now: current });
     const result = runRetention(db, {
       now: current,
       days: settings.days,
@@ -21,13 +19,7 @@ export function createOperationalHistoryRetentionDryRunJob({
       enabled: false,
       dryRun: true,
     });
-    return {
-      ...result,
-      rollups: {
-        completedDays: rollups.completedDays.length,
-        failedDays: rollups.failedDays.length,
-      },
-    };
+    return result;
   };
 }
 

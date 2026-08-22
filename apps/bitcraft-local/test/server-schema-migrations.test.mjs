@@ -46,6 +46,15 @@ test("operational history retention migration is additive, narrow, and idempoten
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table).count, 1);
     assert.equal(db.prepare(`PRAGMA table_info("${table}")`).all().some((column) => column.name === "raw_json"), false);
   }
+  const watermarkColumns = db.prepare("PRAGMA table_info(operational_history_rollup_watermarks)").all().map((column) => column.name);
+  assert.ok(watermarkColumns.includes("source_max_occurred_at"));
+  assert.ok(watermarkColumns.includes("source_fingerprint"));
+  assert.ok(watermarkColumns.includes("remaining_source_fingerprint"));
+  const backupColumns = db.prepare("PRAGMA table_info(operational_history_backup_verifications)").all().map((column) => column.name);
+  assert.ok(backupColumns.includes("backup_path"));
+  assert.ok(backupColumns.includes("manifest_path"));
+  assert.ok(backupColumns.includes("restored_database_sha256"));
+  assert.ok(backupColumns.includes("restored_manifest_sha256"));
   db.close();
 });
 

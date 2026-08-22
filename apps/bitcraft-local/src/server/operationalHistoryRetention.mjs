@@ -1,4 +1,7 @@
-import { existsSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { addDecimal } from "./game-data/exactDecimal.ts";
 
@@ -73,6 +76,9 @@ export const operationalHistoryRetentionSchemaSql = `
     completion_state TEXT NOT NULL CHECK (completion_state IN ('complete', 'failed')),
     source_row_count INTEGER NOT NULL,
     source_max_key TEXT,
+    source_max_occurred_at TEXT,
+    source_fingerprint TEXT NOT NULL DEFAULT '',
+    remaining_source_fingerprint TEXT NOT NULL DEFAULT '',
     pruned_row_count INTEGER NOT NULL DEFAULT 0,
     completed_at TEXT,
     last_error TEXT,
@@ -97,6 +103,10 @@ export const operationalHistoryRetentionSchemaSql = `
     verified_at TEXT NOT NULL,
     manifest_sha256 TEXT NOT NULL,
     database_sha256 TEXT NOT NULL,
+    backup_path TEXT NOT NULL DEFAULT '',
+    manifest_path TEXT NOT NULL DEFAULT '',
+    restored_database_sha256 TEXT NOT NULL DEFAULT '',
+    restored_manifest_sha256 TEXT NOT NULL DEFAULT '',
     restored_temporary_database INTEGER NOT NULL CHECK (restored_temporary_database IN (0, 1)),
     integrity_check TEXT NOT NULL,
     backup_bytes INTEGER NOT NULL
@@ -109,6 +119,22 @@ export const operationalHistoryRetentionSchemaSql = `
 
 export function applyOperationalHistoryRetentionSchema(db) {
   db.exec(operationalHistoryRetentionSchemaSql);
+  const watermarkColumns = new Set(db.prepare("PRAGMA table_info(operational_history_rollup_watermarks)").all().map((column) => column.name));
+  if (!watermarkColumns.has("source_max_occurred_at")) {
+    db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_max_occurred_at TEXT");
+  }
+  if (!watermarkColumns.has("source_fingerprint")) {
+    db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_fingerprint TEXT NOT NULL DEFAULT ''");
+  }
+  if (!watermarkColumns.has("remaining_source_fingerprint")) {
+    db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN remaining_source_fingerprint TEXT NOT NULL DEFAULT ''");
+  }
+  const backupColumns = new Set(db.prepare("PRAGMA table_info(operational_history_backup_verifications)").all().map((column) => column.name));
+  for (const column of ["backup_path", "manifest_path", "restored_database_sha256", "restored_manifest_sha256"]) {
+    if (!backupColumns.has(column)) {
+      db.exec(`ALTER TABLE operational_history_backup_verifications ADD COLUMN "${column}" TEXT NOT NULL DEFAULT ''`);
+    }
+  }
 }
 
 function integerInRange(value, minimum, maximum, label) {
@@ -189,7 +215,8 @@ function latestRun(db, mode) {
 export function latestOperationalHistoryBackupVerification(db) {
   const row = db.prepare(`
     SELECT backup_name, backup_created_at, verified_at, manifest_sha256,
-      database_sha256, restored_temporary_database, integrity_check, backup_bytes
+      database_sha256, backup_path, manifest_path, restored_database_sha256,
+      restored_manifest_sha256, restored_temporary_database, integrity_check, backup_bytes
     FROM operational_history_backup_verifications
     ORDER BY verified_at DESC, id DESC
     LIMIT 1
@@ -200,6 +227,10 @@ export function latestOperationalHistoryBackupVerification(db) {
     verifiedAt: row.verified_at,
     manifestSha256: row.manifest_sha256,
     databaseSha256: row.database_sha256,
+    backupPath: row.backup_path,
+    manifestPath: row.manifest_path,
+    restoredDatabaseSha256: row.restored_database_sha256,
+    restoredManifestSha256: row.restored_manifest_sha256,
     restoredTemporaryDatabase: Boolean(row.restored_temporary_database),
     integrityCheck: row.integrity_check,
     backupBytes: Number(row.backup_bytes),
@@ -248,7 +279,7 @@ function buildMarketTradeDay(db, claimId, day) {
     SELECT trade_id, region_id, item_id, item_type, quantity, total_price, occurred_at
     FROM market_trades
     WHERE claim_id = ? AND substr(occurred_at, 1, 10) = ?
-    ORDER BY trade_id
+    ORDER BY occurred_at, trade_id
   `).all(claimId, day);
   const groups = new Map();
   for (const row of rows) {
@@ -268,7 +299,11 @@ function buildMarketTradeDay(db, claimId, day) {
   `);
   db.prepare("DELETE FROM operational_history_market_trade_daily WHERE claim_id = ? AND utc_day = ?").run(claimId, day);
   for (const group of groups.values()) insert.run(claimId, day, group.regionId, group.itemId, group.itemType, group.salesCount, group.quantity, group.totalValue, group.oldestOccurredAt, group.newestOccurredAt);
-  return { sourceRowCount: rows.length, sourceMaxKey: rows.at(-1)?.trade_id ?? null };
+  return {
+    sourceRowCount: rows.length,
+    sourceMaxKey: rows.at(-1)?.trade_id ?? null,
+    sourceMaxOccurredAt: rows.at(-1)?.occurred_at ?? null,
+  };
 }
 
 function buildMarketEventDay(db, claimId, day) {
@@ -296,7 +331,11 @@ function buildMarketEventDay(db, claimId, day) {
   `);
   db.prepare("DELETE FROM operational_history_market_event_daily WHERE claim_id = ? AND utc_day = ?").run(claimId, day);
   for (const group of groups.values()) insert.run(claimId, day, group.eventType, group.itemId, group.itemType, group.eventCount, group.quantity, group.totalValue, group.oldestOccurredAt, group.newestOccurredAt);
-  return { sourceRowCount: rows.length, sourceMaxKey: rows.at(-1)?.id == null ? null : String(rows.at(-1).id) };
+  return {
+    sourceRowCount: rows.length,
+    sourceMaxKey: rows.at(-1)?.id == null ? null : String(rows.at(-1).id),
+    sourceMaxOccurredAt: rows.at(-1)?.occurred_at ?? null,
+  };
 }
 
 function buildActivityDay(db, claimId, day) {
@@ -320,7 +359,15 @@ function buildActivityDay(db, claimId, day) {
   `);
   db.prepare("DELETE FROM operational_history_activity_daily WHERE claim_id = ? AND utc_day = ?").run(claimId, day);
   for (const row of rows) insert.run(claimId, day, row.event_type, row.event_count, row.oldest_occurred_at, row.newest_occurred_at);
-  return { sourceRowCount: Number(source?.source_row_count ?? 0), sourceMaxKey: source?.source_max_key == null ? null : String(source.source_max_key) };
+  return {
+    sourceRowCount: Number(source?.source_row_count ?? 0),
+    sourceMaxKey: source?.source_max_key == null ? null : String(source.source_max_key),
+    sourceMaxOccurredAt: db.prepare(`
+      SELECT MAX(occurred_at) AS source_max_occurred_at
+      FROM activity_events
+      WHERE claim_id = ? AND substr(occurred_at, 1, 10) = ?
+    `).get(claimId, day)?.source_max_occurred_at ?? null,
+  };
 }
 
 const BUILD_DAY = Object.freeze({
@@ -328,6 +375,62 @@ const BUILD_DAY = Object.freeze({
   market_trades: buildMarketTradeDay,
   activity_events: buildActivityDay,
 });
+
+const SOURCE_FINGERPRINT_COLUMNS = Object.freeze({
+  market_events: Object.freeze(["id", "claim_id", "event_type", "item_id", "item_type", "quantity", "total_value", "occurred_at"]),
+  market_trades: Object.freeze(["trade_id", "claim_id", "region_id", "item_id", "item_type", "quantity", "unit_price", "total_price", "occurred_at", "imported_at"]),
+  activity_events: Object.freeze(["id", "claim_id", "event_type", "occurred_at", "source_key"]),
+});
+
+function fingerprintRows(rows, columns) {
+  const hash = createHash("sha256");
+  for (const row of rows) {
+    for (const column of columns) {
+      if (row[column] == null) {
+        hash.update("-1:");
+      } else {
+        const value = String(row[column]);
+        hash.update(`${Buffer.byteLength(value, "utf8")}:${value}`);
+      }
+    }
+  }
+  return hash.digest("hex");
+}
+
+function sourceSnapshot(db, sourceTable, claimId, day, boundary = null) {
+  const identifier = PRUNE_IDENTIFIERS[sourceTable];
+  const columns = SOURCE_FINGERPRINT_COLUMNS[sourceTable];
+  if (!identifier || !columns) throw new TypeError(`Unsupported operational history fingerprint source: ${sourceTable}`);
+  const resolvedBoundary = boundary ?? db.prepare(`
+    SELECT occurred_at AS source_max_occurred_at, "${identifier}" AS source_max_key
+    FROM "${sourceTable}"
+    WHERE claim_id = ? AND substr(occurred_at, 1, 10) = ?
+    ORDER BY occurred_at DESC, "${identifier}" DESC
+    LIMIT 1
+  `).get(claimId, day);
+  if (!resolvedBoundary?.source_max_occurred_at || resolvedBoundary.source_max_key == null) {
+    return { sourceRowCount: 0, sourceMaxKey: null, sourceMaxOccurredAt: null, sourceFingerprint: fingerprintRows([], columns) };
+  }
+  const rows = db.prepare(`
+    SELECT ${columns.map((column) => `"${column}"`).join(", ")}
+    FROM "${sourceTable}"
+    WHERE claim_id = ? AND substr(occurred_at, 1, 10) = ?
+      AND (occurred_at < ? OR (occurred_at = ? AND "${identifier}" <= ?))
+    ORDER BY occurred_at, "${identifier}"
+  `).all(
+    claimId,
+    day,
+    resolvedBoundary.source_max_occurred_at,
+    resolvedBoundary.source_max_occurred_at,
+    resolvedBoundary.source_max_key,
+  );
+  return {
+    sourceRowCount: rows.length,
+    sourceMaxKey: String(resolvedBoundary.source_max_key),
+    sourceMaxOccurredAt: String(resolvedBoundary.source_max_occurred_at),
+    sourceFingerprint: fingerprintRows(rows, columns),
+  };
+}
 
 export function buildOperationalHistoryRollups(db, {
   beforeDay = new Date().toISOString().slice(0, 10),
@@ -340,12 +443,16 @@ export function buildOperationalHistoryRollups(db, {
   const upsertWatermark = db.prepare(`
     INSERT INTO operational_history_rollup_watermarks (
       source_table, claim_id, utc_day, completion_state, source_row_count,
-      source_max_key, pruned_row_count, completed_at, last_error
-    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+      source_max_key, source_max_occurred_at, source_fingerprint,
+      remaining_source_fingerprint, pruned_row_count, completed_at, last_error
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     ON CONFLICT(source_table, claim_id, utc_day) DO UPDATE SET
       completion_state = excluded.completion_state,
       source_row_count = excluded.source_row_count,
       source_max_key = excluded.source_max_key,
+      source_max_occurred_at = excluded.source_max_occurred_at,
+      source_fingerprint = excluded.source_fingerprint,
+      remaining_source_fingerprint = excluded.remaining_source_fingerprint,
       pruned_row_count = 0,
       completed_at = excluded.completed_at,
       last_error = excluded.last_error
@@ -361,32 +468,31 @@ export function buildOperationalHistoryRollups(db, {
     `).all(`${beforeDay}T00:00:00.000Z`);
     for (const period of periods) {
       const existing = db.prepare(`
-        SELECT completion_state, source_row_count, source_max_key, pruned_row_count
+        SELECT completion_state, source_row_count, source_max_key, source_max_occurred_at,
+          source_fingerprint, remaining_source_fingerprint, pruned_row_count
         FROM operational_history_rollup_watermarks
         WHERE source_table = ? AND claim_id = ? AND utc_day = ?
       `).get(sourceTable, period.claim_id, period.utc_day);
       if (existing?.completion_state === "complete" && Number(existing.pruned_row_count ?? 0) > 0) continue;
       if (existing?.completion_state === "complete") {
-        const identifier = PRUNE_IDENTIFIERS[sourceTable];
-        const current = db.prepare(`
-          SELECT COUNT(*) AS source_row_count, MAX("${identifier}") AS source_max_key
-          FROM "${sourceTable}"
-          WHERE claim_id = ? AND substr(occurred_at, 1, 10) = ?
-        `).get(period.claim_id, period.utc_day);
-        if (Number(current?.source_row_count ?? 0) === Number(existing.source_row_count ?? 0)
-          && String(current?.source_max_key ?? "") === String(existing.source_max_key ?? "")) continue;
+        const current = sourceSnapshot(db, sourceTable, period.claim_id, period.utc_day);
+        if (current.sourceRowCount === Number(existing.source_row_count ?? 0)
+          && current.sourceMaxKey === String(existing.source_max_key ?? "")
+          && current.sourceMaxOccurredAt === String(existing.source_max_occurred_at ?? "")
+          && current.sourceFingerprint === String(existing.source_fingerprint ?? "")) continue;
       }
       db.exec("BEGIN IMMEDIATE");
       try {
-        const result = BUILD_DAY[sourceTable](db, String(period.claim_id), String(period.utc_day));
+        BUILD_DAY[sourceTable](db, String(period.claim_id), String(period.utc_day));
+        const result = sourceSnapshot(db, sourceTable, String(period.claim_id), String(period.utc_day));
         const completedAt = (now instanceof Date ? now : new Date(now)).toISOString();
-        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "complete", result.sourceRowCount, result.sourceMaxKey, completedAt, null);
+        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "complete", result.sourceRowCount, result.sourceMaxKey, result.sourceMaxOccurredAt, result.sourceFingerprint, result.sourceFingerprint, completedAt, null);
         db.exec("COMMIT");
         completedDays.push({ sourceTable, claimId: String(period.claim_id), utcDay: String(period.utc_day), ...result });
       } catch (error) {
         db.exec("ROLLBACK");
         const message = error instanceof Error ? error.message : String(error);
-        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "failed", 0, null, null, message);
+        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "failed", 0, null, null, "", "", null, message);
         failedDays.push({ sourceTable, claimId: String(period.claim_id), utcDay: String(period.utc_day), error: message });
       }
     }
@@ -416,9 +522,14 @@ export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay 
      AND watermark.claim_id = daily.claim_id
      AND watermark.utc_day = daily.utc_day
      AND watermark.completion_state = 'complete'
+     AND watermark.source_max_occurred_at IS NOT NULL
+     AND watermark.source_max_key IS NOT NULL
+     AND length(watermark.source_fingerprint) = 64
     WHERE daily.claim_id = ? AND daily.utc_day >= ? AND daily.utc_day <= ?
   `).all(String(claimId), startDay, endDay);
   for (const row of rollups) add(String(row.utc_day), row.sales_count, row.quantity, row.total_value, row.oldest_occurred_at);
+  const endExclusive = new Date(`${endDay}T00:00:00.000Z`);
+  endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
   const raw = db.prepare(`
     SELECT substr(source.occurred_at, 1, 10) AS utc_day, source.quantity,
       source.total_price, source.occurred_at
@@ -431,9 +542,16 @@ export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay 
           AND watermark.claim_id = source.claim_id
           AND watermark.utc_day = substr(source.occurred_at, 1, 10)
           AND watermark.completion_state = 'complete'
+          AND watermark.source_max_occurred_at IS NOT NULL
+          AND watermark.source_max_key IS NOT NULL
+          AND length(watermark.source_fingerprint) = 64
+          AND (
+            source.occurred_at < watermark.source_max_occurred_at
+            OR (source.occurred_at = watermark.source_max_occurred_at AND source.trade_id <= watermark.source_max_key)
+          )
       )
     ORDER BY source.occurred_at, source.trade_id
-  `).all(String(claimId), `${startDay}T00:00:00.000Z`, `${endDay}T23:59:59.999Z`);
+  `).all(String(claimId), `${startDay}T00:00:00.000Z`, endExclusive.toISOString());
   for (const row of raw) add(String(row.utc_day), 1, row.quantity, row.total_price, String(row.occurred_at));
   const daily = [...groups.values()].sort((left, right) => left.day.localeCompare(right.day));
   return {
@@ -442,17 +560,40 @@ export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay 
   };
 }
 
-export function validateOperationalHistoryRetentionEnableGate({ now, approvedTables, tables, explicitConfirmation, backupVerification }) {
-  for (const table of tables) {
-    if (!approvedTables.has(table)) throw new Error(`Operational history table ${table} is not approved for pruning`);
+function sha256File(filePath) {
+  const hash = createHash("sha256");
+  const descriptor = openSync(filePath, "r");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    for (;;) {
+      const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+      if (!bytesRead) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    closeSync(descriptor);
   }
-  if (explicitConfirmation !== ENABLE_CONFIRMATION) throw new Error("Operational history retention requires explicit confirmation");
+  return hash.digest("hex");
+}
+
+function validateMachineBackupVerification(backupVerification) {
   if (!backupVerification) throw new Error("Operational history retention requires a machine-verified backup");
-  if (!/^[a-f0-9]{64}$/i.test(String(backupVerification.manifestSha256 ?? ""))
+  const hashes = [
+    backupVerification.manifestSha256,
+    backupVerification.databaseSha256,
+    backupVerification.restoredDatabaseSha256,
+    backupVerification.restoredManifestSha256,
+  ];
+  if (hashes.some((value) => !/^[a-f0-9]{64}$/i.test(String(value ?? "")))
+    || backupVerification.restoredDatabaseSha256 !== backupVerification.databaseSha256
+    || backupVerification.restoredManifestSha256 !== backupVerification.manifestSha256
     || backupVerification.restoredTemporaryDatabase !== true
     || backupVerification.integrityCheck !== "ok") {
-    throw new Error("Operational history retention requires a verified backup manifest, temporary restore, and integrity_check");
+    throw new Error("Operational history retention requires a verified backup manifest, temporary restore, hash binding, and integrity_check");
   }
+}
+
+function validateBackupRecency(now, backupVerification) {
   const nowMs = (now instanceof Date ? now : new Date(now)).getTime();
   const createdMs = new Date(backupVerification.backupCreatedAt).getTime();
   const verifiedMs = new Date(backupVerification.verifiedAt).getTime();
@@ -461,6 +602,60 @@ export function validateOperationalHistoryRetentionEnableGate({ now, approvedTab
     || nowMs - verifiedMs < 0 || nowMs - verifiedMs >= DAY_MS) {
     throw new Error("Operational history retention requires a backup created and verified within 24 hours");
   }
+}
+
+function containedRealPath(approvedRoot, candidatePath, label) {
+  if (!approvedRoot || !existsSync(approvedRoot)) throw new Error("Operational history retention approved production backup root is not configured or does not exist");
+  if (!candidatePath || !existsSync(candidatePath)) throw new Error(`Operational history retention ${label} does not exist`);
+  const root = realpathSync(approvedRoot);
+  const candidate = realpathSync(candidatePath);
+  const relative = path.relative(root, candidate);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`Operational history retention ${label} is outside the approved production backup root`);
+  }
+  return candidate;
+}
+
+function validateCurrentBackupArtifact(approvedBackupRoot, backupVerification) {
+  const backupPath = containedRealPath(approvedBackupRoot, backupVerification.backupPath, "backup artifact");
+  const manifestPath = containedRealPath(approvedBackupRoot, backupVerification.manifestPath, "backup manifest");
+  const backupStat = statSync(backupPath);
+  if (backupStat.size !== Number(backupVerification.backupBytes)) throw new Error("Operational history retention backup artifact size does not match verification");
+  if (sha256File(backupPath) !== backupVerification.databaseSha256) throw new Error("Operational history retention backup artifact hash does not match verification");
+  const manifestBytes = readFileSync(manifestPath);
+  if (createHash("sha256").update(manifestBytes).digest("hex") !== backupVerification.manifestSha256) {
+    throw new Error("Operational history retention backup manifest hash does not match verification");
+  }
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestBytes.toString("utf8"));
+  } catch {
+    throw new Error("Operational history retention backup manifest is invalid JSON");
+  }
+  if (manifest.name !== backupVerification.backupName
+    || manifest.createdAt !== backupVerification.backupCreatedAt
+    || Number(manifest.size) !== Number(backupVerification.backupBytes)
+    || manifest.databaseSha256 !== backupVerification.databaseSha256) {
+    throw new Error("Operational history retention backup manifest is not bound to the verified artifact");
+  }
+  const artifact = new DatabaseSync(backupPath, { readOnly: true });
+  try {
+    if (String(artifact.prepare("PRAGMA integrity_check").get()?.integrity_check ?? "") !== "ok") {
+      throw new Error("Operational history retention current backup artifact failed integrity_check");
+    }
+  } finally {
+    artifact.close();
+  }
+}
+
+export function validateOperationalHistoryRetentionEnableGate({ now, approvedTables, tables, explicitConfirmation, backupVerification, approvedBackupRoot = "" }) {
+  for (const table of tables) {
+    if (!approvedTables.has(table)) throw new Error(`Operational history table ${table} is not approved for pruning`);
+  }
+  if (explicitConfirmation !== ENABLE_CONFIRMATION) throw new Error("Operational history retention requires explicit confirmation");
+  validateMachineBackupVerification(backupVerification);
+  validateBackupRecency(now, backupVerification);
+  validateCurrentBackupArtifact(approvedBackupRoot, backupVerification);
 }
 
 function recordRun(db, result, startedAt, completedAt) {
@@ -481,6 +676,7 @@ export function runOperationalHistoryRetention(db, {
   approvedTables = new Set(APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES),
   explicitConfirmation = "",
   backupVerification = null,
+  approvedBackupRoot = "",
   batchSize = MAX_BATCH_SIZE,
 } = {}) {
   const startedMs = Date.now();
@@ -497,7 +693,7 @@ export function runOperationalHistoryRetention(db, {
     recordRun(db, result, startedAt, completedAt);
     return result;
   }
-  validateOperationalHistoryRetentionEnableGate({ now, approvedTables, tables: configuredTables, explicitConfirmation, backupVerification });
+  validateOperationalHistoryRetentionEnableGate({ now, approvedTables, tables: configuredTables, explicitConfirmation, backupVerification, approvedBackupRoot });
   if (!configuredTables.length) throw new Error("Operational history retention approved table allowlist is empty");
   const boundedBatchSize = Math.min(MAX_BATCH_SIZE, Math.max(1, Number(batchSize) || MAX_BATCH_SIZE));
   let remaining = boundedBatchSize;
@@ -507,45 +703,58 @@ export function runOperationalHistoryRetention(db, {
     if (!Object.hasOwn(PRUNE_IDENTIFIERS, table)) throw new Error(`Operational history table ${table} is not prunable`);
     if (remaining <= 0) break;
     const identifier = PRUNE_IDENTIFIERS[table];
-    const candidates = db.prepare(`
-      SELECT source."${identifier}" AS row_key, source.claim_id,
-        substr(source.occurred_at, 1, 10) AS utc_day
-      FROM "${table}" AS source
-      INNER JOIN operational_history_rollup_watermarks AS watermark
-        ON watermark.source_table = ?
-       AND watermark.claim_id = source.claim_id
-       AND watermark.utc_day = substr(source.occurred_at, 1, 10)
-       AND watermark.completion_state = 'complete'
-       AND watermark.source_row_count = watermark.pruned_row_count + (
-         SELECT COUNT(*) FROM "${table}" AS source_check
-         WHERE source_check.claim_id = source.claim_id
-           AND substr(source_check.occurred_at, 1, 10) = watermark.utc_day
-       )
-      WHERE source.occurred_at < ?
-      ORDER BY source.occurred_at, source."${identifier}"
-      LIMIT ?
-    `).all(table, cutoff, remaining);
-    if (!candidates.length) continue;
     const remove = db.prepare(`DELETE FROM "${table}" WHERE "${identifier}" = ? AND occurred_at < ?`);
     const markPruned = db.prepare(`
       UPDATE operational_history_rollup_watermarks
-      SET pruned_row_count = pruned_row_count + ?
+      SET pruned_row_count = pruned_row_count + ?, remaining_source_fingerprint = ?
       WHERE source_table = ? AND claim_id = ? AND utc_day = ?
         AND completion_state = 'complete'
     `);
     db.exec("BEGIN IMMEDIATE");
     try {
       let tableDeleted = 0;
-      const prunedPeriods = new Map();
-      for (const candidate of candidates) {
-        const changes = remove.run(candidate.row_key, cutoff).changes;
-        tableDeleted += changes;
-        if (changes) {
-          const key = `${candidate.claim_id}\0${candidate.utc_day}`;
-          prunedPeriods.set(key, { claimId: candidate.claim_id, utcDay: candidate.utc_day, count: (prunedPeriods.get(key)?.count ?? 0) + changes });
+      const watermarks = db.prepare(`
+        SELECT claim_id, utc_day, source_row_count, source_max_key,
+          source_max_occurred_at, pruned_row_count, remaining_source_fingerprint
+        FROM operational_history_rollup_watermarks
+        WHERE source_table = ? AND completion_state = 'complete'
+        ORDER BY utc_day, claim_id
+      `).all(table);
+      for (const watermark of watermarks) {
+        if (remaining - tableDeleted <= 0) break;
+        const boundary = {
+          source_max_key: watermark.source_max_key,
+          source_max_occurred_at: watermark.source_max_occurred_at,
+        };
+        const snapshot = sourceSnapshot(db, table, watermark.claim_id, watermark.utc_day, boundary);
+        if (snapshot.sourceRowCount !== Number(watermark.source_row_count) - Number(watermark.pruned_row_count)
+          || snapshot.sourceFingerprint !== String(watermark.remaining_source_fingerprint)) {
+          continue;
         }
+        const candidates = db.prepare(`
+          SELECT "${identifier}" AS row_key
+          FROM "${table}"
+          WHERE claim_id = ? AND substr(occurred_at, 1, 10) = ?
+            AND occurred_at < ?
+            AND (occurred_at < ? OR (occurred_at = ? AND "${identifier}" <= ?))
+          ORDER BY occurred_at, "${identifier}"
+          LIMIT ?
+        `).all(
+          watermark.claim_id,
+          watermark.utc_day,
+          cutoff,
+          watermark.source_max_occurred_at,
+          watermark.source_max_occurred_at,
+          watermark.source_max_key,
+          remaining - tableDeleted,
+        );
+        let periodDeleted = 0;
+        for (const candidate of candidates) periodDeleted += remove.run(candidate.row_key, cutoff).changes;
+        if (!periodDeleted) continue;
+        const remainingSnapshot = sourceSnapshot(db, table, watermark.claim_id, watermark.utc_day, boundary);
+        markPruned.run(periodDeleted, remainingSnapshot.sourceFingerprint, table, watermark.claim_id, watermark.utc_day);
+        tableDeleted += periodDeleted;
       }
-      for (const period of prunedPeriods.values()) markPruned.run(period.count, table, period.claimId, period.utcDay);
       db.exec("COMMIT");
       deletedByTable[table] = tableDeleted;
       deletedRows += tableDeleted;
@@ -562,19 +771,14 @@ export function runOperationalHistoryRetention(db, {
 }
 
 export function recordOperationalHistoryBackupVerification(db, evidence) {
-  validateOperationalHistoryRetentionEnableGate({
-    now: new Date(evidence.verifiedAt),
-    approvedTables: new Set(),
-    tables: [],
-    explicitConfirmation: ENABLE_CONFIRMATION,
-    backupVerification: evidence,
-  });
-  if (!/^[a-f0-9]{64}$/i.test(String(evidence.databaseSha256 ?? ""))) throw new TypeError("Backup database hash is invalid");
+  validateMachineBackupVerification(evidence);
+  validateBackupRecency(new Date(evidence.verifiedAt), evidence);
   db.prepare(`
     INSERT INTO operational_history_backup_verifications (
       backup_name, backup_created_at, verified_at, manifest_sha256, database_sha256,
+      backup_path, manifest_path, restored_database_sha256, restored_manifest_sha256,
       restored_temporary_database, integrity_check, backup_bytes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(String(evidence.backupName), evidence.backupCreatedAt, evidence.verifiedAt, evidence.manifestSha256, evidence.databaseSha256, 1, "ok", Number(evidence.backupBytes));
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(String(evidence.backupName), evidence.backupCreatedAt, evidence.verifiedAt, evidence.manifestSha256, evidence.databaseSha256, evidence.backupPath, evidence.manifestPath, evidence.restoredDatabaseSha256, evidence.restoredManifestSha256, 1, "ok", Number(evidence.backupBytes));
   return latestOperationalHistoryBackupVerification(db);
 }

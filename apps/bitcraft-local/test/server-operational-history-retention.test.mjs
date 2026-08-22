@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import { applyAdditiveColumnMigrations } from "../src/server/schemaMigrations.mjs";
@@ -11,12 +15,33 @@ import {
   buildOperationalHistoryRollups,
   normalizeOperationalHistoryRetentionSettings,
   operationalHistoryRetentionPreview,
+  readOperationalMarketTradeDaily,
   recordOperationalHistoryBackupVerification,
   runOperationalHistoryRetention,
+  validateOperationalHistoryRetentionEnableGate,
 } from "../src/server/operationalHistoryRetention.mjs";
 
 const NOW = new Date("2026-08-22T12:00:00.000Z");
 const CUTOFF = "2025-08-22T12:00:00.000Z";
+const BACKUP_FIXTURE_ROOT = mkdtempSync(path.join(tmpdir(), "operational-retention-backup-"));
+const BACKUP_FIXTURE_PATH = path.join(BACKUP_FIXTURE_ROOT, "fixture.sqlite");
+const BACKUP_MANIFEST_PATH = `${BACKUP_FIXTURE_PATH}.manifest.json`;
+{
+  const backupDb = new DatabaseSync(BACKUP_FIXTURE_PATH);
+  backupDb.exec("CREATE TABLE verified_fixture (id INTEGER PRIMARY KEY)");
+  backupDb.close();
+}
+const BACKUP_BYTES = readFileSync(BACKUP_FIXTURE_PATH);
+const BACKUP_DATABASE_SHA256 = createHash("sha256").update(BACKUP_BYTES).digest("hex");
+const BACKUP_MANIFEST = JSON.stringify({
+  name: "fixture.sqlite",
+  size: BACKUP_BYTES.length,
+  createdAt: "2026-08-22T08:00:00.000Z",
+  databaseSha256: BACKUP_DATABASE_SHA256,
+});
+writeFileSync(BACKUP_MANIFEST_PATH, BACKUP_MANIFEST);
+const BACKUP_MANIFEST_SHA256 = createHash("sha256").update(BACKUP_MANIFEST).digest("hex");
+test.after(() => rmSync(BACKUP_FIXTURE_ROOT, { recursive: true, force: true }));
 
 function fixture() {
   const db = new DatabaseSync(":memory:");
@@ -33,13 +58,35 @@ function insertActivity(db, { claimId = "claim-a", sourceKey, occurredAt, eventT
   `).run(claimId, eventType, sourceKey, occurredAt, sourceKey);
 }
 
+function insertTrade(db, {
+  tradeId,
+  occurredAt,
+  claimId = "claim-a",
+  quantity = "1",
+  totalPrice = "2",
+}) {
+  db.prepare(`
+    INSERT INTO market_trades (
+      trade_id, claim_id, region_id, item_id, item_type, item_name,
+      quantity, unit_price, total_price, occurred_at, imported_at, raw_json
+    ) VALUES (?, ?, '19', '42', '0', 'Timber', ?, '2', ?, ?, ?, '{}')
+  `).run(tradeId, claimId, quantity, totalPrice, occurredAt, occurredAt);
+}
+
 function verifiedBackup() {
   return {
+    backupName: "fixture.sqlite",
     backupCreatedAt: "2026-08-22T08:00:00.000Z",
     verifiedAt: "2026-08-22T08:05:00.000Z",
-    manifestSha256: "a".repeat(64),
+    backupPath: BACKUP_FIXTURE_PATH,
+    manifestPath: BACKUP_MANIFEST_PATH,
+    manifestSha256: BACKUP_MANIFEST_SHA256,
+    databaseSha256: BACKUP_DATABASE_SHA256,
+    restoredDatabaseSha256: BACKUP_DATABASE_SHA256,
+    restoredManifestSha256: BACKUP_MANIFEST_SHA256,
     restoredTemporaryDatabase: true,
     integrityCheck: "ok",
+    backupBytes: BACKUP_BYTES.length,
   };
 }
 
@@ -118,6 +165,68 @@ test("daily rollups preserve claims, typed item identity, source counts and idem
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM operational_history_market_trade_daily").get().count, 3);
 });
 
+test("rollup-backed market history includes late rows before and after partial prune without double counting", () => {
+  const beforePrune = fixture();
+  insertTrade(beforePrune, { tradeId: "trade-a", occurredAt: "2025-08-21T01:00:00.000Z" });
+  buildOperationalHistoryRollups(beforePrune, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  insertTrade(beforePrune, { tradeId: "trade-b", occurredAt: "2025-08-21T02:00:00.000Z", quantity: "3", totalPrice: "6" });
+  assert.deepEqual(
+    readOperationalMarketTradeDaily(beforePrune, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }),
+    { daily: [{ day: "2025-08-21", salesCount: 2, unitsSold: "4", totalValue: "8" }], observedSince: "2025-08-21T01:00:00.000Z" },
+  );
+  beforePrune.close();
+
+  const afterPrune = fixture();
+  insertTrade(afterPrune, { tradeId: "trade-a", occurredAt: "2025-08-21T01:00:00.000Z" });
+  insertTrade(afterPrune, { tradeId: "trade-b", occurredAt: "2025-08-21T02:00:00.000Z", quantity: "3", totalPrice: "6" });
+  buildOperationalHistoryRollups(afterPrune, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  const pruned = runOperationalHistoryRetention(afterPrune, {
+    now: NOW,
+    enabled: true,
+    dryRun: false,
+    days: 365,
+    tables: ["market_trades"],
+    approvedTables: new Set(["market_trades"]),
+    explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+    backupVerification: verifiedBackup(),
+    approvedBackupRoot: BACKUP_FIXTURE_ROOT,
+    batchSize: 1,
+  });
+  assert.equal(pruned.deletedRows, 1);
+  insertTrade(afterPrune, { tradeId: "trade-c", occurredAt: "2025-08-21T03:00:00.000Z", quantity: "5", totalPrice: "10" });
+  assert.deepEqual(
+    readOperationalMarketTradeDaily(afterPrune, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }),
+    { daily: [{ day: "2025-08-21", salesCount: 3, unitsSold: "9", totalValue: "18" }], observedSince: "2025-08-21T01:00:00.000Z" },
+  );
+  afterPrune.close();
+});
+
+test("market history includes a raw trade at the final millisecond of the requested UTC day", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "final-ms", occurredAt: "2025-08-21T23:59:59.999Z" });
+  assert.deepEqual(
+    readOperationalMarketTradeDaily(db, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }).daily,
+    [{ day: "2025-08-21", salesCount: 1, unitsSold: "1", totalValue: "2" }],
+  );
+  db.close();
+});
+
+test("a migrated complete watermark without an exact coverage boundary is ignored instead of double counted", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "legacy-covered", occurredAt: "2025-08-21T01:00:00.000Z" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  db.prepare(`
+    UPDATE operational_history_rollup_watermarks
+    SET source_max_occurred_at = NULL, source_fingerprint = '', remaining_source_fingerprint = ''
+    WHERE source_table = 'market_trades'
+  `).run();
+  assert.deepEqual(
+    readOperationalMarketTradeDaily(db, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }).daily,
+    [{ day: "2025-08-21", salesCount: 1, unitsSold: "1", totalValue: "2" }],
+  );
+  db.close();
+});
+
 test("pruning requires complete watermarks and deletes at most 5000 rows below cutoff", () => {
   const db = fixture();
   const insert = db.prepare(`
@@ -149,6 +258,7 @@ test("pruning requires complete watermarks and deletes at most 5000 rows below c
     approvedTables: new Set(["activity_events"]),
     explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
     backupVerification: verifiedBackup(),
+    approvedBackupRoot: BACKUP_FIXTURE_ROOT,
     batchSize: 9000,
   });
   assert.equal(result.deletedRows, 5000);
@@ -167,7 +277,7 @@ test("pruning requires complete watermarks and deletes at most 5000 rows below c
   `).get().event_count, 5002);
 });
 
-test("a source day that changes after rollup completion fails closed before pruning", () => {
+test("a late source row outside the captured boundary remains raw and is never pruned as covered", () => {
   const db = fixture();
   insertActivity(db, { sourceKey: "rolled", occurredAt: "2025-08-21T01:00:00.000Z" });
   buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["activity_events"] });
@@ -182,9 +292,71 @@ test("a source day that changes after rollup completion fails closed before prun
     approvedTables: new Set(["activity_events"]),
     explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
     backupVerification: verifiedBackup(),
+    approvedBackupRoot: BACKUP_FIXTURE_ROOT,
+  });
+  assert.equal(result.deletedRows, 1);
+  assert.deepEqual(
+    db.prepare("SELECT source_key, occurred_at FROM activity_events").all().map((row) => ({ ...row })),
+    [{ source_key: "late", occurred_at: "2025-08-21T02:00:00.000Z" }],
+  );
+});
+
+test("same-count same-boundary source mutation fails fingerprint validation before pruning", () => {
+  const db = fixture();
+  insertActivity(db, { sourceKey: "first", occurredAt: "2025-08-21T01:00:00.000Z", eventType: "market_sale" });
+  insertActivity(db, { sourceKey: "boundary", occurredAt: "2025-08-21T02:00:00.000Z", eventType: "market_sale" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["activity_events"] });
+  db.prepare("UPDATE activity_events SET event_type = 'production_started' WHERE source_key = 'first'").run();
+
+  const result = runOperationalHistoryRetention(db, {
+    now: NOW,
+    enabled: true,
+    dryRun: false,
+    days: 365,
+    tables: ["activity_events"],
+    approvedTables: new Set(["activity_events"]),
+    explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+    backupVerification: verifiedBackup(),
+    approvedBackupRoot: BACKUP_FIXTURE_ROOT,
   });
   assert.equal(result.deletedRows, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count, 2);
+});
+
+test("a concurrent writer transaction on a second connection blocks prune before validation or deletion", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "operational-retention-race-"));
+  const databasePath = path.join(directory, "fixture.sqlite");
+  const pruneConnection = new DatabaseSync(databasePath);
+  const writerConnection = new DatabaseSync(databasePath);
+  try {
+    applySchemaBootstrap(pruneConnection);
+    applyAdditiveColumnMigrations(pruneConnection);
+    applyOperationalHistoryRetentionSchema(pruneConnection);
+    insertActivity(pruneConnection, { sourceKey: "covered", occurredAt: "2025-08-21T01:00:00.000Z" });
+    buildOperationalHistoryRollups(pruneConnection, { beforeDay: "2025-08-22", sourceTables: ["activity_events"] });
+
+    writerConnection.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
+    insertActivity(writerConnection, { sourceKey: "racing", occurredAt: "2025-08-21T02:00:00.000Z" });
+    assert.throws(() => runOperationalHistoryRetention(pruneConnection, {
+      now: NOW,
+      enabled: true,
+      dryRun: false,
+      days: 365,
+      tables: ["activity_events"],
+      approvedTables: new Set(["activity_events"]),
+      explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+      backupVerification: verifiedBackup(),
+      approvedBackupRoot: BACKUP_FIXTURE_ROOT,
+    }), /busy|locked/i);
+    assert.equal(pruneConnection.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count, 1);
+    writerConnection.exec("ROLLBACK");
+    assert.equal(pruneConnection.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count, 1);
+  } finally {
+    try { writerConnection.exec("ROLLBACK"); } catch {}
+    writerConnection.close();
+    pruneConnection.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("enabling fails closed without allowlist approval, confirmation, current verified backup, or complete watermark", () => {
@@ -205,10 +377,10 @@ test("enabling fails closed without allowlist approval, confirmation, current ve
   }), /within 24 hours/i);
 });
 
-test("the scheduled retention job always runs rollups followed by a deletion-disabled dry run", () => {
+test("the scheduled retention job never builds rollups and runs only a deletion-disabled aggregate preview", () => {
   const calls = [];
   const run = createOperationalHistoryRetentionDryRunJob({
-    buildRollups: (_db, options) => { calls.push(["rollups", options]); return { completedDays: [{ utcDay: "2025-08-21" }], failedDays: [] }; },
+    buildRollups: () => { throw new Error("scheduled publication path must not build rollups"); },
     runRetention: (_db, options) => { calls.push(["retention", options]); return { mode: "dry-run", deletedRows: 0 }; },
     db: {},
     readSettings: () => ({ days: 365, tables: [], enabled: false }),
@@ -218,10 +390,8 @@ test("the scheduled retention job always runs rollups followed by a deletion-dis
   assert.deepEqual(run(), {
     mode: "dry-run",
     deletedRows: 0,
-    rollups: { completedDays: 1, failedDays: 0 },
   });
-  assert.equal(calls[0][0], "rollups");
-  assert.deepEqual(calls[1], ["retention", {
+  assert.deepEqual(calls[0], ["retention", {
     now: NOW,
     days: 365,
     tables: [],
@@ -232,12 +402,7 @@ test("the scheduled retention job always runs rollups followed by a deletion-dis
 
 test("backup readiness is accepted only as a machine record with manifest, restored temp DB, and integrity evidence", () => {
   const db = fixture();
-  const evidence = {
-    ...verifiedBackup(),
-    backupName: "fixture.sqlite",
-    databaseSha256: "b".repeat(64),
-    backupBytes: 4096,
-  };
+  const evidence = verifiedBackup();
   const stored = recordOperationalHistoryBackupVerification(db, evidence);
   assert.deepEqual(stored, {
     backupName: "fixture.sqlite",
@@ -245,9 +410,44 @@ test("backup readiness is accepted only as a machine record with manifest, resto
     verifiedAt: evidence.verifiedAt,
     manifestSha256: evidence.manifestSha256,
     databaseSha256: evidence.databaseSha256,
+    backupPath: evidence.backupPath,
+    manifestPath: evidence.manifestPath,
+    restoredDatabaseSha256: evidence.restoredDatabaseSha256,
+    restoredManifestSha256: evidence.restoredManifestSha256,
     restoredTemporaryDatabase: true,
     integrityCheck: "ok",
-    backupBytes: 4096,
+    backupBytes: evidence.backupBytes,
   });
   assert.throws(() => recordOperationalHistoryBackupVerification(db, { ...evidence, restoredTemporaryDatabase: false }), /temporary restore/);
+});
+
+test("enable gate reopens an artifact under the approved root and rejects missing, tampered, or outside-root evidence", () => {
+  const base = {
+    now: NOW,
+    approvedTables: new Set(["activity_events"]),
+    tables: ["activity_events"],
+    explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+    backupVerification: verifiedBackup(),
+    approvedBackupRoot: BACKUP_FIXTURE_ROOT,
+  };
+  assert.doesNotThrow(() => validateOperationalHistoryRetentionEnableGate(base));
+  assert.throws(() => validateOperationalHistoryRetentionEnableGate({
+    ...base,
+    backupVerification: { ...verifiedBackup(), backupPath: path.join(BACKUP_FIXTURE_ROOT, "missing.sqlite") },
+  }), /artifact.*exist|missing/i);
+  assert.throws(() => validateOperationalHistoryRetentionEnableGate({
+    ...base,
+    backupVerification: { ...verifiedBackup(), manifestPath: path.join(BACKUP_FIXTURE_ROOT, "missing.manifest.json") },
+  }), /manifest.*exist|missing/i);
+
+  const tamperedPath = path.join(BACKUP_FIXTURE_ROOT, "tampered.sqlite");
+  writeFileSync(tamperedPath, Buffer.concat([BACKUP_BYTES, Buffer.from("tampered")]));
+  assert.throws(() => validateOperationalHistoryRetentionEnableGate({
+    ...base,
+    backupVerification: { ...verifiedBackup(), backupPath: tamperedPath },
+  }), /hash|size|integrity/i);
+
+  const approvedSubdirectory = path.join(BACKUP_FIXTURE_ROOT, "approved-production-root");
+  mkdirSync(approvedSubdirectory);
+  assert.throws(() => validateOperationalHistoryRetentionEnableGate({ ...base, approvedBackupRoot: approvedSubdirectory }), /outside.*root/i);
 });

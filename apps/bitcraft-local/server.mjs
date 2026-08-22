@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 import { setDefaultResultOrder } from "node:dns";
@@ -149,7 +149,7 @@ import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/se
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
-import { APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES, buildOperationalHistoryRollups, latestOperationalHistoryBackupVerification, normalizeOperationalHistoryRetentionSettings, operationalHistoryRetentionPreview, readOperationalMarketTradeDaily, recordOperationalHistoryBackupVerification, runOperationalHistoryRetention, validateOperationalHistoryRetentionEnableGate } from "./src/server/operationalHistoryRetention.mjs";
+import { APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES, latestOperationalHistoryBackupVerification, normalizeOperationalHistoryRetentionSettings, operationalHistoryRetentionPreview, readOperationalMarketTradeDaily, recordOperationalHistoryBackupVerification, runOperationalHistoryRetention, validateOperationalHistoryRetentionEnableGate } from "./src/server/operationalHistoryRetention.mjs";
 import { installRetiredTableAuthorizer } from "./src/server/retiredTableAuthorizer.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
 import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, publicRoutePerformanceHealth, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
@@ -528,6 +528,17 @@ const smokeAdminReviewMode = resolveSmokeAdminReviewMode({
 });
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
+const configuredOperationalHistoryBackupRoot = String(process.env.BITCRAFT_OPERATIONAL_HISTORY_BACKUP_ROOT ?? "").trim();
+const configuredBackupRootRelativeToDownloads = configuredOperationalHistoryBackupRoot
+  ? path.relative(path.resolve(backupDir), path.resolve(configuredOperationalHistoryBackupRoot))
+  : "";
+const operationalHistoryApprovedBackupRoot = isProduction
+  && configuredOperationalHistoryBackupRoot
+  && (configuredBackupRootRelativeToDownloads === ".."
+    || configuredBackupRootRelativeToDownloads.startsWith(`..${path.sep}`)
+    || path.isAbsolute(configuredBackupRootRelativeToDownloads))
+  ? configuredOperationalHistoryBackupRoot
+  : "";
 const geoipDir = path.join(dataDir, "geoip");
 const geoipDataPath = process.env.GEOIP_DATA_PATH ?? path.join(geoipDir, "geoip.json");
 const maxGeoipJsonFallbackBytes = 25 * 1024 * 1024;
@@ -1215,7 +1226,6 @@ async function runPrivacyRetentionJob() {
 const runOperationalHistoryRetentionDryRunJob = createOperationalHistoryRetentionDryRunJob({
   db,
   readSettings: operationalHistoryRetentionSettings,
-  buildRollups: buildOperationalHistoryRollups,
   runRetention: runOperationalHistoryRetention,
 });
 
@@ -1261,7 +1271,7 @@ const scheduledJobRegistry = {
   },
   operational_history_retention_dry_run: {
     label: "Operational history retention preview",
-    description: "Builds narrow daily rollups and reports eligible history rows. Deletion remains disabled.",
+    description: "Reports aggregate eligible history rows. Rollup writes and deletion remain disabled.",
     schedule: "daily@03:00",
     enabled: true,
     run: runOperationalHistoryRetentionDryRunJob,
@@ -6987,10 +6997,14 @@ function createBackup() {
   const databaseSha256 = sha256File(filePath);
   const manifest = JSON.stringify({ name, size: info.size, createdAt, databaseSha256 });
   const manifestSha256 = createHash("sha256").update(manifest).digest("hex");
+  const manifestPath = `${filePath}.manifest.json`;
+  writeFileSync(manifestPath, manifest, { encoding: "utf8", flag: "wx" });
   const restoredPath = `${filePath}.restore-verification-${process.pid}-${randomBytes(8).toString("hex")}`;
   let integrityCheck = "unavailable";
+  let restoredDatabaseSha256 = "";
   try {
     copyFileSync(filePath, restoredPath);
+    restoredDatabaseSha256 = sha256File(restoredPath);
     const restored = new DatabaseSync(restoredPath, { readOnly: true });
     try {
       integrityCheck = String(restored.prepare("PRAGMA integrity_check").get()?.integrity_check ?? "unavailable");
@@ -7008,6 +7022,10 @@ function createBackup() {
     verifiedAt,
     manifestSha256,
     databaseSha256,
+    backupPath: filePath,
+    manifestPath,
+    restoredDatabaseSha256,
+    restoredManifestSha256: manifestSha256,
     restoredTemporaryDatabase: true,
     integrityCheck,
     backupBytes: info.size,
@@ -9734,6 +9752,7 @@ const server = createServer(async (req, res) => {
               tables: next.tables,
               explicitConfirmation: String(body.confirmation ?? ""),
               backupVerification: latestOperationalHistoryBackupVerification(db),
+              approvedBackupRoot: operationalHistoryApprovedBackupRoot,
             });
           }
           const updatedAt = new Date().toISOString();
