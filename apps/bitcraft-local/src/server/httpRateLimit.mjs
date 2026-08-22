@@ -64,9 +64,31 @@ export function createRateLimiter({ buckets = new Map(), reportOnlyBuckets = new
     }
   }
 
-  function rejectEnforcedCapacity(res, name, windows) {
+  function enforcedCapacityRetryAfter(currentTime, requiredKeys) {
+    nextPruneAt = currentTime + pruneInterval;
+    for (const [key, bucket] of buckets) {
+      if (bucket.resetAt <= currentTime) {
+        buckets.delete(key);
+        pruned += 1;
+      }
+    }
+    const missingBucketCount = [...requiredKeys].reduce((count, key) => count + (buckets.has(key) ? 0 : 1), 0);
+    const slotsNeeded = buckets.size + missingBucketCount - enforcedBucketLimit;
+    if (slotsNeeded <= 0) return 0;
+    const earliestResetTimes = [];
+    for (const [key, bucket] of buckets) {
+      if (requiredKeys.has(key)) continue;
+      const insertAt = earliestResetTimes.findIndex((resetAt) => bucket.resetAt < resetAt);
+      if (insertAt === -1) earliestResetTimes.push(bucket.resetAt);
+      else earliestResetTimes.splice(insertAt, 0, bucket.resetAt);
+      if (earliestResetTimes.length > slotsNeeded) earliestResetTimes.pop();
+    }
+    const capacityResetAt = earliestResetTimes[slotsNeeded - 1];
+    return capacityResetAt === undefined ? null : Math.max(1, Math.ceil((capacityResetAt - currentTime) / 1000));
+  }
+
+  function rejectEnforcedCapacity(res, name, retryAfter) {
     enforcedCapacityRejected += 1;
-    const retryAfter = Math.max(1, ...windows.map(([, policy]) => Math.ceil(policy.windowMs / 1000)));
     onDecision({ name, reportOnly: false, wouldLimit: true, limitedBy: ["capacity"] });
     sendJson(res, 429, {
       error: "Too many requests. Please slow down and try again shortly.",
@@ -86,8 +108,15 @@ export function createRateLimiter({ buckets = new Map(), reportOnlyBuckets = new
       : [["window", policy]];
     const partition = reportOnly ? reportOnlyBuckets : buckets;
     if (!reportOnly) {
-      const newBucketCount = windows.reduce((count, [windowName]) => count + (partition.has(`${name}:${address}:${windowName}`) ? 0 : 1), 0);
-      if (partition.size + newBucketCount > enforcedBucketLimit) return rejectEnforcedCapacity(res, name, windows);
+      const requiredKeys = new Set(windows.map(([windowName]) => `${name}:${address}:${windowName}`));
+      const newBucketCount = [...requiredKeys].reduce((count, key) => count + (partition.has(key) ? 0 : 1), 0);
+      if (partition.size + newBucketCount > enforcedBucketLimit) {
+        const capacityRetryAfter = enforcedCapacityRetryAfter(currentTime, requiredKeys);
+        if (capacityRetryAfter !== 0) {
+          const fallbackRetryAfter = Math.max(1, ...windows.map(([, windowPolicy]) => Math.ceil(windowPolicy.windowMs / 1000)));
+          return rejectEnforcedCapacity(res, name, capacityRetryAfter ?? fallbackRetryAfter);
+        }
+      }
     }
     const limited = [];
     for (const [windowName, windowPolicy] of windows) {

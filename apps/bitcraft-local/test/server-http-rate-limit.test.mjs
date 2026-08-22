@@ -229,3 +229,84 @@ test("new enforced clients fail closed when the enforced partition is full", () 
     reportOnly: { size: 0, maxBuckets: 3, evicted: 0 },
   });
 });
+
+test("enforced capacity pressure prunes expired buckets before rejecting a new client", () => {
+  let now = 0;
+  const sent = [];
+  const rateLimit = createRateLimiter({
+    now: () => now,
+    pruneIntervalMs: 60_000,
+    maxBuckets: 2,
+    enforcedBucketReserve: 1,
+    addressForRequest: (req) => req.address,
+    sendJson: (...args) => sent.push(args),
+  });
+
+  assert.equal(rateLimit({ address: "expired-client" }, {}, "short-window", { windowMs: 10, max: 10 }), true);
+  now = 11;
+  assert.equal(rateLimit({ address: "new-client" }, {}, "auth", { windowMs: 900_000, max: 10 }), true);
+
+  assert.equal(sent.length, 0);
+  assert.deepEqual(rateLimit.stats(), {
+    size: 1,
+    maxBuckets: 2,
+    pruned: 1,
+    enforced: { size: 1, maxBuckets: 1, capacityRejected: 0 },
+    reportOnly: { size: 0, maxBuckets: 1, evicted: 0 },
+  });
+});
+
+test("enforced capacity retry uses the resident expiry and rounds partial seconds up", () => {
+  let now = 1_000;
+  const decisions = [];
+  const sent = [];
+  const rateLimit = createRateLimiter({
+    now: () => now,
+    maxBuckets: 2,
+    enforcedBucketReserve: 1,
+    addressForRequest: (req) => req.address,
+    onDecision: (decision) => decisions.push(decision),
+    sendJson: (_res, status, body, headers) => sent.push({ status, body, headers }),
+  });
+
+  assert.equal(rateLimit({ address: "resident-client" }, {}, "short-window", { windowMs: 1_501, max: 10 }), true);
+  now = 1_500;
+  assert.equal(rateLimit({ address: "new-client" }, {}, "auth", { windowMs: 900_000, max: 10 }), false);
+
+  assert.deepEqual(decisions, [{ name: "auth", reportOnly: false, wouldLimit: true, limitedBy: ["capacity"] }]);
+  assert.deepEqual(sent, [{
+    status: 429,
+    body: {
+      error: "Too many requests. Please slow down and try again shortly.",
+      source: "local-rate-limit",
+      retryAfter: 2,
+    },
+    headers: { "retry-after": "2", "x-rate-limit-source": "local" },
+  }]);
+});
+
+test("enforced capacity retry waits for enough expiries to admit every missing window", () => {
+  let now = 1_000;
+  const sent = [];
+  const rateLimit = createRateLimiter({
+    now: () => now,
+    maxBuckets: 6,
+    enforcedBucketReserve: 3,
+    addressForRequest: (req) => req.address,
+    sendJson: (_res, status, body, headers) => sent.push({ status, body, headers }),
+  });
+
+  assert.equal(rateLimit({ address: "resident-a" }, {}, "seed-a", { windowMs: 1_001, max: 10 }), true);
+  assert.equal(rateLimit({ address: "resident-b" }, {}, "seed-b", { windowMs: 2_501, max: 10 }), true);
+  assert.equal(rateLimit({ address: "resident-c" }, {}, "seed-c", { windowMs: 60_000, max: 10 }), true);
+  now = 1_001;
+  assert.equal(rateLimit({ address: "new-client" }, {}, "auth", {
+    burst: { windowMs: 600_000, max: 10 },
+    sustained: { windowMs: 900_000, max: 10 },
+  }), false);
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].status, 429);
+  assert.equal(sent[0].body.retryAfter, 3);
+  assert.deepEqual(sent[0].headers, { "retry-after": "3", "x-rate-limit-source": "local" });
+});
