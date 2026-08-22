@@ -43,9 +43,10 @@ export async function loadGameDataWithPayloadBytes(
   const text = await response.text();
   const declaredLength = response.headers.get("content-length");
   const declaredPayloadBytes = declaredLength == null ? Number.NaN : Number(declaredLength);
-  const payloadBytes = Number.isFinite(declaredPayloadBytes) && declaredPayloadBytes >= 0
-    ? Math.floor(declaredPayloadBytes)
-    : new TextEncoder().encode(text).byteLength;
+  const textPayloadBytes = new TextEncoder().encode(text).byteLength;
+  const payloadBytes = Number.isSafeInteger(declaredPayloadBytes) && declaredPayloadBytes >= 0
+    ? Math.max(declaredPayloadBytes, textPayloadBytes)
+    : textPayloadBytes;
   const payload = JSON.parse(text) as GameDataResponse;
   const flattened: AnyRecord = {
     claimId: payload.claimId,

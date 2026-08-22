@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { loadGameData, loadGameDataWithPayloadBytes } from "../src/api/gameData.ts";
+import { createPageNavigationCache } from "../src/api/pageNavigationCache.ts";
 
 const claimProvenance = {
   provider: "relay",
@@ -162,7 +163,7 @@ test("an unavailable requested domain does not make fresh available data globall
   assert.deepEqual(result.partialErrors, ["market has not loaded yet."]);
 });
 
-test("captures declared payload bytes or the response text length before parsing", async () => {
+test("uses the larger of a valid declared length and already-read response text bytes", async () => {
   const payload = {
     claimId: "1369094286777412590",
     regionId: "19",
@@ -176,9 +177,43 @@ test("captures declared payload bytes or the response text length before parsing
   const declared = await loadGameDataWithPayloadBytes("1369094286777412590", ["claim"], async () => new Response(text, {
     headers: { "content-length": "999" },
   }));
+  const smallerMismatch = await loadGameDataWithPayloadBytes("1369094286777412590", ["claim"], async () => new Response(text, {
+    headers: { "content-length": "1" },
+  }));
+  const fractional = await loadGameDataWithPayloadBytes("1369094286777412590", ["claim"], async () => new Response(text, {
+    headers: { "content-length": "12.5" },
+  }));
+  const invalid = await loadGameDataWithPayloadBytes("1369094286777412590", ["claim"], async () => new Response(text, {
+    headers: { "content-length": "unknown" },
+  }));
   const observed = await loadGameDataWithPayloadBytes("1369094286777412590", ["claim"], async () => new Response(text));
 
   assert.equal(declared.payloadBytes, 999);
+  assert.equal(smallerMismatch.payloadBytes, new TextEncoder().encode(text).byteLength);
+  assert.equal(fractional.payloadBytes, new TextEncoder().encode(text).byteLength);
+  assert.equal(invalid.payloadBytes, new TextEncoder().encode(text).byteLength);
   assert.equal(observed.payloadBytes, new TextEncoder().encode(text).byteLength);
   assert.deepEqual(observed.data.claim, { name: "Timbersteel" });
+});
+
+test("does not cache an oversized decoded response when compressed wire bytes are small", async () => {
+  const oversizedText = "x".repeat(4_194_305);
+  const payload = {
+    claimId: "1369094286777412590",
+    regionId: "19",
+    generatedAt: "2026-08-22T10:00:02.000Z",
+    domains: { claim: { data: { name: "Timbersteel", oversizedText }, freshness: "fresh" } },
+    domainStatus: {},
+    meta: { coherence: "coherent" },
+    partialErrors: [],
+  };
+  const result = await loadGameDataWithPayloadBytes("1369094286777412590", ["claim"], async () => new Response(JSON.stringify(payload), {
+    headers: { "content-length": "64", "content-encoding": "gzip" },
+  }));
+  const cache = createPageNavigationCache({ now: () => 0 });
+  cache.set("claim-a:dashboard", { claimId: "claim-a", panel: "dashboard", data: result.data, payloadBytes: result.payloadBytes });
+
+  assert.ok(result.payloadBytes > 4_194_304);
+  assert.equal(result.data.claim.oversizedText.length, oversizedText.length, "the active decoded response remains usable");
+  assert.equal(cache.get("claim-a:dashboard"), undefined, "the oversized decoded response is not retained");
 });

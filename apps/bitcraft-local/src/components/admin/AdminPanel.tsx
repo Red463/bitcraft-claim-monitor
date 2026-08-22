@@ -99,6 +99,7 @@ import {
   type ConfigurationSection,
 } from "./adminNavigationState";
 import { shouldConfirmConfigurationNavigation } from "./adminConfigurationState";
+import { applyBrandingSettingsResult, applyConfirmedSettingsSave } from "./adminSettingsSave";
 import { AdminShellHeader } from "./AdminShellHeader";
 import { AdminSectionNavigation } from "./AdminSectionNavigation";
 import { AdminStatusOverview } from "./AdminStatusOverview";
@@ -220,6 +221,7 @@ export type AdminPanelProps = {
   settings: AppSettings;
   members?: AnyRecord[];
   onSettingsSaved: (settings: AppSettings) => void;
+  onClaimSettingsSaved?: (previousClaimId: string, settings: AppSettings) => void;
   botOnly?: boolean;
   headingLevel?: 1 | 2;
   onAuthChanged?: (auth: AnyRecord) => void;
@@ -230,6 +232,7 @@ export function AdminPanel({
   settings,
   members = [],
   onSettingsSaved,
+  onClaimSettingsSaved,
   botOnly = false,
   headingLevel = 2,
   onAuthChanged,
@@ -643,7 +646,12 @@ export function AdminPanel({
       const result = await api("/admin/settings", { method: "PUT", body: JSON.stringify(draft) });
       const next = normalizeAppSettings(result);
       setDraft(next);
-      onSettingsSaved(next);
+      applyConfirmedSettingsSave({
+        previousSettings: settings,
+        persistedSettings: next,
+        onSettingsSaved,
+        onClaimSettingsSaved,
+      });
     }, "Settings saved and applied.", "settings-save");
   }
 
@@ -863,18 +871,18 @@ export function AdminPanel({
     });
     await run(async () => {
       const result = await api("/admin/branding", { method: "POST", body: JSON.stringify({ type, dataUrl }) });
-      const next = { ...draft, branding: result.branding };
-      setDraft(next);
-      onSettingsSaved(next);
+      const next = applyBrandingSettingsResult(settings, draft, result.branding);
+      setDraft(next.nextDraft);
+      onSettingsSaved(next.savedSettings);
     }, `${type === "logo" ? "Logo" : "Favicon"} uploaded.`, `branding-upload:${type}`);
   }
 
   async function removeBrand(type: "logo" | "favicon") {
     await run(async () => {
       const result = await api(`/admin/branding?type=${type}`, { method: "DELETE" });
-      const next = { ...draft, branding: result.branding };
-      setDraft(next);
-      onSettingsSaved(next);
+      const next = applyBrandingSettingsResult(settings, draft, result.branding);
+      setDraft(next.nextDraft);
+      onSettingsSaved(next.savedSettings);
     }, `${type === "logo" ? "Logo" : "Favicon"} removed.`, `branding-remove:${type}`);
   }
 

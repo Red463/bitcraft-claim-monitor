@@ -938,7 +938,7 @@ function DashboardApp() {
     map: <MapPanel data={data} focus={mapFocus} activeRegionScopeKey={activeRegionScopeKey} dedicated={dedicatedMapView} verifiedCharacterPlayerId={verifiedCharacterPlayerId(userAuth.user?.characterStatus, userAuth.user?.characterPlayerId)} playerColourOverrides={normalizedMapPlayerColours} onPlayerColourChange={(playerId, colour) => setMapPlayerColours((current) => withPlayerMarkerColourOverride(current, playerId, colour))} onClearFocus={() => { setMapFocus(null); updateQueryState({ label: null, x: null, z: null, regionId: null, mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} members={data.members} access={effectiveAccess} />,
-    admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} publicAccount={userAuth.user} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { clearPreviousClaimGameData(claimIdRef.current, settings.claimId); setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); }} />,
+    admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} publicAccount={userAuth.user} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); }} onClaimSettingsSaved={(previousClaimId, settings) => clearPreviousClaimGameData(previousClaimId, settings.claimId)} />,
   };
   const activePageTargetId = targetIdForPage(active);
   const activePageDecision = accessDecisionFor(activePageTargetId);
