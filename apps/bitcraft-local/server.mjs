@@ -529,14 +529,8 @@ const smokeAdminReviewMode = resolveSmokeAdminReviewMode({
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
 const configuredOperationalHistoryBackupRoot = String(process.env.BITCRAFT_OPERATIONAL_HISTORY_BACKUP_ROOT ?? "").trim();
-const configuredBackupRootRelativeToDownloads = configuredOperationalHistoryBackupRoot
-  ? path.relative(path.resolve(backupDir), path.resolve(configuredOperationalHistoryBackupRoot))
-  : "";
 const operationalHistoryApprovedBackupRoot = isProduction
   && configuredOperationalHistoryBackupRoot
-  && (configuredBackupRootRelativeToDownloads === ".."
-    || configuredBackupRootRelativeToDownloads.startsWith(`..${path.sep}`)
-    || path.isAbsolute(configuredBackupRootRelativeToDownloads))
   ? configuredOperationalHistoryBackupRoot
   : "";
 const geoipDir = path.join(dataDir, "geoip");
@@ -9753,6 +9747,7 @@ const server = createServer(async (req, res) => {
               explicitConfirmation: String(body.confirmation ?? ""),
               backupVerification: latestOperationalHistoryBackupVerification(db),
               approvedBackupRoot: operationalHistoryApprovedBackupRoot,
+              disallowedBackupRoots: [backupDir],
             });
           }
           const updatedAt = new Date().toISOString();

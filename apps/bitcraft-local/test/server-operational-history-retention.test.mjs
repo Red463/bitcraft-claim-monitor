@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -165,6 +165,26 @@ test("daily rollups preserve claims, typed item identity, source counts and idem
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM operational_history_market_trade_daily").get().count, 3);
 });
 
+test("market trade ingestion identities are append-only across raw-row deletion", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "first", occurredAt: "2025-08-21T12:00:00.000Z" });
+  const firstId = db.prepare(`
+    SELECT ingestion_id FROM operational_history_source_ingestion_ids
+    WHERE source_table = 'market_trades' AND source_key = 'first'
+  `).get().ingestion_id;
+  db.prepare("DELETE FROM market_trades WHERE trade_id = 'first'").run();
+  insertTrade(db, { tradeId: "second", occurredAt: "2025-08-21T01:00:00.000Z" });
+  const identities = db.prepare(`
+    SELECT source_key, ingestion_id FROM operational_history_source_ingestion_ids
+    WHERE source_table = 'market_trades' ORDER BY ingestion_id
+  `).all().map((row) => ({ ...row }));
+  assert.deepEqual(identities, [
+    { source_key: "first", ingestion_id: firstId },
+    { source_key: "second", ingestion_id: firstId + 1 },
+  ]);
+  db.close();
+});
+
 test("rollup-backed market history includes late rows before and after partial prune without double counting", () => {
   const beforePrune = fixture();
   insertTrade(beforePrune, { tradeId: "trade-a", occurredAt: "2025-08-21T01:00:00.000Z" });
@@ -199,6 +219,60 @@ test("rollup-backed market history includes late rows before and after partial p
     { daily: [{ day: "2025-08-21", salesCount: 3, unitsSold: "9", totalValue: "18" }], observedSince: "2025-08-21T01:00:00.000Z" },
   );
   afterPrune.close();
+});
+
+test("hybrid membership uses ingestion order for an earlier backfill and a same-time lower source key", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "trade-z", occurredAt: "2025-08-21T12:00:00.000Z" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  insertTrade(db, { tradeId: "trade-a", occurredAt: "2025-08-21T01:00:00.000Z", quantity: "3", totalPrice: "6" });
+  insertTrade(db, { tradeId: "trade-0", occurredAt: "2025-08-21T12:00:00.000Z", quantity: "5", totalPrice: "10" });
+
+  assert.deepEqual(
+    readOperationalMarketTradeDaily(db, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }),
+    { daily: [{ day: "2025-08-21", salesCount: 3, unitsSold: "9", totalValue: "18" }], observedSince: "2025-08-21T01:00:00.000Z" },
+  );
+  db.close();
+});
+
+test("earlier and same-time lower-key late trades remain visible after a partial prune", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "trade-z", occurredAt: "2025-08-21T12:00:00.000Z" });
+  insertTrade(db, { tradeId: "trade-y", occurredAt: "2025-08-21T13:00:00.000Z", quantity: "2", totalPrice: "4" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  const pruned = runOperationalHistoryRetention(db, {
+    now: NOW,
+    enabled: true,
+    dryRun: false,
+    days: 365,
+    tables: ["market_trades"],
+    approvedTables: new Set(["market_trades"]),
+    explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+    backupVerification: verifiedBackup(),
+    approvedBackupRoot: BACKUP_FIXTURE_ROOT,
+    batchSize: 1,
+  });
+  assert.equal(pruned.deletedRows, 1);
+  insertTrade(db, { tradeId: "trade-a", occurredAt: "2025-08-21T01:00:00.000Z", quantity: "3", totalPrice: "6" });
+  insertTrade(db, { tradeId: "trade-0", occurredAt: "2025-08-21T13:00:00.000Z", quantity: "4", totalPrice: "8" });
+
+  assert.deepEqual(
+    readOperationalMarketTradeDaily(db, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }),
+    { daily: [{ day: "2025-08-21", salesCount: 4, unitsSold: "10", totalValue: "20" }], observedSince: "2025-08-21T01:00:00.000Z" },
+  );
+  db.close();
+});
+
+test("covered-row mutation invalidates rollup parity and falls back to retained raw detail", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "covered", occurredAt: "2025-08-21T12:00:00.000Z" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  db.prepare("UPDATE market_trades SET quantity = '9', total_price = '18' WHERE trade_id = 'covered'").run();
+  assert.deepEqual(
+    readOperationalMarketTradeDaily(db, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }),
+    { daily: [{ day: "2025-08-21", salesCount: 1, unitsSold: "9", totalValue: "18" }], observedSince: "2025-08-21T12:00:00.000Z" },
+  );
+  db.close();
 });
 
 test("market history includes a raw trade at the final millisecond of the requested UTC day", () => {
@@ -450,4 +524,45 @@ test("enable gate reopens an artifact under the approved root and rejects missin
   const approvedSubdirectory = path.join(BACKUP_FIXTURE_ROOT, "approved-production-root");
   mkdirSync(approvedSubdirectory);
   assert.throws(() => validateOperationalHistoryRetentionEnableGate({ ...base, approvedBackupRoot: approvedSubdirectory }), /outside.*root/i);
+});
+
+test("enable gate rejects a configured production root that canonically aliases the local download root", () => {
+  const localDownloadRoot = path.join(BACKUP_FIXTURE_ROOT, "local-download-root");
+  const configuredAlias = path.join(BACKUP_FIXTURE_ROOT, "configured-alias");
+  mkdirSync(localDownloadRoot);
+  mkdirSync(configuredAlias);
+  assert.throws(() => validateOperationalHistoryRetentionEnableGate({
+    now: NOW,
+    approvedTables: new Set(["activity_events"]),
+    tables: ["activity_events"],
+    explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+    backupVerification: verifiedBackup(),
+    approvedBackupRoot: configuredAlias,
+    disallowedBackupRoots: [localDownloadRoot],
+    canonicalizePath: (value) => value === configuredAlias ? localDownloadRoot : value,
+  }), /local downloadable backup root/i);
+});
+
+test("enable gate rejects a real filesystem alias to the local download root when supported", (context) => {
+  const aliasParent = mkdtempSync(path.join(tmpdir(), "operational-retention-alias-"));
+  const aliasPath = path.join(aliasParent, "backup-alias");
+  try {
+    try {
+      symlinkSync(BACKUP_FIXTURE_ROOT, aliasPath, process.platform === "win32" ? "junction" : "dir");
+    } catch (error) {
+      context.skip(`Filesystem alias creation unavailable: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    assert.throws(() => validateOperationalHistoryRetentionEnableGate({
+      now: NOW,
+      approvedTables: new Set(["activity_events"]),
+      tables: ["activity_events"],
+      explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+      backupVerification: verifiedBackup(),
+      approvedBackupRoot: aliasPath,
+      disallowedBackupRoots: [BACKUP_FIXTURE_ROOT],
+    }), /local downloadable backup root/i);
+  } finally {
+    rmSync(aliasParent, { recursive: true, force: true });
+  }
 });

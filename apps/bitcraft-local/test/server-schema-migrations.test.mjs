@@ -39,6 +39,7 @@ test("operational history retention migration is additive, narrow, and idempoten
     "operational_history_market_trade_daily",
     "operational_history_market_event_daily",
     "operational_history_activity_daily",
+    "operational_history_source_ingestion_ids",
     "operational_history_rollup_watermarks",
     "operational_history_retention_runs",
     "operational_history_backup_verifications",
@@ -48,6 +49,7 @@ test("operational history retention migration is additive, narrow, and idempoten
   }
   const watermarkColumns = db.prepare("PRAGMA table_info(operational_history_rollup_watermarks)").all().map((column) => column.name);
   assert.ok(watermarkColumns.includes("source_max_occurred_at"));
+  assert.ok(watermarkColumns.includes("source_max_ingestion_id"));
   assert.ok(watermarkColumns.includes("source_fingerprint"));
   assert.ok(watermarkColumns.includes("remaining_source_fingerprint"));
   const backupColumns = db.prepare("PRAGMA table_info(operational_history_backup_verifications)").all().map((column) => column.name);

@@ -69,6 +69,18 @@ export const operationalHistoryRetentionSchemaSql = `
     newest_occurred_at TEXT NOT NULL,
     PRIMARY KEY (claim_id, utc_day, event_type)
   );
+  CREATE TABLE IF NOT EXISTS operational_history_source_ingestion_ids (
+    ingestion_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_table TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    UNIQUE (source_table, source_key)
+  );
+  CREATE TRIGGER IF NOT EXISTS operational_history_market_trade_ingestion_id
+  AFTER INSERT ON market_trades
+  BEGIN
+    INSERT OR IGNORE INTO operational_history_source_ingestion_ids (source_table, source_key)
+    VALUES ('market_trades', NEW.trade_id);
+  END;
   CREATE TABLE IF NOT EXISTS operational_history_rollup_watermarks (
     source_table TEXT NOT NULL,
     claim_id TEXT NOT NULL,
@@ -77,6 +89,7 @@ export const operationalHistoryRetentionSchemaSql = `
     source_row_count INTEGER NOT NULL,
     source_max_key TEXT,
     source_max_occurred_at TEXT,
+    source_max_ingestion_id INTEGER,
     source_fingerprint TEXT NOT NULL DEFAULT '',
     remaining_source_fingerprint TEXT NOT NULL DEFAULT '',
     pruned_row_count INTEGER NOT NULL DEFAULT 0,
@@ -123,6 +136,9 @@ export function applyOperationalHistoryRetentionSchema(db) {
   if (!watermarkColumns.has("source_max_occurred_at")) {
     db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_max_occurred_at TEXT");
   }
+  if (!watermarkColumns.has("source_max_ingestion_id")) {
+    db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_max_ingestion_id INTEGER");
+  }
   if (!watermarkColumns.has("source_fingerprint")) {
     db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_fingerprint TEXT NOT NULL DEFAULT ''");
   }
@@ -135,6 +151,12 @@ export function applyOperationalHistoryRetentionSchema(db) {
       db.exec(`ALTER TABLE operational_history_backup_verifications ADD COLUMN "${column}" TEXT NOT NULL DEFAULT ''`);
     }
   }
+  db.exec(`
+    INSERT OR IGNORE INTO operational_history_source_ingestion_ids (source_table, source_key)
+    SELECT 'market_trades', trade_id
+    FROM market_trades
+    ORDER BY rowid
+  `);
 }
 
 function integerInRange(value, minimum, maximum, label) {
@@ -397,38 +419,54 @@ function fingerprintRows(rows, columns) {
   return hash.digest("hex");
 }
 
+function sourceIngestionIdentity(sourceTable, sourceAlias = "source") {
+  if (sourceTable === "market_trades") {
+    return {
+      expression: "ingestion.ingestion_id",
+      join: `INNER JOIN operational_history_source_ingestion_ids AS ingestion
+        ON ingestion.source_table = 'market_trades' AND ingestion.source_key = ${sourceAlias}.trade_id`,
+    };
+  }
+  return { expression: `${sourceAlias}."${PRUNE_IDENTIFIERS[sourceTable]}"`, join: "" };
+}
+
 function sourceSnapshot(db, sourceTable, claimId, day, boundary = null) {
   const identifier = PRUNE_IDENTIFIERS[sourceTable];
   const columns = SOURCE_FINGERPRINT_COLUMNS[sourceTable];
   if (!identifier || !columns) throw new TypeError(`Unsupported operational history fingerprint source: ${sourceTable}`);
+  const identity = sourceIngestionIdentity(sourceTable);
   const resolvedBoundary = boundary ?? db.prepare(`
-    SELECT occurred_at AS source_max_occurred_at, "${identifier}" AS source_max_key
-    FROM "${sourceTable}"
-    WHERE claim_id = ? AND substr(occurred_at, 1, 10) = ?
-    ORDER BY occurred_at DESC, "${identifier}" DESC
+    SELECT source.occurred_at AS source_max_occurred_at,
+      source."${identifier}" AS source_max_key,
+      ${identity.expression} AS source_max_ingestion_id
+    FROM "${sourceTable}" AS source
+    ${identity.join}
+    WHERE source.claim_id = ? AND substr(source.occurred_at, 1, 10) = ?
+    ORDER BY ${identity.expression} DESC
     LIMIT 1
   `).get(claimId, day);
-  if (!resolvedBoundary?.source_max_occurred_at || resolvedBoundary.source_max_key == null) {
-    return { sourceRowCount: 0, sourceMaxKey: null, sourceMaxOccurredAt: null, sourceFingerprint: fingerprintRows([], columns) };
+  if (!Number.isSafeInteger(Number(resolvedBoundary?.source_max_ingestion_id)) || Number(resolvedBoundary.source_max_ingestion_id) <= 0) {
+    return { sourceRowCount: 0, sourceMaxKey: null, sourceMaxOccurredAt: null, sourceMaxIngestionId: null, sourceFingerprint: fingerprintRows([], ["__ingestion_id", ...columns]) };
   }
   const rows = db.prepare(`
-    SELECT ${columns.map((column) => `"${column}"`).join(", ")}
-    FROM "${sourceTable}"
-    WHERE claim_id = ? AND substr(occurred_at, 1, 10) = ?
-      AND (occurred_at < ? OR (occurred_at = ? AND "${identifier}" <= ?))
-    ORDER BY occurred_at, "${identifier}"
+    SELECT ${identity.expression} AS __ingestion_id,
+      ${columns.map((column) => `source."${column}"`).join(", ")}
+    FROM "${sourceTable}" AS source
+    ${identity.join}
+    WHERE source.claim_id = ? AND substr(source.occurred_at, 1, 10) = ?
+      AND ${identity.expression} <= ?
+    ORDER BY ${identity.expression}
   `).all(
     claimId,
     day,
-    resolvedBoundary.source_max_occurred_at,
-    resolvedBoundary.source_max_occurred_at,
-    resolvedBoundary.source_max_key,
+    resolvedBoundary.source_max_ingestion_id,
   );
   return {
     sourceRowCount: rows.length,
     sourceMaxKey: String(resolvedBoundary.source_max_key),
     sourceMaxOccurredAt: String(resolvedBoundary.source_max_occurred_at),
-    sourceFingerprint: fingerprintRows(rows, columns),
+    sourceMaxIngestionId: Number(resolvedBoundary.source_max_ingestion_id),
+    sourceFingerprint: fingerprintRows(rows, ["__ingestion_id", ...columns]),
   };
 }
 
@@ -443,14 +481,15 @@ export function buildOperationalHistoryRollups(db, {
   const upsertWatermark = db.prepare(`
     INSERT INTO operational_history_rollup_watermarks (
       source_table, claim_id, utc_day, completion_state, source_row_count,
-      source_max_key, source_max_occurred_at, source_fingerprint,
+      source_max_key, source_max_occurred_at, source_max_ingestion_id, source_fingerprint,
       remaining_source_fingerprint, pruned_row_count, completed_at, last_error
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     ON CONFLICT(source_table, claim_id, utc_day) DO UPDATE SET
       completion_state = excluded.completion_state,
       source_row_count = excluded.source_row_count,
       source_max_key = excluded.source_max_key,
       source_max_occurred_at = excluded.source_max_occurred_at,
+      source_max_ingestion_id = excluded.source_max_ingestion_id,
       source_fingerprint = excluded.source_fingerprint,
       remaining_source_fingerprint = excluded.remaining_source_fingerprint,
       pruned_row_count = 0,
@@ -468,7 +507,7 @@ export function buildOperationalHistoryRollups(db, {
     `).all(`${beforeDay}T00:00:00.000Z`);
     for (const period of periods) {
       const existing = db.prepare(`
-        SELECT completion_state, source_row_count, source_max_key, source_max_occurred_at,
+        SELECT completion_state, source_row_count, source_max_key, source_max_occurred_at, source_max_ingestion_id,
           source_fingerprint, remaining_source_fingerprint, pruned_row_count
         FROM operational_history_rollup_watermarks
         WHERE source_table = ? AND claim_id = ? AND utc_day = ?
@@ -479,6 +518,7 @@ export function buildOperationalHistoryRollups(db, {
         if (current.sourceRowCount === Number(existing.source_row_count ?? 0)
           && current.sourceMaxKey === String(existing.source_max_key ?? "")
           && current.sourceMaxOccurredAt === String(existing.source_max_occurred_at ?? "")
+          && current.sourceMaxIngestionId === Number(existing.source_max_ingestion_id)
           && current.sourceFingerprint === String(existing.source_fingerprint ?? "")) continue;
       }
       db.exec("BEGIN IMMEDIATE");
@@ -486,13 +526,13 @@ export function buildOperationalHistoryRollups(db, {
         BUILD_DAY[sourceTable](db, String(period.claim_id), String(period.utc_day));
         const result = sourceSnapshot(db, sourceTable, String(period.claim_id), String(period.utc_day));
         const completedAt = (now instanceof Date ? now : new Date(now)).toISOString();
-        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "complete", result.sourceRowCount, result.sourceMaxKey, result.sourceMaxOccurredAt, result.sourceFingerprint, result.sourceFingerprint, completedAt, null);
+        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "complete", result.sourceRowCount, result.sourceMaxKey, result.sourceMaxOccurredAt, result.sourceMaxIngestionId, result.sourceFingerprint, result.sourceFingerprint, completedAt, null);
         db.exec("COMMIT");
         completedDays.push({ sourceTable, claimId: String(period.claim_id), utcDay: String(period.utc_day), ...result });
       } catch (error) {
         db.exec("ROLLBACK");
         const message = error instanceof Error ? error.message : String(error);
-        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "failed", 0, null, null, "", "", null, message);
+        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "failed", 0, null, null, null, "", "", null, message);
         failedDays.push({ sourceTable, claimId: String(period.claim_id), utcDay: String(period.utc_day), error: message });
       }
     }
@@ -513,46 +553,56 @@ export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay 
     if (oldestOccurredAt && (!current.oldestOccurredAt || oldestOccurredAt < current.oldestOccurredAt)) current.oldestOccurredAt = oldestOccurredAt;
     groups.set(day, current);
   };
+  const coverageByDay = new Map();
+  const watermarks = db.prepare(`
+    SELECT claim_id, utc_day, source_row_count, source_max_key, source_max_occurred_at,
+      source_max_ingestion_id, source_fingerprint, remaining_source_fingerprint, pruned_row_count
+    FROM operational_history_rollup_watermarks
+    WHERE source_table = 'market_trades' AND claim_id = ?
+      AND utc_day >= ? AND utc_day <= ? AND completion_state = 'complete'
+    ORDER BY utc_day
+  `).all(String(claimId), startDay, endDay);
+  for (const watermark of watermarks) {
+    if (!Number.isSafeInteger(Number(watermark.source_max_ingestion_id))
+      || Number(watermark.source_max_ingestion_id) <= 0
+      || String(watermark.source_fingerprint).length !== 64) continue;
+    const snapshot = sourceSnapshot(db, "market_trades", watermark.claim_id, watermark.utc_day, watermark);
+    const parityValid = snapshot.sourceRowCount === Number(watermark.source_row_count) - Number(watermark.pruned_row_count)
+      && snapshot.sourceFingerprint === String(watermark.remaining_source_fingerprint);
+    if (!parityValid) {
+      if (Number(watermark.pruned_row_count) > 0) {
+        throw new Error(`Operational market history parity is invalid for ${watermark.utc_day}`);
+      }
+      continue;
+    }
+    coverageByDay.set(String(watermark.utc_day), Number(watermark.source_max_ingestion_id));
+  }
   const rollups = db.prepare(`
     SELECT daily.utc_day, daily.sales_count, daily.quantity, daily.total_value,
       daily.oldest_occurred_at
     FROM operational_history_market_trade_daily AS daily
-    INNER JOIN operational_history_rollup_watermarks AS watermark
-      ON watermark.source_table = 'market_trades'
-     AND watermark.claim_id = daily.claim_id
-     AND watermark.utc_day = daily.utc_day
-     AND watermark.completion_state = 'complete'
-     AND watermark.source_max_occurred_at IS NOT NULL
-     AND watermark.source_max_key IS NOT NULL
-     AND length(watermark.source_fingerprint) = 64
     WHERE daily.claim_id = ? AND daily.utc_day >= ? AND daily.utc_day <= ?
   `).all(String(claimId), startDay, endDay);
-  for (const row of rollups) add(String(row.utc_day), row.sales_count, row.quantity, row.total_value, row.oldest_occurred_at);
+  for (const row of rollups) {
+    if (coverageByDay.has(String(row.utc_day))) add(String(row.utc_day), row.sales_count, row.quantity, row.total_value, row.oldest_occurred_at);
+  }
   const endExclusive = new Date(`${endDay}T00:00:00.000Z`);
   endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
   const raw = db.prepare(`
     SELECT substr(source.occurred_at, 1, 10) AS utc_day, source.quantity,
-      source.total_price, source.occurred_at
+      source.total_price, source.occurred_at, ingestion.ingestion_id
     FROM market_trades AS source
+    LEFT JOIN operational_history_source_ingestion_ids AS ingestion
+      ON ingestion.source_table = 'market_trades' AND ingestion.source_key = source.trade_id
     WHERE source.claim_id = ?
       AND source.occurred_at >= ? AND source.occurred_at < ?
-      AND NOT EXISTS (
-        SELECT 1 FROM operational_history_rollup_watermarks AS watermark
-        WHERE watermark.source_table = 'market_trades'
-          AND watermark.claim_id = source.claim_id
-          AND watermark.utc_day = substr(source.occurred_at, 1, 10)
-          AND watermark.completion_state = 'complete'
-          AND watermark.source_max_occurred_at IS NOT NULL
-          AND watermark.source_max_key IS NOT NULL
-          AND length(watermark.source_fingerprint) = 64
-          AND (
-            source.occurred_at < watermark.source_max_occurred_at
-            OR (source.occurred_at = watermark.source_max_occurred_at AND source.trade_id <= watermark.source_max_key)
-          )
-      )
     ORDER BY source.occurred_at, source.trade_id
   `).all(String(claimId), `${startDay}T00:00:00.000Z`, endExclusive.toISOString());
-  for (const row of raw) add(String(row.utc_day), 1, row.quantity, row.total_price, String(row.occurred_at));
+  for (const row of raw) {
+    const coveredMax = coverageByDay.get(String(row.utc_day));
+    if (coveredMax != null && Number(row.ingestion_id) <= coveredMax) continue;
+    add(String(row.utc_day), 1, row.quantity, row.total_price, String(row.occurred_at));
+  }
   const daily = [...groups.values()].sort((left, right) => left.day.localeCompare(right.day));
   return {
     daily: daily.map(({ oldestOccurredAt: ignored, ...row }) => row),
@@ -604,21 +654,32 @@ function validateBackupRecency(now, backupVerification) {
   }
 }
 
-function containedRealPath(approvedRoot, candidatePath, label) {
-  if (!approvedRoot || !existsSync(approvedRoot)) throw new Error("Operational history retention approved production backup root is not configured or does not exist");
-  if (!candidatePath || !existsSync(candidatePath)) throw new Error(`Operational history retention ${label} does not exist`);
-  const root = realpathSync(approvedRoot);
-  const candidate = realpathSync(candidatePath);
+function pathIsWithin(root, candidate) {
   const relative = path.relative(root, candidate);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error(`Operational history retention ${label} is outside the approved production backup root`);
-  }
-  return candidate;
+  return relative === "" || !(relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative));
 }
 
-function validateCurrentBackupArtifact(approvedBackupRoot, backupVerification) {
-  const backupPath = containedRealPath(approvedBackupRoot, backupVerification.backupPath, "backup artifact");
-  const manifestPath = containedRealPath(approvedBackupRoot, backupVerification.manifestPath, "backup manifest");
+function canonicalExistingPath(value, label, canonicalizePath) {
+  if (!value || !existsSync(value)) throw new Error(`Operational history retention ${label} does not exist`);
+  return path.resolve(canonicalizePath(value));
+}
+
+function validateCurrentBackupArtifact(approvedBackupRoot, backupVerification, {
+  disallowedBackupRoots = [],
+  canonicalizePath = realpathSync,
+} = {}) {
+  if (!approvedBackupRoot) throw new Error("Operational history retention approved production backup root is not configured or does not exist");
+  const approvedRoot = canonicalExistingPath(approvedBackupRoot, "approved production backup root", canonicalizePath);
+  for (const disallowedRootPath of disallowedBackupRoots) {
+    const disallowedRoot = canonicalExistingPath(disallowedRootPath, "local downloadable backup root", canonicalizePath);
+    if (pathIsWithin(disallowedRoot, approvedRoot) || pathIsWithin(approvedRoot, disallowedRoot)) {
+      throw new Error("Operational history retention approved root overlaps the local downloadable backup root");
+    }
+  }
+  const backupPath = canonicalExistingPath(backupVerification.backupPath, "backup artifact", canonicalizePath);
+  const manifestPath = canonicalExistingPath(backupVerification.manifestPath, "backup manifest", canonicalizePath);
+  if (!pathIsWithin(approvedRoot, backupPath)) throw new Error("Operational history retention backup artifact is outside the approved production backup root");
+  if (!pathIsWithin(approvedRoot, manifestPath)) throw new Error("Operational history retention backup manifest is outside the approved production backup root");
   const backupStat = statSync(backupPath);
   if (backupStat.size !== Number(backupVerification.backupBytes)) throw new Error("Operational history retention backup artifact size does not match verification");
   if (sha256File(backupPath) !== backupVerification.databaseSha256) throw new Error("Operational history retention backup artifact hash does not match verification");
@@ -648,14 +709,23 @@ function validateCurrentBackupArtifact(approvedBackupRoot, backupVerification) {
   }
 }
 
-export function validateOperationalHistoryRetentionEnableGate({ now, approvedTables, tables, explicitConfirmation, backupVerification, approvedBackupRoot = "" }) {
+export function validateOperationalHistoryRetentionEnableGate({
+  now,
+  approvedTables,
+  tables,
+  explicitConfirmation,
+  backupVerification,
+  approvedBackupRoot = "",
+  disallowedBackupRoots = [],
+  canonicalizePath = realpathSync,
+}) {
   for (const table of tables) {
     if (!approvedTables.has(table)) throw new Error(`Operational history table ${table} is not approved for pruning`);
   }
   if (explicitConfirmation !== ENABLE_CONFIRMATION) throw new Error("Operational history retention requires explicit confirmation");
   validateMachineBackupVerification(backupVerification);
   validateBackupRecency(now, backupVerification);
-  validateCurrentBackupArtifact(approvedBackupRoot, backupVerification);
+  validateCurrentBackupArtifact(approvedBackupRoot, backupVerification, { disallowedBackupRoots, canonicalizePath });
 }
 
 function recordRun(db, result, startedAt, completedAt) {
@@ -677,6 +747,7 @@ export function runOperationalHistoryRetention(db, {
   explicitConfirmation = "",
   backupVerification = null,
   approvedBackupRoot = "",
+  disallowedBackupRoots = [],
   batchSize = MAX_BATCH_SIZE,
 } = {}) {
   const startedMs = Date.now();
@@ -693,7 +764,7 @@ export function runOperationalHistoryRetention(db, {
     recordRun(db, result, startedAt, completedAt);
     return result;
   }
-  validateOperationalHistoryRetentionEnableGate({ now, approvedTables, tables: configuredTables, explicitConfirmation, backupVerification, approvedBackupRoot });
+  validateOperationalHistoryRetentionEnableGate({ now, approvedTables, tables: configuredTables, explicitConfirmation, backupVerification, approvedBackupRoot, disallowedBackupRoots });
   if (!configuredTables.length) throw new Error("Operational history retention approved table allowlist is empty");
   const boundedBatchSize = Math.min(MAX_BATCH_SIZE, Math.max(1, Number(batchSize) || MAX_BATCH_SIZE));
   let remaining = boundedBatchSize;
@@ -703,6 +774,7 @@ export function runOperationalHistoryRetention(db, {
     if (!Object.hasOwn(PRUNE_IDENTIFIERS, table)) throw new Error(`Operational history table ${table} is not prunable`);
     if (remaining <= 0) break;
     const identifier = PRUNE_IDENTIFIERS[table];
+    const identity = sourceIngestionIdentity(table);
     const remove = db.prepare(`DELETE FROM "${table}" WHERE "${identifier}" = ? AND occurred_at < ?`);
     const markPruned = db.prepare(`
       UPDATE operational_history_rollup_watermarks
@@ -715,7 +787,7 @@ export function runOperationalHistoryRetention(db, {
       let tableDeleted = 0;
       const watermarks = db.prepare(`
         SELECT claim_id, utc_day, source_row_count, source_max_key,
-          source_max_occurred_at, pruned_row_count, remaining_source_fingerprint
+          source_max_occurred_at, source_max_ingestion_id, pruned_row_count, remaining_source_fingerprint
         FROM operational_history_rollup_watermarks
         WHERE source_table = ? AND completion_state = 'complete'
         ORDER BY utc_day, claim_id
@@ -725,6 +797,7 @@ export function runOperationalHistoryRetention(db, {
         const boundary = {
           source_max_key: watermark.source_max_key,
           source_max_occurred_at: watermark.source_max_occurred_at,
+          source_max_ingestion_id: watermark.source_max_ingestion_id,
         };
         const snapshot = sourceSnapshot(db, table, watermark.claim_id, watermark.utc_day, boundary);
         if (snapshot.sourceRowCount !== Number(watermark.source_row_count) - Number(watermark.pruned_row_count)
@@ -732,20 +805,19 @@ export function runOperationalHistoryRetention(db, {
           continue;
         }
         const candidates = db.prepare(`
-          SELECT "${identifier}" AS row_key
-          FROM "${table}"
-          WHERE claim_id = ? AND substr(occurred_at, 1, 10) = ?
-            AND occurred_at < ?
-            AND (occurred_at < ? OR (occurred_at = ? AND "${identifier}" <= ?))
-          ORDER BY occurred_at, "${identifier}"
+          SELECT source."${identifier}" AS row_key
+          FROM "${table}" AS source
+          ${identity.join}
+          WHERE source.claim_id = ? AND substr(source.occurred_at, 1, 10) = ?
+            AND source.occurred_at < ?
+            AND ${identity.expression} <= ?
+          ORDER BY ${identity.expression}
           LIMIT ?
         `).all(
           watermark.claim_id,
           watermark.utc_day,
           cutoff,
-          watermark.source_max_occurred_at,
-          watermark.source_max_occurred_at,
-          watermark.source_max_key,
+          watermark.source_max_ingestion_id,
           remaining - tableDeleted,
         );
         let periodDeleted = 0;

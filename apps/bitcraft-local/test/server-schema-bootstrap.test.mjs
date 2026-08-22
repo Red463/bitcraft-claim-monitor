@@ -27,6 +27,8 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE TABLE IF NOT EXISTS operational_history_market_trade_daily",
     "CREATE TABLE IF NOT EXISTS operational_history_market_event_daily",
     "CREATE TABLE IF NOT EXISTS operational_history_activity_daily",
+    "CREATE TABLE IF NOT EXISTS operational_history_source_ingestion_ids",
+    "CREATE TRIGGER IF NOT EXISTS operational_history_market_trade_ingestion_id",
     "CREATE TABLE IF NOT EXISTS operational_history_rollup_watermarks",
     "CREATE TABLE IF NOT EXISTS operational_history_retention_runs",
     "CREATE TABLE IF NOT EXISTS operational_history_backup_verifications",
