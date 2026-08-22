@@ -18,7 +18,7 @@ import { originFromRequest as requestOriginFromRequest, requestLogPolicy, safeRe
 import { appUserCsrfToken, csrfToken, validCsrfHeader } from "./src/server/httpCsrf.mjs";
 import { BODY_LIMITS, readJson, readRawBody } from "./src/server/httpBodies.mjs";
 import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/httpRateLimit.mjs";
-import { HeavyRouteCapacityError, createHeavyRouteGate, createRoutePerformanceTelemetry, normalizeRoutePerformancePath } from "./src/server/routePerformance.mjs";
+import { createHeavyRouteGate, createRoutePerformanceTelemetry, normalizeRoutePerformancePath, sendHeavyRouteCapacityResponse } from "./src/server/routePerformance.mjs";
 import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
 import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySettings.mjs";
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
@@ -9944,13 +9944,7 @@ const server = createServer(async (req, res) => {
     if (!url.pathname.startsWith("/api/") && await serveBuiltFrontend(url, req.method, res)) return;
     send(res, 404, { error: "Not found" });
   } catch (error) {
-    if (error instanceof HeavyRouteCapacityError && !res.headersSent) {
-      return send(res, 503, {
-        error: error.message,
-        source: "projection-capacity",
-        retryAfter: error.retryAfter,
-      }, { "retry-after": String(error.retryAfter) });
-    }
+    if (sendHeavyRouteCapacityResponse(error, res, send)) return;
     const status = Number(error?.statusCode) || 500;
     const logPolicy = requestLogPolicy(req.url, "exception");
     if (!isTestRuntime) {

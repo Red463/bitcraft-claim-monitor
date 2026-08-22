@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { createServer } from "node:http";
 import test from "node:test";
 
-import { HeavyRouteCapacityError, createHeavyRouteGate, createRoutePerformanceTelemetry } from "../src/server/routePerformance.mjs";
+import { sendJson } from "../src/server/httpResponses.mjs";
+import { HeavyRouteCapacityError, createHeavyRouteGate, createRoutePerformanceTelemetry, sendHeavyRouteCapacityResponse } from "../src/server/routePerformance.mjs";
 
 class FakeResponse extends EventEmitter {
   constructor() {
@@ -133,4 +135,36 @@ test("separate heavy route gates admit game-data and market projections independ
   assert.equal(marketGate.snapshot().active, 1);
   release();
   await Promise.all([game, market]);
+});
+
+test("a saturated heavy route returns a bounded JSON 503 response over HTTP", async (t) => {
+  const gate = createHeavyRouteGate({ maxConcurrent: 1, maxQueued: 0 });
+  let release;
+  const blocker = new Promise((resolve) => { release = resolve; });
+  const occupied = gate.run(() => blocker);
+  await Promise.resolve();
+
+  const server = createServer(async (_req, res) => {
+    try {
+      await gate.run(() => ({ ok: true }));
+      sendJson(res, 200, { ok: true });
+    } catch (error) {
+      if (!sendHeavyRouteCapacityResponse(error, res, sendJson)) throw error;
+    }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/local/game-data`);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("retry-after"), "1");
+  assert.match(response.headers.get("content-type") ?? "", /^application\/json/);
+  assert.deepEqual(await response.json(), {
+    error: "Server projection capacity is temporarily full.",
+    source: "projection-capacity",
+    retryAfter: 1,
+  });
+
+  release();
+  await occupied;
 });

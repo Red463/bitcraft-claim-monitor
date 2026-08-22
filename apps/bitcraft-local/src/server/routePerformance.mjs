@@ -132,6 +132,16 @@ export class HeavyRouteCapacityError extends Error {
   }
 }
 
+export function sendHeavyRouteCapacityResponse(error, res, sendJson) {
+  if (!(error instanceof HeavyRouteCapacityError) || res.headersSent) return false;
+  sendJson(res, 503, {
+    error: error.message,
+    source: "projection-capacity",
+    retryAfter: error.retryAfter,
+  }, { "retry-after": String(error.retryAfter) });
+  return true;
+}
+
 export function createHeavyRouteGate({ maxConcurrent = 8, maxQueued = 16 } = {}) {
   const concurrentLimit = Math.max(1, Math.floor(finiteNonNegative(maxConcurrent, 8)));
   const queuedLimit = Math.max(0, Math.floor(finiteNonNegative(maxQueued, 16)));

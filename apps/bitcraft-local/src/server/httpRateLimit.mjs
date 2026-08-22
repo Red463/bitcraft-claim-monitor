@@ -32,9 +32,36 @@ export function requestAddress(req, { trustedProxyAddresses = [] } = {}) {
   return trustedPeers.has(peerAddress) && forwardedAddress ? forwardedAddress : peerAddress;
 }
 
-export function createRateLimiter({ buckets = new Map(), sendJson, now = () => Date.now(), addressForRequest = requestAddress, onDecision = () => {} } = {}) {
-  return function rateLimit(req, res, name, policy = RATE_LIMITS.expensiveLocal) {
+export function createRateLimiter({ buckets = new Map(), sendJson, now = () => Date.now(), addressForRequest = requestAddress, onDecision = () => {}, maxBuckets = 20_000, pruneIntervalMs = 60_000 } = {}) {
+  const bucketLimit = Math.max(1, Math.floor(Number(maxBuckets) || 20_000));
+  const pruneInterval = Math.max(1, Math.floor(Number(pruneIntervalMs) || 60_000));
+  let nextPruneAt = 0;
+  let pruned = 0;
+  let evicted = 0;
+
+  function pruneExpired(currentTime) {
+    if (currentTime < nextPruneAt) return;
+    nextPruneAt = currentTime + pruneInterval;
+    for (const [key, bucket] of buckets) {
+      if (bucket.resetAt <= currentTime) {
+        buckets.delete(key);
+        pruned += 1;
+      }
+    }
+  }
+
+  function enforceBucketLimit() {
+    while (buckets.size > bucketLimit) {
+      const oldestKey = buckets.keys().next().value;
+      if (oldestKey === undefined) break;
+      buckets.delete(oldestKey);
+      evicted += 1;
+    }
+  }
+
+  function rateLimit(req, res, name, policy = RATE_LIMITS.expensiveLocal) {
     const currentTime = now();
+    pruneExpired(currentTime);
     const address = addressForRequest(req) || "unknown";
     const windows = policy.burst && policy.sustained
       ? [["burst", policy.burst], ["sustained", policy.sustained]]
@@ -46,6 +73,7 @@ export function createRateLimiter({ buckets = new Map(), sendJson, now = () => D
       const bucket = current && current.resetAt > currentTime ? current : { count: 0, resetAt: currentTime + windowPolicy.windowMs };
       bucket.count += 1;
       buckets.set(key, bucket);
+      enforceBucketLimit();
       if (bucket.count > windowPolicy.max) limited.push({ windowName, resetAt: bucket.resetAt });
     }
     if (!limited.length) return true;
@@ -59,5 +87,8 @@ export function createRateLimiter({ buckets = new Map(), sendJson, now = () => D
       retryAfter,
     }, { "retry-after": String(retryAfter), "x-rate-limit-source": "local" });
     return false;
-  };
+  }
+
+  rateLimit.stats = () => ({ size: buckets.size, maxBuckets: bucketLimit, pruned, evicted });
+  return rateLimit;
 }

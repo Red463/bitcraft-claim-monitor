@@ -115,3 +115,39 @@ test("createRateLimiter allows requests through the configured max then emits th
   currentTime = 5001;
   assert.equal(rateLimit(req, res, "auth", policy), true);
 });
+
+test("createRateLimiter prunes expired client buckets without exposing bucket keys", () => {
+  let now = 0;
+  const rateLimit = createRateLimiter({
+    now: () => now,
+    pruneIntervalMs: 1,
+    maxBuckets: 10,
+    addressForRequest: (req) => req.address,
+    sendJson: () => {},
+  });
+  const policy = { windowMs: 10, max: 100 };
+
+  rateLimit({ address: "client-a" }, {}, "public-read", policy);
+  assert.deepEqual(rateLimit.stats(), { size: 1, maxBuckets: 10, pruned: 0, evicted: 0 });
+  now = 11;
+  rateLimit({ address: "client-b" }, {}, "public-read", policy);
+
+  assert.deepEqual(rateLimit.stats(), { size: 1, maxBuckets: 10, pruned: 1, evicted: 0 });
+});
+
+test("createRateLimiter enforces a hard bucket cap across distributed addresses", () => {
+  const rateLimit = createRateLimiter({
+    now: () => 1_000,
+    pruneIntervalMs: 60_000,
+    maxBuckets: 8,
+    addressForRequest: (req) => req.address,
+    sendJson: () => {},
+  });
+  const policy = { windowMs: 60_000, max: 100 };
+
+  for (let index = 0; index < 100; index += 1) {
+    rateLimit({ address: `client-${index}` }, {}, "public-read", policy);
+  }
+
+  assert.deepEqual(rateLimit.stats(), { size: 8, maxBuckets: 8, pruned: 0, evicted: 92 });
+});
