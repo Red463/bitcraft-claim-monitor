@@ -13,8 +13,8 @@ const manifest = JSON.parse(readFileSync(
 
 test("Relay schema manifest records independent global and regional fingerprints", () => {
   assert.equal(
-    assertSchemaFingerprint(manifest, "global", "17e7e2ddc0ad3416bac036d5463655fb8d2a9f2bc21b79f2e9f076b9c1a25232"),
-    "17e7e2ddc0ad3416bac036d5463655fb8d2a9f2bc21b79f2e9f076b9c1a25232",
+    assertSchemaFingerprint(manifest, "global", "f538457640d0bb0d0dfa85577c4dfd71760854ba0fa9bb681c7b5de0e6e7f4db"),
+    "f538457640d0bb0d0dfa85577c4dfd71760854ba0fa9bb681c7b5de0e6e7f4db",
   );
   assert.equal(
     assertSchemaFingerprint(manifest, "regional", "3d0b4c9bba59f7b1daad5122369599ea557e333124c4f778079a45af1683f65b"),
