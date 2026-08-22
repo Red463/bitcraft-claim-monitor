@@ -76,6 +76,13 @@ export function completeGameDataScope<T>(
   };
 }
 
+export function completeEmptyGameDataScope<T>(
+  previous: LoadState<T>,
+  scopeKey: string,
+): LoadState<T> {
+  return completeGameDataScope(beginGameDataScope(previous, scopeKey), scopeKey, null);
+}
+
 export function useGameData(
   claimId: string,
   activePanel: ActivePanel,
@@ -98,7 +105,7 @@ export function useGameData(
     const cached = pageNavigationCache.get(requestedScopeKey);
     const refreshHeaders = pageRefreshHeaders(pageRefreshCycle, activePanel);
     if (domains.length === 0) {
-      setState((previous) => completeGameDataScope(previous, requestedScopeKey, null));
+      setState((previous) => completeEmptyGameDataScope(previous, requestedScopeKey));
       return;
     }
     setState((previous) => beginGameDataScope(previous, requestedScopeKey, cached));

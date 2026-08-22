@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   beginGameDataScope,
   completeGameDataScope,
+  completeEmptyGameDataScope,
 } from "../src/api/gameDataLoader.ts";
 
 test("game data never retains data across page or claim scopes", () => {
@@ -72,4 +73,21 @@ test("late fetch results cannot replace the current scope", () => {
     completeGameDataScope(membersState, "claim-a:dashboard", { claimId: "claim-a", panel: "dashboard" }),
     membersState,
   );
+});
+
+test("an empty-domain panel replaces populated data and settles in its requested scope", () => {
+  const state = completeEmptyGameDataScope({
+    data: { claimId: "claim-a", panel: "dashboard" },
+    error: null,
+    loading: false,
+    scopeKey: "claim-a:dashboard",
+  }, "claim-a:planning");
+
+  assert.deepEqual(state, {
+    data: null,
+    error: null,
+    loading: false,
+    scopeKey: "claim-a:planning",
+  });
+  assert.equal(Boolean(state.loading || state.error), false, "an empty-domain panel can render instead of staying on a skeleton");
 });
