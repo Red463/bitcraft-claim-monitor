@@ -288,7 +288,7 @@ test("generation invalidation does not overwrite a queued manual refresh", () =>
   assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "manual"]);
 });
 
-test("generation failure retry preserves a queued manual refresh", () => {
+test("a failed generation runs a queued manual cycle before its pending retry", () => {
   const clock = createFakeClock();
   const cycles = [];
   const controller = createPageRefreshController({
@@ -307,10 +307,20 @@ test("generation failure retry preserves a queued manual refresh", () => {
   clock.advance(2_000);
   controller.requestManual();
   controller.complete(cycles[1].id, false);
-  clock.advance(5_000);
-  controller.complete(cycles[2].id, true);
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation", "manual"]);
 
-  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation", "generation", "manual"]);
+  controller.complete(cycles[2].id, true);
+  clock.advance(4_999);
+  assert.equal(cycles.length, 3);
+  clock.advance(1);
+  assert.equal(cycles[3].reason, "generation");
+
+  controller.complete(cycles[3].id, false);
+  clock.advance(9_999);
+  assert.equal(cycles.length, 4);
+  clock.advance(1);
+
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation", "manual", "generation", "generation"]);
 });
 
 test("cold-start failures are sealed outside the data branch and enter Craft Monitor backoff", async () => {
@@ -701,6 +711,49 @@ test("hidden interval provider pages defer generation invalidation to one visibl
   controller.setVisible(true);
   controller.setVisible(true);
   assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "visibility-catch-up"]);
+});
+
+test("a fresh hidden generation catch-up failure enters bounded generation backoff and success resets it", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `fresh-hidden-generation-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.setVisible(false);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.setVisible(true);
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "visibility-catch-up"]);
+
+  for (const delay of [5_000, 10_000, 20_000, 30_000, 30_000]) {
+    controller.complete(cycles.at(-1).id, false);
+    const beforeRetry = cycles.length;
+    clock.advance(delay - 1);
+    assert.equal(cycles.length, beforeRetry);
+    clock.advance(1);
+    assert.equal(cycles.length, beforeRetry + 1);
+    assert.equal(cycles.at(-1).reason, "generation");
+  }
+
+  controller.complete(cycles.at(-1).id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles.at(-1).id, false);
+  const beforeResetRetry = cycles.length;
+  clock.advance(4_999);
+  assert.equal(cycles.length, beforeResetRetry);
+  clock.advance(1);
+  assert.equal(cycles.length, beforeResetRetry + 1);
+  assert.equal(cycles.at(-1).reason, "generation");
 });
 
 test("Craft Monitor visibility catch-up preserves the two-second coalescing deadline", () => {

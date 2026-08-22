@@ -61,8 +61,10 @@ Live-first data policy:
   manual/non-provider pages create no watcher, and invalidations remain
   single-flight with one trailing cycle rather than accumulating behind a slow
   response;
-- generation-triggered request failures retry after 5, 10, 20, then at most 30
-  seconds and reset on success; ordinary interval failures retain their normal
+- generation-triggered request failures, including a visibility catch-up for a
+  generation observed while hidden, retry after 5, 10, 20, then at most 30
+  seconds and reset on generation success; a queued manual cycle runs before
+  the background retry, and ordinary interval failures retain their normal
   next-interval behavior;
 - browser history reads follow exact ownership: Dashboard requests activity,
   market, and dashboard history, Activity requests activity, and Local Market

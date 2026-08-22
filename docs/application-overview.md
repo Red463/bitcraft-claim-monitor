@@ -91,9 +91,12 @@ hidden and visibility restoration produces one catch-up cycle. Manual and
 non-provider pages create no generation watcher.
 
 Generation invalidations are single-flight and coalesced to one trailing cycle.
-Generation-triggered failures retry after 5, 10, 20, then at most 30 seconds;
-a successful cycle resets that backoff. Ordinary interval failures retain their
-normal next-interval cadence.
+Generation-triggered failures, including a visibility catch-up for a generation
+observed while hidden, retry after 5, 10, 20, then at most 30 seconds; a
+successful generation cycle resets that backoff. A queued manual cycle runs
+immediately after the active generation cycle without being delayed by its
+background retry. Ordinary interval failures retain their normal next-interval
+cadence.
 
 Durable `/api/local/history` projections also have exact page ownership:
 Dashboard requests activity, market, and dashboard history; Activity requests

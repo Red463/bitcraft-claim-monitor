@@ -95,9 +95,12 @@ For `/api/local/game-data`:
 - use the existing refresh coordinator for manual refresh.
 
 Generation refreshes use the same coordinator with single-flight coalescing and
-at most one trailing cycle. Only generation-triggered failures use the bounded
+at most one trailing cycle. Generation-triggered failures, including a
+visibility catch-up for a generation observed while hidden, use the bounded
 5/10/20/30-second retry; an ordinary interval failure waits for the next normal
-interval, and success resets generation backoff.
+interval, and a successful generation cycle resets generation backoff. A queued
+manual cycle runs immediately after the active generation cycle while any
+required background retry retains its deadline.
 
 For `/api/local/history`, keep ownership narrow: Dashboard owns
 `activity,market,dashboard`, Activity owns `activity`, and Local Market owns

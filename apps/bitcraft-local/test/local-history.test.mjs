@@ -42,6 +42,35 @@ test("pages without a history projection neither fetch nor enroll a refresh task
   assert.equal(coordinator.snapshot().lastSuccessfulAt != null, true);
 });
 
+test("the history hook result is stably empty on unowned panels without clearing retained owned state", () => {
+  assert.equal(typeof localHistoryModule.localHistoryResultForPanel, "function");
+  const retained = {
+    market: { listings: ["retained-market"] },
+    activity: ["retained-activity"],
+    activityTotal: 1,
+    dashboard: { trend: "retained-dashboard" },
+    error: null,
+    refreshToken: 7,
+  };
+
+  const firstEmpty = localHistoryModule.localHistoryResultForPanel("members", retained);
+  const secondEmpty = localHistoryModule.localHistoryResultForPanel("map", {
+    ...retained,
+    refreshToken: 8,
+  });
+
+  assert.deepEqual(firstEmpty, {
+    market: null,
+    activity: [],
+    activityTotal: 0,
+    dashboard: null,
+    error: null,
+    refreshToken: 0,
+  });
+  assert.strictEqual(secondEmpty, firstEmpty, "empty hook results reuse one stable object");
+  assert.strictEqual(localHistoryModule.localHistoryResultForPanel("activity", retained), retained);
+});
+
 test("owned history refreshes update only returned projections without clearing same-scope data", () => {
   assert.equal(typeof localHistoryModule.mergeLocalHistoryState, "function");
   const previous = {

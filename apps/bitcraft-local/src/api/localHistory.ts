@@ -8,6 +8,24 @@ import { localHistoryIncludeForPanel } from "./localHistoryInclude.ts";
 
 const LOCAL_API = "/api/local";
 
+const EMPTY_LOCAL_HISTORY_STATE: LocalHistoryState = {
+  market: null,
+  activity: [],
+  activityTotal: 0,
+  dashboard: null,
+  error: null,
+  refreshToken: 0,
+};
+Object.freeze(EMPTY_LOCAL_HISTORY_STATE.activity);
+Object.freeze(EMPTY_LOCAL_HISTORY_STATE);
+
+export function localHistoryResultForPanel(
+  activePanel: ActivePanel,
+  retainedState: LocalHistoryState,
+): LocalHistoryState {
+  return localHistoryIncludeForPanel(activePanel) ? retainedState : EMPTY_LOCAL_HISTORY_STATE;
+}
+
 export function localHistoryRequestForPanel({
   claimId,
   activePanel,
@@ -62,14 +80,7 @@ export function useLocalHistory(
   pageRefreshCycle: PageRefreshCycle | null,
   trackPageRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (_taskKey, promise) => promise,
 ): LocalHistoryState {
-  const [state, setState] = React.useState<LocalHistoryState>({
-    market: null,
-    activity: [],
-    activityTotal: 0,
-    dashboard: null,
-    error: null,
-    refreshToken: 0,
-  });
+  const [state, setState] = React.useState<LocalHistoryState>(EMPTY_LOCAL_HISTORY_STATE);
 
   React.useEffect(() => {
     if (!localHistoryIncludeForPanel(activePanel)) return;
@@ -92,7 +103,7 @@ export function useLocalHistory(
     };
   }, [activePanel, claimId, pageRefreshCycle?.sequence, trackPageRefreshPromise]);
 
-  return state;
+  return localHistoryResultForPanel(activePanel, state);
 }
 
 export function useNotificationActivity(refreshToken: number, claimId: string): NotificationActivityState {
