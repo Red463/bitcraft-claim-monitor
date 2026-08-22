@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, constants as sqliteConstants } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -235,6 +235,36 @@ test("hybrid membership uses ingestion order for an earlier backfill and a same-
   db.close();
 });
 
+test("late trades with missing or invalid ingestion identities remain visible and emit a diagnostic", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "covered", occurredAt: "2025-08-21T12:00:00.000Z" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  db.exec("DROP TRIGGER operational_history_market_trade_ingestion_id");
+  insertTrade(db, { tradeId: "missing-ledger", occurredAt: "2025-08-21T01:00:00.000Z", quantity: "3", totalPrice: "6" });
+  insertTrade(db, { tradeId: "invalid-ledger", occurredAt: "2025-08-21T00:30:00.000Z", quantity: "2", totalPrice: "4" });
+  db.prepare(`
+    INSERT INTO operational_history_source_ingestion_ids (ingestion_id, source_table, source_key)
+    VALUES (0, 'market_trades', 'invalid-ledger')
+  `).run();
+  const diagnostics = [];
+
+  assert.deepEqual(
+    readOperationalMarketTradeDaily(db, {
+      claimId: "claim-a",
+      startDay: "2025-08-21",
+      endDay: "2025-08-21",
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    }),
+    { daily: [{ day: "2025-08-21", salesCount: 3, unitsSold: "6", totalValue: "12" }], observedSince: "2025-08-21T00:30:00.000Z" },
+  );
+  assert.deepEqual(diagnostics, [{
+    code: "operational_history_missing_ingestion_identity",
+    claimId: "claim-a",
+    rowCount: 2,
+  }]);
+  db.close();
+});
+
 test("earlier and same-time lower-key late trades remain visible after a partial prune", () => {
   const db = fixture();
   insertTrade(db, { tradeId: "trade-z", occurredAt: "2025-08-21T12:00:00.000Z" });
@@ -271,6 +301,66 @@ test("covered-row mutation invalidates rollup parity and falls back to retained 
   assert.deepEqual(
     readOperationalMarketTradeDaily(db, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }),
     { daily: [{ day: "2025-08-21", salesCount: 1, unitsSold: "9", totalValue: "18" }], observedSince: "2025-08-21T12:00:00.000Z" },
+  );
+  db.close();
+});
+
+test("normal rollup-backed market reads do not rescan covered source fields for fingerprints", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "covered", occurredAt: "2025-08-21T12:00:00.000Z" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  insertTrade(db, { tradeId: "late", occurredAt: "2025-08-21T13:00:00.000Z", quantity: "3", totalPrice: "6" });
+  db.setAuthorizer((action, table, column) => {
+    if (action === sqliteConstants.SQLITE_READ && table === "market_trades" && column === "imported_at") {
+      return sqliteConstants.SQLITE_DENY;
+    }
+    return sqliteConstants.SQLITE_OK;
+  });
+  let rawRowsReturned = null;
+  const instrumentedDb = {
+    prepare(sql) {
+      const statement = db.prepare(sql);
+      return {
+        all(...parameters) {
+          const rows = statement.all(...parameters);
+          if (/WITH coverage AS/.test(sql)) rawRowsReturned = rows.length;
+          return rows;
+        },
+      };
+    },
+  };
+
+  assert.deepEqual(
+    readOperationalMarketTradeDaily(instrumentedDb, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }),
+    { daily: [{ day: "2025-08-21", salesCount: 2, unitsSold: "4", totalValue: "8" }], observedSince: "2025-08-21T12:00:00.000Z" },
+  );
+  assert.equal(rawRowsReturned, 1);
+  db.setAuthorizer(null);
+  db.close();
+});
+
+test("a covered mutation after partial prune fails closed instead of serving a stale rollup", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "pruned", occurredAt: "2025-08-21T01:00:00.000Z" });
+  insertTrade(db, { tradeId: "retained", occurredAt: "2025-08-21T02:00:00.000Z", quantity: "2", totalPrice: "4" });
+  buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  const result = runOperationalHistoryRetention(db, {
+    now: NOW,
+    enabled: true,
+    dryRun: false,
+    days: 365,
+    tables: ["market_trades"],
+    approvedTables: new Set(["market_trades"]),
+    explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+    backupVerification: verifiedBackup(),
+    approvedBackupRoot: BACKUP_FIXTURE_ROOT,
+    batchSize: 1,
+  });
+  assert.equal(result.deletedRows, 1);
+  db.prepare("UPDATE market_trades SET quantity = '9', total_price = '18' WHERE trade_id = 'retained'").run();
+  assert.throws(
+    () => readOperationalMarketTradeDaily(db, { claimId: "claim-a", startDay: "2025-08-21", endDay: "2025-08-21" }),
+    /parity is invalid/i,
   );
   db.close();
 });

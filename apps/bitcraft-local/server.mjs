@@ -6157,6 +6157,9 @@ function marketHistory(claimId, limit, owner = "") {
     claimId,
     startDay: marketRangeStart.slice(0, 10),
     endDay: new Date(new Date(marketRangeEnd).getTime() - 1).toISOString().slice(0, 10),
+    onDiagnostic: (diagnostic) => console.warn(
+      `Operational market history diagnostic: ${diagnostic.code} claim=${diagnostic.claimId} rows=${diagnostic.rowCount}`,
+    ),
   });
   const daily = rollupDaily?.daily ?? db.prepare(`
       SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue

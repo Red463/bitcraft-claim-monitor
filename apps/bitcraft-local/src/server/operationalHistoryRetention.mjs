@@ -9,6 +9,55 @@ const DAY_MS = 86_400_000;
 const MAX_BATCH_SIZE = 5_000;
 const ENABLE_CONFIRMATION = "ENABLE OPERATIONAL HISTORY RETENTION";
 
+const operationalHistoryMarketTradeTriggerSql = `
+  CREATE TRIGGER operational_history_market_trade_ingestion_id
+  AFTER INSERT ON market_trades
+  BEGIN
+    INSERT OR IGNORE INTO operational_history_source_ingestion_ids (source_table, source_key)
+    VALUES ('market_trades', NEW.trade_id);
+    INSERT INTO operational_history_source_mutations (
+      source_table, source_key, ingestion_id, claim_id, utc_day, operation
+    )
+    SELECT 'market_trades', NEW.trade_id, ingestion_id, NEW.claim_id,
+      substr(NEW.occurred_at, 1, 10), 'insert'
+    FROM operational_history_source_ingestion_ids
+    WHERE source_table = 'market_trades' AND source_key = NEW.trade_id;
+  END;
+  CREATE TRIGGER operational_history_market_trade_update
+  AFTER UPDATE ON market_trades
+  BEGIN
+    INSERT INTO operational_history_source_mutations (
+      source_table, source_key, ingestion_id, claim_id, utc_day, operation
+    ) VALUES (
+      'market_trades', OLD.trade_id,
+      (SELECT ingestion_id FROM operational_history_source_ingestion_ids
+        WHERE source_table = 'market_trades' AND source_key = OLD.trade_id),
+      OLD.claim_id, substr(OLD.occurred_at, 1, 10), 'update'
+    );
+    INSERT OR IGNORE INTO operational_history_source_ingestion_ids (source_table, source_key)
+    VALUES ('market_trades', NEW.trade_id);
+    INSERT INTO operational_history_source_mutations (
+      source_table, source_key, ingestion_id, claim_id, utc_day, operation
+    )
+    SELECT 'market_trades', NEW.trade_id, ingestion_id, NEW.claim_id,
+      substr(NEW.occurred_at, 1, 10), 'update'
+    FROM operational_history_source_ingestion_ids
+    WHERE source_table = 'market_trades' AND source_key = NEW.trade_id;
+  END;
+  CREATE TRIGGER operational_history_market_trade_delete
+  AFTER DELETE ON market_trades
+  BEGIN
+    INSERT INTO operational_history_source_mutations (
+      source_table, source_key, ingestion_id, claim_id, utc_day, operation
+    ) VALUES (
+      'market_trades', OLD.trade_id,
+      (SELECT ingestion_id FROM operational_history_source_ingestion_ids
+        WHERE source_table = 'market_trades' AND source_key = OLD.trade_id),
+      OLD.claim_id, substr(OLD.occurred_at, 1, 10), 'delete'
+    );
+  END;
+`;
+
 export const OPERATIONAL_HISTORY_RETENTION_DEFAULTS = Object.freeze({
   enabled: false,
   days: 365,
@@ -75,12 +124,18 @@ export const operationalHistoryRetentionSchemaSql = `
     source_key TEXT NOT NULL,
     UNIQUE (source_table, source_key)
   );
-  CREATE TRIGGER IF NOT EXISTS operational_history_market_trade_ingestion_id
-  AFTER INSERT ON market_trades
-  BEGIN
-    INSERT OR IGNORE INTO operational_history_source_ingestion_ids (source_table, source_key)
-    VALUES ('market_trades', NEW.trade_id);
-  END;
+  CREATE TABLE IF NOT EXISTS operational_history_source_mutations (
+    mutation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_table TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    ingestion_id INTEGER,
+    claim_id TEXT NOT NULL,
+    utc_day TEXT NOT NULL,
+    operation TEXT NOT NULL CHECK (operation IN ('insert', 'update', 'delete'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_operational_history_source_mutations_coverage
+    ON operational_history_source_mutations (source_table, claim_id, utc_day, mutation_id, ingestion_id);
+  ${operationalHistoryMarketTradeTriggerSql.replaceAll("CREATE TRIGGER ", "CREATE TRIGGER IF NOT EXISTS ")}
   CREATE TABLE IF NOT EXISTS operational_history_rollup_watermarks (
     source_table TEXT NOT NULL,
     claim_id TEXT NOT NULL,
@@ -90,6 +145,7 @@ export const operationalHistoryRetentionSchemaSql = `
     source_max_key TEXT,
     source_max_occurred_at TEXT,
     source_max_ingestion_id INTEGER,
+    source_max_mutation_id INTEGER,
     source_fingerprint TEXT NOT NULL DEFAULT '',
     remaining_source_fingerprint TEXT NOT NULL DEFAULT '',
     pruned_row_count INTEGER NOT NULL DEFAULT 0,
@@ -139,6 +195,9 @@ export function applyOperationalHistoryRetentionSchema(db) {
   if (!watermarkColumns.has("source_max_ingestion_id")) {
     db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_max_ingestion_id INTEGER");
   }
+  if (!watermarkColumns.has("source_max_mutation_id")) {
+    db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_max_mutation_id INTEGER");
+  }
   if (!watermarkColumns.has("source_fingerprint")) {
     db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_fingerprint TEXT NOT NULL DEFAULT ''");
   }
@@ -156,6 +215,12 @@ export function applyOperationalHistoryRetentionSchema(db) {
     SELECT 'market_trades', trade_id
     FROM market_trades
     ORDER BY rowid
+  `);
+  db.exec(`
+    DROP TRIGGER IF EXISTS operational_history_market_trade_ingestion_id;
+    DROP TRIGGER IF EXISTS operational_history_market_trade_update;
+    DROP TRIGGER IF EXISTS operational_history_market_trade_delete;
+    ${operationalHistoryMarketTradeTriggerSql}
   `);
 }
 
@@ -430,6 +495,16 @@ function sourceIngestionIdentity(sourceTable, sourceAlias = "source") {
   return { expression: `${sourceAlias}."${PRUNE_IDENTIFIERS[sourceTable]}"`, join: "" };
 }
 
+function sourceMutationVersion(db, sourceTable, claimId, day, sourceMaxIngestionId) {
+  if (sourceTable !== "market_trades") return 0;
+  return Number(db.prepare(`
+    SELECT COALESCE(MAX(mutation_id), 0) AS source_max_mutation_id
+    FROM operational_history_source_mutations
+    WHERE source_table = ? AND claim_id = ? AND utc_day = ?
+      AND ingestion_id <= ?
+  `).get(sourceTable, claimId, day, sourceMaxIngestionId)?.source_max_mutation_id ?? 0);
+}
+
 function sourceSnapshot(db, sourceTable, claimId, day, boundary = null) {
   const identifier = PRUNE_IDENTIFIERS[sourceTable];
   const columns = SOURCE_FINGERPRINT_COLUMNS[sourceTable];
@@ -446,7 +521,7 @@ function sourceSnapshot(db, sourceTable, claimId, day, boundary = null) {
     LIMIT 1
   `).get(claimId, day);
   if (!Number.isSafeInteger(Number(resolvedBoundary?.source_max_ingestion_id)) || Number(resolvedBoundary.source_max_ingestion_id) <= 0) {
-    return { sourceRowCount: 0, sourceMaxKey: null, sourceMaxOccurredAt: null, sourceMaxIngestionId: null, sourceFingerprint: fingerprintRows([], ["__ingestion_id", ...columns]) };
+    return { sourceRowCount: 0, sourceMaxKey: null, sourceMaxOccurredAt: null, sourceMaxIngestionId: null, sourceMaxMutationId: 0, sourceFingerprint: fingerprintRows([], ["__ingestion_id", ...columns]) };
   }
   const rows = db.prepare(`
     SELECT ${identity.expression} AS __ingestion_id,
@@ -466,6 +541,7 @@ function sourceSnapshot(db, sourceTable, claimId, day, boundary = null) {
     sourceMaxKey: String(resolvedBoundary.source_max_key),
     sourceMaxOccurredAt: String(resolvedBoundary.source_max_occurred_at),
     sourceMaxIngestionId: Number(resolvedBoundary.source_max_ingestion_id),
+    sourceMaxMutationId: sourceMutationVersion(db, sourceTable, claimId, day, Number(resolvedBoundary.source_max_ingestion_id)),
     sourceFingerprint: fingerprintRows(rows, ["__ingestion_id", ...columns]),
   };
 }
@@ -481,15 +557,16 @@ export function buildOperationalHistoryRollups(db, {
   const upsertWatermark = db.prepare(`
     INSERT INTO operational_history_rollup_watermarks (
       source_table, claim_id, utc_day, completion_state, source_row_count,
-      source_max_key, source_max_occurred_at, source_max_ingestion_id, source_fingerprint,
+      source_max_key, source_max_occurred_at, source_max_ingestion_id, source_max_mutation_id, source_fingerprint,
       remaining_source_fingerprint, pruned_row_count, completed_at, last_error
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     ON CONFLICT(source_table, claim_id, utc_day) DO UPDATE SET
       completion_state = excluded.completion_state,
       source_row_count = excluded.source_row_count,
       source_max_key = excluded.source_max_key,
       source_max_occurred_at = excluded.source_max_occurred_at,
       source_max_ingestion_id = excluded.source_max_ingestion_id,
+      source_max_mutation_id = excluded.source_max_mutation_id,
       source_fingerprint = excluded.source_fingerprint,
       remaining_source_fingerprint = excluded.remaining_source_fingerprint,
       pruned_row_count = 0,
@@ -507,7 +584,7 @@ export function buildOperationalHistoryRollups(db, {
     `).all(`${beforeDay}T00:00:00.000Z`);
     for (const period of periods) {
       const existing = db.prepare(`
-        SELECT completion_state, source_row_count, source_max_key, source_max_occurred_at, source_max_ingestion_id,
+        SELECT completion_state, source_row_count, source_max_key, source_max_occurred_at, source_max_ingestion_id, source_max_mutation_id,
           source_fingerprint, remaining_source_fingerprint, pruned_row_count
         FROM operational_history_rollup_watermarks
         WHERE source_table = ? AND claim_id = ? AND utc_day = ?
@@ -519,6 +596,7 @@ export function buildOperationalHistoryRollups(db, {
           && current.sourceMaxKey === String(existing.source_max_key ?? "")
           && current.sourceMaxOccurredAt === String(existing.source_max_occurred_at ?? "")
           && current.sourceMaxIngestionId === Number(existing.source_max_ingestion_id)
+          && current.sourceMaxMutationId === Number(existing.source_max_mutation_id)
           && current.sourceFingerprint === String(existing.source_fingerprint ?? "")) continue;
       }
       db.exec("BEGIN IMMEDIATE");
@@ -526,13 +604,13 @@ export function buildOperationalHistoryRollups(db, {
         BUILD_DAY[sourceTable](db, String(period.claim_id), String(period.utc_day));
         const result = sourceSnapshot(db, sourceTable, String(period.claim_id), String(period.utc_day));
         const completedAt = (now instanceof Date ? now : new Date(now)).toISOString();
-        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "complete", result.sourceRowCount, result.sourceMaxKey, result.sourceMaxOccurredAt, result.sourceMaxIngestionId, result.sourceFingerprint, result.sourceFingerprint, completedAt, null);
+        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "complete", result.sourceRowCount, result.sourceMaxKey, result.sourceMaxOccurredAt, result.sourceMaxIngestionId, result.sourceMaxMutationId, result.sourceFingerprint, result.sourceFingerprint, completedAt, null);
         db.exec("COMMIT");
         completedDays.push({ sourceTable, claimId: String(period.claim_id), utcDay: String(period.utc_day), ...result });
       } catch (error) {
         db.exec("ROLLBACK");
         const message = error instanceof Error ? error.message : String(error);
-        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "failed", 0, null, null, null, "", "", null, message);
+        upsertWatermark.run(sourceTable, period.claim_id, period.utc_day, "failed", 0, null, null, null, null, "", "", null, message);
         failedDays.push({ sourceTable, claimId: String(period.claim_id), utcDay: String(period.utc_day), error: message });
       }
     }
@@ -540,7 +618,7 @@ export function buildOperationalHistoryRollups(db, {
   return { completedDays, failedDays };
 }
 
-export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay }) {
+export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay, onDiagnostic = () => {} }) {
   if (![startDay, endDay].every((value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value)))) {
     throw new TypeError("Market trade daily history requires explicit UTC day bounds");
   }
@@ -556,26 +634,40 @@ export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay 
   const coverageByDay = new Map();
   const watermarks = db.prepare(`
     SELECT claim_id, utc_day, source_row_count, source_max_key, source_max_occurred_at,
-      source_max_ingestion_id, source_fingerprint, remaining_source_fingerprint, pruned_row_count
-    FROM operational_history_rollup_watermarks
-    WHERE source_table = 'market_trades' AND claim_id = ?
-      AND utc_day >= ? AND utc_day <= ? AND completion_state = 'complete'
-    ORDER BY utc_day
+      source_max_ingestion_id, source_max_mutation_id, source_fingerprint,
+      remaining_source_fingerprint, pruned_row_count,
+      EXISTS (
+        SELECT 1
+        FROM operational_history_source_mutations AS mutation
+        WHERE mutation.source_table = 'market_trades'
+          AND mutation.claim_id = watermark.claim_id
+          AND mutation.utc_day = watermark.utc_day
+          AND mutation.mutation_id > watermark.source_max_mutation_id
+          AND mutation.ingestion_id <= watermark.source_max_ingestion_id
+        LIMIT 1
+      ) AS has_covered_mutation
+    FROM operational_history_rollup_watermarks AS watermark
+    WHERE watermark.source_table = 'market_trades' AND watermark.claim_id = ?
+      AND watermark.utc_day >= ? AND watermark.utc_day <= ? AND watermark.completion_state = 'complete'
+    ORDER BY watermark.utc_day
   `).all(String(claimId), startDay, endDay);
   for (const watermark of watermarks) {
-    if (!Number.isSafeInteger(Number(watermark.source_max_ingestion_id))
-      || Number(watermark.source_max_ingestion_id) <= 0
+    const sourceMaxIngestionId = Number(watermark.source_max_ingestion_id);
+    const sourceMaxMutationId = Number(watermark.source_max_mutation_id);
+    if (watermark.source_max_ingestion_id == null
+      || !Number.isSafeInteger(sourceMaxIngestionId)
+      || sourceMaxIngestionId <= 0
+      || watermark.source_max_mutation_id == null
+      || !Number.isSafeInteger(sourceMaxMutationId)
+      || sourceMaxMutationId < 0
       || String(watermark.source_fingerprint).length !== 64) continue;
-    const snapshot = sourceSnapshot(db, "market_trades", watermark.claim_id, watermark.utc_day, watermark);
-    const parityValid = snapshot.sourceRowCount === Number(watermark.source_row_count) - Number(watermark.pruned_row_count)
-      && snapshot.sourceFingerprint === String(watermark.remaining_source_fingerprint);
-    if (!parityValid) {
+    if (Number(watermark.has_covered_mutation) > 0) {
       if (Number(watermark.pruned_row_count) > 0) {
         throw new Error(`Operational market history parity is invalid for ${watermark.utc_day}`);
       }
       continue;
     }
-    coverageByDay.set(String(watermark.utc_day), Number(watermark.source_max_ingestion_id));
+    coverageByDay.set(String(watermark.utc_day), sourceMaxIngestionId);
   }
   const rollups = db.prepare(`
     SELECT daily.utc_day, daily.sales_count, daily.quantity, daily.total_value,
@@ -588,20 +680,45 @@ export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay 
   }
   const endExclusive = new Date(`${endDay}T00:00:00.000Z`);
   endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+  const coverageJson = JSON.stringify([...coverageByDay].map(([day, maxId]) => ({ day, maxId })));
   const raw = db.prepare(`
+    WITH coverage AS (
+      SELECT json_extract(value, '$.day') AS utc_day,
+        CAST(json_extract(value, '$.maxId') AS INTEGER) AS source_max_ingestion_id
+      FROM json_each(?)
+    )
     SELECT substr(source.occurred_at, 1, 10) AS utc_day, source.quantity,
       source.total_price, source.occurred_at, ingestion.ingestion_id
     FROM market_trades AS source
     LEFT JOIN operational_history_source_ingestion_ids AS ingestion
       ON ingestion.source_table = 'market_trades' AND ingestion.source_key = source.trade_id
+    LEFT JOIN coverage
+      ON coverage.utc_day = substr(source.occurred_at, 1, 10)
     WHERE source.claim_id = ?
       AND source.occurred_at >= ? AND source.occurred_at < ?
+      AND (
+        coverage.utc_day IS NULL
+        OR ingestion.ingestion_id IS NULL
+        OR typeof(ingestion.ingestion_id) <> 'integer'
+        OR ingestion.ingestion_id <= 0
+        OR ingestion.ingestion_id > 9007199254740991
+        OR ingestion.ingestion_id > coverage.source_max_ingestion_id
+      )
     ORDER BY source.occurred_at, source.trade_id
-  `).all(String(claimId), `${startDay}T00:00:00.000Z`, endExclusive.toISOString());
+  `).all(coverageJson, String(claimId), `${startDay}T00:00:00.000Z`, endExclusive.toISOString());
+  let missingIngestionIdentityRows = 0;
   for (const row of raw) {
-    const coveredMax = coverageByDay.get(String(row.utc_day));
-    if (coveredMax != null && Number(row.ingestion_id) <= coveredMax) continue;
+    const ingestionId = Number(row.ingestion_id);
+    const hasIngestionIdentity = row.ingestion_id != null && Number.isSafeInteger(ingestionId) && ingestionId > 0;
+    if (!hasIngestionIdentity) missingIngestionIdentityRows += 1;
     add(String(row.utc_day), 1, row.quantity, row.total_price, String(row.occurred_at));
+  }
+  if (missingIngestionIdentityRows > 0) {
+    onDiagnostic({
+      code: "operational_history_missing_ingestion_identity",
+      claimId: String(claimId),
+      rowCount: missingIngestionIdentityRows,
+    });
   }
   const daily = [...groups.values()].sort((left, right) => left.day.localeCompare(right.day));
   return {
@@ -778,7 +895,8 @@ export function runOperationalHistoryRetention(db, {
     const remove = db.prepare(`DELETE FROM "${table}" WHERE "${identifier}" = ? AND occurred_at < ?`);
     const markPruned = db.prepare(`
       UPDATE operational_history_rollup_watermarks
-      SET pruned_row_count = pruned_row_count + ?, remaining_source_fingerprint = ?
+      SET pruned_row_count = pruned_row_count + ?, remaining_source_fingerprint = ?,
+        source_max_mutation_id = ?
       WHERE source_table = ? AND claim_id = ? AND utc_day = ?
         AND completion_state = 'complete'
     `);
@@ -824,7 +942,7 @@ export function runOperationalHistoryRetention(db, {
         for (const candidate of candidates) periodDeleted += remove.run(candidate.row_key, cutoff).changes;
         if (!periodDeleted) continue;
         const remainingSnapshot = sourceSnapshot(db, table, watermark.claim_id, watermark.utc_day, boundary);
-        markPruned.run(periodDeleted, remainingSnapshot.sourceFingerprint, table, watermark.claim_id, watermark.utc_day);
+        markPruned.run(periodDeleted, remainingSnapshot.sourceFingerprint, remainingSnapshot.sourceMaxMutationId, table, watermark.claim_id, watermark.utc_day);
         tableDeleted += periodDeleted;
       }
       db.exec("COMMIT");
