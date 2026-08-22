@@ -72,6 +72,59 @@ test("provider transition lease migration is additive and preserves pending rows
   db.close();
 });
 
+test("legacy provider transitions survive production bootstrap before lease migration", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE provider_transition_outbox (
+      transition_key TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      observed_at TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO provider_transition_outbox VALUES (
+      'claim-market:100:market:2', '100', 'market',
+      '2026-08-22T10:00:00.000Z', '{"version":1,"events":[]}',
+      0, NULL, '2026-08-22T10:00:00.000Z', '2026-08-22T10:00:00.000Z'
+    );
+  `);
+
+  applySchemaBootstrap(db);
+  applyProviderTransitionLeaseMigration(db);
+  applySchemaBootstrap(db);
+  applyProviderTransitionLeaseMigration(db);
+
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM provider_transition_outbox").get().count,
+    1,
+  );
+  assert.equal(
+    db.prepare("PRAGMA index_list(provider_transition_outbox)").all()
+      .some((index) => index.name === "idx_provider_transition_lease"),
+    true,
+  );
+  db.close();
+});
+
+test("fresh production bootstrap plus lease migration creates the lease index idempotently", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyProviderTransitionLeaseMigration(db);
+  applySchemaBootstrap(db);
+  applyProviderTransitionLeaseMigration(db);
+
+  assert.equal(
+    db.prepare("PRAGMA index_list(provider_transition_outbox)").all()
+      .filter((index) => index.name === "idx_provider_transition_lease").length,
+    1,
+  );
+  db.close();
+});
+
 test("production contribution repair acquires its write transaction before reading counters", () => {
   const db = new DatabaseSync(":memory:");
   applySchemaBootstrap(db);

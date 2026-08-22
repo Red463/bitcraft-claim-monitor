@@ -225,6 +225,75 @@ test("a committed market edge survives a process stop and dispatches exactly onc
   restartedDb.close();
 });
 
+test("blank owner display survives restart when the stable owner entity id is present", async (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "bitcraft-market-owner-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const filename = path.join(directory, "blank-owner.sqlite");
+  const blankOwnerListing = { ...listing, ownerUsername: "" };
+  const blankOwnerPrevious = marketSnapshot({ listings: [blankOwnerListing] });
+  const blankOwnerCurrent = marketSnapshot({
+    listings: [],
+    closedListings: current.closedListings,
+  });
+
+  const committingDb = openDatabase(filename);
+  const committingRepository = createCurrentStateRepository(committingDb);
+  await committingRepository.commitGeneration(marketBatch(1, blankOwnerPrevious));
+  const events = compactRelayMarketTransitionEvents(deriveRelayMarketTransitions({
+    previous: blankOwnerPrevious,
+    current: blankOwnerCurrent,
+    observedAt,
+  }));
+  await committingRepository.commitGenerationWithTransition(
+    marketBatch(2, blankOwnerCurrent),
+    {
+      transitionKey: `claim-market:${claimId}:market:2`,
+      claimId,
+      domain: "market",
+      observedAt,
+      payload: { version: 1, claimId, generation: 2, observedAt, events },
+    },
+  );
+  committingDb.close();
+
+  const restartedDb = openDatabase(filename);
+  const clock = new Date(observedAt);
+  const restartedRepository = createCurrentStateRepository(restartedDb, { now: () => clock });
+  const dispatcher = createMarketTransitionDispatcher({
+    repository: restartedRepository,
+    writer: createWriter(restartedDb),
+    workerId: "blank-owner-worker",
+    leaseMs: 30_000,
+    now: () => clock,
+  });
+  assert.deepEqual(await dispatcher.drain({ claimId, limit: 25 }), {
+    claimed: 1,
+    processed: 1,
+    failed: 0,
+  });
+  assert.deepEqual({ ...restartedDb.prepare(`
+    SELECT owner, owner_entity_id FROM market_events
+  `).get() }, {
+    owner: "",
+    owner_entity_id: listing.ownerEntityId,
+  });
+  assert.deepEqual({ ...restartedDb.prepare(`
+    SELECT seller_username, seller_entity_id FROM market_trades
+  `).get() }, {
+    seller_username: "",
+    seller_entity_id: listing.ownerEntityId,
+  });
+  assert.equal(restartedDb.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count, 1);
+  assert.equal(restartedDb.prepare("SELECT COUNT(*) AS count FROM discord_notification_outbox").get().count, 1);
+  assert.deepEqual(await dispatcher.drain({ claimId, limit: 25 }), {
+    claimed: 0,
+    processed: 0,
+    failed: 0,
+  });
+  assert.equal(restartedDb.prepare("SELECT COUNT(*) AS count FROM market_events").get().count, 1);
+  restartedDb.close();
+});
+
 test("transition leases exclude a second dispatcher and recover after expiry without stale-token acknowledgement", async (t) => {
   const directory = mkdtempSync(path.join(tmpdir(), "bitcraft-market-lease-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -399,5 +468,105 @@ test("dispatcher rolls back every derived effect and retries with bounded expone
     failed: 0,
   });
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM market_events").get().count, 1);
+  db.close();
+});
+
+test("a final lease-token acknowledgement failure rolls back every inserted effect", async () => {
+  const db = openDatabase(":memory:");
+  let clock = new Date(observedAt);
+  const repository = createCurrentStateRepository(db, { now: () => clock });
+  await commitPendingTransition(repository);
+  const ackFailingRepository = {
+    ...repository,
+    ackTransition(input) {
+      assert.equal(repository.ackTransition(input), true);
+      return false;
+    },
+  };
+  const dispatcher = createMarketTransitionDispatcher({
+    repository: ackFailingRepository,
+    writer: createWriter(db),
+    workerId: "ack-failure-worker",
+    leaseMs: 30_000,
+    now: () => clock,
+  });
+
+  assert.deepEqual(await dispatcher.drain({ claimId, limit: 25 }), {
+    claimed: 1,
+    processed: 0,
+    failed: 1,
+  });
+  for (const table of [
+    "market_events",
+    "market_trades",
+    "activity_events",
+    "discord_notification_outbox",
+  ]) {
+    assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0);
+  }
+  const pending = repository.listPendingTransitions(claimId, "market");
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].attempts, 1);
+  assert.equal(pending[0].leaseToken, null);
+  assert.match(pending[0].lastError, /lease was lost before acknowledgement/);
+  db.close();
+});
+
+test("pre-version-1 snapshot payload is retried without replaying any effects", async () => {
+  const db = openDatabase(":memory:");
+  let clock = new Date(observedAt);
+  const repository = createCurrentStateRepository(db, { now: () => clock });
+  await repository.commitGenerationWithTransition(
+    marketBatch(2, current),
+    {
+      transitionKey: `claim-market:${claimId}:market:2`,
+      claimId,
+      domain: "market",
+      observedAt,
+      payload: {
+        version: 0,
+        claimId,
+        generation: 2,
+        observedAt,
+        previousData: previous,
+        currentData: current,
+      },
+    },
+  );
+  const dispatcher = createMarketTransitionDispatcher({
+    repository,
+    writer: createWriter(db),
+    workerId: "pre-v1-worker",
+    leaseMs: 30_000,
+    now: () => clock,
+  });
+
+  assert.deepEqual(await dispatcher.drain({ claimId, limit: 25 }), {
+    claimed: 1,
+    processed: 0,
+    failed: 1,
+  });
+  for (const table of [
+    "market_events",
+    "market_trades",
+    "activity_events",
+    "discord_notification_outbox",
+  ]) {
+    assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0);
+  }
+  let pending = repository.listPendingTransitions(claimId, "market");
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].attempts, 1);
+  assert.match(pending[0].lastError, /version 1/);
+
+  clock = new Date("2026-08-22T10:00:05.000Z");
+  assert.deepEqual(await dispatcher.drain({ claimId, limit: 25 }), {
+    claimed: 1,
+    processed: 0,
+    failed: 1,
+  });
+  pending = repository.listPendingTransitions(claimId, "market");
+  assert.equal(pending[0].attempts, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM market_events").get().count, 0);
   db.close();
 });

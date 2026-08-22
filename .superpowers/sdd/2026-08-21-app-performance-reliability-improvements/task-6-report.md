@@ -81,3 +81,21 @@ An earlier full-suite run had one stale source-contract assertion that still exp
 - The dispatcher exposes lease renewal, but current derived batches are synchronous and bounded, so it does not run a renewal heartbeat mid-batch. Crash recovery and token-conditional completion protect correctness.
 - Unsupported pre-cutover/non-version-1 rows are never replayed as arbitrary snapshots. They remain pending with bounded retry/error metadata for operator visibility.
 - No controller documentation, changelog, version bump, or unrelated review artifact was changed.
+
+## Reviewer fix round 1
+
+### RED/GREEN evidence
+
+- **Legacy startup order:** A new test created the pre-lease `provider_transition_outbox` schema and ran the exact production order, `applySchemaBootstrap` followed by `applyProviderTransitionLeaseMigration`. RED failed in bootstrap with `no such column: lease_expires_at`. GREEN removes the lease-dependent index from bootstrap; the additive migration creates it only after all four lease columns exist. Both legacy and fresh schemas now pass the production order twice, preserve pending rows, and end with exactly one lease index.
+- **Partial owner enrichment:** A file-backed restart test used `ownerUsername: ""` with an exact 64-bit `ownerEntityId`. RED claimed the transition but failed dispatch (`processed: 0`, `failed: 1`). GREEN permits a missing display username while still requiring the stable decimal owner identity. Market history and the authoritative trade retain the exact entity ID and an empty username; no display name is invented. Activity and Discord outbox effects land once, and a second drain is empty.
+- **Transaction/version coverage:** Added a behavioral final-ack failure test that first inserts market history, a trade, activity, and a Discord outbox row, then deletes through the active token but forces the acknowledgement result to fail. The outer transaction restores both the transition and every effect; retry metadata is then recorded. Added a version-0 snapshot payload test proving it is rejected and retried with zero derived effects. The existing version validation and transaction boundary were already green under these new characterizations.
+- **Discord enqueue rollback:** The writer's Discord failure test now inserts a real durable outbox row before throwing, then proves market, activity, and Discord rows all roll back together.
+
+### Final verification after fixes
+
+- Required six-file gate: **94 passed, 0 failed**.
+- Relevant dispatcher, transition writer, bootstrap, and migration gate: **52 passed, 0 failed**.
+- Production build: **passed**.
+- Full app suite (run once after all fixes): **2,447 tests; 2,444 passed, 0 failed, 3 skipped**. The skips remain the existing Windows environment constraints.
+- Record-only/no-network temporary SQLite restart smoke: **2 passed, 0 failed**, covering both the ordinary authoritative sale and blank owner display with stable identity.
+- No Discord network delivery was attempted.

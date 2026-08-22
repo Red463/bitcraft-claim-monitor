@@ -543,7 +543,7 @@ function validatedCompactTransitionEvents(events) {
     ]) {
       decimalInteger(value, `${label} ${key}`);
     }
-    if (!listing.itemName || !listing.owner || !["buy", "sell"].includes(listing.side)) {
+    if (!listing.itemName || !["buy", "sell"].includes(listing.side)) {
       throw new TypeError(`${label} listing identity is incomplete`);
     }
     if (!["item", "cargo"].includes(listing.itemType)) {

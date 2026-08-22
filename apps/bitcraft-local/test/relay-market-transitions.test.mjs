@@ -593,6 +593,13 @@ test("Relay transition history is idempotent and needs no current-listing table"
     CREATE UNIQUE INDEX idx_activity_source
       ON activity_events (claim_id, event_type, source_key)
       WHERE source_key IS NOT NULL;
+    CREATE TABLE discord_notification_outbox (
+      source_key TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      metadata_json TEXT NOT NULL
+    );
   `);
   const activityInsert = db.prepare(`
     INSERT OR IGNORE INTO activity_events
@@ -748,7 +755,18 @@ test("Relay transition history is idempotent and needs no current-listing table"
         sourceKey,
       ).changes) > 0
     ),
-    enqueueDiscordActivity: () => {
+    enqueueDiscordActivity: (claimId, eventType, summary, occurredAt, metadata, sourceKey) => {
+      db.prepare(`
+        INSERT INTO discord_notification_outbox (
+          source_key, event_type, summary, occurred_at, metadata_json
+        ) VALUES (?, ?, ?, ?, ?)
+      `).run(
+        `${claimId}:${sourceKey}`,
+        eventType,
+        summary,
+        occurredAt,
+        JSON.stringify(metadata),
+      );
       throw new Error("forced Discord enqueue failure");
     },
   });
@@ -763,6 +781,10 @@ test("Relay transition history is idempotent and needs no current-listing table"
   );
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM activity_events WHERE source_key LIKE '%:777:%'").get().count,
+    0,
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM discord_notification_outbox").get().count,
     0,
   );
 });

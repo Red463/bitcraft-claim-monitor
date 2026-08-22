@@ -178,10 +178,6 @@ export const schemaBootstrapSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_provider_transition_pending
     ON provider_transition_outbox (claim_id, domain, created_at, transition_key);
-  CREATE INDEX IF NOT EXISTS idx_provider_transition_lease
-    ON provider_transition_outbox (
-      claim_id, domain, updated_at, lease_expires_at, created_at, transition_key
-    );
   CREATE TABLE IF NOT EXISTS app_secrets (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
