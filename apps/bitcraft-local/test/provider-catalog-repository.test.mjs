@@ -66,6 +66,7 @@ test("provider catalog snapshot atomically preserves item/cargo identity and rem
   });
   assert.deepEqual(repository.getRevision({
     generation: 41,
+    data: { sourceGeneration: 8 },
     provenance: {
       provider: "relay",
       sourceKey: "global",
@@ -80,7 +81,23 @@ test("provider catalog snapshot atomically preserves item/cargo identity and rem
     receivedAt: "2026-07-29T20:05:00.000Z",
   });
   assert.deepEqual(repository.getRevision({
+    generation: 41,
+    provenance: {
+      provider: "relay",
+      sourceKey: "global",
+      database: "relay-mirror-bc-global",
+      schemaFingerprint: "global-v1",
+      receivedAt: "2026-07-29T20:05:00.000Z",
+    },
+  }), {
+    generation: null,
+    sourceGeneration: 8,
+    sourceKey: "global",
+    receivedAt: "2026-07-29T20:05:00.000Z",
+  });
+  assert.deepEqual(repository.getRevision({
     generation: 8,
+    data: { sourceGeneration: 8 },
     provenance: {
       provider: "relay",
       sourceKey: "global",
@@ -91,6 +108,42 @@ test("provider catalog snapshot atomically preserves item/cargo identity and rem
   }), {
     generation: null,
     sourceGeneration: 8,
+    sourceKey: "global",
+    receivedAt: "2026-07-29T20:05:00.000Z",
+  });
+  repository.replaceEntitySnapshot([
+    { kind: "item", id: "42", name: "Timber Plank", iconAssetName: "Items/Timber" },
+    { kind: "cargo", id: "42", name: "Timber Crate", iconAssetName: "GeneratedIcons/Cargo/Timber Crate" },
+  ], {
+    provider: "relay",
+    database: "relay-mirror-bc-global",
+    schemaFingerprint: "global-v1",
+    generation: 9,
+    receivedAt: "2026-07-29T20:05:00.000Z",
+  });
+  const sameTimestampPublication = {
+    generation: 42,
+    data: { sourceGeneration: 8 },
+    provenance: {
+      provider: "relay",
+      sourceKey: "global",
+      database: "relay-mirror-bc-global",
+      schemaFingerprint: "global-v1",
+      receivedAt: "2026-07-29T20:05:00.000Z",
+    },
+  };
+  assert.deepEqual(repository.getRevision(sameTimestampPublication), {
+    generation: null,
+    sourceGeneration: 9,
+    sourceKey: "global",
+    receivedAt: "2026-07-29T20:05:00.000Z",
+  });
+  assert.deepEqual(repository.getRevision({
+    ...sameTimestampPublication,
+    data: { sourceGeneration: 9 },
+  }), {
+    generation: 42,
+    sourceGeneration: 9,
     sourceKey: "global",
     receivedAt: "2026-07-29T20:05:00.000Z",
   });

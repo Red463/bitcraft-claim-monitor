@@ -127,6 +127,7 @@ test("global catalog runtime discovers topology and atomically publishes reposit
     domains: {
       catalogs: {
         data: {
+          sourceGeneration: 8,
           itemCount: 1,
           cargoCount: 1,
           descriptionCounts: {

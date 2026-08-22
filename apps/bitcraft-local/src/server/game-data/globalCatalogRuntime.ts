@@ -405,6 +405,7 @@ export class RelayGlobalCatalogRuntime {
         };
         domains.catalogs = {
           data: {
+            sourceGeneration: snapshot.generation,
             itemCount,
             cargoCount,
             descriptionCounts,

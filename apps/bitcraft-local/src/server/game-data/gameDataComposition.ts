@@ -18,6 +18,13 @@ const CATALOG_ENRICHED_DOMAINS = new Set<DomainKey>([
   "recruitment",
 ]);
 
+const UNKNOWN_CATALOG_DEPENDENCY: GenerationDependency = {
+  generation: null,
+  sourceGeneration: null,
+  sourceKey: "global",
+  receivedAt: null,
+};
+
 type CatalogRevisionReader = {
   getRevision(publicationSnapshot?: StoredDomainSnapshot | null): GenerationDependency | null;
 };
@@ -40,7 +47,7 @@ export function createGameDataCompositionDependencies(options: {
     if (catalogDependencies) return catalogDependencies;
     const publicationSnapshot = options.repository.read(options.claimId, "catalogs");
     const catalog = options.catalogRepository.getRevision(publicationSnapshot);
-    catalogDependencies = catalog ? { catalog } : {};
+    catalogDependencies = { catalog: catalog ?? UNKNOWN_CATALOG_DEPENDENCY };
     return catalogDependencies;
   };
 

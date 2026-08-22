@@ -238,3 +238,82 @@ The browser smoke was not retried because the initial round already documented t
 - Confirmed the composition helper is the helper used by `server.mjs`, remains lazy across the queue gate, and declares only actually composed supplemental snapshots.
 - Confirmed warning output has both per-group and total-group bounds with explicit omission accounting.
 - Confirmed no hooks, schema, controller docs, changelog, version, 64-bit ID handling, or typed item/cargo identities changed.
+
+## Reviewer fix round 2
+
+Round 2 closes the remaining fail-open catalog cases from round 1. Catalog-enriched available domains now always declare a catalog dependency, and an application publication links only through the exact source generation that produced it.
+
+### Round-2 RED evidence
+
+Before production edits, the focused witness command was:
+
+```text
+node --experimental-strip-types --test \
+  test/provider-catalog-repository.test.mjs \
+  test/game-data-composition.test.mjs \
+  test/global-catalog-runtime.test.mjs \
+  test/game-data-repository-route.test.mjs
+
+tests 55, pass 52, fail 3
+```
+
+The three failures proved that an absent catalog returned no dependency, catalog publications did not persist their source generation, and an older publication could falsely link after a same-metadata/same-receive-time source-generation advance.
+
+### Fail-closed publication identity
+
+- New provider-neutral `catalogs` current-state payloads persist `sourceGeneration` alongside the catalog counts in the existing atomic domain publication.
+- `catalogRepository.getRevision(publicationSnapshot)` requires that persisted source generation to exactly equal the current durable catalog source generation, in addition to the existing provider/source/database/schema/receive-time checks.
+- A legacy publication has no `data.sourceGeneration`; it therefore resolves to `generation: null` and remains mixed until the next successful catalog publication. This is a safe additive payload default and requires no destructive database migration or schema rewrite.
+- A test advances the catalog from source generation 8 to 9 with identical metadata and `receivedAt`; the generation-8 publication does not link, while the exact generation-9 publication does.
+
+### Explicit unavailable dependency
+
+- When the catalog repository has no source revision and returns `null`, catalog-enriched domains declare `{ generation: null, sourceGeneration: null, sourceKey: "global", receivedAt: null }`.
+- This explicit unknown dependency makes an otherwise available catalog-enriched response `mixed` without adding null to `availableGenerations`.
+- Non-enriched domains do not receive the dependency and remain coherent when their own application generations are coherent.
+- The dependency contract now allows a null receive time only for explicit unavailable dependency provenance; existing populated dependency timestamps remain unchanged.
+
+### Round-2 verification
+
+Final client-inclusive focused gate:
+
+```text
+node --experimental-strip-types --test \
+  test/provider-catalog-repository.test.mjs \
+  test/game-data-composition.test.mjs \
+  test/global-catalog-runtime.test.mjs \
+  test/game-data-repository-route.test.mjs \
+  test/game-data-client-contract.test.mjs \
+  test/page-game-data-warnings.test.mjs
+
+tests 62, pass 62, fail 0
+```
+
+Production build:
+
+```text
+corepack pnpm --filter @workspace/bitcraft-local run build
+
+exit 0
+```
+
+Single round-2 full-suite run:
+
+```text
+corepack pnpm --filter @workspace/bitcraft-local test
+
+tests 2433, pass 2430, fail 0, skipped 3
+```
+
+The three skips are existing Windows environment skips. The unrelated broad server race from round 1 did not recur.
+
+Browser smoke was not retried, as required, because the initial report already records the exact process-stop/EPERM blocker and unavailable fixture injection.
+
+### Round-2 self-review
+
+- Confirmed catalog absence, legacy publication metadata, and catalog replacement crash windows all fail closed.
+- Confirmed same-timestamp source revisions cannot alias because the persisted source generation is exact.
+- Confirmed catalog publication and current-state application generation retain their distinct namespaces.
+- Confirmed unavailable catalog dependency provenance is explicit and backward compatible.
+- Confirmed non-enriched domains are unaffected.
+- Confirmed no schema, controller docs, smoke state, hook order, HTTP semantics, 64-bit identity, or typed item/cargo identity changed.

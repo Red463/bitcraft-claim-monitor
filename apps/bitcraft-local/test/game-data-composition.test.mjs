@@ -4,6 +4,9 @@ import test from "node:test";
 const { createGameDataCompositionDependencies } = await import(
   new URL("../src/server/game-data/gameDataComposition.ts", import.meta.url).href,
 );
+const { gameDataResponse } = await import(
+  new URL("../src/server/game-data/gameDataRoute.ts", import.meta.url).href,
+);
 
 function snapshot(generation, sourceKey = "relay-cache") {
   return {
@@ -110,4 +113,73 @@ test("production composition seam conditionally declares composed snapshot depen
       receivedAt: "2026-08-22T09:00:00.000Z",
     },
   );
+});
+
+test("absent catalog state is an explicit unknown dependency for enriched domains only", () => {
+  const marketSnapshot = {
+    data: { marketplaces: [], listings: [] },
+    generation: 51,
+    confidence: "authoritative",
+    lastError: null,
+    warnings: [],
+    provenance: {
+      provider: "relay",
+      sourceKey: "region:19",
+      regionId: "19",
+      database: "relay-region",
+      schemaFingerprint: "regional-v1",
+      sourceObservedAt: null,
+      receivedAt: "2026-08-22T09:00:00.000Z",
+    },
+  };
+  const repository = {
+    read(_claimId, domain) {
+      if (domain === "market") return marketSnapshot;
+      if (domain === "claim") return { ...marketSnapshot, data: { entityId: "1369094286777412590", regionId: "19" } };
+      return null;
+    },
+  };
+  const composition = createGameDataCompositionDependencies({
+    claimId: "1369094286777412590",
+    repository,
+    catalogRepository: { getRevision: () => null },
+  });
+
+  assert.deepEqual(composition.forDomain("claim"), {});
+  assert.deepEqual(composition.forDomain("market"), {
+    catalog: {
+      generation: null,
+      sourceGeneration: null,
+      sourceKey: "global",
+      receivedAt: null,
+    },
+  });
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["market"],
+    repository,
+    transformDomain: (domain, data) => ({
+      data,
+      dependencies: composition.forDomain(domain),
+    }),
+    now: new Date("2026-08-22T09:00:01.000Z"),
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.meta.coherence, "mixed");
+  assert.deepEqual(result.body.meta.availableGenerations, [51]);
+
+  const nonEnrichedResult = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["claim"],
+    repository,
+    transformDomain: (domain, data) => ({
+      data,
+      dependencies: composition.forDomain(domain),
+    }),
+    now: new Date("2026-08-22T09:00:01.000Z"),
+  });
+  assert.equal(nonEnrichedResult.body.meta.coherence, "coherent");
 });

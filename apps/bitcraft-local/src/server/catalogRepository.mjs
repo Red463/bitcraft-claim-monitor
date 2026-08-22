@@ -442,6 +442,8 @@ export function createProviderCatalogRepository(db) {
       const linkedPublication = source
         && Number.isSafeInteger(publicationSnapshot?.generation)
         && publicationSnapshot.generation > 0
+        && Number.isSafeInteger(publicationSnapshot?.data?.sourceGeneration)
+        && publicationSnapshot.data.sourceGeneration === source.generation
         && publication?.provider === source.provider
         && publication?.sourceKey === SOURCE_KEY
         && publication?.database === source.database

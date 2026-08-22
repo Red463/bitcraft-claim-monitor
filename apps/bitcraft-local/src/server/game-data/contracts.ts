@@ -64,7 +64,7 @@ export type GenerationDependency = {
   generation: number | null;
   sourceGeneration?: number | null;
   sourceKey: string;
-  receivedAt: string;
+  receivedAt: string | null;
 };
 
 export type DomainDependencies = Partial<Record<
