@@ -10,7 +10,24 @@ type BindingManifest = Parameters<RelayClaimMarketRegionSession["start"]>[0]["ma
 
 type CurrentStateRepository = {
   nextGeneration(claimId: string): number;
-  commitGeneration(batch: DomainSnapshotBatch): Promise<void> | void;
+  commitGenerationWithTransition(
+    batch: DomainSnapshotBatch,
+    transition: {
+      transitionKey: string;
+      claimId: string;
+      domain: "market";
+      observedAt: string;
+      payload: unknown;
+    },
+  ): Promise<{
+    published: boolean;
+    changedDomains: string[];
+    generation: number;
+  }> | {
+    published: boolean;
+    changedDomains: string[];
+    generation: number;
+  };
   read?(claimId: string, domain: "market"): { data: unknown } | null;
 };
 
@@ -31,10 +48,18 @@ type RuntimeDependencies = {
   createSession?: ClaimMarketSessionFactory;
   onSnapshotCommitted?: (input: {
     claimId: string;
+    generation: number;
+    transitionKey: string;
     previousData: unknown | null;
     currentData: RegionalClaimMarketSnapshot["data"];
     observedAt: string;
   }) => Promise<void> | void;
+  deriveTransitionEvents?: (input: {
+    claimId: string;
+    previousData: unknown | null;
+    currentData: RegionalClaimMarketSnapshot["data"];
+    observedAt: string;
+  }) => unknown[];
   now?: () => number;
   reconnectDelayMs?: (failureCount: number) => number;
 };
@@ -51,6 +76,7 @@ export class RelayClaimMarketRuntime {
   readonly #discoverTopology: (baseUrl: string) => Promise<RelayTopology>;
   readonly #createSession: ClaimMarketSessionFactory;
   readonly #onSnapshotCommitted: RuntimeDependencies["onSnapshotCommitted"];
+  readonly #deriveTransitionEvents: NonNullable<RuntimeDependencies["deriveTransitionEvents"]>;
   readonly #now: () => number;
   readonly #reconnectDelayMs: (failureCount: number) => number;
   #session: ClaimMarketSession | null = null;
@@ -79,6 +105,7 @@ export class RelayClaimMarketRuntime {
     this.#createSession = dependencies.createSession
       ?? ((options) => new RelayClaimMarketRegionSession(options));
     this.#onSnapshotCommitted = dependencies.onSnapshotCommitted;
+    this.#deriveTransitionEvents = dependencies.deriveTransitionEvents ?? (() => []);
     this.#now = dependencies.now ?? Date.now;
     this.#reconnectDelayMs = dependencies.reconnectDelayMs ?? (() => 1_000);
   }
@@ -197,9 +224,21 @@ export class RelayClaimMarketRuntime {
     const sourceKey = `region:${Number(snapshot.regionId)}` as const;
     const previousData = this.#currentStateRepository.read?.(claimId, "market")?.data ?? null;
     try {
-      await this.#currentStateRepository.commitGeneration({
+      const generation = this.#currentStateRepository.nextGeneration(claimId);
+      const transitionInput = {
         claimId,
-        generation: this.#currentStateRepository.nextGeneration(claimId),
+        previousData,
+        currentData: snapshot.data,
+        observedAt: snapshot.receivedAt,
+      };
+      const events = this.#deriveTransitionEvents(transitionInput);
+      if (!Array.isArray(events)) {
+        throw new TypeError("Relay claim-market transition derivation must return an array");
+      }
+      const transitionKey = `claim-market:${claimId}:market:${generation}`;
+      const publication = await this.#currentStateRepository.commitGenerationWithTransition({
+        claimId,
+        generation,
         domains: {
           market: {
             data: snapshot.data,
@@ -216,14 +255,27 @@ export class RelayClaimMarketRuntime {
             warnings: snapshot.warnings,
           },
         },
+      }, {
+        transitionKey,
+        claimId,
+        domain: "market",
+        observedAt: snapshot.receivedAt,
+        payload: {
+          version: 1,
+          claimId,
+          generation,
+          observedAt: snapshot.receivedAt,
+          events,
+        },
       });
       this.#lastError = null;
-      this.#enqueueTransition({
-        claimId,
-        previousData,
-        currentData: snapshot.data,
-        observedAt: snapshot.receivedAt,
-      });
+      if (publication.published) {
+        this.#enqueueTransition({
+          ...transitionInput,
+          generation,
+          transitionKey,
+        });
+      }
     } catch (error) {
       this.#lastError = error instanceof Error ? error.message : String(error);
       throw error;
@@ -232,6 +284,8 @@ export class RelayClaimMarketRuntime {
 
   #enqueueTransition(input: {
     claimId: string;
+    generation: number;
+    transitionKey: string;
     previousData: unknown | null;
     currentData: RegionalClaimMarketSnapshot["data"];
     observedAt: string;

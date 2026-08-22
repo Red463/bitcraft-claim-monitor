@@ -119,7 +119,9 @@ test("completed sales are Relay-native and have no BitJita reconciler or schedul
 
   assert.ok(claimRuntimeStart > -1);
   assert.ok(regionalRuntimeStart > claimRuntimeStart);
-  assert.match(claimRuntime, /onSnapshotCommitted:[\s\S]*relayMarketTransitionWriter\.apply/);
+  assert.match(claimRuntime, /deriveTransitionEvents:[\s\S]*compactRelayMarketTransitionEvents/);
+  assert.match(claimRuntime, /onSnapshotCommitted:[\s\S]*kickMarketTransitionDispatcher/);
+  assert.doesNotMatch(claimRuntime, /relayMarketTransitionWriter\.apply/);
   assert.match(regionalRuntime, /onCurrentPublished:[\s\S]*queueMarketDealWatchEvaluation/);
   assert.doesNotMatch(regionalRuntime, /onSnapshotCommitted/);
   assert.doesNotMatch(source, /regionalMarketTransitionSnapshot/);

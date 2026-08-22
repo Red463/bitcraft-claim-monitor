@@ -66,6 +66,17 @@ export const discordOutboxLeaseIndexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_discord_notification_outbox_lease ON discord_notification_outbox (status, next_attempt_at, lease_expires_at, id);",
 ];
 
+export const providerTransitionLeaseColumnMigrations = [
+  { table: "provider_transition_outbox", column: "locked_by", definition: "TEXT" },
+  { table: "provider_transition_outbox", column: "lease_token", definition: "TEXT" },
+  { table: "provider_transition_outbox", column: "locked_at", definition: "TEXT" },
+  { table: "provider_transition_outbox", column: "lease_expires_at", definition: "TEXT" },
+];
+
+export const providerTransitionLeaseIndexStatements = [
+  "CREATE INDEX IF NOT EXISTS idx_provider_transition_lease ON provider_transition_outbox (claim_id, domain, updated_at, lease_expires_at, created_at, transition_key);",
+];
+
 export const retiredTableNames = [
   "current_claim_state",
   "recipe_catalog_entries",
@@ -210,6 +221,15 @@ export function applyDiscordOutboxLeaseMigration(
   db,
   migrations = discordOutboxLeaseColumnMigrations,
   indexes = discordOutboxLeaseIndexStatements,
+) {
+  applyAdditiveColumnMigrations(db, migrations);
+  applySchemaIndexStatements(db, indexes);
+}
+
+export function applyProviderTransitionLeaseMigration(
+  db,
+  migrations = providerTransitionLeaseColumnMigrations,
+  indexes = providerTransitionLeaseIndexStatements,
 ) {
   applyAdditiveColumnMigrations(db, migrations);
   applySchemaIndexStatements(db, indexes);

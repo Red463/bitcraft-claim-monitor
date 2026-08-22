@@ -9,13 +9,68 @@ import {
   applyMarketHistoryExactAmountMigration,
   applyMarketTradeRegionBackfill,
   applyProductionContributionExactAmountMigration,
+  applyProviderTransitionLeaseMigration,
   applySchemaIndexStatements,
+  providerTransitionLeaseColumnMigrations,
+  providerTransitionLeaseIndexStatements,
   retiredTableNames,
   schemaIndexStatements,
 } from "../src/server/schemaMigrations.mjs";
 import { installRetiredTableAuthorizer } from "../src/server/retiredTableAuthorizer.mjs";
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import { createCurrentStateRepository } from "../src/server/game-data/currentStateRepository.ts";
+
+test("provider transition lease migration is additive and preserves pending rows", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE provider_transition_outbox (
+      transition_key TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      observed_at TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO provider_transition_outbox VALUES (
+      'claim-market:100:market:2', '100', 'market',
+      '2026-08-22T10:00:00.000Z', '{"version":1,"events":[]}',
+      0, NULL, '2026-08-22T10:00:00.000Z', '2026-08-22T10:00:00.000Z'
+    );
+  `);
+
+  applyProviderTransitionLeaseMigration(db);
+  applyProviderTransitionLeaseMigration(db);
+
+  assert.deepEqual(providerTransitionLeaseColumnMigrations, [
+    { table: "provider_transition_outbox", column: "locked_by", definition: "TEXT" },
+    { table: "provider_transition_outbox", column: "lease_token", definition: "TEXT" },
+    { table: "provider_transition_outbox", column: "locked_at", definition: "TEXT" },
+    { table: "provider_transition_outbox", column: "lease_expires_at", definition: "TEXT" },
+  ]);
+  assert.deepEqual(providerTransitionLeaseIndexStatements, [
+    "CREATE INDEX IF NOT EXISTS idx_provider_transition_lease ON provider_transition_outbox (claim_id, domain, updated_at, lease_expires_at, created_at, transition_key);",
+  ]);
+  const row = db.prepare(`
+    SELECT transition_key, locked_by, lease_token, locked_at, lease_expires_at
+    FROM provider_transition_outbox
+  `).get();
+  assert.deepEqual({ ...row }, {
+    transition_key: "claim-market:100:market:2",
+    locked_by: null,
+    lease_token: null,
+    locked_at: null,
+    lease_expires_at: null,
+  });
+  assert.equal(
+    db.prepare("PRAGMA index_list(provider_transition_outbox)").all()
+      .some((index) => index.name === "idx_provider_transition_lease"),
+    true,
+  );
+  db.close();
+});
 
 test("production contribution repair acquires its write transaction before reading counters", () => {
   const db = new DatabaseSync(":memory:");

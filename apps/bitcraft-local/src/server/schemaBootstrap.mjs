@@ -169,11 +169,19 @@ export const schemaBootstrapSql = `
     payload_json TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
+    locked_by TEXT,
+    lease_token TEXT,
+    locked_at TEXT,
+    lease_expires_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_provider_transition_pending
     ON provider_transition_outbox (claim_id, domain, created_at, transition_key);
+  CREATE INDEX IF NOT EXISTS idx_provider_transition_lease
+    ON provider_transition_outbox (
+      claim_id, domain, updated_at, lease_expires_at, created_at, transition_key
+    );
   CREATE TABLE IF NOT EXISTS app_secrets (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

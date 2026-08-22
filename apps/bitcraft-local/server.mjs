@@ -33,7 +33,12 @@ import {
   buyOrderBaselineKey,
   readBuyOrderSaleBaselines,
 } from "./src/server/buyOrderSaleBaselines.mjs";
-import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
+import {
+  compactRelayMarketTransitionEvents,
+  createRelayMarketTransitionWriter,
+  deriveRelayMarketTransitions,
+} from "./src/server/relayMarketTransitions.mjs";
+import { createMarketTransitionDispatcher } from "./src/server/marketTransitionDispatcher.mjs";
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { mapResourceRegionCatalog, nameMapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
@@ -211,7 +216,7 @@ import {
   relayEmpireMembershipObservation,
 } from "./src/server/empireMembership.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
-import { applyAdditiveColumnMigrations, applyDiscordOutboxLeaseMigration, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyProductionContributionExactAmountMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
+import { applyAdditiveColumnMigrations, applyDiscordOutboxLeaseMigration, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyProductionContributionExactAmountMigration, applyProviderTransitionLeaseMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { assertCanonicalDiscordGatewayReady, resolveDeploymentRuntime } from "./src/server/deploymentRuntime.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
@@ -444,6 +449,11 @@ const serverPollingEnabled = processRoleConfig.runBackgroundJobs && process.env.
 const discordStartupEnabled = deploymentRuntime.discordGatewayEnabled;
 const scheduledJobsEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SCHEDULED_JOBS !== "false";
 const discordNotificationOutboxProcessingEnabled = process.env.ENABLE_DISCORD_OUTBOX_PROCESSING !== "false";
+const marketTransitionDispatcherEnabled = process.env.ENABLE_MARKET_TRANSITION_DISPATCHER !== "false";
+const marketTransitionDispatcherIntervalMs = Math.max(
+  Number(process.env.MARKET_TRANSITION_DISPATCHER_INTERVAL_MS ?? 5_000),
+  1_000,
+);
 const discordNetworkEnabled = process.env.ENABLE_DISCORD_NETWORK !== "false";
 const discordNotificationOutboxIntervalMs = Math.max(Number(process.env.DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS ?? 5000), 1000);
 const discordNotificationMaxAttempts = Math.max(Number(process.env.DISCORD_NOTIFICATION_MAX_ATTEMPTS ?? 8), 1);
@@ -461,6 +471,7 @@ const discordNotificationLeaseMs = Number.isFinite(configuredDiscordNotification
   ? Math.max(Math.floor(configuredDiscordNotificationLeaseMs), minimumDiscordNotificationLeaseMs)
   : Math.max(60_000, minimumDiscordNotificationLeaseMs);
 let discordNotificationOutboxRunning = false;
+let marketTransitionDispatcherRunning = false;
 
 function assertDiscordNetworkEnabled() {
   if (!discordNetworkEnabled) throw new Error("Discord network access is disabled");
@@ -561,6 +572,7 @@ applyLegacySchemaCleanup(db);
 
 applyAdditiveColumnMigrations(db);
 applyDiscordOutboxLeaseMigration(db);
+applyProviderTransitionLeaseMigration(db);
 applyMarketHistoryExactAmountMigration(db);
 applyMarketTradeRegionBackfill(db);
 applyProductionContributionExactAmountMigration(db);
@@ -732,22 +744,43 @@ const relayMapResourceReadiness = new RelayMapResourceReadiness({
 const mapResourceCursorCodec = createMapResourceCursorCodec(randomBytes(32));
 const relayMarketTransitionWriter = createRelayMarketTransitionWriter(db, {
   addActivity,
+  enqueueDiscordActivity: (
+    claimId,
+    eventType,
+    summary,
+    occurredAt,
+    metadata,
+    activitySourceKey,
+  ) => enqueueDiscordActivityRow(eventType, summary, occurredAt, metadata, {
+    sourceKey: `${eventType}:${claimId}:${activitySourceKey}`,
+    processImmediately: false,
+  }),
   processOutbox: kickDiscordNotificationOutbox,
+});
+const marketTransitionDispatcher = createMarketTransitionDispatcher({
+  repository: currentStateRepository,
+  writer: relayMarketTransitionWriter,
+  workerId: `${processRole}:market-transitions:${os.hostname()}:${process.pid}:${randomBytes(8).toString("hex")}`,
+  leaseMs: Math.max(
+    5_000,
+    Number(process.env.MARKET_TRANSITION_LEASE_MS ?? 60_000),
+  ),
+  now: () => new Date(),
 });
 const relayClaimMarketRuntime = new RelayClaimMarketRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
   reconnectDelayMs: relayReconnectDelayMs,
-  onSnapshotCommitted: ({ claimId, previousData, currentData, observedAt }) => (
-    relayMarketTransitionWriter.apply({
-      claimId,
+  deriveTransitionEvents: ({ claimId, previousData, currentData, observedAt }) => (
+    compactRelayMarketTransitionEvents(deriveRelayMarketTransitions({
       previous: previousData == null
         ? null
         : enrichMarketSnapshot(claimId, previousData),
       current: enrichMarketSnapshot(claimId, currentData),
       observedAt,
-    })
+    }))
   ),
+  onSnapshotCommitted: ({ claimId }) => kickMarketTransitionDispatcher(claimId),
 });
 const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
   manifest: relayBindingManifest,
@@ -3619,11 +3652,18 @@ function analyticsDashboard(days = 30) {
   return { days: selectedDays, retentionDays: analyticsRetentionDays, totals, pages, features, daily };
 }
 
-function addActivity(claimId, eventType, summary, occurredAt, metadata = {}, sourceKey = null, { processDiscordImmediately = true } = {}) {
+function addActivity(claimId, eventType, summary, occurredAt, metadata = {}, sourceKey = null, {
+  processDiscordImmediately = true,
+  enqueueDiscord = true,
+} = {}) {
   const result = sourceKey
     ? statements.insertSourcedActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata), sourceKey)
     : statements.insertActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata));
-  if (result.changes > 0) queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata, { processImmediately: processDiscordImmediately });
+  if (result.changes > 0 && enqueueDiscord) {
+    queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata, {
+      processImmediately: processDiscordImmediately,
+    });
+  }
   return result.changes > 0;
 }
 
@@ -4125,7 +4165,7 @@ function discordOutboxSourceKey(eventType, summary, occurredAt, metadata = {}) {
   return `${eventType}:${String(stable || `${summary}:${occurredAt}`).slice(0, 240)}`;
 }
 
-async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata = {}, options = {}) {
+function enqueueDiscordActivityRow(eventType, summary, occurredAt, metadata = {}, options = {}) {
   const now = new Date().toISOString();
   const sourceKey = String(options.sourceKey ?? discordOutboxSourceKey(eventType, summary, occurredAt, metadata));
   statements.enqueueDiscordNotification.run(sourceKey, eventType, summary, occurredAt, JSON.stringify(metadata ?? {}), now, now, now);
@@ -4133,9 +4173,35 @@ async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata =
   return { ok: true, queued: true, sourceKey };
 }
 
+async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata = {}, options = {}) {
+  return enqueueDiscordActivityRow(eventType, summary, occurredAt, metadata, options);
+}
+
 function kickDiscordNotificationOutbox() {
   if (!discordNotificationOutboxProcessingEnabled) return;
   void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
+}
+
+function kickMarketTransitionDispatcher(claimId = currentClaimId()) {
+  if (!marketTransitionDispatcherEnabled) return;
+  void processMarketTransitionOutbox({ claimId }).catch((error) => console.warn(
+    `Market transition dispatcher failed: ${errorMessage(error)}`,
+  ));
+}
+
+async function processMarketTransitionOutbox({ claimId = currentClaimId(), limit = 25 } = {}) {
+  if (!marketTransitionDispatcherEnabled) {
+    return { skipped: true, reason: "Market transition dispatcher is held" };
+  }
+  if (marketTransitionDispatcherRunning) {
+    return { skipped: true, reason: "Market transition dispatcher already running" };
+  }
+  marketTransitionDispatcherRunning = true;
+  try {
+    return await marketTransitionDispatcher.drain({ claimId, limit: Math.min(25, limit) });
+  } finally {
+    marketTransitionDispatcherRunning = false;
+  }
 }
 
 function discordNotificationRetryAt(attempts) {
@@ -10435,6 +10501,12 @@ function startBackgroundTasks() {
     }
   }
   startDiscordGateway();
+  void processMarketTransitionOutbox().catch((error) => console.warn(`Market transition dispatcher failed: ${errorMessage(error)}`));
+  const marketTransitionTimer = setInterval(
+    () => void processMarketTransitionOutbox().catch((error) => console.warn(`Market transition dispatcher failed: ${errorMessage(error)}`)),
+    marketTransitionDispatcherIntervalMs,
+  );
+  marketTransitionTimer.unref?.();
   void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
   setInterval(processDiscordNotificationOutbox, discordNotificationOutboxIntervalMs);
   setTimeout(() => {

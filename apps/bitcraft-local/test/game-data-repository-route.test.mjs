@@ -358,7 +358,7 @@ test("repository commits current state and a retryable transition edge atomicall
       observedAt: "2026-07-30T12:00:00.000Z",
     },
   };
-  await repository.commitGenerationWithTransition({
+  const publication = await repository.commitGenerationWithTransition({
     claimId: transition.claimId,
     generation: 42,
     domains: {
@@ -371,6 +371,12 @@ test("repository commits current state and a retryable transition edge atomicall
     },
   }, transition);
 
+  assert.deepEqual(publication, {
+    published: true,
+    changedDomains: ["regional-market"],
+    generation: 42,
+  });
+
   const restartedProcess = createCurrentStateRepository(db);
   assert.equal(
     restartedProcess.read(transition.claimId, "regional-market").generation,
@@ -382,21 +388,44 @@ test("repository commits current state and a retryable transition edge atomicall
       ...transition,
       attempts: 0,
       lastError: null,
+      lockedBy: null,
+      leaseToken: null,
+      lockedAt: null,
+      leaseExpiresAt: null,
       createdAt: transition.observedAt,
       updatedAt: transition.observedAt,
     }],
   );
 
-  await restartedProcess.recordTransitionError(
-    transition.transitionKey,
-    "history disk temporarily unavailable",
-    "2026-07-30T12:00:01.000Z",
-  );
+  const lease = restartedProcess.claimPendingTransition({
+    claimId: transition.claimId,
+    domain: "regional-market",
+    workerId: "repository-test",
+    leaseMs: 30_000,
+    at: "2026-07-30T12:00:00.000Z",
+  });
+  assert.ok(lease?.leaseToken);
+  assert.equal(restartedProcess.recordTransitionError({
+    transitionKey: transition.transitionKey,
+    leaseToken: lease.leaseToken,
+    error: "history disk temporarily unavailable",
+    retryAt: "2026-07-30T12:00:01.000Z",
+  }), true);
   assert.equal(
     restartedProcess.listPendingTransitions(transition.claimId, "regional-market")[0].attempts,
     1,
   );
-  await restartedProcess.ackTransition(transition.transitionKey);
+  const retryLease = restartedProcess.claimPendingTransition({
+    claimId: transition.claimId,
+    domain: "regional-market",
+    workerId: "repository-test",
+    leaseMs: 30_000,
+    at: "2026-07-30T12:00:01.000Z",
+  });
+  assert.equal(restartedProcess.ackTransition({
+    transitionKey: transition.transitionKey,
+    leaseToken: retryLease.leaseToken,
+  }), true);
   assert.deepEqual(
     restartedProcess.listPendingTransitions(transition.claimId, "regional-market"),
     [],
@@ -492,6 +521,58 @@ test("repository persists provider health for the separate web process", async (
       },
     },
   });
+  db.close();
+});
+
+test("repository rejects stale and equal transition generations without creating outbox rows", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const repository = createCurrentStateRepository(db);
+  const claimId = "1369094286777412590";
+  const transitionFor = (generation) => ({
+    transitionKey: `claim-market:${claimId}:market:${generation}`,
+    claimId,
+    domain: "market",
+    observedAt: "2026-07-30T12:00:00.000Z",
+    payload: {
+      version: 1,
+      claimId,
+      generation,
+      observedAt: "2026-07-30T12:00:00.000Z",
+      events: [],
+    },
+  });
+  const batchFor = (generation) => ({
+    claimId,
+    generation,
+    domains: {
+      market: {
+        data: { claimId, regionId: "19", listings: [] },
+        confidence: "authoritative",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+    },
+  });
+
+  assert.deepEqual(
+    await repository.commitGenerationWithTransition(batchFor(42), transitionFor(42)),
+    { published: true, changedDomains: ["market"], generation: 42 },
+  );
+  assert.deepEqual(
+    await repository.commitGenerationWithTransition(batchFor(42), transitionFor(42)),
+    { published: false, changedDomains: [], generation: 42 },
+  );
+  assert.deepEqual(
+    await repository.commitGenerationWithTransition(batchFor(41), transitionFor(41)),
+    { published: false, changedDomains: [], generation: 41 },
+  );
+  assert.equal(repository.read(claimId, "market").generation, 42);
+  assert.deepEqual(
+    repository.listPendingTransitions(claimId, "market").map((row) => row.transitionKey),
+    [`claim-market:${claimId}:market:42`],
+  );
   db.close();
 });
 

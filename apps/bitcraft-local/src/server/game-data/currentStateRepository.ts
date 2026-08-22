@@ -8,6 +8,7 @@ import type {
   StoredDomainSnapshot,
 } from "./contracts.ts";
 import { addDecimal, canonicalNonNegativeDecimal } from "./exactDecimal.ts";
+import { randomUUID } from "node:crypto";
 
 type Statement = {
   all(...values: unknown[]): Record<string, unknown>[];
@@ -31,8 +32,25 @@ type ProviderTransition = {
 type StoredProviderTransition = ProviderTransition & {
   attempts: number;
   lastError: string | null;
+  lockedBy: string | null;
+  leaseToken: string | null;
+  lockedAt: string | null;
+  leaseExpiresAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+type LeasedProviderTransition = StoredProviderTransition & {
+  lockedBy: string;
+  leaseToken: string;
+  lockedAt: string;
+  leaseExpiresAt: string;
+};
+
+type GenerationPublication = {
+  published: boolean;
+  changedDomains: DomainKey[];
+  generation: number;
 };
 
 export function createCurrentStateRepository(
@@ -44,6 +62,7 @@ export function createCurrentStateRepository(
       generatedAt: string;
       changedDomains: DomainKey[];
     }) => void;
+    now?: () => Date;
   } = {},
 ): ProviderSink & {
   read(claimId: string, domain: DomainKey): StoredDomainSnapshot | null;
@@ -82,14 +101,30 @@ export function createCurrentStateRepository(
   commitGenerationWithTransition(
     batch: DomainSnapshotBatch,
     transition: ProviderTransition,
-  ): Promise<void>;
+  ): Promise<GenerationPublication>;
   listPendingTransitions(claimId: string, domain: DomainKey): StoredProviderTransition[];
-  recordTransitionError(
-    transitionKey: string,
-    error: string,
-    updatedAt: string,
-  ): Promise<void>;
-  ackTransition(transitionKey: string): Promise<void>;
+  claimPendingTransition(input: {
+    claimId: string;
+    domain: DomainKey;
+    workerId: string;
+    leaseMs: number;
+    at?: string;
+  }): LeasedProviderTransition | null;
+  renewTransitionLease(input: {
+    transitionKey: string;
+    leaseToken: string;
+    leaseMs: number;
+    at?: string;
+  }): boolean;
+  recoverExpiredTransitionLeases(at?: string): number;
+  recordTransitionError(input: {
+    transitionKey: string;
+    leaseToken: string;
+    error: string;
+    retryAt: string;
+  }): boolean;
+  ackTransition(input: { transitionKey: string; leaseToken: string }): boolean;
+  withImmediateTransaction<T>(operation: () => T): T;
 } {
   const upsert = db.prepare(`
     INSERT INTO domain_payload_current (
@@ -116,7 +151,7 @@ export function createCurrentStateRepository(
       confidence = excluded.confidence,
       generation = excluded.generation,
       warnings_json = excluded.warnings_json
-    WHERE excluded.generation >= domain_payload_current.generation
+    WHERE excluded.generation > domain_payload_current.generation
   `);
   const read = db.prepare(
     "SELECT * FROM domain_payload_current WHERE claim_id = ? AND domain = ? AND provider = 'relay'",
@@ -180,13 +215,52 @@ export function createCurrentStateRepository(
     WHERE claim_id = ? AND domain = ?
     ORDER BY rowid
   `);
+  const selectClaimCandidate = db.prepare(`
+    SELECT transition_key
+    FROM provider_transition_outbox
+    WHERE claim_id = ? AND domain = ?
+      AND locked_by IS NULL
+      AND updated_at <= ?
+    ORDER BY created_at, transition_key
+    LIMIT 1
+  `);
+  const claimTransition = db.prepare(`
+    UPDATE provider_transition_outbox
+    SET locked_by = ?, lease_token = ?, locked_at = ?, lease_expires_at = ?,
+        updated_at = ?
+    WHERE transition_key = ?
+      AND locked_by IS NULL
+      AND updated_at <= ?
+  `);
+  const selectClaimedTransition = db.prepare(`
+    SELECT *
+    FROM provider_transition_outbox
+    WHERE transition_key = ? AND lease_token = ? AND locked_by = ?
+  `);
+  const renewTransitionLease = db.prepare(`
+    UPDATE provider_transition_outbox
+    SET locked_at = ?, lease_expires_at = ?, updated_at = ?
+    WHERE transition_key = ? AND lease_token = ? AND locked_by IS NOT NULL
+      AND lease_expires_at > ?
+  `);
+  const recoverExpiredTransitionLeases = db.prepare(`
+    UPDATE provider_transition_outbox
+    SET locked_by = NULL, lease_token = NULL, locked_at = NULL,
+        lease_expires_at = NULL,
+        last_error = 'Transition lease expired before completion; retrying atomically',
+        updated_at = ?
+    WHERE locked_by IS NOT NULL
+      AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+  `);
   const recordTransitionError = db.prepare(`
     UPDATE provider_transition_outbox
-    SET attempts = attempts + 1, last_error = ?, updated_at = ?
-    WHERE transition_key = ?
+    SET attempts = attempts + 1, last_error = ?, updated_at = ?,
+        locked_by = NULL, lease_token = NULL, locked_at = NULL,
+        lease_expires_at = NULL
+    WHERE transition_key = ? AND lease_token = ? AND locked_by IS NOT NULL
   `);
   const ackTransition = db.prepare(
-    "DELETE FROM provider_transition_outbox WHERE transition_key = ?",
+    "DELETE FROM provider_transition_outbox WHERE transition_key = ? AND lease_token = ? AND locked_by IS NOT NULL",
   );
   const insertSourcedActivity = db.prepare(`
     INSERT OR IGNORE INTO activity_events (
@@ -231,9 +305,10 @@ export function createCurrentStateRepository(
   const commitBatch = (
     batch: DomainSnapshotBatch,
     transition: ProviderTransition | null,
-  ) => {
+  ): GenerationPublication => {
       const changedDomains: DomainKey[] = [];
       let generatedAt = "";
+      let transitionInserted = false;
       db.exec("BEGIN IMMEDIATE");
       try {
         for (const [domain, snapshot] of Object.entries(batch.domains)) {
@@ -273,15 +348,17 @@ export function createCurrentStateRepository(
               "Provider transition must match a domain in the committed generation",
             );
           }
-          insertTransition.run(
-            transition.transitionKey,
-            transition.claimId,
-            transition.domain,
-            transition.observedAt,
-            JSON.stringify(transition.payload),
-            transition.observedAt,
-            transition.observedAt,
-          );
+          if (changedDomains.includes(transition.domain)) {
+            transitionInserted = Number(insertTransition.run(
+              transition.transitionKey,
+              transition.claimId,
+              transition.domain,
+              transition.observedAt,
+              JSON.stringify(transition.payload),
+              transition.observedAt,
+              transition.observedAt,
+            ).changes) > 0;
+          }
         }
         db.exec("COMMIT");
       } catch (error) {
@@ -296,6 +373,54 @@ export function createCurrentStateRepository(
           changedDomains,
         });
       }
+      return {
+        published: transition == null
+          ? changedDomains.length > 0
+          : changedDomains.includes(transition.domain) && transitionInserted,
+        changedDomains,
+        generation: batch.generation,
+      };
+  };
+
+  const rowToTransition = (row: Record<string, unknown>): StoredProviderTransition => ({
+    transitionKey: String(row.transition_key),
+    claimId: String(row.claim_id),
+    domain: String(row.domain) as DomainKey,
+    observedAt: String(row.observed_at),
+    payload: JSON.parse(String(row.payload_json)),
+    attempts: Number(row.attempts ?? 0),
+    lastError: row.last_error == null ? null : String(row.last_error),
+    lockedBy: row.locked_by == null ? null : String(row.locked_by),
+    leaseToken: row.lease_token == null ? null : String(row.lease_token),
+    lockedAt: row.locked_at == null ? null : String(row.locked_at),
+    leaseExpiresAt: row.lease_expires_at == null ? null : String(row.lease_expires_at),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  });
+
+  const isoInstant = (value: string | Date | number, label: string) => {
+    const instant = value instanceof Date ? value : new Date(value);
+    if (!Number.isFinite(instant.getTime())) throw new TypeError(`${label} must be a valid instant`);
+    return instant;
+  };
+
+  const leaseDuration = (value: number) => {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new TypeError("Provider transition lease duration must be positive");
+    }
+    return Math.floor(value);
+  };
+
+  const withImmediateTransaction = <T>(operation: () => T): T => {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = operation();
+      db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
   };
 
   return {
@@ -303,27 +428,88 @@ export function createCurrentStateRepository(
       commitBatch(batch, null);
     },
     async commitGenerationWithTransition(batch, transition) {
-      commitBatch(batch, transition);
+      return commitBatch(batch, transition);
     },
     listPendingTransitions(claimId, domain) {
-      return listPendingTransitions.all(claimId, domain).map((row) => ({
-        transitionKey: String(row.transition_key),
-        claimId: String(row.claim_id),
-        domain: String(row.domain) as DomainKey,
-        observedAt: String(row.observed_at),
-        payload: JSON.parse(String(row.payload_json)),
-        attempts: Number(row.attempts ?? 0),
-        lastError: row.last_error == null ? null : String(row.last_error),
-        createdAt: String(row.created_at),
-        updatedAt: String(row.updated_at),
-      }));
+      return listPendingTransitions.all(claimId, domain).map(rowToTransition);
     },
-    async recordTransitionError(transitionKey, error, updatedAt) {
-      recordTransitionError.run(error, updatedAt, transitionKey);
+    claimPendingTransition({ claimId, domain, workerId, leaseMs, at }) {
+      const normalizedWorkerId = String(workerId ?? "").trim();
+      if (!normalizedWorkerId) throw new TypeError("Provider transition worker id is required");
+      const duration = leaseDuration(leaseMs);
+      return withImmediateTransaction(() => {
+        const postLock = isoInstant(options.now?.() ?? new Date(), "Provider transition claim time");
+        const requested = at == null
+          ? postLock
+          : isoInstant(at, "Provider transition claim time");
+        const claimedAt = requested > postLock ? requested : postLock;
+        const claimedAtIso = claimedAt.toISOString();
+        const candidate = selectClaimCandidate.get(claimId, domain, claimedAtIso);
+        if (!candidate) return null;
+        const transitionKey = String(candidate.transition_key);
+        const token = randomUUID();
+        const expiresAt = new Date(claimedAt.getTime() + duration).toISOString();
+        const result = claimTransition.run(
+          normalizedWorkerId,
+          token,
+          claimedAtIso,
+          expiresAt,
+          claimedAtIso,
+          transitionKey,
+          claimedAtIso,
+        );
+        if (Number(result.changes) === 0) return null;
+        const row = selectClaimedTransition.get(transitionKey, token, normalizedWorkerId);
+        if (!row) throw new Error("Claimed provider transition could not be read back");
+        return rowToTransition(row) as LeasedProviderTransition;
+      });
     },
-    async ackTransition(transitionKey) {
-      ackTransition.run(transitionKey);
+    renewTransitionLease({ transitionKey, leaseToken, leaseMs, at }) {
+      const duration = leaseDuration(leaseMs);
+      return withImmediateTransaction(() => {
+        const postLock = isoInstant(options.now?.() ?? new Date(), "Provider transition renewal time");
+        const requested = at == null
+          ? postLock
+          : isoInstant(at, "Provider transition renewal time");
+        const effective = requested > postLock ? requested : postLock;
+        const effectiveIso = effective.toISOString();
+        const expiresAt = new Date(effective.getTime() + duration).toISOString();
+        return Number(renewTransitionLease.run(
+          effectiveIso,
+          expiresAt,
+          effectiveIso,
+          transitionKey,
+          leaseToken,
+          effectiveIso,
+        ).changes) > 0;
+      });
     },
+    recoverExpiredTransitionLeases(at) {
+      return withImmediateTransaction(() => {
+        const postLock = isoInstant(
+          options.now?.() ?? new Date(),
+          "Provider transition recovery time",
+        );
+        const requested = at == null
+          ? postLock
+          : isoInstant(at, "Provider transition recovery time");
+        const recoveredAt = (requested > postLock ? requested : postLock).toISOString();
+        return Number(recoverExpiredTransitionLeases.run(recoveredAt, recoveredAt).changes);
+      });
+    },
+    recordTransitionError({ transitionKey, leaseToken, error, retryAt }) {
+      const retryAtIso = isoInstant(retryAt, "Provider transition retry time").toISOString();
+      return Number(recordTransitionError.run(
+        String(error).slice(0, 2_000),
+        retryAtIso,
+        transitionKey,
+        leaseToken,
+      ).changes) > 0;
+    },
+    ackTransition({ transitionKey, leaseToken }) {
+      return Number(ackTransition.run(transitionKey, leaseToken).changes) > 0;
+    },
+    withImmediateTransaction,
     async appendEvents(events: DomainEvent[]) {
       if (!events.length) return;
       db.exec("BEGIN IMMEDIATE");
