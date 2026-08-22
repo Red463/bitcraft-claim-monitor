@@ -99,7 +99,7 @@ import {
   type ConfigurationSection,
 } from "./adminNavigationState";
 import { shouldConfirmConfigurationNavigation } from "./adminConfigurationState";
-import { applyBrandingSettingsResult, applyConfirmedSettingsSave } from "./adminSettingsSave";
+import { applyBrandingSettingsResult, applyConfirmedSettingsSave, syncDraftFromPersistedSettings } from "./adminSettingsSave";
 import { AdminShellHeader } from "./AdminShellHeader";
 import { AdminSectionNavigation } from "./AdminSectionNavigation";
 import { AdminStatusOverview } from "./AdminStatusOverview";
@@ -259,6 +259,7 @@ export function AdminPanel({
   const pendingActionsRef = React.useRef(new Set<string>());
   const [pendingActions, setPendingActions] = React.useState<Set<string>>(() => new Set());
   const [draft, setDraft] = React.useState<AppSettings>(settings);
+  const persistedSettingsRef = React.useRef(settings);
   const hasUnsavedSettings = React.useMemo(() => JSON.stringify(draft) !== JSON.stringify(settings), [draft, settings]);
   const requestDiscardSettings = React.useCallback((onDiscard: () => void) => {
     if (!hasUnsavedSettings) {
@@ -572,7 +573,11 @@ export function AdminPanel({
       setMessage(error.message);
     }).finally(() => setAuthLoading(false));
   }, []);
-  React.useEffect(() => setDraft(settings), [settings]);
+  React.useEffect(() => {
+    const previousSettings = persistedSettingsRef.current;
+    setDraft((current) => syncDraftFromPersistedSettings(previousSettings, settings, current));
+    persistedSettingsRef.current = settings;
+  }, [settings]);
   React.useEffect(() => {
     const applyLocation = () => {
       const params = new URLSearchParams(window.location.search);

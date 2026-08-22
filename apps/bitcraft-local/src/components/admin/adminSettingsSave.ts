@@ -1,5 +1,13 @@
 import type { AppSettings } from "../../types/settings";
 
+export function syncDraftFromPersistedSettings(
+  previousSettings: AppSettings,
+  nextSettings: AppSettings,
+  draft: AppSettings,
+): AppSettings {
+  return JSON.stringify(draft) === JSON.stringify(previousSettings) ? nextSettings : draft;
+}
+
 export function applyBrandingSettingsResult(
   persistedSettings: AppSettings,
   draft: AppSettings,
