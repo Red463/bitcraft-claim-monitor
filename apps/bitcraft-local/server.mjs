@@ -86,9 +86,8 @@ import { resolveDiscordChannelSelection } from "./src/server/discordNotification
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
 import {
   canonicalCutoverDiscordDelivery,
-  claimCanonicalCutoverDelivery,
-  recoverInterruptedCanonicalCutoverDeliveries,
 } from "./src/server/canonicalCutoverAnnouncement.mjs";
+import { createDiscordOutboxLeaser } from "./src/server/discordOutboxLease.mjs";
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import {
@@ -210,7 +209,7 @@ import {
   relayEmpireMembershipObservation,
 } from "./src/server/empireMembership.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
-import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyProductionContributionExactAmountMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
+import { applyAdditiveColumnMigrations, applyDiscordOutboxLeaseMigration, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyProductionContributionExactAmountMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { assertCanonicalDiscordGatewayReady, resolveDeploymentRuntime } from "./src/server/deploymentRuntime.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
@@ -446,6 +445,19 @@ const discordNotificationOutboxProcessingEnabled = process.env.ENABLE_DISCORD_OU
 const discordNetworkEnabled = process.env.ENABLE_DISCORD_NETWORK !== "false";
 const discordNotificationOutboxIntervalMs = Math.max(Number(process.env.DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS ?? 5000), 1000);
 const discordNotificationMaxAttempts = Math.max(Number(process.env.DISCORD_NOTIFICATION_MAX_ATTEMPTS ?? 8), 1);
+const configuredDiscordRequestTimeoutMs = Number(process.env.DISCORD_REQUEST_TIMEOUT_MS ?? 10_000);
+const discordRequestTimeoutMs = Number.isFinite(configuredDiscordRequestTimeoutMs)
+  ? Math.max(Math.floor(configuredDiscordRequestTimeoutMs), 1_000)
+  : 10_000;
+const configuredDiscordCompletionWriteMarginMs = Number(process.env.DISCORD_OUTBOX_COMPLETION_MARGIN_MS ?? 5_000);
+const discordOutboxCompletionWriteMarginMs = Number.isFinite(configuredDiscordCompletionWriteMarginMs)
+  ? Math.max(Math.floor(configuredDiscordCompletionWriteMarginMs), 1_000)
+  : 5_000;
+const minimumDiscordNotificationLeaseMs = discordRequestTimeoutMs + discordOutboxCompletionWriteMarginMs + 1;
+const configuredDiscordNotificationLeaseMs = Number(process.env.DISCORD_NOTIFICATION_LEASE_MS ?? 60_000);
+const discordNotificationLeaseMs = Number.isFinite(configuredDiscordNotificationLeaseMs)
+  ? Math.max(Math.floor(configuredDiscordNotificationLeaseMs), minimumDiscordNotificationLeaseMs)
+  : Math.max(60_000, minimumDiscordNotificationLeaseMs);
 let discordNotificationOutboxRunning = false;
 
 function assertDiscordNetworkEnabled() {
@@ -546,6 +558,7 @@ applyLegacySchemaCleanup(db);
 
 
 applyAdditiveColumnMigrations(db);
+applyDiscordOutboxLeaseMigration(db);
 applyMarketHistoryExactAmountMigration(db);
 applyMarketTradeRegionBackfill(db);
 applyProductionContributionExactAmountMigration(db);
@@ -557,8 +570,13 @@ cleanupRetiredRegionalMarketState();
 installRetiredTableAuthorizer(db);
 
 const statements = createPreparedStatements(db);
+const discordOutboxLeaser = createDiscordOutboxLeaser(db, {
+  workerId: `${processRole}:${os.hostname()}:${process.pid}:${randomBytes(8).toString("hex")}`,
+  leaseMs: discordNotificationLeaseMs,
+  now: () => new Date(),
+});
 if (processRoleConfig.runBackgroundJobs && discordNotificationOutboxProcessingEnabled) {
-  recoverInterruptedCanonicalCutoverDeliveries(db, new Date().toISOString());
+  discordOutboxLeaser.recoverExpiredLeases(new Date().toISOString());
 }
 const gameDataGenerationListeners = new Set();
 let productionRelayLifecycleCoordinator = null;
@@ -4132,41 +4150,60 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
   let sent = 0;
   let skipped = 0;
   let failed = 0;
+  let checked = 0;
   try {
-    const rows = statements.pendingDiscordNotifications.all(discordNotificationMaxAttempts, new Date().toISOString(), limit);
-    for (const row of rows) {
+    discordOutboxLeaser.recoverExpiredLeases(new Date().toISOString());
+    for (let index = 0; index < limit; index += 1) {
+      const row = discordOutboxLeaser.claimNext({ maxAttempts: discordNotificationMaxAttempts });
+      if (!row) break;
+      checked += 1;
       const metadata = safeJson(row.metadata_json, {});
       const canonicalCutoverAttempt = row.event_type === "canonical_cutover";
-      if (canonicalCutoverAttempt && !claimCanonicalCutoverDelivery(db, row.id, new Date().toISOString())) continue;
       try {
         const result = await sendDiscordActivity(row.event_type, row.summary, row.occurred_at, metadata);
         const finishedAt = new Date().toISOString();
         if (result?.skipped) {
-          statements.markDiscordNotificationSkipped.run(finishedAt, result.reason ?? "Notification skipped by sender", finishedAt, row.id);
-          if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+          const completed = discordOutboxLeaser.markSkipped({
+            id: row.id,
+            leaseToken: row.leaseToken,
+            reason: result.reason ?? "Notification skipped by sender",
+            finishedAt,
+          });
+          if (completed && row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
             statements.updateDiscordCraftPlanReportOccurrence.run("skipped", null, redactServerHealthText(result.reason ?? "Notification skipped").slice(0, 500), finishedAt, metadata.ruleId, metadata.occurrenceKey);
           }
-          skipped += 1;
+          if (completed) skipped += 1;
         } else {
-          statements.markDiscordNotificationSent.run(finishedAt, JSON.stringify(result ?? {}), finishedAt, row.id);
-          if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+          const completed = discordOutboxLeaser.markSent({
+            id: row.id,
+            leaseToken: row.leaseToken,
+            response: result ?? {},
+            finishedAt,
+          });
+          if (completed && row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
             statements.updateDiscordCraftPlanReportOccurrence.run("sent", String(result?.response?.id ?? ""), null, finishedAt, metadata.ruleId, metadata.occurrenceKey);
           }
-          if (row.event_type === "app_update" && (metadata.announcementKey || metadata.version || metadata.releaseKey)) statements.upsertSetting.run("discord_last_announced_version", String(metadata.announcementKey || metadata.version || metadata.releaseKey), finishedAt);
-          sent += 1;
+          if (completed && row.event_type === "app_update" && (metadata.announcementKey || metadata.version || metadata.releaseKey)) statements.upsertSetting.run("discord_last_announced_version", String(metadata.announcementKey || metadata.version || metadata.releaseKey), finishedAt);
+          if (completed) sent += 1;
         }
       } catch (error) {
         const failedAt = new Date().toISOString();
         const message = error instanceof Error ? error.message : String(error);
         if (canonicalCutoverAttempt) {
-          statements.markDiscordNotificationSkipped.run(
-            failedAt,
-            "Canonical announcement delivery outcome is unknown; automatic retry is suppressed",
-            failedAt,
-            row.id,
-          );
+          discordOutboxLeaser.markSkipped({
+            id: row.id,
+            leaseToken: row.leaseToken,
+            reason: "Canonical announcement delivery outcome is unknown; automatic retry is suppressed",
+            finishedAt: failedAt,
+          });
         } else {
-          statements.markDiscordNotificationFailed.run(discordNotificationMaxAttempts, discordNotificationRetryAt(toNumber(row.attempts)), failedAt, message, failedAt, row.id);
+          discordOutboxLeaser.markFailed({
+            id: row.id,
+            leaseToken: row.leaseToken,
+            error: message,
+            retryAt: discordNotificationRetryAt(toNumber(row.attempts) - 1),
+            finishedAt: failedAt,
+          });
         }
         if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
           statements.updateDiscordCraftPlanReportOccurrence.run("failed", null, redactServerHealthText(message).slice(0, 500), failedAt, metadata.ruleId, metadata.occurrenceKey);
@@ -4175,7 +4212,7 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
         else failed += 1;
       }
     }
-    return { checked: rows.length, sent, skipped, failed };
+    return { checked, sent, skipped, failed };
   } finally {
     discordNotificationOutboxRunning = false;
   }
@@ -4197,6 +4234,7 @@ async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), c
   assertDiscordNetworkEnabled();
   const response = await fetch(`${discordApiOrigin}/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
+    signal: AbortSignal.timeout(discordRequestTimeoutMs),
     headers: {
       authorization: `Bot ${settings.botToken}`,
       "content-type": "application/json",
@@ -4302,6 +4340,7 @@ async function discordApiRequest(pathname, options = {}, settings = getDiscordSe
   if (!settings.botToken) throw new Error("Discord bot token is not configured");
   const response = await fetch(`${discordApiOrigin}${pathname}`, {
     ...options,
+    signal: options.signal ?? AbortSignal.timeout(discordRequestTimeoutMs),
     headers: {
       authorization: `Bot ${settings.botToken}`,
       ...(options.headers ?? {}),
@@ -6614,6 +6653,7 @@ function databaseStatus() {
   ]));
   const discordLastDelivery = safeJson(statements.getSetting.get("discord_last_delivery_json")?.value, { status: "none" });
   const discordOutboxCounts = Object.fromEntries(statements.discordNotificationOutboxCounts.all().map((row) => [row.status, toNumber(row.count)]));
+  const discordDuplicateRisk = statements.discordNotificationOutboxDuplicateRisk.get();
   const discordDeliveryLog = statements.recentDiscordDeliveries.all(80).map((row) => ({
     ...row,
     metadata: safeJson(row.metadata_json, {}),
@@ -6632,6 +6672,18 @@ function databaseStatus() {
       lastDelivery: discordLastDelivery,
       deliveryLog: discordDeliveryLog,
       outbox: discordOutboxCounts,
+      deliveryGuarantee: {
+        semantics: "at-least-once",
+        unknownAcknowledgementWindow: true,
+        canonicalUnknownOutcomeSuppression: true,
+        requestTimeoutMs: discordRequestTimeoutMs,
+        completionWriteMarginMs: discordOutboxCompletionWriteMarginMs,
+        leaseMs: discordNotificationLeaseMs,
+        potentialDuplicateRows: toNumber(discordDuplicateRisk?.potential_duplicate_rows),
+        activeLeases: toNumber(discordDuplicateRisk?.active_leases),
+        expiredLeaseRows: toNumber(discordDuplicateRisk?.expired_lease_rows),
+        unknownOutcomeRows: toNumber(discordDuplicateRisk?.unknown_outcome_rows),
+      },
       gateway: { ...discordGatewayStatus },
     },
     settings: getSettings(),

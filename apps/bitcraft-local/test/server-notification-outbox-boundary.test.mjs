@@ -38,7 +38,8 @@ test("Discord outbox worker delivers canonical cutover rows through the exact no
   );
   assert.doesNotMatch(canonicalBranch, /recordDiscordDeliverySafe/);
   assert.match(server, /eventType !== "canonical_cutover"[^\n]*recordDiscordDeliverySafe/);
-  assert.match(server, /claimCanonicalCutoverDelivery\(db, row\.id/);
-  assert.match(server, /recoverInterruptedCanonicalCutoverDeliveries\(db/);
-  assert.match(server, /canonicalCutoverAttempt[\s\S]*?markDiscordNotificationSkipped/);
+  assert.match(server, /createDiscordOutboxLeaser\(db/);
+  assert.match(server, /discordOutboxLeaser\.claimNext\(\{ maxAttempts: discordNotificationMaxAttempts \}\)/);
+  assert.match(server, /discordOutboxLeaser\.recoverExpiredLeases\(/);
+  assert.match(server, /canonicalCutoverAttempt[\s\S]*?discordOutboxLeaser\.markSkipped\(\{[\s\S]*?leaseToken: row\.leaseToken/);
 });

@@ -56,6 +56,16 @@ export const schemaIndexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_production_contrib_events_craft ON production_contribution_events (claim_id, craft_entity_id, occurred_at DESC);",
 ];
 
+export const discordOutboxLeaseColumnMigrations = [
+  { table: "discord_notification_outbox", column: "locked_by", definition: "TEXT" },
+  { table: "discord_notification_outbox", column: "lease_token", definition: "TEXT" },
+  { table: "discord_notification_outbox", column: "lease_expires_at", definition: "TEXT" },
+];
+
+export const discordOutboxLeaseIndexStatements = [
+  "CREATE INDEX IF NOT EXISTS idx_discord_notification_outbox_lease ON discord_notification_outbox (status, next_attempt_at, lease_expires_at, id);",
+];
+
 export const retiredTableNames = [
   "current_claim_state",
   "recipe_catalog_entries",
@@ -194,6 +204,15 @@ export function applyAdditiveColumnMigrations(db, migrations = additiveColumnMig
     const exists = db.prepare(`PRAGMA table_info(${migration.table})`).all().some((row) => row.name === migration.column);
     if (!exists) db.exec(`ALTER TABLE ${migration.table} ADD COLUMN ${migration.column} ${migration.definition}`);
   }
+}
+
+export function applyDiscordOutboxLeaseMigration(
+  db,
+  migrations = discordOutboxLeaseColumnMigrations,
+  indexes = discordOutboxLeaseIndexStatements,
+) {
+  applyAdditiveColumnMigrations(db, migrations);
+  applySchemaIndexStatements(db, indexes);
 }
 
 export function applyMarketHistoryExactAmountMigration(db) {

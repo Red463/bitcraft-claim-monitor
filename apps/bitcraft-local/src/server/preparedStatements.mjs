@@ -331,19 +331,32 @@ export function createPreparedStatements(db) {
       summary = excluded.summary,
       occurred_at = excluded.occurred_at,
       metadata_json = excluded.metadata_json,
-      status = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.status ELSE 'pending' END,
-      attempts = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.attempts ELSE 0 END,
-      next_attempt_at = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.next_attempt_at ELSE excluded.next_attempt_at END,
-      skipped_at = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.skipped_at ELSE NULL END,
-      failed_at = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.failed_at ELSE NULL END,
-      last_error = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.last_error ELSE NULL END,
+      status = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.status ELSE 'pending' END,
+      attempts = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.attempts ELSE 0 END,
+      next_attempt_at = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.next_attempt_at ELSE excluded.next_attempt_at END,
+      locked_at = CASE WHEN discord_notification_outbox.status = 'sending' THEN discord_notification_outbox.locked_at ELSE NULL END,
+      locked_by = CASE WHEN discord_notification_outbox.status = 'sending' THEN discord_notification_outbox.locked_by ELSE NULL END,
+      lease_token = CASE WHEN discord_notification_outbox.status = 'sending' THEN discord_notification_outbox.lease_token ELSE NULL END,
+      lease_expires_at = CASE WHEN discord_notification_outbox.status = 'sending' THEN discord_notification_outbox.lease_expires_at ELSE NULL END,
+      skipped_at = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.skipped_at ELSE NULL END,
+      failed_at = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.failed_at ELSE NULL END,
+      last_error = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.last_error ELSE NULL END,
       updated_at = excluded.updated_at
   `),
-  pendingDiscordNotifications: db.prepare("SELECT * FROM discord_notification_outbox WHERE status IN ('pending', 'failed') AND attempts < ? AND next_attempt_at <= ? ORDER BY created_at ASC, id ASC LIMIT ?"),
-  markDiscordNotificationSent: db.prepare("UPDATE discord_notification_outbox SET status = 'sent', sent_at = ?, response_json = ?, last_error = NULL, updated_at = ? WHERE id = ?"),
-  markDiscordNotificationSkipped: db.prepare("UPDATE discord_notification_outbox SET status = 'skipped', skipped_at = ?, last_error = ?, updated_at = ? WHERE id = ?"),
-  markDiscordNotificationFailed: db.prepare("UPDATE discord_notification_outbox SET status = CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END, attempts = attempts + 1, next_attempt_at = ?, failed_at = ?, last_error = ?, updated_at = ? WHERE id = ?"),
   discordNotificationOutboxCounts: db.prepare("SELECT status, COUNT(*) AS count FROM discord_notification_outbox GROUP BY status"),
+  discordNotificationOutboxDuplicateRisk: db.prepare(`
+    SELECT
+      SUM(CASE
+        WHEN attempts > 1
+          OR last_error LIKE 'Delivery lease expired before completion;%'
+          OR last_error = 'Canonical announcement delivery outcome is unknown; automatic retry is suppressed'
+        THEN 1 ELSE 0
+      END) AS potential_duplicate_rows,
+      SUM(CASE WHEN status = 'sending' THEN 1 ELSE 0 END) AS active_leases,
+      SUM(CASE WHEN last_error LIKE 'Delivery lease expired before completion;%' THEN 1 ELSE 0 END) AS expired_lease_rows,
+      SUM(CASE WHEN last_error = 'Canonical announcement delivery outcome is unknown; automatic retry is suppressed' THEN 1 ELSE 0 END) AS unknown_outcome_rows
+    FROM discord_notification_outbox
+  `),
   recentDiscordDeliveries: db.prepare("SELECT * FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT ?"),
   pruneDiscordDeliveries: db.prepare("DELETE FROM discord_delivery_log WHERE id NOT IN (SELECT id FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT 250)"),
   claimDiscordCraftPlanReportOccurrence: db.prepare(`
