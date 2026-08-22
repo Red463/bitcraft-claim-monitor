@@ -180,6 +180,8 @@ export function createPageRefreshController(options) {
   let dirty = false;
   let timer = null;
   let generationScheduled = false;
+  let generationRetryTimer = null;
+  let generationRetryReason = "generation";
   let stopped = false;
   let failureCount = 0;
   let failureRetryAt = Number.NEGATIVE_INFINITY;
@@ -193,6 +195,12 @@ export function createPageRefreshController(options) {
     if (timer != null) clearTimer(timer);
     timer = null;
     generationScheduled = false;
+  }
+
+  function clearGenerationRetry() {
+    if (generationRetryTimer != null) clearTimer(generationRetryTimer);
+    generationRetryTimer = null;
+    generationRetryReason = "generation";
   }
 
   function startCycle(reason, generationTriggered = reason === "generation") {
@@ -251,6 +259,10 @@ export function createPageRefreshController(options) {
       overdueGeneration = true;
       return;
     }
+    if (generationRetryTimer != null) {
+      if (reason === "visibility-catch-up") generationRetryReason = reason;
+      return;
+    }
     clearScheduled();
     generationScheduled = true;
     const wait = Math.max(0, Math.max(lastStartedAt + PAGE_REFRESH_COALESCE_MS, failureRetryAt) - now());
@@ -279,6 +291,26 @@ export function createPageRefreshController(options) {
     clearScheduled();
     const delay = PAGE_REFRESH_BACKOFF_MS[Math.min(failureCount - 1, PAGE_REFRESH_BACKOFF_MS.length - 1)];
     failureRetryAt = now() + delay;
+    if (reason === "generation") {
+      clearGenerationRetry();
+      generationRetryReason = reason;
+      generationRetryTimer = setTimer(() => {
+        const retryReason = generationRetryReason;
+        generationRetryTimer = null;
+        generationRetryReason = "generation";
+        if (!visible) {
+          overdue = true;
+          overdueGeneration = true;
+          return;
+        }
+        if (activeCycle) {
+          if (queuedReason !== "manual") queuedReason = "generation";
+          return;
+        }
+        startCycle(retryReason, true);
+      }, delay);
+      return;
+    }
     timer = setTimer(() => {
       timer = null;
       if (!visible) {
@@ -317,11 +349,13 @@ export function createPageRefreshController(options) {
       stopped = true;
       dirty = false;
       clearScheduled();
+      clearGenerationRetry();
     },
     setPage(nextPage) {
       const normalizedPage = String(nextPage ?? "");
       if (normalizedPage === page) return null;
       clearScheduled();
+      clearGenerationRetry();
       page = normalizedPage;
       activeCycle = null;
       activeGenerationTriggered = false;
@@ -335,6 +369,7 @@ export function createPageRefreshController(options) {
     },
     restart() {
       clearScheduled();
+      clearGenerationRetry();
       activeCycle = null;
       activeGenerationTriggered = false;
       dirty = false;
@@ -415,6 +450,7 @@ export function createPageRefreshController(options) {
         return;
       }
       if (succeeded && (completedGenerationTriggered || pageRefreshPolicy(page).mode === "near-live")) {
+        if (completedGenerationTriggered) clearGenerationRetry();
         failureCount = 0;
         failureRetryAt = Number.NEGATIVE_INFINITY;
       }

@@ -54,7 +54,16 @@ function createFakeClock(start = 0) {
     now = target;
   };
   const elapse = (elapsed) => { now += elapsed; };
-  return { now: () => now, setTimeout, clearTimeout, setInterval, clearInterval: clearTimeout, advance, elapse };
+  return {
+    now: () => now,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval: clearTimeout,
+    advance,
+    elapse,
+    pendingTimers: () => timers.size,
+  };
 }
 
 test("route policy keeps only Craft Monitor near-live and demand pages manual", () => {
@@ -362,6 +371,123 @@ test("generation events during a priority manual cycle honor the retained retry 
   assert.equal(cycles[4].reason, "generation");
 });
 
+test("a manual cycle completed before generation retry keeps its original deadline and backoff", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `manual-before-retry-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles[1].id, false);
+  clock.advance(1_000);
+  controller.requestManual();
+  controller.complete(cycles[2].id, true);
+
+  clock.advance(3_999);
+  assert.equal(cycles.length, 3);
+  clock.advance(1);
+  assert.equal(cycles.length, 4);
+  assert.equal(cycles[3].reason, "generation");
+  controller.complete(cycles[3].id, false);
+
+  clock.advance(9_999);
+  assert.equal(cycles.length, 4);
+  clock.advance(1);
+  assert.equal(cycles.length, 5);
+  assert.equal(cycles[4].reason, "generation");
+  controller.complete(cycles[4].id, true);
+
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles[5].id, false);
+  clock.advance(4_999);
+  assert.equal(cycles.length, 6);
+  clock.advance(1);
+  assert.equal(cycles.length, 7);
+  assert.equal(cycles[6].reason, "generation");
+});
+
+test("changing the interval cadence does not replace a pending generation retry", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `interval-during-retry-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles[1].id, false);
+  clock.advance(1_000);
+  controller.setIntervalMs(60_000);
+
+  clock.advance(3_999);
+  assert.equal(cycles.length, 2);
+  clock.advance(1);
+  assert.equal(cycles.length, 3);
+  assert.equal(cycles[2].reason, "generation");
+  controller.complete(cycles[2].id, true);
+
+  clock.advance(59_999);
+  assert.equal(cycles.length, 3);
+  clock.advance(1);
+  assert.equal(cycles.length, 4);
+  assert.equal(cycles[3].reason, "interval");
+});
+
+test("a generation retry crossed by a manual cycle runs once immediately afterward", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `manual-crosses-retry-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles[1].id, false);
+  clock.advance(1_000);
+  controller.requestManual();
+  clock.advance(5_000);
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation", "manual"]);
+
+  controller.complete(cycles[2].id, true);
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation", "manual", "generation"]);
+  clock.advance(0);
+  assert.equal(cycles.length, 4, "one elapsed retry produces one generation cycle");
+  controller.complete(cycles[3].id, false);
+
+  clock.advance(9_999);
+  assert.equal(cycles.length, 4);
+  clock.advance(1);
+  assert.equal(cycles.length, 5);
+  assert.equal(cycles[4].reason, "generation");
+});
+
 test("cold-start failures are sealed outside the data branch and enter Craft Monitor backoff", async () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
   assert.match(appShell, /state\.error && !state\.data \? \([\s\S]*<ApiErrorState[\s\S]*<PageRefreshCycleSeal[\s\S]*\) : \(/);
@@ -554,6 +680,32 @@ test("route changes start a page-scoped initial cycle and cleanup cancels stale 
   controller.stop();
   clock.advance(60_000);
   assert.equal(cycles.length, 2);
+});
+
+test("controller cleanup cancels an independently owned generation retry timer", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `cleanup-generation-retry-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles[1].id, false);
+  assert.equal(clock.pendingTimers(), 1);
+  controller.stop();
+  assert.equal(clock.pendingTimers(), 0);
+  clock.advance(60_000);
+
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation"]);
 });
 
 test("generation watcher combines SSE with a 1000 ms poll and deduplicates generations", async () => {
