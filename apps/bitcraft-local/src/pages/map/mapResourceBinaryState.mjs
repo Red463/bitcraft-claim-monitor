@@ -24,6 +24,10 @@ function replace(state, key, next) {
   return output;
 }
 
+function isOlderDecimalGeneration(candidate, committed) {
+  return /^\d+$/.test(candidate) && /^\d+$/.test(committed) && BigInt(candidate) < BigInt(committed);
+}
+
 export function createMapResourceBinaryState(scope = []) {
   return new Map(scope.map((input) => [String(input.key), partition(input)]));
 }
@@ -49,6 +53,16 @@ export function reconcileMapResourceBinaryScope(state, scope = []) {
     }
   }
   return changed ? output : state;
+}
+
+export function markMapResourceBinaryAwaitingConfirmation(state) {
+  let output = null;
+  for (const [key, current] of state) {
+    if (current.generation == null || current.freshness === "awaiting-confirmation") continue;
+    if (!output) output = new Map(state);
+    output.set(key, { ...current, freshness: "awaiting-confirmation" });
+  }
+  return output ?? state;
 }
 
 export function applyMapResourceBinaryCommitted(state, key, decoded, metadata = {}) {
@@ -77,13 +91,36 @@ export function applyMapResourceBinaryEvent(state, event) {
   const current = state.get(key);
   if (!current) return { partitions: state, requiresFetch: false };
   if (event.type === "partition-ready") {
+    const generation = String(event.generation);
+    if (
+      current.generation != null
+      && current.freshness !== "awaiting-confirmation"
+      && isOlderDecimalGeneration(generation, current.generation)
+    ) {
+      return { partitions: state, requiresFetch: false };
+    }
+    const generationMatches = current.generation != null && current.generation === generation;
+    const incomingFreshness = String(event.freshness ?? current.freshness);
+    let freshness = current.freshness;
+    let status = current.status;
+    let warning = current.warning;
+    if (current.generation == null || generationMatches) {
+      freshness = incomingFreshness;
+      status = current.generation == null ? "loading" : freshness === "stale" ? "stale" : "live";
+      warning = event.warning == null ? null : String(event.warning);
+    } else if (incomingFreshness === "stale" || incomingFreshness === "unavailable") {
+      freshness = "stale";
+      status = "stale";
+      warning = event.warning == null ? current.warning : String(event.warning);
+    }
     return {
       partitions: replace(state, key, {
         ...current,
-        status: current.generation == null ? "loading" : current.status,
-        warning: null,
+        freshness,
+        status,
+        warning,
       }),
-      requiresFetch: current.generation !== String(event.generation),
+      requiresFetch: current.generation !== generation,
     };
   }
   if (event.type === "partition-loading") {

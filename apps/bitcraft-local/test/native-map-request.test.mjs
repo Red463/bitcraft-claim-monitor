@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { boundedNativeMapRegions, nativeMapRequest, nativeMapResourceRegions, nativeMapResourceSelectionLimit, normalizeNativeMapRegionSelection } from "../src/pages/map/nativeMapRequest.mjs";
+import { MAP_RESOURCE_PARTITION_BUDGET, mapResourceTypeLimitForRegions } from "../src/map/mapResourceSelection.mjs";
+import { boundedNativeMapRegions, nativeMapPreferredResourceRegion, nativeMapRequest, nativeMapResourceRegions, nativeMapResourceSelectionLimit, normalizeNativeMapRegionSelection } from "../src/pages/map/nativeMapRequest.mjs";
 
 test("native map requests are same-origin, canonical, and omit empty bounded layers", () => {
   const request = nativeMapRequest({
@@ -28,8 +29,8 @@ test("native map request keeps resource and enemy namespaces separate", () => {
   assert.equal(new URL(request.snapshotUrl, "http://local").searchParams.get("layers").includes("resources"), false);
   assert.deepEqual(request.resourcePartitions.map(({ key, url }) => [key, url]), [
     ["19|resource:123", undefined],
-    ["19|resource:456", undefined],
     ["24|resource:123", undefined],
+    ["19|resource:456", undefined],
     ["24|resource:456", undefined],
   ]);
   assert.equal(JSON.stringify(request).includes("/api/local/map/resources"), false);
@@ -50,14 +51,71 @@ test("native map resource planning keeps all 16 types across all 13 regions", ()
   assert.equal(new URL(request.resourceEventUrl, "http://local").searchParams.get("resourceIds"), resourceIds.join(","));
 });
 
-test("native map regions discard stale persisted ids and request every ready world region", () => {
+test("native map resource type limits share the 256-partition browser budget", () => {
+  const regions = (count) => Array.from({ length: count }, (_, index) => String(index + 1));
+  assert.equal(MAP_RESOURCE_PARTITION_BUDGET, 256);
+  assert.equal(mapResourceTypeLimitForRegions(regions(13)), 16);
+  assert.equal(mapResourceTypeLimitForRegions(regions(16)), 16);
+  assert.equal(mapResourceTypeLimitForRegions(regions(17)), 15);
+  assert.equal(mapResourceTypeLimitForRegions([]), 0);
+  assert.ok(mapResourceTypeLimitForRegions(regions(257)) * 257 <= MAP_RESOURCE_PARTITION_BUDGET);
+  assert.equal(mapResourceTypeLimitForRegions(["019", "19", "bad", "24"]), 16, "only unique decimal regions count");
+});
+
+test("resource selection options can lower but never raise hard partition or type ceilings", () => {
+  const regions = (count) => Array.from({ length: count }, (_, index) => String(index + 1));
+  assert.equal(mapResourceTypeLimitForRegions(["1"], { partitionBudget: 257, typeLimit: 257 }), 16);
+  assert.equal(mapResourceTypeLimitForRegions(regions(17), { partitionBudget: 257, typeLimit: 257 }), 15);
+  assert.ok(mapResourceTypeLimitForRegions(regions(17), { partitionBudget: 257, typeLimit: 257 }) * 17 <= 256);
+  assert.equal(mapResourceTypeLimitForRegions(regions(4), { partitionBudget: 8, typeLimit: 3 }), 2);
+});
+
+test("native map regions preserve explicit All but narrowly fall back for a stale persisted selection", () => {
   assert.deepEqual(boundedNativeMapRegions(["99", "19"], ["19", "24"]), ["19"]);
   assert.deepEqual(boundedNativeMapRegions([], Array.from({ length: 13 }, (_, index) => String(index + 1))), Array.from({ length: 13 }, (_, index) => String(index + 1)));
   assert.deepEqual(nativeMapResourceRegions([], ["1", "2", "3", "4", "5"]), ["1", "2", "3", "4", "5"]);
   assert.deepEqual(nativeMapResourceRegions(["99", "24"], ["19", "24"]), ["24"]);
   assert.deepEqual(nativeMapResourceRegions([], ["19", "24"]), ["19", "24"], "All requests every ready resource region");
-  assert.deepEqual(nativeMapResourceRegions(["24"], ["19"]), ["19"], "a configured but unready selection falls back within the ready set");
+  assert.deepEqual(nativeMapResourceRegions(["24"], ["19", "31"], "31"), ["31"], "a configured but unready selection falls back to the ready claim region");
+  assert.deepEqual(nativeMapResourceRegions(["24"], ["19", "31"], "99"), ["19"], "without a ready claim it falls back to the first ready region");
   assert.deepEqual(nativeMapResourceRegions(["24", "19"], ["19"]), ["19"], "mixed selections intersect the ready set");
+});
+
+test("preferred resource region always belongs to the active resource scope", () => {
+  assert.equal(nativeMapPreferredResourceRegion([], ["19"], "31"), "19", "an out-of-scope ready claim cannot become the priority hint");
+  assert.equal(nativeMapPreferredResourceRegion([], ["19", "31"], "31"), "31");
+  assert.equal(nativeMapPreferredResourceRegion(["24"], ["19", "24"], "19"), "24", "an explicit in-scope region wins");
+});
+
+test("native map request validates priority hints and applies them to scope and URL order", () => {
+  const prioritized = nativeMapRequest({
+    operationalRegionIds: ["19"],
+    resourceRegionIds: ["19", "24"],
+    resourceIds: ["28", "54"],
+    priorityResourceId: "54",
+    priorityRegionId: "24",
+  });
+  assert.deepEqual(prioritized.resourcePartitions.map((partition) => partition.key), [
+    "24|resource:54",
+    "19|resource:54",
+    "19|resource:28",
+    "24|resource:28",
+  ]);
+  const priorityUrl = new URL(prioritized.resourceEventUrl, "http://local");
+  assert.equal(priorityUrl.searchParams.get("priorityResourceId"), "54");
+  assert.equal(priorityUrl.searchParams.get("priorityRegionId"), "24");
+
+  const ignored = nativeMapRequest({
+    operationalRegionIds: ["19"],
+    resourceRegionIds: ["19", "24"],
+    resourceIds: ["28", "54"],
+    priorityResourceId: "999",
+    priorityRegionId: "31",
+  });
+  const ignoredUrl = new URL(ignored.resourceEventUrl, "http://local");
+  assert.equal(ignoredUrl.searchParams.has("priorityResourceId"), false);
+  assert.equal(ignoredUrl.searchParams.has("priorityRegionId"), false);
+  assert.ok(ignored.resourcePartitions.length <= MAP_RESOURCE_PARTITION_BUDGET);
 });
 
 test("player collection regions are independent of selected operational and resource regions", () => {
