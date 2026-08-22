@@ -475,8 +475,98 @@ export function deriveRelayMarketTransitions({
   });
 }
 
+export function compactRelayMarketTransitionEvents(events) {
+  if (!Array.isArray(events)) {
+    throw new TypeError("Relay market transition events must be an array");
+  }
+  return events.map((event, index) => {
+    const source = record(event, `Relay market transition event ${index}`);
+    const listing = record(source.listing, `Relay market transition event ${index} listing`);
+    const compact = {
+      eventType: String(source.eventType ?? ""),
+      activityType: String(source.activityType ?? ""),
+      occurredAt: String(source.occurredAt ?? ""),
+      sourceKey: String(source.sourceKey ?? ""),
+      activitySourceKey: String(source.activitySourceKey ?? ""),
+      summary: String(source.summary ?? ""),
+      listing: {
+        key: String(listing.key ?? ""),
+        itemName: String(listing.itemName ?? ""),
+        side: String(listing.side ?? ""),
+        owner: String(listing.owner ?? ""),
+        ownerEntityId: String(listing.ownerEntityId ?? ""),
+        itemId: String(listing.itemId ?? ""),
+        itemType: String(listing.itemType ?? ""),
+        quantity: String(listing.quantity ?? ""),
+        price: String(listing.price ?? ""),
+        totalValue: String(listing.totalValue ?? ""),
+        tier: listing.tier == null ? null : String(listing.tier),
+        rarity: listing.rarity == null ? null : String(listing.rarity),
+        listedAt: listing.listedAt == null ? null : String(listing.listedAt),
+        tradeId: listing.tradeId == null ? null : String(listing.tradeId),
+      },
+    };
+    if (source.evidence != null) {
+      const evidence = record(source.evidence, `Relay market transition event ${index} evidence`);
+      const tradeRegionId = String(listing.tradeId ?? "").match(
+        /^relay_closed_listing:(\d+):/,
+      )?.[1] ?? null;
+      compact.evidence = {
+        kind: "closed_listing",
+        closureKind: String(evidence.closureKind ?? ""),
+        entityId: String(evidence.entityId ?? ""),
+        regionId: evidence.regionId == null ? tradeRegionId : String(evidence.regionId),
+      };
+    }
+    return compact;
+  });
+}
+
+function validatedCompactTransitionEvents(events) {
+  return compactRelayMarketTransitionEvents(events).map((event, index) => {
+    const label = `Compact Relay market transition event ${index}`;
+    if (!event.eventType || !event.activityType || !event.sourceKey
+      || !event.activitySourceKey || !event.summary) {
+      throw new TypeError(`${label} is incomplete`);
+    }
+    if (!Number.isFinite(Date.parse(event.occurredAt))) {
+      throw new TypeError(`${label} occurredAt must be an ISO timestamp`);
+    }
+    const listing = event.listing;
+    for (const [key, value] of [
+      ["listing key", listing.key],
+      ["owner entity id", listing.ownerEntityId],
+      ["item id", listing.itemId],
+      ["quantity", listing.quantity],
+      ["price", listing.price],
+      ["total value", listing.totalValue],
+    ]) {
+      decimalInteger(value, `${label} ${key}`);
+    }
+    if (!listing.itemName || !["buy", "sell"].includes(listing.side)) {
+      throw new TypeError(`${label} listing identity is incomplete`);
+    }
+    if (!["item", "cargo"].includes(listing.itemType)) {
+      throw new TypeError(`${label} item type must be item or cargo`);
+    }
+    if (event.eventType === "sale_confirmed") {
+      const tradeMatch = String(listing.tradeId ?? "").match(
+        /^relay_closed_listing:(\d+):(\d+)$/,
+      );
+      if (!tradeMatch || event.evidence?.kind !== "closed_listing"
+        || event.evidence.closureKind !== "sale_proceeds"
+        || decimalInteger(event.evidence.entityId, `${label} evidence id`) !== tradeMatch[2]
+        || decimalInteger(event.evidence.regionId, `${label} evidence region id`) !== tradeMatch[1]) {
+        throw new TypeError(`${label} cannot confirm a sale without matching closed-listing evidence`);
+      }
+    }
+    return event;
+  });
+}
+
 export function createRelayMarketTransitionWriter(db, {
   addActivity,
+  enqueueDiscordActivity = null,
   processOutbox = () => {},
 }) {
   if (!db?.prepare || !db?.exec) {
@@ -484,6 +574,9 @@ export function createRelayMarketTransitionWriter(db, {
   }
   if (typeof addActivity !== "function") {
     throw new TypeError("Relay market transition writer requires addActivity");
+  }
+  if (enqueueDiscordActivity != null && typeof enqueueDiscordActivity !== "function") {
+    throw new TypeError("Relay market transition Discord enqueue must be a function");
   }
   const insertMarketEvent = db.prepare(`
     INSERT OR IGNORE INTO market_events (
@@ -501,28 +594,30 @@ export function createRelayMarketTransitionWriter(db, {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  return {
-    apply({ claimId, previous, current, observedAt }) {
+  const writeDerived = ({
+    claimId,
+    events,
+    observedAt,
+    manageTransaction,
+    allowEvidenceDerivedPurchaser,
+  }) => {
       const normalizedClaimId = decimalInteger(claimId, "Relay market transition claim id");
-      if (previous != null) {
-        assertSnapshotClaimScope(previous, "previous Relay market snapshot", normalizedClaimId);
+      if (!Number.isFinite(Date.parse(String(observedAt)))) {
+        throw new TypeError("Relay market transition observedAt must be an ISO timestamp");
       }
-      assertSnapshotClaimScope(current, "current Relay market snapshot", normalizedClaimId);
-      const transitions = deriveRelayMarketTransitions({
-        previous,
-        current,
-        observedAt,
-      });
+      const transitions = allowEvidenceDerivedPurchaser
+        ? events
+        : validatedCompactTransitionEvents(events);
       let inserted = 0;
       let trades = 0;
       let activities = 0;
-      db.exec("BEGIN IMMEDIATE");
+      if (manageTransaction) db.exec("BEGIN IMMEDIATE");
       try {
         for (const event of transitions) {
           const listing = event.listing;
           const raw = event.evidence == null
-            ? listing.raw
-            : { listing: listing.raw, evidence: event.evidence };
+            ? (listing.raw ?? listing)
+            : { listing: listing.raw ?? listing, evidence: event.evidence };
           const result = insertMarketEvent.run(
             normalizedClaimId,
             event.eventType,
@@ -579,18 +674,57 @@ export function createRelayMarketTransitionWriter(db, {
             event.occurredAt,
             listing,
             event.activitySourceKey,
-            { processDiscordImmediately: false },
+            {
+              processDiscordImmediately: false,
+              enqueueDiscord: enqueueDiscordActivity == null,
+            },
           )) {
             activities += 1;
+            enqueueDiscordActivity?.(
+              normalizedClaimId,
+              event.activityType,
+              event.summary,
+              event.occurredAt,
+              listing,
+              event.activitySourceKey,
+            );
           }
         }
-        db.exec("COMMIT");
+        if (manageTransaction) db.exec("COMMIT");
       } catch (error) {
-        db.exec("ROLLBACK");
+        if (manageTransaction) db.exec("ROLLBACK");
         throw error;
       }
-      if (activities > 0) processOutbox();
+      if (manageTransaction && activities > 0) processOutbox();
       return { derived: transitions.length, inserted, trades, activities };
+  };
+
+  return {
+    apply({ claimId, previous, current, observedAt }) {
+      const normalizedClaimId = decimalInteger(claimId, "Relay market transition claim id");
+      if (previous != null) {
+        assertSnapshotClaimScope(previous, "previous Relay market snapshot", normalizedClaimId);
+      }
+      assertSnapshotClaimScope(current, "current Relay market snapshot", normalizedClaimId);
+      return writeDerived({
+        claimId: normalizedClaimId,
+        events: deriveRelayMarketTransitions({ previous, current, observedAt }),
+        observedAt,
+        manageTransaction: true,
+        allowEvidenceDerivedPurchaser: true,
+      });
+    },
+    applyDerived({ claimId, events, observedAt, manageTransaction = true }) {
+      return writeDerived({
+        claimId,
+        events,
+        observedAt,
+        manageTransaction,
+        allowEvidenceDerivedPurchaser: false,
+      });
+    },
+    kickOutbox() {
+      processOutbox();
     },
   };
 }

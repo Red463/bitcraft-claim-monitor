@@ -31,14 +31,26 @@ test("Discord outbox worker delivers canonical cutover rows through the exact no
   assert.match(server, /canonicalCutoverDiscordDelivery/);
   assert.match(server, /eventType === "canonical_cutover"/);
   assert.match(server, /revision: metadata\.admittedRevision/);
-  assert.match(server, /sendDiscordMessage\(delivery\.payload, settings, delivery\.channelId\)/);
+  assert.match(server, /sendDiscordMessage\(delivery\.payload, settings, delivery\.channelId, deliveryLease\)/);
   const canonicalBranch = server.slice(
     server.indexOf('if (eventType === "canonical_cutover")'),
     server.indexOf('if (eventType === "craft_plan_report")'),
   );
   assert.doesNotMatch(canonicalBranch, /recordDiscordDeliverySafe/);
   assert.match(server, /eventType !== "canonical_cutover"[^\n]*recordDiscordDeliverySafe/);
-  assert.match(server, /claimCanonicalCutoverDelivery\(db, row\.id/);
-  assert.match(server, /recoverInterruptedCanonicalCutoverDeliveries\(db/);
-  assert.match(server, /canonicalCutoverAttempt[\s\S]*?markDiscordNotificationSkipped/);
+  assert.match(server, /createDiscordOutboxLeaser\(db/);
+  assert.match(server, /discordOutboxLeaser\.claimNext\(\{ maxAttempts: discordNotificationMaxAttempts \}\)/);
+  assert.match(server, /discordOutboxLeaser\.recoverExpiredLeases\(/);
+  assert.match(server, /canonicalCutoverAttempt[\s\S]*?discordOutboxLeaser\.markSkipped\(\{[\s\S]*?leaseToken: row\.leaseToken/);
+});
+
+test("Discord outbox renews ownership before each network request and gates failure side effects", () => {
+  assert.match(server, /discordOutboxLeaser\.renewLease\(\{/);
+  assert.match(server, /sendDiscordDirectMessage\(recipientId, payload, settings, deliveryLease\)/);
+  assert.match(server, /discordApiRequest\("\/users\/@me\/channels"[\s\S]*?settings, deliveryLease\)/);
+  assert.match(server, /sendDiscordMessage\(payload, settings, channel\.id, deliveryLease\)/);
+  assert.match(server, /completeDiscordOutboxFailure\(\{[\s\S]*?afterCompletion\(\)/);
+  assert.match(server, /if \(completed\) \{[\s\S]*?skipped \+= 1[\s\S]*?failed \+= 1/);
+  assert.match(server, /fetchDiscordWithLease\(/);
+  assert.equal(server.match(/await fetchDiscordWithLease\(/g)?.length, 2);
 });

@@ -368,6 +368,7 @@ export class RelayBitCraftProvider implements GameDataProvider {
         ready: this.#topology.global.ready,
         database: this.#topology.global.database,
         schemaFingerprint: this.#topology.global.schemaFingerprint,
+        schemaFingerprintDiagnostic: this.#topology.global.schemaFingerprintDiagnostic,
       };
     }
     for (const source of this.#topology?.regions.values() ?? []) {
@@ -375,6 +376,7 @@ export class RelayBitCraftProvider implements GameDataProvider {
         ready: source.ready,
         database: source.database,
         schemaFingerprint: source.schemaFingerprint,
+        schemaFingerprintDiagnostic: source.schemaFingerprintDiagnostic,
       };
     }
     return {

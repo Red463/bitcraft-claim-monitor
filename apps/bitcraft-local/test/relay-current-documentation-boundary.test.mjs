@@ -45,7 +45,7 @@ test("current documentation and environment use only the Relay browser contract"
   assert.match(architecture, /\/api\/local\/game-data/);
   assert.match(architecture, /provider generation/i);
   assert.match(architecture, /last-good/i);
-  assert.match(architecture, /DirectBitCraftProvider/);
+  assert.match(architecture, /RelayBitCraftProvider/);
   assert.match(architecture, /relay\.timbersteeltrade\.com/);
 
   const deploymentDocs = `${readRoot("README.md")}\n${readRoot("docs/developer-guide.md")}`;

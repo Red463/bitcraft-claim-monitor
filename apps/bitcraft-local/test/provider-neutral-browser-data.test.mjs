@@ -74,7 +74,7 @@ test("claim overview, Members, Professions, and Leaderboard request provider-neu
 test("AppShell depends on the provider-neutral transitional loader", async () => {
   const appShell = await readFile(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
 
-  assert.match(appShell, /import \{ useGameData \} from "\.\/api\/gameDataLoader"/);
+  assert.match(appShell, /import\s*\{[^}]*\buseGameData\b[^}]*\}\s*from "\.\/api\/gameDataLoader"/);
   assert.match(appShell, /const state = useGameData\(/);
   assert.doesNotMatch(appShell, /useBitjitaData|\.\/api\/bitjita/);
 });

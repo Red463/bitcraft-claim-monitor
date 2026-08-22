@@ -436,6 +436,26 @@ export function createProviderCatalogRepository(db) {
     getSourceState() {
       return mapSourceState(statements.getSourceState.get(SOURCE_KEY));
     },
+    getRevision(publicationSnapshot = null) {
+      const source = mapSourceState(statements.getSourceState.get(SOURCE_KEY));
+      const publication = publicationSnapshot?.provenance;
+      const linkedPublication = source
+        && Number.isSafeInteger(publicationSnapshot?.generation)
+        && publicationSnapshot.generation > 0
+        && Number.isSafeInteger(publicationSnapshot?.data?.sourceGeneration)
+        && publicationSnapshot.data.sourceGeneration === source.generation
+        && publication?.provider === source.provider
+        && publication?.sourceKey === SOURCE_KEY
+        && publication?.database === source.database
+        && publication?.schemaFingerprint === source.schemaFingerprint
+        && publication?.receivedAt === source.receivedAt;
+      return source ? {
+        generation: linkedPublication ? publicationSnapshot.generation : null,
+        sourceGeneration: source.generation,
+        sourceKey: SOURCE_KEY,
+        receivedAt: source.receivedAt,
+      } : null;
+    },
     listDescriptions(kind) {
       return statements.listDescriptions.all(String(kind ?? ""))
         .map((row) => JSON.parse(String(row.data_json)));

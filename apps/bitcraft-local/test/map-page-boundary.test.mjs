@@ -498,7 +498,11 @@ test("Native map separates event and snapshot limits and ignores the initial str
 
 test("Native map uses event-driven snapshot loading without a snapshot polling timer", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
-  const snapshotEffect = nativeMap.slice(nativeMap.indexOf("const loader = createMapSnapshotLoader"), nativeMap.indexOf("React.useEffect(() => {\n    if (!resourceLocateRequest"));
+  const snapshotEffectStart = nativeMap.indexOf("const loader = createMapSnapshotLoader");
+  const snapshotEffectEnd = nativeMap.search(/React\.useEffect\(\(\) => \{\r?\n    if \(!resourceLocateRequest/);
+  assert.notEqual(snapshotEffectStart, -1);
+  assert.notEqual(snapshotEffectEnd, -1);
+  const snapshotEffect = nativeMap.slice(snapshotEffectStart, snapshotEffectEnd);
 
   assert.match(snapshotEffect, /new EventSource\(request\.eventsUrl/);
   assert.match(snapshotEffect, /mapEventNeedsSnapshot\(JSON\.parse\(message\.data\)\)/);

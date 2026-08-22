@@ -4,6 +4,7 @@ import {
   discoverRelayTopology,
   normalizeMembersPayload,
   RelayHttpClient,
+  RelayPlayerPresenceService,
   RelayPrimaryRegionPlayerSession,
   relayWebSocketUri,
 } from "../dist-server/game-data/index.js";
@@ -66,21 +67,40 @@ try {
       `Regional player snapshot count ${snapshot.players.length} did not match member count ${members.length}`,
     );
   }
+  const reconciledPlayers = await new RelayPlayerPresenceService({ http }).enrich(snapshot.players);
+  const unresolvedPlayerIds = reconciledPlayers
+    .filter(({ presenceSource }) => presenceSource === "unavailable")
+    .map(({ playerEntityId }) => playerEntityId)
+    .sort();
   const regionalRowsFound = snapshot.players.filter(
     ({ timePlayedSeconds }) => timePlayedSeconds != null,
   ).length;
   const expectedMemberIds = members.map(({ playerEntityId }) => playerEntityId).sort();
+  const actualMemberIds = snapshot.players.map(({ playerEntityId }) => playerEntityId).sort();
+  const expectedRegionalIds = reconciledPlayers
+    .filter(({ presenceRegionId }) => presenceRegionId === regionId)
+    .map(({ playerEntityId }) => playerEntityId)
+    .sort();
   const actualTypedRowIds = snapshot.players
     .filter(({ timePlayedSeconds }) => timePlayedSeconds != null)
     .map(({ playerEntityId }) => playerEntityId)
     .sort();
+  const expectedMemberIdSet = new Set(expectedRegionalIds);
+  const actualTypedRowIdSet = new Set(actualTypedRowIds);
+  const missingTypedRowIds = expectedRegionalIds.filter((id) => !actualTypedRowIdSet.has(id));
+  const unexpectedTypedRowIds = actualTypedRowIds.filter((id) => !expectedMemberIdSet.has(id));
   if (
     regionalRowsFound === 0
+    || unresolvedPlayerIds.length > 0
+    || JSON.stringify(actualMemberIds) !== JSON.stringify(expectedMemberIds)
     || snapshot.warnings.length > 0
-    || JSON.stringify(actualTypedRowIds) !== JSON.stringify(expectedMemberIds)
+    || JSON.stringify(actualTypedRowIds) !== JSON.stringify(expectedRegionalIds)
   ) {
     throw new Error(
-      `Regional player verification found ${regionalRowsFound} typed rows with ${snapshot.warnings.length} warnings`,
+      `Regional player verification found ${regionalRowsFound} typed rows with ${snapshot.warnings.length} warnings`
+      + `; unresolved player IDs: ${unresolvedPlayerIds.join(",") || "none"}`
+      + `; missing typed IDs: ${missingTypedRowIds.join(",") || "none"}`
+      + `; unexpected typed IDs: ${unexpectedTypedRowIds.join(",") || "none"}`,
     );
   }
   const crossClaimProjects = snapshot.construction.projects.filter(
@@ -146,7 +166,10 @@ try {
     receivedAt: snapshot.receivedAt,
     memberCount: members.length,
     playerCount: snapshot.players.length,
-    signedInCount: snapshot.players.filter(({ signedIn }) => signedIn).length,
+    signedInCount: reconciledPlayers.filter(({ signedIn }) => signedIn).length,
+    remoteRegionMemberCount: reconciledPlayers.filter(
+      ({ presenceRegionId }) => presenceRegionId !== regionId,
+    ).length,
     travelerTaskCount: snapshot.players.reduce(
       (total, player) => total + (player.tasks?.tasks?.length ?? 0),
       0,

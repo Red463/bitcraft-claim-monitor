@@ -7,6 +7,8 @@ type DialogProps = {
   description?: string;
   modal?: boolean;
   closeOnBackdrop?: boolean;
+  dismissible?: boolean;
+  titleElementId?: string;
   onClose: () => void;
   initialFocusRef?: React.RefObject<HTMLElement | null>;
   children: React.ReactNode;
@@ -62,6 +64,8 @@ export function Dialog({
   description,
   modal = true,
   closeOnBackdrop = true,
+  dismissible = true,
+  titleElementId,
   onClose,
   initialFocusRef,
   children,
@@ -98,7 +102,7 @@ export function Dialog({
     }
     function handleKeyDown(event: KeyboardEvent) {
       if (!isTopDialog()) return;
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && dismissible) {
         event.preventDefault();
         onCloseRef.current();
         return;
@@ -138,7 +142,7 @@ export function Dialog({
       if (modal) unlockBodyScroll();
       triggerRef.current?.focus();
     };
-  }, [autoFocus, initialFocusRef, modal, open]);
+  }, [autoFocus, dismissible, initialFocusRef, modal, open]);
 
   if (!open || typeof document === "undefined") return null;
 
@@ -147,7 +151,7 @@ export function Dialog({
       className={`dialog-backdrop ${modal ? "is-modal" : "is-non-modal"} ${backdropClassName}`.trim()}
       role="presentation"
       onMouseDown={(event) => {
-        if (closeOnBackdrop && event.target === event.currentTarget) onClose();
+        if (closeOnBackdrop && dismissible && event.target === event.currentTarget) onClose();
       }}
     >
       <section
@@ -155,13 +159,13 @@ export function Dialog({
         className={`dialog-surface ${className}`.trim()}
         role="dialog"
         aria-modal={modal ? "true" : undefined}
-        aria-labelledby={titleId}
+        aria-labelledby={titleElementId ?? titleId}
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         data-tour={dataTour}
         style={style}
       >
-        <span className="dialog-sr-only" id={titleId}>{title}</span>
+        {!titleElementId ? <span className="dialog-sr-only" id={titleId}>{title}</span> : null}
         {description ? <span className="dialog-sr-only" id={descriptionId}>{description}</span> : null}
         {children}
       </section>

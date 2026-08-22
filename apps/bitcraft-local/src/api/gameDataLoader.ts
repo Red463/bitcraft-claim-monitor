@@ -4,11 +4,51 @@ import type { AnyRecord } from "../main-app-data";
 import type { PageRefreshCycle } from "../refresh/pageRefresh.mjs";
 import { pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
 import type { ActivePanel, LoadState } from "../types/app";
-import { loadGameData } from "./gameData.ts";
+import { loadGameDataWithPayloadBytes } from "./gameData.ts";
 import { pageDomains } from "./pageDomains.ts";
+import { createPageNavigationCache } from "./pageNavigationCache.ts";
 
 type PageFreshness = { updatedAt: string; cacheState: string | null; stale: boolean };
-const pageNavigationCache = new Map<string, PageFreshness & { data: AnyRecord }>();
+type PageNavigationCache = ReturnType<typeof createPageNavigationCache<AnyRecord>>;
+const pageNavigationCache = createPageNavigationCache<AnyRecord>();
+
+export function gameDataScopeKey(claimId: string, activePanel: ActivePanel): string {
+  return `${claimId}:${activePanel}`;
+}
+
+export function cacheGameDataForNavigation(
+  cache: PageNavigationCache,
+  scopeKey: string,
+  claimId: string,
+  panel: ActivePanel,
+  data: AnyRecord,
+  payloadBytes: number | undefined,
+  freshness: Partial<PageFreshness> = {},
+): AnyRecord {
+  const responseMeta = data.responseMeta as AnyRecord | null | undefined;
+  cache.set(scopeKey, {
+    claimId,
+    panel,
+    data,
+    payloadBytes,
+    generation: responseMeta?.newestGeneration == null ? null : String(responseMeta.newestGeneration),
+    coherence: responseMeta?.coherence == null ? null : String(responseMeta.coherence),
+    ...stateFreshness(freshness),
+  });
+  return data;
+}
+
+export function clearPreviousClaimNavigationCache(
+  cache: PageNavigationCache,
+  previousClaimId: string,
+  nextClaimId: string,
+): void {
+  if (previousClaimId && nextClaimId && previousClaimId !== nextClaimId) cache.clearClaim(previousClaimId);
+}
+
+export function clearPreviousClaimGameData(previousClaimId: string, nextClaimId: string): void {
+  clearPreviousClaimNavigationCache(pageNavigationCache, previousClaimId, nextClaimId);
+}
 
 function freshnessFromPayload(data: AnyRecord, fallbackMs = Date.now()): PageFreshness {
   const serverFreshness = data?.serverFreshness ?? {};
@@ -29,13 +69,68 @@ function freshnessFromPayload(data: AnyRecord, fallbackMs = Date.now()): PageFre
   return { updatedAt, cacheState, stale };
 }
 
-function loadedState(data: AnyRecord): LoadState<AnyRecord> {
+function stateFreshness(freshness?: Partial<PageFreshness>): Partial<PageFreshness> {
+  if (!freshness) return {};
   return {
-    loading: false,
-    error: null,
-    data,
-    ...freshnessFromPayload(data),
+    ...(freshness.updatedAt === undefined ? {} : { updatedAt: freshness.updatedAt }),
+    ...(freshness.cacheState === undefined ? {} : { cacheState: freshness.cacheState }),
+    ...(freshness.stale === undefined ? {} : { stale: freshness.stale }),
   };
+}
+
+function qualityState(data: unknown): Pick<LoadState<unknown>, "domainStatus" | "responseMeta"> {
+  if (!data || typeof data !== "object") return {};
+  const payload = data as AnyRecord;
+  return {
+    ...(payload.domainStatus && typeof payload.domainStatus === "object"
+      ? { domainStatus: payload.domainStatus }
+      : {}),
+    ...(payload.responseMeta && typeof payload.responseMeta === "object"
+      ? { responseMeta: payload.responseMeta }
+      : {}),
+  };
+}
+
+export function beginGameDataScope<T>(
+  previous: LoadState<T>,
+  scopeKey: string,
+  cached?: Partial<PageFreshness> & { data: T },
+): LoadState<T> {
+  if (previous.scopeKey === scopeKey) {
+    return { ...previous, loading: true, error: null };
+  }
+  return {
+    data: cached?.data ?? null,
+    error: null,
+    loading: true,
+    scopeKey,
+    ...stateFreshness(cached),
+    ...qualityState(cached?.data),
+  };
+}
+
+export function completeGameDataScope<T>(
+  previous: LoadState<T>,
+  scopeKey: string,
+  data: T | null,
+  freshness?: Partial<PageFreshness>,
+): LoadState<T> {
+  if (previous.scopeKey !== scopeKey) return previous;
+  return {
+    data,
+    error: null,
+    loading: false,
+    scopeKey,
+    ...stateFreshness(freshness),
+    ...qualityState(data),
+  };
+}
+
+export function completeEmptyGameDataScope<T>(
+  previous: LoadState<T>,
+  scopeKey: string,
+): LoadState<T> {
+  return completeGameDataScope(beginGameDataScope(previous, scopeKey), scopeKey, null);
 }
 
 export function useGameData(
@@ -48,45 +143,42 @@ export function useGameData(
   ) => promise,
 ): LoadState<AnyRecord> {
   const domains = pageDomains(activePanel);
+  const requestedScopeKey = gameDataScopeKey(claimId, activePanel);
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
     error: null,
     loading: true,
+    scopeKey: requestedScopeKey,
   });
 
   React.useEffect(() => {
-    if (!pageRefreshCycle || pageRefreshCycle.page !== activePanel) return;
-    const cacheKey = `${claimId}:${activePanel}`;
-    const cached = pageNavigationCache.get(cacheKey);
+    const cached = pageNavigationCache.get(requestedScopeKey);
     const refreshHeaders = pageRefreshHeaders(pageRefreshCycle, activePanel);
     if (domains.length === 0) {
-      setState({ data: null, loading: false, error: null });
+      setState((previous) => completeEmptyGameDataScope(previous, requestedScopeKey));
       return;
     }
-    if (cached) {
-      setState({
-        loading: true,
-        error: null,
-        data: cached.data,
-        updatedAt: cached.updatedAt,
-        cacheState: cached.cacheState,
-        stale: cached.stale,
-      });
-    }
+    setState((previous) => beginGameDataScope(previous, requestedScopeKey, cached));
+    if (!pageRefreshCycle || pageRefreshCycle.page !== activePanel) return;
 
     let cancelled = false;
     const controller = new AbortController();
     async function load() {
       try {
-        const raw = await loadGameData(
+        const result = await loadGameDataWithPayloadBytes(
           claimId,
           domains,
           fetch,
           { headers: { ...refreshHeaders }, signal: controller.signal },
         );
+        const raw = result.data;
         const freshness = freshnessFromPayload(raw);
-        pageNavigationCache.set(cacheKey, { data: raw, ...freshness });
-        if (!cancelled) React.startTransition(() => setState(loadedState(raw)));
+        cacheGameDataForNavigation(pageNavigationCache, requestedScopeKey, claimId, activePanel, raw, result.payloadBytes, freshness);
+        if (!cancelled) {
+          React.startTransition(() => {
+            setState((previous) => completeGameDataScope(previous, requestedScopeKey, raw, freshness));
+          });
+        }
       } catch (error) {
         if (cancelled || controller.signal.aborted) return;
         setState((previous) => ({
@@ -108,6 +200,7 @@ export function useGameData(
     activePanel,
     claimId,
     pageRefreshCycle?.sequence,
+    requestedScopeKey,
     trackPageRefreshPromise,
   ]);
 

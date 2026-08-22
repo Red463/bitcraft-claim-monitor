@@ -1,3 +1,5 @@
+import { operationalHistoryRetentionSchemaSql } from "./operationalHistoryRetention.mjs";
+
 export const schemaBootstrapSql = `
   PRAGMA journal_mode = WAL;
   CREATE TABLE IF NOT EXISTS settlement_state_current (
@@ -151,6 +153,8 @@ export const schemaBootstrapSql = `
     domain TEXT NOT NULL,
     generation INTEGER NOT NULL DEFAULT 0,
     connected INTEGER NOT NULL DEFAULT 0,
+    runtime_state TEXT NOT NULL DEFAULT 'disconnected'
+      CHECK (runtime_state IN ('connected', 'disconnected', 'blocked_by_schema')),
     apply_duration_ms INTEGER,
     lag_ms INTEGER,
     reconnects INTEGER NOT NULL DEFAULT 0,
@@ -167,6 +171,10 @@ export const schemaBootstrapSql = `
     payload_json TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
+    locked_by TEXT,
+    lease_token TEXT,
+    locked_at TEXT,
+    lease_expires_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -645,6 +653,9 @@ export const schemaBootstrapSql = `
     attempts INTEGER NOT NULL DEFAULT 0,
     next_attempt_at TEXT NOT NULL,
     locked_at TEXT,
+    locked_by TEXT,
+    lease_token TEXT,
+    lease_expires_at TEXT,
     sent_at TEXT,
     skipped_at TEXT,
     failed_at TEXT,
@@ -803,6 +814,7 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_game_catalog_item_list_possibility_outputs_output ON game_catalog_item_list_possibility_outputs (output_key, item_list_id);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_resource_completion_outputs_output ON game_catalog_resource_completion_outputs (output_key, resource_id);
   CREATE INDEX IF NOT EXISTS idx_domain_payload_claim ON domain_payload_current (claim_id, domain);
+  ${operationalHistoryRetentionSchemaSql}
 `;
 
 export function applySchemaBootstrap(db) {

@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 import { setDefaultResultOrder } from "node:dns";
@@ -18,21 +18,27 @@ import { originFromRequest as requestOriginFromRequest, requestLogPolicy, safeRe
 import { appUserCsrfToken, csrfToken, validCsrfHeader } from "./src/server/httpCsrf.mjs";
 import { BODY_LIMITS, readJson, readRawBody } from "./src/server/httpBodies.mjs";
 import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/httpRateLimit.mjs";
+import { createHeavyRouteGate, createRoutePerformanceTelemetry, normalizeRoutePerformancePath, sendHeavyRouteCapacityResponse } from "./src/server/routePerformance.mjs";
 import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
 import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySettings.mjs";
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
 import { projectCraftContributionEnvelope } from "./src/server/craftContributionProjection.mjs";
 import { projectCraftContributionLeaderboard } from "./src/server/craftContributionLeaderboard.mjs";
-import { partitionCraftContributionRows } from "./src/server/craftContributionVisibility.mjs";
+import { partitionCraftContributionRows, readCraftContributionDiagnostics } from "./src/server/craftContributionVisibility.mjs";
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
-import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
+import { createOperationalHistoryRetentionDryRunJob, nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
 import { gameTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
 import { currentMarketListings, marketLeaderboardFromCurrent } from "./src/server/currentMarketViews.mjs";
 import {
   buyOrderBaselineKey,
   readBuyOrderSaleBaselines,
 } from "./src/server/buyOrderSaleBaselines.mjs";
-import { createRelayMarketTransitionWriter } from "./src/server/relayMarketTransitions.mjs";
+import {
+  compactRelayMarketTransitionEvents,
+  createRelayMarketTransitionWriter,
+  deriveRelayMarketTransitions,
+} from "./src/server/relayMarketTransitions.mjs";
+import { createMarketTransitionDispatcher } from "./src/server/marketTransitionDispatcher.mjs";
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
 import { mapResourceRegionCatalog, nameMapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
@@ -69,6 +75,8 @@ import {
   regionalBuyOrdersView,
   regionalMarketCatalogView,
   regionalMarketDealsView,
+  regionalMarketFavoriteQuotesView,
+  regionalMarketFavoriteItemsView,
   regionalMarketOverviewView,
   regionalMarketOrderBookView,
   regionalMarketPriceHistoryView,
@@ -86,9 +94,9 @@ import { resolveDiscordChannelSelection } from "./src/server/discordNotification
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
 import {
   canonicalCutoverDiscordDelivery,
-  claimCanonicalCutoverDelivery,
-  recoverInterruptedCanonicalCutoverDeliveries,
 } from "./src/server/canonicalCutoverAnnouncement.mjs";
+import { completeDiscordOutboxFailure, createDiscordOutboxLeaser } from "./src/server/discordOutboxLease.mjs";
+import { fetchDiscordWithLease } from "./src/server/discordRequestLease.mjs";
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import {
@@ -142,9 +150,10 @@ import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/se
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
+import { APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES, latestOperationalHistoryBackupVerification, normalizeOperationalHistoryRetentionSettings, operationalHistoryRetentionPreview, readOperationalMarketTradeDailyReport, recordOperationalHistoryBackupVerification, runOperationalHistoryRetention, validateOperationalHistoryRetentionEnableGate } from "./src/server/operationalHistoryRetention.mjs";
 import { installRetiredTableAuthorizer } from "./src/server/retiredTableAuthorizer.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
-import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
+import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, publicRoutePerformanceHealth, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import {
   createCurrentStateRepository,
@@ -162,6 +171,7 @@ import {
   enrichPublicCraftsWithCatalog,
   enrichRecruitmentWithCatalog,
   enrichResearchWithCatalog,
+  createGameDataCompositionDependencies,
   gameDataResponse,
   discoverRelayTopology,
   generationDomainsForListener,
@@ -197,6 +207,7 @@ import {
   RelayMapResourceReadiness,
   mapResourceScopeKey,
   sanitizedMapResourceHealth,
+  sanitizeSchemaFingerprintDiagnostic,
   RelayStorageActivityService,
   RelayTerrainRuntime,
   runtimeHealthWithPersistedSnapshot,
@@ -212,7 +223,7 @@ import {
   relayEmpireMembershipObservation,
 } from "./src/server/empireMembership.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
-import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyProductionContributionExactAmountMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
+import { applyAdditiveColumnMigrations, applyDiscordOutboxLeaseMigration, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyOperationalHistoryRetentionMigration, applyProductionContributionExactAmountMigration, applyProviderTransitionLeaseMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
 import { assertCanonicalDiscordGatewayReady, resolveDeploymentRuntime } from "./src/server/deploymentRuntime.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
@@ -280,6 +291,17 @@ const eventLoopHistogram = monitorEventLoopDelay({ resolution: 20 });
 eventLoopHistogram.enable();
 const requestTelemetry = [];
 const mapPerformanceTelemetry = createMapPerformanceTelemetry();
+const routePerformanceTelemetry = createRoutePerformanceTelemetry({ maxEntries: 10_000 });
+const gameDataHeavyRouteGate = createHeavyRouteGate({ maxConcurrent: 8, maxQueued: 16 });
+const marketHeavyRouteGate = createHeavyRouteGate({ maxConcurrent: 8, maxQueued: 16 });
+const measuredRoutePaths = new Set([
+  "/api/local/game-data",
+  "/api/local/market/overview",
+  "/api/local/market/order-book",
+  "/api/local/market/favorite-quotes",
+  "/api/local/history",
+  "/api/local/admin/server-health",
+]);
 const plannerTelemetry = {
   freshCalculations: 0,
   cacheHits: 0,
@@ -304,7 +326,10 @@ function applicationHealthTelemetry() {
     current.count += 1; current.totalMs += entry.durationMs; current.maxMs = Math.max(current.maxMs, entry.durationMs); groups[entry.path] = current;
     return groups;
   }, {})).map((entry) => ({ ...entry, averageMs: Math.round(entry.totalMs / entry.count) })).sort((a, b) => b.maxMs - a.maxMs).slice(0, 20);
-  return { requests: recent.length, status5xx, status5xxRate: recent.length ? status5xx / recent.length : 0, p50Ms: percentile(.5), p95Ms: percentile(.95), p99Ms: percentile(.99), eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0, memory: process.memoryUsage(), uptimeSeconds: process.uptime(), slowEndpoints: slow, planner: { ...plannerTelemetry } };
+  const routePerformance = publicRoutePerformanceHealth(routePerformanceTelemetry.snapshot(), {
+    gates: { gameData: gameDataHeavyRouteGate.snapshot(), market: marketHeavyRouteGate.snapshot() },
+  });
+  return { requests: recent.length, status5xx, status5xxRate: recent.length ? status5xx / recent.length : 0, p50Ms: percentile(.5), p95Ms: percentile(.95), p99Ms: percentile(.99), eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0, memory: process.memoryUsage(), uptimeSeconds: process.uptime(), slowEndpoints: slow, routePerformance, planner: { ...plannerTelemetry } };
 }
 
 async function serverHealthResponse(url, { includeDiagnosticBundle = false } = {}) {
@@ -313,12 +338,8 @@ async function serverHealthResponse(url, { includeDiagnosticBundle = false } = {
   const overall = serverHealthState(files.snapshot, application);
   const logs = filterServerHealthLogs(files.snapshot?.logs ?? [], { service: url.searchParams.get("service") ?? "", severity: url.searchParams.get("severity") ?? "", search: url.searchParams.get("search") ?? "", cursor: url.searchParams.get("cursor") ?? 0, limit: url.searchParams.get("limit") ?? 50 });
   const incidents = db.prepare("SELECT * FROM server_health_incidents ORDER BY last_observed_at DESC LIMIT 100").all();
-  const contributionRows = db.prepare(`
-    SELECT contributor_entity_id, attribution_confidence
-    FROM production_contribution_events
-  `).all();
-  const craftContributionDiagnostics = partitionCraftContributionRows(contributionRows).adminDiagnostics;
-  const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), craftContributionDiagnostics, incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: false }, version: appVersion, buildId: currentAppBuildId() };
+  const craftContributionDiagnostics = readCraftContributionDiagnostics(db);
+  const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), craftContributionDiagnostics, incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: "not-retained", requestIdentifiers: "not-retained" }, version: appVersion, buildId: currentAppBuildId() };
   return buildServerHealthResponse(response, { includeDiagnosticBundle });
 }
 
@@ -372,7 +393,36 @@ async function evaluateServerHealthIncidents() {
   }
 }
 
-const rateLimit = createRateLimiter({ sendJson: send });
+const trustedProxyAddresses = String(process.env.TRUSTED_PROXY_ADDRESSES ?? "")
+  .split(",")
+  .map((address) => address.trim())
+  .filter(Boolean);
+const clientAddress = (req) => requestAddress(req, { trustedProxyAddresses });
+const rateLimit = createRateLimiter({
+  sendJson: send,
+  addressForRequest: clientAddress,
+  onDecision: (decision) => routePerformanceTelemetry.recordRateLimitDecision(decision),
+});
+
+async function runHeavyProjection(gate, measurement, project) {
+  return gate.run(() => {
+    const startedAt = Date.now();
+    try {
+      return project();
+    } finally {
+      measurement?.recordProjection(Date.now() - startedAt);
+    }
+  });
+}
+
+function runMeasuredProjection(measurement, project) {
+  const startedAt = Date.now();
+  try {
+    return project();
+  } finally {
+    measurement?.recordProjection(Date.now() - startedAt);
+  }
+}
 
 // This server is the local app boundary: it serves the built frontend, owns
 // SQLite history/configuration, validates admin sessions,
@@ -402,10 +452,29 @@ const serverPollingEnabled = processRoleConfig.runBackgroundJobs && process.env.
 const discordStartupEnabled = deploymentRuntime.discordGatewayEnabled;
 const scheduledJobsEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SCHEDULED_JOBS !== "false";
 const discordNotificationOutboxProcessingEnabled = process.env.ENABLE_DISCORD_OUTBOX_PROCESSING !== "false";
+const marketTransitionDispatcherEnabled = process.env.ENABLE_MARKET_TRANSITION_DISPATCHER !== "false";
+const marketTransitionDispatcherIntervalMs = Math.max(
+  Number(process.env.MARKET_TRANSITION_DISPATCHER_INTERVAL_MS ?? 5_000),
+  1_000,
+);
 const discordNetworkEnabled = process.env.ENABLE_DISCORD_NETWORK !== "false";
 const discordNotificationOutboxIntervalMs = Math.max(Number(process.env.DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS ?? 5000), 1000);
 const discordNotificationMaxAttempts = Math.max(Number(process.env.DISCORD_NOTIFICATION_MAX_ATTEMPTS ?? 8), 1);
+const configuredDiscordRequestTimeoutMs = Number(process.env.DISCORD_REQUEST_TIMEOUT_MS ?? 10_000);
+const discordRequestTimeoutMs = Number.isFinite(configuredDiscordRequestTimeoutMs)
+  ? Math.max(Math.floor(configuredDiscordRequestTimeoutMs), 1_000)
+  : 10_000;
+const configuredDiscordCompletionWriteMarginMs = Number(process.env.DISCORD_OUTBOX_COMPLETION_MARGIN_MS ?? 5_000);
+const discordOutboxCompletionWriteMarginMs = Number.isFinite(configuredDiscordCompletionWriteMarginMs)
+  ? Math.max(Math.floor(configuredDiscordCompletionWriteMarginMs), 1_000)
+  : 5_000;
+const minimumDiscordNotificationLeaseMs = discordRequestTimeoutMs + discordOutboxCompletionWriteMarginMs + 1;
+const configuredDiscordNotificationLeaseMs = Number(process.env.DISCORD_NOTIFICATION_LEASE_MS ?? 60_000);
+const discordNotificationLeaseMs = Number.isFinite(configuredDiscordNotificationLeaseMs)
+  ? Math.max(Math.floor(configuredDiscordNotificationLeaseMs), minimumDiscordNotificationLeaseMs)
+  : Math.max(60_000, minimumDiscordNotificationLeaseMs);
 let discordNotificationOutboxRunning = false;
+let marketTransitionDispatcherRunning = false;
 
 function assertDiscordNetworkEnabled() {
   if (!discordNetworkEnabled) throw new Error("Discord network access is disabled");
@@ -463,6 +532,11 @@ const smokeAdminReviewMode = resolveSmokeAdminReviewMode({
 });
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
+const configuredOperationalHistoryBackupRoot = String(process.env.BITCRAFT_OPERATIONAL_HISTORY_BACKUP_ROOT ?? "").trim();
+const operationalHistoryApprovedBackupRoot = isProduction
+  && configuredOperationalHistoryBackupRoot
+  ? configuredOperationalHistoryBackupRoot
+  : "";
 const geoipDir = path.join(dataDir, "geoip");
 const geoipDataPath = process.env.GEOIP_DATA_PATH ?? path.join(geoipDir, "geoip.json");
 const maxGeoipJsonFallbackBytes = 25 * 1024 * 1024;
@@ -505,9 +579,12 @@ applyLegacySchemaCleanup(db);
 
 
 applyAdditiveColumnMigrations(db);
+applyDiscordOutboxLeaseMigration(db);
+applyProviderTransitionLeaseMigration(db);
 applyMarketHistoryExactAmountMigration(db);
 applyMarketTradeRegionBackfill(db);
 applyProductionContributionExactAmountMigration(db);
+applyOperationalHistoryRetentionMigration(db);
 applySchemaIndexStatements(db);
 
 const now = new Date().toISOString();
@@ -516,8 +593,13 @@ cleanupRetiredRegionalMarketState();
 installRetiredTableAuthorizer(db);
 
 const statements = createPreparedStatements(db);
+const discordOutboxLeaser = createDiscordOutboxLeaser(db, {
+  workerId: `${processRole}:${os.hostname()}:${process.pid}:${randomBytes(8).toString("hex")}`,
+  leaseMs: discordNotificationLeaseMs,
+  now: () => new Date(),
+});
 if (processRoleConfig.runBackgroundJobs && discordNotificationOutboxProcessingEnabled) {
-  recoverInterruptedCanonicalCutoverDeliveries(db, new Date().toISOString());
+  discordOutboxLeaser.recoverExpiredLeases(new Date().toISOString());
 }
 const gameDataGenerationListeners = new Set();
 let productionRelayLifecycleCoordinator = null;
@@ -675,22 +757,43 @@ const relayMapResourceReadiness = new RelayMapResourceReadiness({
 const mapResourceCursorCodec = createMapResourceCursorCodec(randomBytes(32));
 const relayMarketTransitionWriter = createRelayMarketTransitionWriter(db, {
   addActivity,
+  enqueueDiscordActivity: (
+    claimId,
+    eventType,
+    summary,
+    occurredAt,
+    metadata,
+    activitySourceKey,
+  ) => enqueueDiscordActivityRow(eventType, summary, occurredAt, metadata, {
+    sourceKey: `${eventType}:${claimId}:${activitySourceKey}`,
+    processImmediately: false,
+  }),
   processOutbox: kickDiscordNotificationOutbox,
+});
+const marketTransitionDispatcher = createMarketTransitionDispatcher({
+  repository: currentStateRepository,
+  writer: relayMarketTransitionWriter,
+  workerId: `${processRole}:market-transitions:${os.hostname()}:${process.pid}:${randomBytes(8).toString("hex")}`,
+  leaseMs: Math.max(
+    5_000,
+    Number(process.env.MARKET_TRANSITION_LEASE_MS ?? 60_000),
+  ),
+  now: () => new Date(),
 });
 const relayClaimMarketRuntime = new RelayClaimMarketRuntime({
   manifest: relayBindingManifest,
   currentStateRepository,
   reconnectDelayMs: relayReconnectDelayMs,
-  onSnapshotCommitted: ({ claimId, previousData, currentData, observedAt }) => (
-    relayMarketTransitionWriter.apply({
-      claimId,
+  deriveTransitionEvents: ({ claimId, previousData, currentData, observedAt }) => (
+    compactRelayMarketTransitionEvents(deriveRelayMarketTransitions({
       previous: previousData == null
         ? null
         : enrichMarketSnapshot(claimId, previousData),
       current: enrichMarketSnapshot(claimId, currentData),
       observedAt,
-    })
+    }))
   ),
+  onSnapshotCommitted: ({ claimId }) => kickMarketTransitionDispatcher(claimId),
 });
 const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
   manifest: relayBindingManifest,
@@ -817,44 +920,95 @@ const relayClaimScopeFence = createRelayClaimScopeFence([
 function gameDataProviderHealth() {
   const processHealth = relayProvider.health();
   const health = processHealth.running ? processHealth : currentStateRepository.readHealth() ?? processHealth;
+  const safeSources = Object.fromEntries(Object.entries(health.sources ?? {}).map(([sourceKey, source]) => [
+    sourceKey,
+    {
+      ...source,
+      schemaFingerprintDiagnostic: source.schemaFingerprintDiagnostic
+        ? sanitizeSchemaFingerprintDiagnostic(source.schemaFingerprintDiagnostic)
+        : null,
+    },
+  ]));
+  const catalogSnapshot = currentStateRepository.read(currentClaimId(), "catalogs");
   const globalCatalog = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayGlobalCatalogRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "catalogs"),
-    providerHealth: health,
+    snapshot: catalogSnapshot,
+    subscriptionHealth: currentStateRepository.readSubscriptionHealth(
+      catalogSnapshot?.provenance?.sourceKey ?? "global",
+      "catalogs",
+    ),
   });
+  const playerSnapshot = currentStateRepository.read(currentClaimId(), "players");
   const primaryRegion = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayPrimaryRegionRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "players"),
-    providerHealth: health,
+    snapshot: playerSnapshot,
+    subscriptionHealth: playerSnapshot
+      ? currentStateRepository.readSubscriptionHealth(playerSnapshot.provenance.sourceKey, "players")
+      : null,
   });
+  const publicCraftSnapshot = currentStateRepository.read(currentClaimId(), "public-crafts");
   const publicCrafts = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayPublicCraftRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "public-crafts"),
-    providerHealth: health,
+    snapshot: publicCraftSnapshot,
+    subscriptionHealth: publicCraftSnapshot
+      ? currentStateRepository.readSubscriptionHealth(publicCraftSnapshot.provenance.sourceKey, "public-crafts")
+      : null,
   });
+  const claimMarketSnapshot = currentStateRepository.read(currentClaimId(), "market");
   const claimMarket = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayClaimMarketRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "market"),
-    providerHealth: health,
+    snapshot: claimMarketSnapshot,
+    subscriptionHealth: claimMarketSnapshot
+      ? currentStateRepository.readSubscriptionHealth(claimMarketSnapshot.provenance.sourceKey, "market")
+      : null,
   });
+  const regionalMarketSnapshot = currentStateRepository.read(currentClaimId(), "regional-market");
   const regionalMarket = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayRegionalMarketRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "regional-market"),
-    providerHealth: health,
+    snapshot: regionalMarketSnapshot,
+    subscriptionHealth: regionalMarketSnapshot
+      ? currentStateRepository.readSubscriptionHealth(regionalMarketSnapshot.provenance.sourceKey, "regional-market")
+      : null,
   });
+  const regionClaimsSnapshot = currentStateRepository.read(currentClaimId(), "region-claims");
   const regionClaims = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayRegionClaimsRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "region-claims"),
-    providerHealth: health,
+    snapshot: regionClaimsSnapshot,
+    subscriptionHealth: regionClaimsSnapshot
+      ? currentStateRepository.readSubscriptionHealth(regionClaimsSnapshot.provenance.sourceKey, "region-claims")
+      : null,
   });
+  const empireSnapshot = currentStateRepository.read(currentClaimId(), "empires");
   const empires = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayEmpireRuntime.health(),
-    snapshot: currentStateRepository.read(currentClaimId(), "empires"),
-    providerHealth: health,
+    snapshot: empireSnapshot,
+    subscriptionHealth: empireSnapshot
+      ? currentStateRepository.readSubscriptionHealth(empireSnapshot.provenance.sourceKey, "empires")
+      : null,
   });
+  const rawDiagnostic = globalCatalog.schemaDiagnostic
+    ?? safeSources.global?.schemaFingerprintDiagnostic
+    ?? null;
+  const diagnostic = rawDiagnostic
+    ? sanitizeSchemaFingerprintDiagnostic(rawDiagnostic)
+    : null;
   return {
     ...health,
-    globalCatalog,
+    sources: safeSources,
+    globalCatalog: {
+      ...globalCatalog,
+      schemaDiagnostic: globalCatalog.schemaDiagnostic
+        ? sanitizeSchemaFingerprintDiagnostic(globalCatalog.schemaDiagnostic)
+        : null,
+      schemaHealth: {
+        source: "global",
+        typedState: globalCatalog.subscription?.typedState ?? "disconnected",
+        expectedFingerprint: String(relayBindingManifest.schemas?.global?.fingerprint ?? "") || null,
+        observedFingerprint: diagnostic?.observed ?? health.sources?.global?.schemaFingerprint ?? null,
+        attemptedAt: diagnostic?.attemptedAt ?? null,
+        error: diagnostic?.error ?? null,
+      },
+    },
     primaryRegion,
     publicCrafts,
     claimMarket,
@@ -875,14 +1029,16 @@ function globalRegionSubscriptionHealth() {
     && Date.now() - observedAtMs <= heartbeatFreshForMs;
   const lastError = persisted.lastError
     ?? (heartbeatFresh ? null : "Relay global region subscription heartbeat is stale.");
+  const typedState = persisted.runtimeState ?? "disconnected";
   return {
     ...runtime,
     persisted: true,
     subscription: {
-      connected: heartbeatFresh && persisted.connected && !lastError,
+      connected: typedState === "connected" && heartbeatFresh && persisted.connected && !lastError,
       applied: persisted.generation > 0,
       lastAppliedAt: persisted.updatedAt,
       lastError,
+      typedState,
     },
     lastError,
   };
@@ -903,6 +1059,10 @@ async function persistGlobalRegionSubscriptionHealth() {
         && subscription.applied === true
         && !subscription.lastError
         && !runtime.lastError,
+      runtimeState: subscription.typedState
+        ?? (runtime.running && subscription.connected === true
+          ? "connected"
+          : "disconnected"),
       lastError: subscription.lastError ?? runtime.lastError ?? null,
     }, observedAt);
   }
@@ -933,6 +1093,8 @@ async function persistRelayRuntimeDomainHeartbeats(runtimeHealth, domains) {
       domain,
       generation: snapshot.generation,
       connected,
+      runtimeState: runtimeHealth?.subscription?.typedState
+        ?? (connected ? "connected" : "disconnected"),
       lastError,
     }, observedAt);
   }
@@ -1063,6 +1225,12 @@ async function runPrivacyRetentionJob() {
   });
 }
 
+const runOperationalHistoryRetentionDryRunJob = createOperationalHistoryRetentionDryRunJob({
+  db,
+  readSettings: operationalHistoryRetentionSettings,
+  runRetention: runOperationalHistoryRetention,
+});
+
 // Scheduled jobs are registered here rather than scattered through route
 // handlers so Admin can expose a consistent enable/run/status surface for each
 // background task. Jobs should report progress in metadata when they can run for
@@ -1102,6 +1270,13 @@ const scheduledJobRegistry = {
     schedule: "daily@02:30",
     enabled: true,
     run: runPrivacyRetentionJob,
+  },
+  operational_history_retention_dry_run: {
+    label: "Operational history retention preview",
+    description: "Reports aggregate eligible history rows. Rollup writes and deletion remain disabled.",
+    schedule: "daily@03:00",
+    enabled: true,
+    run: runOperationalHistoryRetentionDryRunJob,
   },
 };
 
@@ -1455,6 +1630,23 @@ function getSettings() {
     branding,
     visitorSecurity: visitorSecuritySettings(),
     discord: publicDiscordSettings(),
+  };
+}
+
+function publicBootstrapConfig() {
+  const settings = getSettings();
+  return {
+    claimId: settings.claimId,
+    syncUrl: settings.syncUrl,
+    excludedMemberIds: settings.excludedMemberIds,
+    theme: settings.theme,
+    refreshSeconds: settings.refreshSeconds,
+    defaultPage: settings.defaultPage,
+    defaultRegion: settings.defaultRegion,
+    additionalActiveRegions: settings.additionalActiveRegions,
+    toastSettings: settings.toastSettings,
+    marketDealWatch: settings.marketDealWatch,
+    branding: settings.branding,
   };
 }
 
@@ -2826,7 +3018,7 @@ function recordVisitorSecurityEvent(req, pathname, statusCode) {
   if (!shouldLogVisitor(pathname)) return;
   const nowIso = new Date().toISOString();
   if (Date.now() - lastVisitorSecurityPruneAt > 60 * 60 * 1000) pruneVisitorSecurityEvents();
-  const ip = normalizeIpAddress(requestAddress(req));
+  const ip = normalizeIpAddress(clientAddress(req));
   const anonymized = anonymizeIpAddress(ip);
   const userAgent = String(req.headers["user-agent"] ?? "").slice(0, 500);
   const userAgentHash = userAgent ? createHash("sha256").update(userAgent).digest("hex") : null;
@@ -3503,11 +3695,18 @@ function analyticsDashboard(days = 30) {
   return { days: selectedDays, retentionDays: analyticsRetentionDays, totals, pages, features, daily };
 }
 
-function addActivity(claimId, eventType, summary, occurredAt, metadata = {}, sourceKey = null, { processDiscordImmediately = true } = {}) {
+function addActivity(claimId, eventType, summary, occurredAt, metadata = {}, sourceKey = null, {
+  processDiscordImmediately = true,
+  enqueueDiscord = true,
+} = {}) {
   const result = sourceKey
     ? statements.insertSourcedActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata), sourceKey)
     : statements.insertActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata));
-  if (result.changes > 0) queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata, { processImmediately: processDiscordImmediately });
+  if (result.changes > 0 && enqueueDiscord) {
+    queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata, {
+      processImmediately: processDiscordImmediately,
+    });
+  }
   return result.changes > 0;
 }
 
@@ -3930,7 +4129,7 @@ function isMarketSaleDiscordEvent(eventType) {
   return eventType === "market_sale" || eventType === "market_sale_confirmed";
 }
 
-async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw(), diagnostics = {}) {
+async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw(), diagnostics = {}, deliveryLease = null) {
   const decision = marketSaleDiscordRecipientDecision(metadata, statements.listUserAccounts.all());
   const recipients = decision.recipients;
   if (!recipients.length) {
@@ -3944,7 +4143,7 @@ async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredA
   };
   const responses = [];
   for (const recipientId of recipients) {
-    const response = await sendDiscordDirectMessage(recipientId, payload, settings);
+    const response = await sendDiscordDirectMessage(recipientId, payload, settings, deliveryLease);
     responses.push({ recipientId, ...discordDeliveryResponse(response) });
   }
   recordDiscordDeliverySafe({
@@ -3958,7 +4157,7 @@ async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredA
   return { ok: true, skipped: false, channelKey: "dm", response: { count: responses.length } };
 }
 
-async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw()) {
+async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw(), deliveryLease = null) {
   const channelId = discordChannelForEvent(eventType, metadata, settings);
   const channelKey = discordChannelKeyForEvent(eventType, metadata, settings);
   const diagnostics = discordDiagnosticContext(eventType, metadata, settings);
@@ -3976,16 +4175,16 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
   try {
     if (eventType === "canonical_cutover") {
       const delivery = canonicalCutoverDiscordDelivery({ summary, revision: metadata.admittedRevision, settings });
-      const response = await sendDiscordMessage(delivery.payload, settings, delivery.channelId);
+      const response = await sendDiscordMessage(delivery.payload, settings, delivery.channelId, deliveryLease);
       return { ok: true, skipped: false, channelId: delivery.channelId, channelKey: delivery.channelKey, response: discordDeliveryResponse(response) };
     }
     if (eventType === "craft_plan_report") {
-      const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(metadata.report), settings, channelId);
+      const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(metadata.report), settings, channelId, deliveryLease);
       recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: discordDeliveryResponse(response) });
       return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
     }
     if (isMarketSaleDiscordEvent(eventType) && settings.marketSalesDelivery === "dm") {
-      return await sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata, settings, diagnostics);
+      return await sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata, settings, diagnostics, deliveryLease);
     }
     const role = craftWatchRole(metadata, settings);
     const response = await sendDiscordMessage({
@@ -3993,7 +4192,7 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
       embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata, settings)],
       components: discordCraftWatchComponents(eventType, metadata),
       allowed_mentions: { roles: role ? [role.roleId] : [], parse: [] },
-    }, settings, channelId);
+    }, settings, channelId, deliveryLease);
     recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: discordDeliveryResponse(response) });
     if (eventType === "supplies") statements.upsertSetting.run("discord_last_low_supplies_at", new Date().toISOString(), new Date().toISOString());
     return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
@@ -4009,7 +4208,7 @@ function discordOutboxSourceKey(eventType, summary, occurredAt, metadata = {}) {
   return `${eventType}:${String(stable || `${summary}:${occurredAt}`).slice(0, 240)}`;
 }
 
-async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata = {}, options = {}) {
+function enqueueDiscordActivityRow(eventType, summary, occurredAt, metadata = {}, options = {}) {
   const now = new Date().toISOString();
   const sourceKey = String(options.sourceKey ?? discordOutboxSourceKey(eventType, summary, occurredAt, metadata));
   statements.enqueueDiscordNotification.run(sourceKey, eventType, summary, occurredAt, JSON.stringify(metadata ?? {}), now, now, now);
@@ -4017,9 +4216,43 @@ async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata =
   return { ok: true, queued: true, sourceKey };
 }
 
+function operationalHistoryRetentionSettings() {
+  return normalizeOperationalHistoryRetentionSettings({
+    enabled: statements.getSetting.get("operational_history_retention_enabled")?.value === "true",
+    days: Number(statements.getSetting.get("operational_history_retention_days")?.value ?? 365),
+    tables: safeJson(statements.getSetting.get("operational_history_retention_tables_json")?.value, []),
+  }, { approvedTables: new Set(APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES) });
+}
+
+async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata = {}, options = {}) {
+  return enqueueDiscordActivityRow(eventType, summary, occurredAt, metadata, options);
+}
+
 function kickDiscordNotificationOutbox() {
   if (!discordNotificationOutboxProcessingEnabled) return;
   void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
+}
+
+function kickMarketTransitionDispatcher(claimId = currentClaimId()) {
+  if (!marketTransitionDispatcherEnabled) return;
+  void processMarketTransitionOutbox({ claimId }).catch((error) => console.warn(
+    `Market transition dispatcher failed: ${errorMessage(error)}`,
+  ));
+}
+
+async function processMarketTransitionOutbox({ claimId = currentClaimId(), limit = 25 } = {}) {
+  if (!marketTransitionDispatcherEnabled) {
+    return { skipped: true, reason: "Market transition dispatcher is held" };
+  }
+  if (marketTransitionDispatcherRunning) {
+    return { skipped: true, reason: "Market transition dispatcher already running" };
+  }
+  marketTransitionDispatcherRunning = true;
+  try {
+    return await marketTransitionDispatcher.drain({ claimId, limit: Math.min(25, limit) });
+  } finally {
+    marketTransitionDispatcherRunning = false;
+  }
 }
 
 function discordNotificationRetryAt(attempts) {
@@ -4036,50 +4269,81 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
   let sent = 0;
   let skipped = 0;
   let failed = 0;
+  let checked = 0;
   try {
-    const rows = statements.pendingDiscordNotifications.all(discordNotificationMaxAttempts, new Date().toISOString(), limit);
-    for (const row of rows) {
+    discordOutboxLeaser.recoverExpiredLeases(new Date().toISOString());
+    for (let index = 0; index < limit; index += 1) {
+      const row = discordOutboxLeaser.claimNext({ maxAttempts: discordNotificationMaxAttempts });
+      if (!row) break;
+      checked += 1;
       const metadata = safeJson(row.metadata_json, {});
       const canonicalCutoverAttempt = row.event_type === "canonical_cutover";
-      if (canonicalCutoverAttempt && !claimCanonicalCutoverDelivery(db, row.id, new Date().toISOString())) continue;
       try {
-        const result = await sendDiscordActivity(row.event_type, row.summary, row.occurred_at, metadata);
+        const deliveryLease = {
+          beforeRequest() {
+            return discordOutboxLeaser.renewLease({
+              id: row.id,
+              leaseToken: row.leaseToken,
+              leaseMs: discordNotificationLeaseMs,
+            });
+          },
+        };
+        const result = await sendDiscordActivity(
+          row.event_type,
+          row.summary,
+          row.occurred_at,
+          metadata,
+          getDiscordSettingsRaw(),
+          deliveryLease,
+        );
         const finishedAt = new Date().toISOString();
         if (result?.skipped) {
-          statements.markDiscordNotificationSkipped.run(finishedAt, result.reason ?? "Notification skipped by sender", finishedAt, row.id);
-          if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+          const completed = discordOutboxLeaser.markSkipped({
+            id: row.id,
+            leaseToken: row.leaseToken,
+            reason: result.reason ?? "Notification skipped by sender",
+            finishedAt,
+          });
+          if (completed && row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
             statements.updateDiscordCraftPlanReportOccurrence.run("skipped", null, redactServerHealthText(result.reason ?? "Notification skipped").slice(0, 500), finishedAt, metadata.ruleId, metadata.occurrenceKey);
           }
-          skipped += 1;
+          if (completed) skipped += 1;
         } else {
-          statements.markDiscordNotificationSent.run(finishedAt, JSON.stringify(result ?? {}), finishedAt, row.id);
-          if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+          const completed = discordOutboxLeaser.markSent({
+            id: row.id,
+            leaseToken: row.leaseToken,
+            response: result ?? {},
+            finishedAt,
+          });
+          if (completed && row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
             statements.updateDiscordCraftPlanReportOccurrence.run("sent", String(result?.response?.id ?? ""), null, finishedAt, metadata.ruleId, metadata.occurrenceKey);
           }
-          if (row.event_type === "app_update" && (metadata.announcementKey || metadata.version || metadata.releaseKey)) statements.upsertSetting.run("discord_last_announced_version", String(metadata.announcementKey || metadata.version || metadata.releaseKey), finishedAt);
-          sent += 1;
+          if (completed && row.event_type === "app_update" && (metadata.announcementKey || metadata.version || metadata.releaseKey)) statements.upsertSetting.run("discord_last_announced_version", String(metadata.announcementKey || metadata.version || metadata.releaseKey), finishedAt);
+          if (completed) sent += 1;
         }
       } catch (error) {
         const failedAt = new Date().toISOString();
         const message = error instanceof Error ? error.message : String(error);
-        if (canonicalCutoverAttempt) {
-          statements.markDiscordNotificationSkipped.run(
-            failedAt,
-            "Canonical announcement delivery outcome is unknown; automatic retry is suppressed",
-            failedAt,
-            row.id,
-          );
-        } else {
-          statements.markDiscordNotificationFailed.run(discordNotificationMaxAttempts, discordNotificationRetryAt(toNumber(row.attempts)), failedAt, message, failedAt, row.id);
+        const completed = completeDiscordOutboxFailure({
+          leaser: discordOutboxLeaser,
+          row,
+          error: message,
+          retryAt: discordNotificationRetryAt(toNumber(row.attempts) - 1),
+          finishedAt: failedAt,
+          canonicalCutoverAttempt,
+          afterCompletion() {
+            if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+              statements.updateDiscordCraftPlanReportOccurrence.run("failed", null, redactServerHealthText(message).slice(0, 500), failedAt, metadata.ruleId, metadata.occurrenceKey);
+            }
+          },
+        });
+        if (completed) {
+          if (canonicalCutoverAttempt) skipped += 1;
+          else failed += 1;
         }
-        if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
-          statements.updateDiscordCraftPlanReportOccurrence.run("failed", null, redactServerHealthText(message).slice(0, 500), failedAt, metadata.ruleId, metadata.occurrenceKey);
-        }
-        if (canonicalCutoverAttempt) skipped += 1;
-        else failed += 1;
       }
     }
-    return { checked: rows.length, sent, skipped, failed };
+    return { checked, sent, skipped, failed };
   } finally {
     discordNotificationOutboxRunning = false;
   }
@@ -4095,32 +4359,33 @@ function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata 
   }).catch((error) => console.warn(`Discord notification enqueue failed: ${error instanceof Error ? error.message : String(error)}`));
 }
 
-async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId) {
+async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId, deliveryLease = null) {
   if (!settings.enabled || !settings.botToken || !channelId) throw new Error("Discord integration is not fully configured");
   if (configuredDiscordDeliveryMode === "record") return recordedDiscordResponse(channelId, payload);
   assertDiscordNetworkEnabled();
-  const response = await fetch(`${discordApiOrigin}/channels/${encodeURIComponent(channelId)}/messages`, {
+  const response = await fetchDiscordWithLease(`${discordApiOrigin}/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
+    signal: AbortSignal.timeout(discordRequestTimeoutMs),
     headers: {
       authorization: `Bot ${settings.botToken}`,
       "content-type": "application/json",
     },
     body: JSON.stringify(payload),
-  });
+  }, { deliveryLease });
   if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
   return response.json();
 }
 
-async function sendDiscordDirectMessage(userId, payload, settings = getDiscordSettingsRaw()) {
+async function sendDiscordDirectMessage(userId, payload, settings = getDiscordSettingsRaw(), deliveryLease = null) {
   if (!settings.enabled || !settings.botToken || !/^\d+$/.test(String(userId))) throw new Error("Discord integration is not fully configured");
   if (configuredDiscordDeliveryMode === "record") return recordedDiscordResponse(`dm:${userId}`, payload);
   const channel = await discordApiRequest("/users/@me/channels", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ recipient_id: String(userId) }),
-  }, settings);
+  }, settings, deliveryLease);
   if (!channel?.id) throw new Error("Discord did not return a DM channel.");
-  return sendDiscordMessage(payload, settings, channel.id);
+  return sendDiscordMessage(payload, settings, channel.id, deliveryLease);
 }
 
 async function editDiscordMessage(channelId, messageId, payload, settings = getDiscordSettingsRaw()) {
@@ -4201,16 +4466,17 @@ async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
   return response;
 }
 
-async function discordApiRequest(pathname, options = {}, settings = getDiscordSettingsRaw()) {
+async function discordApiRequest(pathname, options = {}, settings = getDiscordSettingsRaw(), deliveryLease = null) {
   assertDiscordNetworkEnabled();
   if (!settings.botToken) throw new Error("Discord bot token is not configured");
-  const response = await fetch(`${discordApiOrigin}${pathname}`, {
+  const response = await fetchDiscordWithLease(`${discordApiOrigin}${pathname}`, {
     ...options,
+    signal: options.signal ?? AbortSignal.timeout(discordRequestTimeoutMs),
     headers: {
       authorization: `Bot ${settings.botToken}`,
       ...(options.headers ?? {}),
     },
-  });
+  }, { deliveryLease });
   if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
   if (response.status === 204) return null;
   const text = await response.text();
@@ -5912,14 +6178,22 @@ function marketHistory(claimId, limit, owner = "") {
     ORDER BY unitsSold DESC, totalValue DESC
     LIMIT 20
   `).all(...tradeArgs);
-  const daily = db.prepare(`
-    SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue
-    FROM market_trades
-    WHERE claim_id = ?${tradeOwnerClause}
-    GROUP BY day
-    ORDER BY day DESC
-    LIMIT ?
-  `).all(...tradeArgs, MARKET_DAILY_HISTORY_LIMIT).reverse();
+  const rollupDaily = selectedOwner ? null : readOperationalMarketTradeDailyReport(db, {
+    claimId,
+    startDay: marketRangeStart.slice(0, 10),
+    endDay: new Date(new Date(marketRangeEnd).getTime() - 1).toISOString().slice(0, 10),
+    onDiagnostic: (diagnostic) => console.warn(
+      `Operational market history diagnostic: ${diagnostic.code} claim=${diagnostic.claimId} day=${diagnostic.utcDay ?? "n/a"} rows=${diagnostic.rowCount ?? "n/a"}`,
+    ),
+  });
+  const daily = rollupDaily?.historyWarning ? [] : rollupDaily?.daily ?? db.prepare(`
+      SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue
+      FROM market_trades
+      WHERE claim_id = ?${tradeOwnerClause}
+      GROUP BY day
+      ORDER BY day DESC
+      LIMIT ?
+    `).all(...tradeArgs, MARKET_DAILY_HISTORY_LIMIT).reverse();
   const lifecycleTotals = db.prepare(`
     SELECT
       SUM(CASE WHEN event_type = 'new_listing' THEN 1 ELSE 0 END) AS newListings,
@@ -5940,7 +6214,17 @@ function marketHistory(claimId, limit, owner = "") {
     ORDER BY occurred_at DESC
     LIMIT 30
   `).all(...args);
-  return { liveListings, events, sales, topItems, daily, totals, pending };
+  return {
+    liveListings,
+    events,
+    sales,
+    topItems,
+    daily,
+    totals,
+    pending,
+    observedSince: rollupDaily?.historyWarning ? null : rollupDaily?.observedSince ?? daily[0]?.day ?? null,
+    historyWarning: rollupDaily?.historyWarning ?? null,
+  };
 }
 
 function currentBuyOrderBaselineKeys(snapshot, regionId, allowedRegionIds) {
@@ -6167,6 +6451,36 @@ function regionalMarketResponseStatus(current, regionId, allowedRegionIds) {
       staleAfterMs: relayGlobalCatalogStaleMs,
     },
   );
+}
+
+function favoriteQuoteRequestBody(value) {
+  const body = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const regionId = String(body.regionId ?? "all").trim().toLowerCase() || "all";
+  if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+    throw Object.assign(new Error("Region id must be numeric or all"), { statusCode: 400 });
+  }
+  if (!Array.isArray(body.items)) {
+    throw Object.assign(new Error("Items must be an array"), { statusCode: 400 });
+  }
+  if (body.items.length > 20) {
+    throw Object.assign(new Error("At most 20 favorite items may be requested"), { statusCode: 400 });
+  }
+  const seen = new Set();
+  const items = body.items.map((rawItem) => {
+    const item = rawItem && typeof rawItem === "object" && !Array.isArray(rawItem) ? rawItem : {};
+    const itemType = String(item.itemType ?? "").trim().toLowerCase();
+    const itemId = String(item.itemId ?? "").trim();
+    if ((itemType !== "item" && itemType !== "cargo") || !/^\d+$/.test(itemId)) {
+      throw Object.assign(new Error("Each favorite must have itemType item or cargo and a decimal itemId"), { statusCode: 400 });
+    }
+    const key = `${itemType}:${itemId}`;
+    if (seen.has(key)) {
+      throw Object.assign(new Error("Favorite typed identities must be unique"), { statusCode: 400 });
+    }
+    seen.add(key);
+    return { itemType, itemId };
+  });
+  return { regionId, items };
 }
 
 function regionalMarketObservedTrades(claimId, regionId, allowedRegionIds, options = {}) {
@@ -6398,12 +6712,14 @@ function activityLeaderboard(claimId) {
 }
 
 function marketLeaderboard(claimId) {
+  const historyStart = new Date(Date.now() - 365 * 86_400_000).toISOString();
+  const historyEnd = new Date().toISOString();
   const trades = db.prepare(`
     SELECT seller_username, seller_entity_id, quantity, total_price, occurred_at
     FROM market_trades
-    WHERE claim_id = ?
+    WHERE claim_id = ? AND occurred_at >= ? AND occurred_at < ?
     ORDER BY occurred_at DESC, trade_id DESC
-  `).all(claimId);
+  `).all(claimId, historyStart, historyEnd);
   const currentMarket = currentMarketProjection(claimId);
   return marketLeaderboardFromCurrent({
     snapshot: currentMarket.data,
@@ -6518,17 +6834,25 @@ function databaseStatus() {
   ]));
   const discordLastDelivery = safeJson(statements.getSetting.get("discord_last_delivery_json")?.value, { status: "none" });
   const discordOutboxCounts = Object.fromEntries(statements.discordNotificationOutboxCounts.all().map((row) => [row.status, toNumber(row.count)]));
+  const discordDuplicateRisk = statements.discordNotificationOutboxDuplicateRisk.get(new Date().toISOString());
   const discordDeliveryLog = statements.recentDiscordDeliveries.all(80).map((row) => ({
     ...row,
     metadata: safeJson(row.metadata_json, {}),
     response: row.response_json ? safeJson(row.response_json, {}) : null,
   }));
+  const retentionSettings = operationalHistoryRetentionSettings();
+  const operationalHistory = operationalHistoryRetentionPreview(db, {
+    ...retentionSettings,
+    databasePath,
+  });
   return {
     version: appVersion,
     environment: isProduction ? "production" : "development",
     storageLabel: isProduction ? "Production persistent storage" : "Local development storage",
     databaseSize: existsSync(databasePath) ? statSync(databasePath).size : 0,
+    walSize: existsSync(`${databasePath}-wal`) ? statSync(`${databasePath}-wal`).size : 0,
     counts,
+    operationalHistory,
     polling: collectorStatusPayload(),
     gameDataProvider: gameDataProviderHealth(),
     discord: {
@@ -6536,6 +6860,18 @@ function databaseStatus() {
       lastDelivery: discordLastDelivery,
       deliveryLog: discordDeliveryLog,
       outbox: discordOutboxCounts,
+      deliveryGuarantee: {
+        semantics: "at-least-once",
+        unknownAcknowledgementWindow: true,
+        canonicalUnknownOutcomeSuppression: true,
+        requestTimeoutMs: discordRequestTimeoutMs,
+        completionWriteMarginMs: discordOutboxCompletionWriteMarginMs,
+        leaseMs: discordNotificationLeaseMs,
+        potentialDuplicateRows: toNumber(discordDuplicateRisk?.potential_duplicate_rows),
+        activeLeases: toNumber(discordDuplicateRisk?.active_leases),
+        expiredLeaseRows: toNumber(discordDuplicateRisk?.expired_lease_rows),
+        unknownOutcomeRows: toNumber(discordDuplicateRisk?.unknown_outcome_rows),
+      },
       gateway: { ...discordGatewayStatus },
     },
     settings: getSettings(),
@@ -6668,12 +7004,65 @@ function backupNames() {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : [];
 }
 
+function sha256File(filePath) {
+  const hash = createHash("sha256");
+  const descriptor = openSync(filePath, "r");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    for (;;) {
+      const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+      if (!bytesRead) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+  return hash.digest("hex");
+}
+
 function createBackup() {
   const name = `bitcraft-local-${new Date().toISOString().replaceAll(":", "-").replace(/\.\d{3}Z$/, "Z")}.sqlite`;
   const filePath = path.join(backupDir, name);
   db.exec(`VACUUM INTO '${filePath.replaceAll("'", "''")}'`);
   const info = statSync(filePath);
-  return { name, size: info.size, createdAt: info.mtime.toISOString() };
+  const createdAt = info.mtime.toISOString();
+  const databaseSha256 = sha256File(filePath);
+  const manifest = JSON.stringify({ name, size: info.size, createdAt, databaseSha256 });
+  const manifestSha256 = createHash("sha256").update(manifest).digest("hex");
+  const manifestPath = `${filePath}.manifest.json`;
+  writeFileSync(manifestPath, manifest, { encoding: "utf8", flag: "wx" });
+  const restoredPath = `${filePath}.restore-verification-${process.pid}-${randomBytes(8).toString("hex")}`;
+  let integrityCheck = "unavailable";
+  let restoredDatabaseSha256 = "";
+  try {
+    copyFileSync(filePath, restoredPath);
+    restoredDatabaseSha256 = sha256File(restoredPath);
+    const restored = new DatabaseSync(restoredPath, { readOnly: true });
+    try {
+      integrityCheck = String(restored.prepare("PRAGMA integrity_check").get()?.integrity_check ?? "unavailable");
+    } finally {
+      restored.close();
+    }
+  } finally {
+    if (existsSync(restoredPath)) unlinkSync(restoredPath);
+  }
+  if (integrityCheck !== "ok") throw new Error(`Backup temporary restore integrity_check failed: ${integrityCheck}`);
+  const verifiedAt = new Date().toISOString();
+  const verification = recordOperationalHistoryBackupVerification(db, {
+    backupName: name,
+    backupCreatedAt: createdAt,
+    verifiedAt,
+    manifestSha256,
+    databaseSha256,
+    backupPath: filePath,
+    manifestPath,
+    restoredDatabaseSha256,
+    restoredManifestSha256: manifestSha256,
+    restoredTemporaryDatabase: true,
+    integrityCheck,
+    backupBytes: info.size,
+  });
+  return { name, size: info.size, createdAt, verification };
 }
 
 
@@ -7417,7 +7806,7 @@ async function serveBuiltFrontend(url, method, res) {
 function manualRefreshAccess(req, res) {
   const rawHeader = req.headers[MANUAL_REFRESH_HEADER];
   const refreshId = String(Array.isArray(rawHeader) ? rawHeader[0] ?? "" : rawHeader ?? "").trim();
-  const decision = manualRefreshGuard.authorize(requestAddress(req), refreshId);
+  const decision = manualRefreshGuard.authorize(clientAddress(req), refreshId);
   if (decision.allowed) return { forceRefresh: decision.forceRefresh, refreshId };
   const status = decision.reason === "invalid-id" ? 400 : 429;
   const headers = decision.retryAfterSeconds ? { "retry-after": String(decision.retryAfterSeconds) } : {};
@@ -7437,6 +7826,9 @@ const server = createServer(async (req, res) => {
     // before authenticated admin routes, while static frontend fallback stays at
     // the end so API typos do not accidentally return index.html.
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    const routeMeasurement = measuredRoutePaths.has(url.pathname)
+      ? routePerformanceTelemetry.observe(req, res, { path: url.pathname })
+      : null;
     const requestLogTarget = mapRequestLogTarget(url);
     const requestStartedAt = Date.now();
     const slowRequestLogPolicy = requestLogPolicy(url.pathname, "slow");
@@ -7446,7 +7838,7 @@ const server = createServer(async (req, res) => {
     res.once("finish", () => {
       requestFinished = true;
       const durationMs = Date.now() - requestStartedAt;
-      requestTelemetry.push({ at: Date.now(), path: url.pathname, status: res.statusCode, durationMs });
+      requestTelemetry.push({ at: Date.now(), path: normalizeRoutePerformancePath(url.pathname), status: res.statusCode, durationMs });
       if (requestTelemetry.length > 10_000) requestTelemetry.splice(0, requestTelemetry.length - 10_000);
       if (url.pathname.startsWith("/api/local/map/") && shouldRecordMapRequestLatency(url.pathname)) {
         mapPerformanceTelemetry.recordMapRequest({ durationMs, statusCode: res.statusCode });
@@ -7540,6 +7932,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/local/game-data") {
+      if (!rateLimit(req, res, "gameDataRead", RATE_LIMITS.gameDataRead)) return;
       const claimId = String(url.searchParams.get("claimId") ?? "").trim();
       const domains = parseDomainKeys(url.searchParams.get("domains"));
       if (!claimId) return send(res, 400, { error: "claimId is required." });
@@ -7575,7 +7968,12 @@ const server = createServer(async (req, res) => {
           // The route below deliberately serves last-good envelopes when present.
         }
       }
-      const result = gameDataResponse({
+      const compositionDependencies = createGameDataCompositionDependencies({
+        claimId,
+        repository: currentStateRepository,
+        catalogRepository: providerCatalogRepository,
+      });
+      const result = await runHeavyProjection(gameDataHeavyRouteGate, routeMeasurement, () => gameDataResponse({
         configuredClaimId: currentClaimId(),
         claimId,
         domains,
@@ -7599,16 +7997,24 @@ const server = createServer(async (req, res) => {
                 confidence: "partial",
                 warnings: bankWarnings,
               } : {}),
+              dependencies: compositionDependencies.forDomain(domain, {
+                inventoryBankSnapshot: bankSnapshot,
+              }),
             };
           }
           if (domain === "crafts") {
             const publicCraftSnapshot = currentStateRepository.read(claimId, "public-crafts");
-            return enrichCraftsDomain(
-              data,
-              publicCraftSnapshot,
-              (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
-              (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
-            );
+            return {
+              ...enrichCraftsDomain(
+                data,
+                publicCraftSnapshot,
+                (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+                (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
+              ),
+              dependencies: compositionDependencies.forDomain(domain, {
+                publicCraftSnapshot,
+              }),
+            };
           }
           if (domain === "contributions") {
             const projected = currentCraftContributions(claimId);
@@ -7625,6 +8031,7 @@ const server = createServer(async (req, res) => {
             return {
               ...projected,
               ...(projected.warnings.length ? { confidence: "partial" } : {}),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           if (domain === "market") {
@@ -7635,6 +8042,7 @@ const server = createServer(async (req, res) => {
             return {
               ...projected,
               ...(projected.warnings.length ? { confidence: "partial" } : {}),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           if (domain === "equipment") {
@@ -7644,6 +8052,7 @@ const server = createServer(async (req, res) => {
                 (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
                 (kind, id) => providerCatalogRepository.getDescription(kind, id),
               ),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           if (domain === "construction") {
@@ -7655,6 +8064,7 @@ const server = createServer(async (req, res) => {
             return {
               ...projected,
               ...(projected.warnings.length ? { confidence: "partial" } : {}),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           if (domain === "research") {
@@ -7665,6 +8075,7 @@ const server = createServer(async (req, res) => {
             return {
               ...projected,
               ...(projected.warnings.length ? { confidence: "partial" } : {}),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           if (domain === "recruitment") {
@@ -7675,11 +8086,12 @@ const server = createServer(async (req, res) => {
             return {
               ...projected,
               ...(projected.warnings.length ? { confidence: "partial" } : {}),
+              dependencies: compositionDependencies.forDomain(domain),
             };
           }
           return { data };
         },
-      });
+      }));
       return send(res, result.status, result.body);
     }
     if (req.method === "GET" && url.pathname === "/api/local/player-data") {
@@ -7778,6 +8190,15 @@ const server = createServer(async (req, res) => {
       });
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
+    if (req.method === "GET" && url.pathname === "/api/local/bootstrap") {
+      const auth = authStatus(req);
+      return send(res, 200, {
+        config: publicBootstrapConfig(),
+        auth: { ...auth, authenticated: Boolean(auth.user), featurebaseJwt: auth.featurebaseJwt ?? null },
+        legal: { ...legalPolicy, ...legalDigests, acceptanceRequired: auth.legal.requiresAcceptance },
+        build: { version: appVersion, buildSha: currentAppBuildId() },
+      }, { "cache-control": "no-store" });
+    }
     if (req.method === "GET" && url.pathname === "/api/local/popups") return send(res, 200, { popups: publicPopups(appPopupConfig()) });
     if (req.method === "GET" && url.pathname === "/api/local/catalog/probabilities.xlsx") {
       if (!rateLimit(req, res, "probability-workbook", RATE_LIMITS.expensiveLocal)) return;
@@ -8554,11 +8975,11 @@ const server = createServer(async (req, res) => {
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator sign-in rejected" });
       const body = await readJson(req, BODY_LIMITS.auth);
       const username = String(body.username ?? "admin").trim();
-      const attemptKey = loginAttemptKey(requestAddress(req), username);
+      const attemptKey = loginAttemptKey(clientAddress(req), username);
       if (adminLoginAttempts.blocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
       const user = statements.adminByUsername.get(username);
       const successful = Boolean(user && await verifyPassword(String(body.password ?? ""), user.password_hash));
-      statements.insertLoginEvent.run(username, successful ? 1 : 0, new Date().toISOString(), requestAddress(req));
+      statements.insertLoginEvent.run(username, successful ? 1 : 0, new Date().toISOString(), clientAddress(req));
       if (!successful) {
         adminLoginAttempts.recordFailure(attemptKey);
         return send(res, 401, { error: "Invalid username or password" });
@@ -9343,6 +9764,49 @@ const server = createServer(async (req, res) => {
         return send(res, 200, { removed });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/tables") return send(res, 200, { tables: tableInfo() });
+      if (req.method === "GET" && url.pathname === "/api/local/admin/operational-history-retention") {
+        return send(res, 200, operationalHistoryRetentionPreview(db, {
+          ...operationalHistoryRetentionSettings(),
+          databasePath,
+        }));
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/operational-history-retention/dry-run") {
+        const result = runOperationalHistoryRetentionDryRunJob();
+        audit(user, "operational_history_retention.dry_run", { eligibleRows: result.eligibleRows, deletedRows: result.deletedRows });
+        return send(res, 200, {
+          result,
+          preview: operationalHistoryRetentionPreview(db, { ...operationalHistoryRetentionSettings(), databasePath }),
+        });
+      }
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/operational-history-retention") {
+        const body = await readJson(req, BODY_LIMITS.settings);
+        try {
+          const next = normalizeOperationalHistoryRetentionSettings({
+            enabled: body.enabled === true,
+            days: body.days,
+            tables: body.tables,
+          }, { approvedTables: new Set(APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES) });
+          if (next.enabled) {
+            validateOperationalHistoryRetentionEnableGate({
+              now: new Date(),
+              approvedTables: new Set(APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES),
+              tables: next.tables,
+              explicitConfirmation: String(body.confirmation ?? ""),
+              backupVerification: latestOperationalHistoryBackupVerification(db),
+              approvedBackupRoot: operationalHistoryApprovedBackupRoot,
+              disallowedBackupRoots: [backupDir],
+            });
+          }
+          const updatedAt = new Date().toISOString();
+          statements.upsertSetting.run("operational_history_retention_enabled", next.enabled ? "true" : "false", updatedAt);
+          statements.upsertSetting.run("operational_history_retention_days", String(next.days), updatedAt);
+          statements.upsertSetting.run("operational_history_retention_tables_json", JSON.stringify(next.tables), updatedAt);
+          audit(user, "operational_history_retention.settings", { enabled: next.enabled, days: next.days, tables: next.tables });
+          return send(res, 200, operationalHistoryRetentionPreview(db, { ...next, databasePath }));
+        } catch (error) {
+          return send(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
+      }
       if (req.method === "GET" && url.pathname === "/api/local/admin/table") {
         const table = url.searchParams.get("name") ?? "";
         return send(res, 200, tableQuery(table, Object.fromEntries(url.searchParams.entries())));
@@ -9574,7 +10038,7 @@ const server = createServer(async (req, res) => {
       if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
         return send(res, 403, { error: "Region is outside the configured active-region scope" });
       }
-      return send(res, 200, {
+      const body = await runHeavyProjection(marketHeavyRouteGate, routeMeasurement, () => ({
         ...regionalMarketOverviewView(current?.data, {
           regionId,
           allowedRegionIds,
@@ -9583,7 +10047,8 @@ const server = createServer(async (req, res) => {
         }),
         ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
         generatedAt: current?.provenance?.receivedAt ?? null,
-      });
+      }));
+      return send(res, 200, body);
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/deals") {
       if (!rateLimit(req, res, "global-market-deals", RATE_LIMITS.expensiveLocal)) return;
@@ -9723,7 +10188,30 @@ const server = createServer(async (req, res) => {
         generatedAt: current?.provenance?.receivedAt ?? null,
       });
     }
+    if (req.method === "POST" && url.pathname === "/api/local/market/favorite-quotes") {
+      if (!rateLimit(req, res, "favoriteQuotesRead", RATE_LIMITS.favoriteQuotesRead)) return;
+      const { regionId, items } = favoriteQuoteRequestBody(await readJson(req, 16 * 1024));
+      const configuredClaimId = currentClaimId();
+      const { current, allowedRegionIds } = regionalMarketReadScope(configuredClaimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const body = await runHeavyProjection(marketHeavyRouteGate, routeMeasurement, () => ({
+        generation: current?.generation ?? 0,
+        ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
+        quotes: regionalMarketFavoriteQuotesView(current?.data, items, {
+          generation: current?.generation ?? 0,
+          regionId,
+          allowedRegionIds,
+        }),
+        items: regionalMarketFavoriteItemsView(items, {
+          getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+        }),
+      }));
+      return send(res, 200, body);
+    }
     if (req.method === "GET" && url.pathname === "/api/local/market/order-book") {
+      if (!rateLimit(req, res, "orderBookRead", RATE_LIMITS.orderBookRead)) return;
       const configuredClaimId = currentClaimId();
       const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
       if (claimId !== configuredClaimId) {
@@ -9746,7 +10234,7 @@ const server = createServer(async (req, res) => {
         return send(res, 403, { error: "Region is outside the configured active-region scope" });
       }
       const catalogKey = `${requestedItemType === "cargo" ? "cargo" : "items"}:${itemId}`;
-      return send(res, 200, {
+      const body = await runHeavyProjection(marketHeavyRouteGate, routeMeasurement, () => ({
         ...regionalMarketOrderBookView(
           current?.data,
           providerCatalogRepository.getEntity(catalogKey),
@@ -9759,7 +10247,8 @@ const server = createServer(async (req, res) => {
         ),
         ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
         generatedAt: current?.provenance?.receivedAt ?? null,
-      });
+      }));
+      return send(res, 200, body);
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/price-history") {
       const configuredClaimId = currentClaimId();
@@ -9815,9 +10304,10 @@ const server = createServer(async (req, res) => {
       const include = String(url.searchParams.get("include") ?? "").split(",").map((part) => part.trim()).filter(Boolean);
       const allowed = new Set(["market", "activity", "dashboard"]);
       const sections = include.length ? new Set(include.filter((part) => allowed.has(part))) : null;
-      return send(res, 200, localHistory(url.searchParams.get("claimId") ?? "", sections, {
+      const body = runMeasuredProjection(routeMeasurement, () => localHistory(url.searchParams.get("claimId") ?? "", sections, {
         activityLimit: Number(url.searchParams.get("activityLimit") ?? 2000),
       }));
+      return send(res, 200, body);
     }
     if (req.method === "POST" && url.pathname === "/api/local/market/event/resolve") {
       if (isProduction) {
@@ -9840,6 +10330,7 @@ const server = createServer(async (req, res) => {
     if (!url.pathname.startsWith("/api/") && await serveBuiltFrontend(url, req.method, res)) return;
     send(res, 404, { error: "Not found" });
   } catch (error) {
+    if (sendHeavyRouteCapacityResponse(error, res, send)) return;
     const status = Number(error?.statusCode) || 500;
     const logPolicy = requestLogPolicy(req.url, "exception");
     if (!isTestRuntime) {
@@ -10245,6 +10736,12 @@ function startBackgroundTasks() {
     }
   }
   startDiscordGateway();
+  void processMarketTransitionOutbox().catch((error) => console.warn(`Market transition dispatcher failed: ${errorMessage(error)}`));
+  const marketTransitionTimer = setInterval(
+    () => void processMarketTransitionOutbox().catch((error) => console.warn(`Market transition dispatcher failed: ${errorMessage(error)}`)),
+    marketTransitionDispatcherIntervalMs,
+  );
+  marketTransitionTimer.unref?.();
   void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
   setInterval(processDiscordNotificationOutbox, discordNotificationOutboxIntervalMs);
   setTimeout(() => {

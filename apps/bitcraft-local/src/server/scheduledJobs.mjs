@@ -3,6 +3,26 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+export function createOperationalHistoryRetentionDryRunJob({
+  db,
+  readSettings,
+  runRetention,
+  now = () => new Date(),
+}) {
+  return function runOperationalHistoryRetentionDryRunJob() {
+    const current = now();
+    const settings = readSettings();
+    const result = runRetention(db, {
+      now: current,
+      days: settings.days,
+      tables: settings.tables,
+      enabled: false,
+      dryRun: true,
+    });
+    return result;
+  };
+}
+
 export function validScheduleTime(value) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value ?? ""));
 }

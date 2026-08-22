@@ -40,7 +40,7 @@ test("Market page exposes a dedicated deal watchlist tool tab", () => {
 
   assert.match(marketPage, /id: "deal-watch"/);
   assert.match(marketPage, /label: "Deal Watch"/);
-  assert.match(marketPage, /<DealWatchlist[^>]*monitoredRegionId=\{regionId \|\| fallbackRegionId\}[^>]*onDiscordLogin=\{onDiscordLogin\}/);
+  assert.match(marketPage, /<DealWatchlist[^>]*monitoredRegionId=\{regionId \|\| fallbackRegionId\}[^>]*auth=\{auth\}[^>]*onDiscordLogin=\{onDiscordLogin\}/);
   assert.match(commandPalette, /deal-watch/);
   assert.match(commandPalette, /Deal Watch/);
 });

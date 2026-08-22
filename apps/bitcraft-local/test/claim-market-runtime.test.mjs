@@ -50,7 +50,10 @@ test("claim-market runtime publishes one generic live market generation", async 
     },
     currentStateRepository: {
       nextGeneration: () => 12,
-      commitGeneration: (batch) => writes.push(batch),
+      commitGenerationWithTransition: (batch, transition) => {
+        writes.push({ batch, transition });
+        return { published: true, changedDomains: ["market"], generation: 12 };
+      },
     },
   });
 
@@ -88,7 +91,7 @@ test("claim-market runtime publishes one generic live market generation", async 
     receivedAt: "2026-07-30T12:00:00.000Z",
   });
 
-  assert.deepEqual(writes[0], {
+  assert.deepEqual(writes[0].batch, {
     claimId: "100",
     generation: 12,
     domains: {
@@ -113,6 +116,7 @@ test("claim-market runtime publishes one generic live market generation", async 
       },
     },
   });
+  assert.equal(writes[0].transition.transitionKey, "claim-market:100:market:12");
   assert.equal(runtime.health().running, true);
   await runtime.reconcile({ claimId: "200", regionId: "19" });
   assert.equal(starts[1].claimId, "200");
@@ -135,7 +139,7 @@ test("claim-market runtime preserves last-good when its regional source is unava
     },
     currentStateRepository: {
       nextGeneration: () => 1,
-      commitGeneration: () => assert.fail("must preserve last-good market state"),
+      commitGenerationWithTransition: () => assert.fail("must preserve last-good market state"),
     },
   });
   await assert.rejects(runtime.start({
@@ -190,7 +194,10 @@ test("claim-market runtime publishes current data without waiting for transition
     currentStateRepository: {
       nextGeneration: () => 13,
       read: () => ({ data: previousData }),
-      commitGeneration: (batch) => writes.push(batch),
+      commitGenerationWithTransition: (batch) => {
+        writes.push(batch);
+        return { published: true, changedDomains: ["market"], generation: 13 };
+      },
     },
     onSnapshotCommitted: async (input) => {
       transitionInput = input;
@@ -217,6 +224,8 @@ test("claim-market runtime publishes current data without waiting for transition
   assert.equal(writes.length, 1);
   assert.deepEqual(transitionInput, {
     claimId: "100",
+    generation: 13,
+    transitionKey: "claim-market:100:market:13",
     previousData,
     currentData,
     observedAt: "2026-07-30T15:00:00.000Z",
@@ -254,7 +263,10 @@ test("claim-market runtime reports transition failures without rolling back curr
     currentStateRepository: {
       nextGeneration: () => 13,
       read: () => null,
-      commitGeneration: (batch) => writes.push(batch),
+      commitGenerationWithTransition: (batch) => {
+        writes.push(batch);
+        return { published: true, changedDomains: ["market"], generation: 13 };
+      },
     },
     onSnapshotCommitted: async () => {
       throw new Error("history disk unavailable");
@@ -284,6 +296,149 @@ test("claim-market runtime reports transition failures without rolling back curr
 
   assert.equal(writes.length, 1);
   assert.equal(runtime.health().transition.lastError, "history disk unavailable");
+});
+
+test("claim-market runtime atomically commits a compact version-1 transition before its asynchronous kick", async () => {
+  assert.ok(runtimeModule, "claim-market runtime module must exist");
+  let onSnapshot;
+  const commits = [];
+  const order = [];
+  const runtime = new runtimeModule.RelayClaimMarketRuntime({
+    manifest: {
+      schemas: {
+        regional: { fingerprint: "regional-v1", bindingsGenerated: true },
+      },
+    },
+    discoverTopology: async () => topology(),
+    createSession: (options) => {
+      onSnapshot = options.onSnapshot;
+      return {
+        start: async () => {},
+        stop: async () => {},
+        health: () => ({ connected: true, applied: true, lastError: null }),
+      };
+    },
+    currentStateRepository: {
+      nextGeneration: () => 13,
+      read: () => ({
+        data: {
+          claimId: "100",
+          regionId: "19",
+          marketplaces: [],
+          listings: [{ entityId: "1", quantity: "10" }],
+        },
+      }),
+      commitGeneration: () => assert.fail("market generations must use the atomic transition commit"),
+      commitGenerationWithTransition: async (batch, transition) => {
+        commits.push({ batch, transition });
+        order.push("committed");
+        return { published: true, changedDomains: ["market"], generation: 13 };
+      },
+    },
+    deriveTransitionEvents: () => [{
+      eventType: "partial_quantity_drop",
+      activityType: "market_quantity_drop",
+      occurredAt: "2026-07-30T15:00:00.000Z",
+      sourceKey: "relay_market_event:partial_quantity_drop:1:10->6",
+      activitySourceKey: "relay_market_activity:partial_quantity_drop:1:10->6",
+      summary: "Quantity dropped: Timber x4 at 5g",
+      listing: {
+        key: "1",
+        itemName: "Timber",
+        side: "sell",
+        owner: "Builder",
+        ownerEntityId: "7",
+        itemId: "42",
+        itemType: "item",
+        quantity: "4",
+        price: "5",
+        totalValue: "20",
+        tier: null,
+        rarity: null,
+        listedAt: null,
+        tradeId: null,
+      },
+    }],
+    onSnapshotCommitted: ({ transitionKey, generation }) => {
+      order.push(`kick:${transitionKey}:${generation}`);
+      throw new Error("dispatcher unavailable");
+    },
+  });
+  await runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "100",
+    regionId: "19",
+  });
+
+  await onSnapshot({
+    data: {
+      claimId: "100",
+      regionId: "19",
+      marketplaces: [],
+      listings: [{ entityId: "1", quantity: "6" }],
+    },
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 2,
+    receivedAt: "2026-07-30T15:00:00.000Z",
+  });
+  await runtime.stop();
+
+  assert.equal(commits.length, 1);
+  assert.equal(commits[0].transition.transitionKey, "claim-market:100:market:13");
+  assert.deepEqual(commits[0].transition.payload, {
+    version: 1,
+    claimId: "100",
+    generation: 13,
+    observedAt: "2026-07-30T15:00:00.000Z",
+    events: commits[0].transition.payload.events,
+  });
+  assert.doesNotMatch(JSON.stringify(commits[0].transition.payload), /previousData|currentData|"raw"/);
+  assert.deepEqual(order, ["committed", "kick:claim-market:100:market:13:13"]);
+  assert.equal(runtime.health().lastError, null, "dispatcher failure must not roll back current publication");
+  assert.equal(runtime.health().transition.lastError, "dispatcher unavailable");
+});
+
+test("claim-market runtime does not kick a dispatcher for an equal rejected generation", async () => {
+  let onSnapshot;
+  let kicks = 0;
+  const runtime = new runtimeModule.RelayClaimMarketRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: (options) => {
+      onSnapshot = options.onSnapshot;
+      return {
+        start: async () => {},
+        stop: async () => {},
+        health: () => ({ connected: true, applied: true, lastError: null }),
+      };
+    },
+    currentStateRepository: {
+      nextGeneration: () => 13,
+      read: () => null,
+      commitGenerationWithTransition: async () => ({
+        published: false,
+        changedDomains: [],
+        generation: 13,
+      }),
+    },
+    deriveTransitionEvents: () => [],
+    onSnapshotCommitted: () => { kicks += 1; },
+  });
+  await runtime.start({ relayBaseUrl: "https://relay.example", claimId: "100", regionId: "19" });
+  await onSnapshot({
+    data: { claimId: "100", regionId: "19", marketplaces: [], listings: [] },
+    warnings: [],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 2,
+    receivedAt: "2026-07-30T15:00:00.000Z",
+  });
+  await runtime.stop();
+  assert.equal(kicks, 0);
 });
 
 test("claim-market reconnects only for disconnected or errored subscription health", async () => {

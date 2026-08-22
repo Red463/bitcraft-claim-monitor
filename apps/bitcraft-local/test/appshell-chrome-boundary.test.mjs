@@ -46,8 +46,9 @@ test("global refresh uses the page-cycle lifecycle with consistent manual feedba
 test("page cadence is centralized while notification and deal timers stay independent", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
   assert.match(appShell, /pageRefreshController\.setIntervalMs\(appSettings\.refreshSeconds \* 1000\)/);
-  assert.match(appShell, /active !== "craft-monitor"/);
-  assert.match(appShell, /createGameDataGenerationWatcher/);
+  assert.match(appShell, /createPageGameDataGenerationWatcher/);
+  assert.match(appShell, /activePanel:\s*active/);
+  assert.doesNotMatch(appShell, /createGameDataGenerationWatcher\(/);
   assert.match(appShell, /schedule\(setNotificationRefreshToken/);
   assert.match(appShell, /schedule\(setDealRefreshToken/);
   assert.doesNotMatch(appShell, /schedule\(setRefreshToken|schedule\(setHistoryAutoRefreshToken/);

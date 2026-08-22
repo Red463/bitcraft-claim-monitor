@@ -17,6 +17,7 @@ type AdminDataSectionProps = {
     tableSearch: string;
     tableOffset: number;
     backups: AnyRecord[];
+    operationalHistory?: AnyRecord | null;
   };
   pending: (key: string) => boolean;
   error?: string | null;
@@ -26,6 +27,7 @@ type AdminDataSectionProps = {
   onPreviousTablePage: () => void;
   onNextTablePage: () => void;
   onCreateBackup: () => void;
+  onRunRetentionDryRun: () => void;
   tableExportHref: (format: "csv" | "json") => string;
   backupDownloadHref: (name: string) => string;
 };
@@ -41,6 +43,7 @@ export function AdminDataSection({
   onPreviousTablePage,
   onNextTablePage,
   onCreateBackup,
+  onRunRetentionDryRun,
   tableExportHref,
   backupDownloadHref,
 }: AdminDataSectionProps) {
@@ -52,13 +55,32 @@ export function AdminDataSection({
   const selectedTableInfo = data.tables.find((table) => table.name === data.selectedTable);
   const tableRangeStart = activeTableResult.total ? data.tableOffset + 1 : 0;
   const tableRangeEnd = Math.min(data.tableOffset + tableRows.length, toNumber(activeTableResult.total));
+  const retention = data.operationalHistory ?? {};
+  const retentionTables: AnyRecord[] = retention.tables ?? [];
+
+  const retentionStatus = (
+    <section className="form-card">
+      <div className="split-header">
+        <div><h3><HardDrive size={17} /> Operational History Retention</h3><p className="legend">Report-only preview. Pruning has no approved tables and remains disabled.</p></div>
+        <button className="toolbar-button" disabled={pending("retention-dry-run")} onClick={onRunRetentionDryRun}>{pending("retention-dry-run") ? "Running..." : "Run dry-run"}</button>
+      </div>
+      <div className="database-inspector-stats">
+        <Info label="Enabled" value={retention.enabled ? "Yes" : "No"} />
+        <Info label="Configured days" value={formatNumber(retention.configuredDays ?? 365)} />
+        <Info label="Approved tables" value={formatNumber((retention.approvedTables ?? []).length)} />
+        <Info label="WAL size" value={bytesLabel(retention.walBytes)} />
+      </div>
+      <div className="table-scroll"><table><thead><tr><th>Table</th><th>Rows</th><th>Oldest</th><th>Eligible</th></tr></thead><tbody>{retentionTables.map((row) => <tr key={row.table}><td><code>{row.table}</code></td><td>{formatNumber(row.rowCount)}</td><td>{dateLabel(row.oldestOccurredAt)}</td><td>{formatNumber(row.eligibleRows)}</td></tr>)}</tbody></table></div>
+      <p className="legend">Last dry-run {dateLabel(retention.lastDryRun?.completed_at)} · Last prune {dateLabel(retention.lastPrune?.completed_at)} · Backup verification {retention.backupVerification?.integrityCheck === "ok" ? `passed ${dateLabel(retention.backupVerification.verifiedAt)}` : "not recorded"}</p>
+    </section>
+  );
 
   return (
     <>
       {error ? <div className="admin-message error" role="alert" aria-live="assertive">{error}</div> : null}
       {result ? <div className={`admin-message ${result.kind}`} role="status" aria-live="polite">{result.message}</div> : null}
       {tab === "database" ? (
-        <section className="form-card database-browser">
+        <><section className="form-card database-browser">
           <div className="database-browser-header">
             <div>
               <h3><Database size={17} /> Database Browser</h3>
@@ -84,7 +106,7 @@ export function AdminDataSection({
           </div>
           {tableColumns.length ? <DataTable rows={tableRows} scrollLabel="Database records table" emptyState="No database records match the current search." columns={tableColumns.map((key: string) => [key, (row: AnyRecord) => { const value = String(row[key] ?? "-"); const display = value.length > 120 ? `${value.slice(0, 120)}...` : value; return <code className={value.startsWith("{") || value.startsWith("[") ? "database-cell-code" : ""}>{display}</code>; }])} /> : <p className="legend">No records returned.</p>}
           <div className="pager"><span>{formatNumber(activeTableResult.total)} matching records</span><button className="toolbar-button" disabled={!data.tableOffset} onClick={onPreviousTablePage}>Previous</button><button className="toolbar-button" disabled={data.tableOffset + 50 >= activeTableResult.total} onClick={onNextTablePage}>Next</button></div>
-        </section>
+        </section>{retentionStatus}</>
       ) : null}
 
       {tab === "backups" ? (
@@ -94,6 +116,7 @@ export function AdminDataSection({
             <p className="legend">Downloadable SQLite copies are stored on the server. Restore them manually on the VPS while services are stopped.</p>
             <div className="backup-list">{data.backups.length ? data.backups.map((backup) => <div key={backup.name}><div><strong>{backup.name}</strong><span>{bytesLabel(backup.size)} | {dateLabel(backup.createdAt)}</span></div><a className="toolbar-button" title="Download this database backup file." href={backupDownloadHref(backup.name)}><Download size={14} /> Download</a></div>) : <p className="legend">No database backups have been created yet.</p>}</div>
           </section>
+          {retentionStatus}
         </div>
       ) : null}
     </>

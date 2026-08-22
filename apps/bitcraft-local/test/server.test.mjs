@@ -35,6 +35,13 @@ async function requestJson(req) {
   return body ? JSON.parse(body) : {};
 }
 
+async function jsonWithObservedResponseSize(response) {
+  const text = await response.text();
+  const responseBytes = Buffer.byteLength(text);
+  assert.ok(responseBytes > 0, "expected a non-empty JSON response");
+  return { body: JSON.parse(text), responseBytes };
+}
+
 function gameDataProbabilityFixture(url, res) {
   if (url.pathname === "/game-data/item-lists") {
     json(res, [{ id: 55, possibilities: [
@@ -1291,11 +1298,90 @@ test("server collection paginates listings and protects production mutations", a
   }]);
   assert.equal(marketCatalog.freshness, "stale");
   assert.match(marketCatalog.warnings.join(" "), /catalog subscription is disconnected/i);
-  const marketOrderBook = await fetch(`${origin}/api/local/market/order-book?claimId=${claimId}&regionId=19&itemType=item&itemId=30`).then((response) => response.json());
+  const marketOrderBookResponse = await fetch(`${origin}/api/local/market/order-book?claimId=${claimId}&regionId=19&itemType=item&itemId=30`);
+  const { body: marketOrderBook, responseBytes: marketOrderBookResponseBytes } = await jsonWithObservedResponseSize(marketOrderBookResponse);
+  assert.ok(Number.isSafeInteger(marketOrderBookResponseBytes));
   assert.deepEqual(marketOrderBook.sellOrders.map((order) => order.entityId), ["3003"]);
   assert.deepEqual(marketOrderBook.buyOrders.map((order) => order.entityId), ["3001"]);
   assert.equal(marketOrderBook.sellOrders[0].price, "15");
   assert.equal(marketOrderBook.item.name, "Leather");
+  const favoriteQuoteResponse = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      regionId: "19",
+      items: [
+        { itemType: "item", itemId: "30" },
+        { itemType: "cargo", itemId: "30" },
+        { itemType: "item", itemId: "9007199254740993" },
+      ],
+    }),
+  });
+  assert.equal(favoriteQuoteResponse.status, 200, "read-only favorite quotes do not require CSRF");
+  const favoriteQuotePayload = await favoriteQuoteResponse.json();
+  assert.equal(favoriteQuotePayload.generation, 99);
+  assert.equal(favoriteQuotePayload.freshness, "stale");
+  assert.deepEqual(favoriteQuotePayload.quotes, {
+    "item:30": { bestSell: "15", bestBuy: "20", sellCount: 1, buyCount: 1 },
+    "cargo:30": { bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 },
+    "item:9007199254740993": { bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 },
+  });
+  assert.deepEqual(favoriteQuotePayload.items["item:30"], {
+    id: "30",
+    itemId: "30",
+    itemType: "item",
+    name: "Leather",
+    category: "Leather",
+    tag: "Leather",
+    tier: 1,
+    rarity: "Common",
+    rarityStr: "Common",
+    iconAssetName: null,
+  });
+  const foreignFavoriteQuote = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ regionId: "9", items: [{ itemType: "item", itemId: "30" }] }),
+  });
+  assert.equal(foreignFavoriteQuote.status, 403);
+  const favoriteQuoteRefreshes = await Promise.all(Array.from({ length: 8 }, () => fetch(
+    `${origin}/api/local/market/favorite-quotes`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ regionId: "19", items: [{ itemType: "item", itemId: "30" }] }),
+    },
+  )));
+  assert.equal(favoriteQuoteRefreshes.every((response) => response.status === 200), true);
+  const duplicateFavoriteQuote = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ regionId: "19", items: [{ itemType: "item", itemId: "30" }, { itemType: "item", itemId: "30" }] }),
+  });
+  assert.equal(duplicateFavoriteQuote.status, 400);
+  const tooManyFavoriteQuotes = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ regionId: "19", items: Array.from({ length: 21 }, (_, index) => ({ itemType: "item", itemId: String(index + 1) })) }),
+  });
+  assert.equal(tooManyFavoriteQuotes.status, 400);
+  const invalidFavoriteQuote = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ regionId: "not-a-region", items: [{ itemType: "other", itemId: "30" }] }),
+  });
+  assert.equal(invalidFavoriteQuote.status, 400);
+  const oversizedFavoriteQuote = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ regionId: "19", items: [], padding: "x".repeat(17 * 1024) }),
+  });
+  assert.equal(oversizedFavoriteQuote.status, 413);
+  const reportOnlyOrderBooks = await Promise.all(Array.from({ length: 26 }, () => fetch(
+    `${origin}/api/local/market/order-book?claimId=${claimId}&regionId=19&itemType=item&itemId=30`,
+    { headers: { "x-manual-refresh-id": "normal-browser-refresh" } },
+  )));
+  assert.equal(reportOnlyOrderBooks.every((response) => response.status === 200), true);
   const marketStalls = await fetch(`${origin}/api/local/market/stalls?claimId=${claimId}&regionId=19&q=Leather&activeOnly=true&page=1`).then((response) => response.json());
   assert.equal(marketStalls.totalStalls, 1);
   assert.equal(marketStalls.totalOrders, 1);
@@ -1488,6 +1574,22 @@ test("server collection paginates listings and protects production mutations", a
   assert.match(failedCollect.collectorStatus.lastError, /Relay (claim|crafts|members) input is unavailable/);
   failClaimRefresh = false;
   const initialConfig = await fetch(`${origin}/api/local/config`).then((response) => response.json());
+  const bootstrapResponse = await fetch(`${origin}/api/local/bootstrap`);
+  assert.equal(bootstrapResponse.status, 200);
+  assert.equal(bootstrapResponse.headers.get("cache-control"), "no-store");
+  const bootstrap = await bootstrapResponse.json();
+  assert.deepEqual(Object.keys(bootstrap).sort(), ["auth", "build", "config", "legal"]);
+  assert.equal(bootstrap.config.claimId, claimId);
+  assert.equal(bootstrap.config.refreshSeconds, initialConfig.refreshSeconds);
+  assert.equal(bootstrap.auth.authenticated, false);
+  assert.equal(bootstrap.auth.featurebaseJwt, null);
+  assert.equal(bootstrap.legal.acceptanceRequired, false);
+  const publicHealth = await fetch(`${origin}/api/local/health`).then((response) => response.json());
+  assert.equal(bootstrap.build.version, publicHealth.version);
+  assert.equal(typeof bootstrap.build.buildSha, "string");
+  assert.equal("visitorSecurity" in bootstrap.config, false);
+  assert.equal("discord" in bootstrap.config, false);
+  assert.doesNotMatch(JSON.stringify(bootstrap), /botToken|clientSecret|adminSetupKey|geoipLicenseKey/i);
   assert.equal(initialConfig.analytics, undefined);
   assert.deepEqual(initialConfig.excludedMemberIds, []);
   assert.equal(initialConfig.serverRefreshSeconds, 30);
@@ -2214,6 +2316,35 @@ test("server collection paginates listings and protects production mutations", a
   // Current contribution attribution is subscription-driven, so a forced poll
   // exposes no game-data acquisition reconciler.
   await seedCommittedRelayInputs();
+
+  const reportOnlyGameData = await Promise.all(Array.from({ length: 13 }, () => fetch(
+    `${origin}/api/local/game-data?claimId=${claimId}&domains=claim`,
+    { headers: { "x-client-refresh-mode": "normal" } },
+  )));
+  assert.equal(reportOnlyGameData.every((response) => response.status === 200), true);
+  const routeHealthResponse = await fetch(`${origin}/api/local/admin/server-health`, { headers: { cookie, origin } });
+  assert.equal(routeHealthResponse.status, 200);
+  const routeHealth = await routeHealthResponse.json();
+  const routePerformance = routeHealth.application.routePerformance;
+  const orderBookPerformance = routePerformance.routes.find((route) => route.path === "/api/local/market/order-book");
+  const favoriteQuotesPerformance = routePerformance.routes.find((route) => route.path === "/api/local/market/favorite-quotes");
+  const gameDataPerformance = routePerformance.routes.find((route) => route.path === "/api/local/game-data");
+  assert.ok(orderBookPerformance.sampleCount >= 26);
+  assert.ok(orderBookPerformance.responseBytes.p99 > 0);
+  assert.equal(orderBookPerformance.status429, 0);
+  assert.ok(favoriteQuotesPerformance.sampleCount >= 13);
+  assert.ok(favoriteQuotesPerformance.responseBytes.p99 > 0);
+  assert.ok(favoriteQuotesPerformance.projectionMs.p99 >= 0);
+  assert.equal(favoriteQuotesPerformance.status429, 0);
+  assert.ok(gameDataPerformance.sampleCount >= 13);
+  assert.ok(gameDataPerformance.responseBytes.p99 > 0);
+  assert.equal(gameDataPerformance.status429, 0);
+  assert.deepEqual(routePerformance.rateLimits.orderBookRead, { reportOnly: true, wouldLimit: 2 });
+  assert.deepEqual(routePerformance.rateLimits.favoriteQuotesRead, { reportOnly: true, wouldLimit: 6 });
+  assert.deepEqual(routePerformance.rateLimits.gameDataRead, { reportOnly: true, wouldLimit: 1 });
+  assert.deepEqual(routePerformance.gates.gameData, { active: 0, queued: 0, rejected: 0, maxConcurrent: 8, maxQueued: 16 });
+  assert.deepEqual(routePerformance.gates.market, { active: 0, queued: 0, rejected: 0, maxConcurrent: 8, maxQueued: 16 });
+  assert.doesNotMatch(JSON.stringify(routePerformance), new RegExp(`${claimId}|itemId|claimId|normal-browser-refresh`));
 
   const poll = await fetch(`${origin}/api/local/admin/poll`, {
     method: "POST",

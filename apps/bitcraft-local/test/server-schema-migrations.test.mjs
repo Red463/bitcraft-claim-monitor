@@ -1,21 +1,289 @@
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { DatabaseSync, constants as sqliteConstants } from "node:sqlite";
 import test from "node:test";
 
 import {
   additiveColumnMigrations,
   applyAdditiveColumnMigrations,
   applyLegacySchemaCleanup,
+  applyOperationalHistoryRetentionMigration,
   applyMarketHistoryExactAmountMigration,
   applyMarketTradeRegionBackfill,
   applyProductionContributionExactAmountMigration,
+  applyProviderTransitionLeaseMigration,
   applySchemaIndexStatements,
+  providerTransitionLeaseColumnMigrations,
+  providerTransitionLeaseIndexStatements,
   retiredTableNames,
   schemaIndexStatements,
 } from "../src/server/schemaMigrations.mjs";
 import { installRetiredTableAuthorizer } from "../src/server/retiredTableAuthorizer.mjs";
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import { createCurrentStateRepository } from "../src/server/game-data/currentStateRepository.ts";
+
+test("operational history retention migration is additive, narrow, and idempotent", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  db.prepare(`
+    INSERT INTO market_trades (
+      trade_id, claim_id, item_name, quantity, unit_price, total_price,
+      occurred_at, imported_at, raw_json
+    ) VALUES ('kept', '1', 'Timber', '1', '2', '2', '2026-08-21T00:00:00.000Z', '2026-08-21T00:00:01.000Z', '{}')
+  `).run();
+
+  applyOperationalHistoryRetentionMigration(db);
+  applyOperationalHistoryRetentionMigration(db);
+
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM market_trades").get().count, 1);
+  for (const table of [
+    "operational_history_market_trade_daily",
+    "operational_history_market_event_daily",
+    "operational_history_activity_daily",
+    "operational_history_source_ingestion_ids",
+    "operational_history_source_mutations",
+    "operational_history_rollup_watermarks",
+    "operational_history_retention_runs",
+    "operational_history_backup_verifications",
+  ]) {
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table).count, 1);
+    assert.equal(db.prepare(`PRAGMA table_info("${table}")`).all().some((column) => column.name === "raw_json"), false);
+  }
+  const watermarkColumns = db.prepare("PRAGMA table_info(operational_history_rollup_watermarks)").all().map((column) => column.name);
+  assert.ok(watermarkColumns.includes("source_max_occurred_at"));
+  assert.ok(watermarkColumns.includes("source_max_ingestion_id"));
+  assert.ok(watermarkColumns.includes("source_max_mutation_id"));
+  assert.ok(watermarkColumns.includes("source_fingerprint"));
+  assert.ok(watermarkColumns.includes("remaining_source_fingerprint"));
+  const backupColumns = db.prepare("PRAGMA table_info(operational_history_backup_verifications)").all().map((column) => column.name);
+  assert.ok(backupColumns.includes("backup_path"));
+  assert.ok(backupColumns.includes("manifest_path"));
+  assert.ok(backupColumns.includes("restored_database_sha256"));
+  assert.ok(backupColumns.includes("restored_manifest_sha256"));
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM sqlite_schema
+    WHERE type = 'trigger' AND name IN (
+      'operational_history_market_trade_ingestion_id',
+      'operational_history_market_trade_update',
+      'operational_history_market_trade_delete'
+    )
+  `).get().count, 3);
+  db.close();
+});
+
+test("operational history migration reconciles every market trade to one safe positive ingestion identity", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  db.exec(`
+    DROP TRIGGER operational_history_market_trade_ingestion_id;
+    DROP TRIGGER operational_history_market_trade_update;
+    DROP TRIGGER operational_history_market_trade_delete;
+    INSERT INTO market_trades (
+      trade_id, claim_id, item_name, quantity, unit_price, total_price,
+      occurred_at, imported_at, raw_json
+    ) VALUES
+      ('missing', '1', 'Timber', '1', '2', '2', '2026-08-21T00:00:00.000Z', '2026-08-21T00:00:01.000Z', '{}'),
+      ('invalid', '1', 'Timber', '1', '2', '2', '2026-08-21T00:01:00.000Z', '2026-08-21T00:01:01.000Z', '{}'),
+      ('too-large', '1', 'Timber', '1', '2', '2', '2026-08-21T00:02:00.000Z', '2026-08-21T00:02:01.000Z', '{}');
+    INSERT INTO operational_history_source_ingestion_ids (ingestion_id, source_table, source_key)
+    VALUES
+      (0, 'market_trades', 'invalid'),
+      (9007199254740992, 'market_trades', 'too-large');
+  `);
+
+  applyOperationalHistoryRetentionMigration(db);
+  applyOperationalHistoryRetentionMigration(db);
+
+  const identities = db.prepare(`
+    SELECT source.trade_id, COUNT(ingestion.ingestion_id) AS identity_count,
+      MIN(ingestion.ingestion_id) AS ingestion_id
+    FROM market_trades AS source
+    LEFT JOIN operational_history_source_ingestion_ids AS ingestion
+      ON ingestion.source_table = 'market_trades' AND ingestion.source_key = source.trade_id
+    GROUP BY source.trade_id
+    ORDER BY source.trade_id
+  `).all().map((row) => ({ ...row }));
+  assert.equal(identities.length, 3);
+  for (const row of identities) {
+    assert.equal(row.identity_count, 1);
+    assert.equal(Number.isSafeInteger(Number(row.ingestion_id)) && Number(row.ingestion_id) > 0, true);
+  }
+  db.close();
+});
+
+test("operational history migration excludes concurrent writers and reconciles after a blocked attempt", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "operational-retention-migration-"));
+  const databasePath = path.join(directory, "fixture.sqlite");
+  const migrationConnection = new DatabaseSync(databasePath);
+  const writerConnection = new DatabaseSync(databasePath);
+  try {
+    applySchemaBootstrap(migrationConnection);
+    migrationConnection.exec(`
+      DROP TRIGGER operational_history_market_trade_ingestion_id;
+      DROP TRIGGER operational_history_market_trade_update;
+      DROP TRIGGER operational_history_market_trade_delete;
+    `);
+    writerConnection.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
+    writerConnection.prepare(`
+      INSERT INTO market_trades (
+        trade_id, claim_id, item_name, quantity, unit_price, total_price,
+        occurred_at, imported_at, raw_json
+      ) VALUES ('racing', '1', 'Timber', '1', '2', '2',
+        '2026-08-21T00:00:00.000Z', '2026-08-21T00:00:01.000Z', '{}')
+    `).run();
+    assert.throws(() => applyOperationalHistoryRetentionMigration(migrationConnection), /busy|locked/i);
+    writerConnection.exec("COMMIT");
+
+    const criticalTransactionStates = [];
+    migrationConnection.setAuthorizer((action, name) => {
+      if ((action === sqliteConstants.SQLITE_DROP_TRIGGER || action === sqliteConstants.SQLITE_CREATE_TRIGGER)
+        && String(name).startsWith("operational_history_market_trade_")) {
+        criticalTransactionStates.push(migrationConnection.isTransaction);
+      }
+      if ((action === sqliteConstants.SQLITE_INSERT || action === sqliteConstants.SQLITE_DELETE)
+        && name === "operational_history_source_ingestion_ids") {
+        criticalTransactionStates.push(migrationConnection.isTransaction);
+      }
+      return sqliteConstants.SQLITE_OK;
+    });
+    applyOperationalHistoryRetentionMigration(migrationConnection);
+    migrationConnection.setAuthorizer(null);
+    writerConnection.prepare(`
+      INSERT INTO market_trades (
+        trade_id, claim_id, item_name, quantity, unit_price, total_price,
+        occurred_at, imported_at, raw_json
+      ) VALUES ('after', '1', 'Timber', '1', '2', '2',
+        '2026-08-21T00:02:00.000Z', '2026-08-21T00:02:01.000Z', '{}')
+    `).run();
+
+    assert.ok(criticalTransactionStates.length > 0);
+    assert.equal(criticalTransactionStates.every(Boolean), true);
+    const unsafe = migrationConnection.prepare(`
+      SELECT COUNT(*) AS count
+      FROM market_trades AS source
+      LEFT JOIN operational_history_source_ingestion_ids AS ingestion
+        ON ingestion.source_table = 'market_trades' AND ingestion.source_key = source.trade_id
+      WHERE ingestion.ingestion_id IS NULL
+        OR typeof(ingestion.ingestion_id) <> 'integer'
+        OR ingestion.ingestion_id <= 0
+        OR ingestion.ingestion_id > 9007199254740991
+    `).get().count;
+    assert.equal(unsafe, 0);
+  } finally {
+    try { writerConnection.exec("ROLLBACK"); } catch {}
+    migrationConnection.setAuthorizer(null);
+    writerConnection.close();
+    migrationConnection.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("provider transition lease migration is additive and preserves pending rows", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE provider_transition_outbox (
+      transition_key TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      observed_at TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO provider_transition_outbox VALUES (
+      'claim-market:100:market:2', '100', 'market',
+      '2026-08-22T10:00:00.000Z', '{"version":1,"events":[]}',
+      0, NULL, '2026-08-22T10:00:00.000Z', '2026-08-22T10:00:00.000Z'
+    );
+  `);
+
+  applyProviderTransitionLeaseMigration(db);
+  applyProviderTransitionLeaseMigration(db);
+
+  assert.deepEqual(providerTransitionLeaseColumnMigrations, [
+    { table: "provider_transition_outbox", column: "locked_by", definition: "TEXT" },
+    { table: "provider_transition_outbox", column: "lease_token", definition: "TEXT" },
+    { table: "provider_transition_outbox", column: "locked_at", definition: "TEXT" },
+    { table: "provider_transition_outbox", column: "lease_expires_at", definition: "TEXT" },
+  ]);
+  assert.deepEqual(providerTransitionLeaseIndexStatements, [
+    "CREATE INDEX IF NOT EXISTS idx_provider_transition_lease ON provider_transition_outbox (claim_id, domain, updated_at, lease_expires_at, created_at, transition_key);",
+  ]);
+  const row = db.prepare(`
+    SELECT transition_key, locked_by, lease_token, locked_at, lease_expires_at
+    FROM provider_transition_outbox
+  `).get();
+  assert.deepEqual({ ...row }, {
+    transition_key: "claim-market:100:market:2",
+    locked_by: null,
+    lease_token: null,
+    locked_at: null,
+    lease_expires_at: null,
+  });
+  assert.equal(
+    db.prepare("PRAGMA index_list(provider_transition_outbox)").all()
+      .some((index) => index.name === "idx_provider_transition_lease"),
+    true,
+  );
+  db.close();
+});
+
+test("legacy provider transitions survive production bootstrap before lease migration", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE provider_transition_outbox (
+      transition_key TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      observed_at TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO provider_transition_outbox VALUES (
+      'claim-market:100:market:2', '100', 'market',
+      '2026-08-22T10:00:00.000Z', '{"version":1,"events":[]}',
+      0, NULL, '2026-08-22T10:00:00.000Z', '2026-08-22T10:00:00.000Z'
+    );
+  `);
+
+  applySchemaBootstrap(db);
+  applyProviderTransitionLeaseMigration(db);
+  applySchemaBootstrap(db);
+  applyProviderTransitionLeaseMigration(db);
+
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM provider_transition_outbox").get().count,
+    1,
+  );
+  assert.equal(
+    db.prepare("PRAGMA index_list(provider_transition_outbox)").all()
+      .some((index) => index.name === "idx_provider_transition_lease"),
+    true,
+  );
+  db.close();
+});
+
+test("fresh production bootstrap plus lease migration creates the lease index idempotently", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyProviderTransitionLeaseMigration(db);
+  applySchemaBootstrap(db);
+  applyProviderTransitionLeaseMigration(db);
+
+  assert.equal(
+    db.prepare("PRAGMA index_list(provider_transition_outbox)").all()
+      .filter((index) => index.name === "idx_provider_transition_lease").length,
+    1,
+  );
+  db.close();
+});
 
 test("production contribution repair acquires its write transaction before reading counters", () => {
   const db = new DatabaseSync(":memory:");
@@ -325,6 +593,7 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "user_sessions", column: "reauthenticated_at", definition: "TEXT" },
     { table: "user_accounts", column: "inactivity_warning_sent_at", definition: "TEXT" },
     { table: "production_jobs", column: "start_notified", definition: "INTEGER NOT NULL DEFAULT 0" },
+    { table: "provider_subscription_health", column: "runtime_state", definition: "TEXT NOT NULL DEFAULT 'disconnected' CHECK (runtime_state IN ('connected', 'disconnected', 'blocked_by_schema'))" },
     { table: "domain_payload_current", column: "updated_at", definition: "TEXT" },
     { table: "domain_payload_current", column: "provider", definition: "TEXT NOT NULL DEFAULT 'legacy'" },
     { table: "domain_payload_current", column: "source_key", definition: "TEXT" },
@@ -349,6 +618,46 @@ test("additiveColumnMigrations preserves bootstrap column migration order", () =
     { table: "game_catalog_recipe_outputs", column: "guaranteed_quantity", definition: "REAL" },
     { table: "game_catalog_item_list_possibility_outputs", column: "nested_item_list_id", definition: "TEXT" },
   ]);
+});
+
+test("typed subscription runtime state migrates additively without losing its heartbeat", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE provider_subscription_health (
+      provider TEXT NOT NULL,
+      source_key TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
+      connected INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (provider, source_key, domain)
+    );
+    INSERT INTO provider_subscription_health (
+      provider, source_key, domain, generation, connected, updated_at
+    ) VALUES (
+      'relay', 'global', 'region', 7, 1, '2026-08-22T09:45:00.000Z'
+    );
+  `);
+
+  applyAdditiveColumnMigrations(db, [{
+    table: "provider_subscription_health",
+    column: "runtime_state",
+    definition: "TEXT NOT NULL DEFAULT 'disconnected' CHECK (runtime_state IN ('connected', 'disconnected', 'blocked_by_schema'))",
+  }]);
+
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT generation, connected, runtime_state, updated_at
+      FROM provider_subscription_health
+    `).get() },
+    {
+      generation: 7,
+      connected: 1,
+      runtime_state: "disconnected",
+      updated_at: "2026-08-22T09:45:00.000Z",
+    },
+  );
+  db.close();
 });
 
 test("reauthentication timestamp migrates existing user sessions without losing them", () => {

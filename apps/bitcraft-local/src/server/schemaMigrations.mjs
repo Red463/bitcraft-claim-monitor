@@ -1,4 +1,9 @@
 import { addDecimal } from "../../dist-server/game-data/exactDecimal.js";
+import { applyOperationalHistoryRetentionSchema } from "./operationalHistoryRetention.mjs";
+
+export function applyOperationalHistoryRetentionMigration(db) {
+  applyOperationalHistoryRetentionSchema(db);
+}
 
 export const additiveColumnMigrations = [
   { table: "market_events", column: "owner_entity_id", definition: "TEXT" },
@@ -18,6 +23,7 @@ export const additiveColumnMigrations = [
   { table: "user_sessions", column: "reauthenticated_at", definition: "TEXT" },
   { table: "user_accounts", column: "inactivity_warning_sent_at", definition: "TEXT" },
   { table: "production_jobs", column: "start_notified", definition: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "provider_subscription_health", column: "runtime_state", definition: "TEXT NOT NULL DEFAULT 'disconnected' CHECK (runtime_state IN ('connected', 'disconnected', 'blocked_by_schema'))" },
   { table: "domain_payload_current", column: "updated_at", definition: "TEXT" },
   { table: "domain_payload_current", column: "provider", definition: "TEXT NOT NULL DEFAULT 'legacy'" },
   { table: "domain_payload_current", column: "source_key", definition: "TEXT" },
@@ -53,6 +59,27 @@ export const schemaIndexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_production_contrib_profession ON production_contributions (claim_id, profession, contributed_progress DESC);",
   "CREATE INDEX IF NOT EXISTS idx_production_contrib_events_claim ON production_contribution_events (claim_id, occurred_at DESC);",
   "CREATE INDEX IF NOT EXISTS idx_production_contrib_events_craft ON production_contribution_events (claim_id, craft_entity_id, occurred_at DESC);",
+];
+
+export const discordOutboxLeaseColumnMigrations = [
+  { table: "discord_notification_outbox", column: "locked_by", definition: "TEXT" },
+  { table: "discord_notification_outbox", column: "lease_token", definition: "TEXT" },
+  { table: "discord_notification_outbox", column: "lease_expires_at", definition: "TEXT" },
+];
+
+export const discordOutboxLeaseIndexStatements = [
+  "CREATE INDEX IF NOT EXISTS idx_discord_notification_outbox_lease ON discord_notification_outbox (status, next_attempt_at, lease_expires_at, id);",
+];
+
+export const providerTransitionLeaseColumnMigrations = [
+  { table: "provider_transition_outbox", column: "locked_by", definition: "TEXT" },
+  { table: "provider_transition_outbox", column: "lease_token", definition: "TEXT" },
+  { table: "provider_transition_outbox", column: "locked_at", definition: "TEXT" },
+  { table: "provider_transition_outbox", column: "lease_expires_at", definition: "TEXT" },
+];
+
+export const providerTransitionLeaseIndexStatements = [
+  "CREATE INDEX IF NOT EXISTS idx_provider_transition_lease ON provider_transition_outbox (claim_id, domain, updated_at, lease_expires_at, created_at, transition_key);",
 ];
 
 export const retiredTableNames = [
@@ -193,6 +220,24 @@ export function applyAdditiveColumnMigrations(db, migrations = additiveColumnMig
     const exists = db.prepare(`PRAGMA table_info(${migration.table})`).all().some((row) => row.name === migration.column);
     if (!exists) db.exec(`ALTER TABLE ${migration.table} ADD COLUMN ${migration.column} ${migration.definition}`);
   }
+}
+
+export function applyDiscordOutboxLeaseMigration(
+  db,
+  migrations = discordOutboxLeaseColumnMigrations,
+  indexes = discordOutboxLeaseIndexStatements,
+) {
+  applyAdditiveColumnMigrations(db, migrations);
+  applySchemaIndexStatements(db, indexes);
+}
+
+export function applyProviderTransitionLeaseMigration(
+  db,
+  migrations = providerTransitionLeaseColumnMigrations,
+  indexes = providerTransitionLeaseIndexStatements,
+) {
+  applyAdditiveColumnMigrations(db, migrations);
+  applySchemaIndexStatements(db, indexes);
 }
 
 export function applyMarketHistoryExactAmountMigration(db) {

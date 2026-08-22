@@ -185,10 +185,14 @@ test("Deal Watch renders operational facts as labelled units", () => {
   assert.match(watch, />Last alert<\/span><strong>/);
 });
 
-test("favorite order-book failures fail the active page cycle without clearing last-good rows", () => {
+test("favorites use one retained bulk-quote request per refresh cycle", () => {
   const overview = source("../src/pages/market/MarketOverview.tsx");
 
-  assert.match(overview, /if \(!response\.ok\) throw new Error\(`favorite order book HTTP \$\{response\.status\}`\)/);
-  assert.doesNotMatch(overview, /catch \{\s*return null;\s*\}/);
+  assert.match(overview, /fetch\(request\.url,[\s\S]*method: "POST"[\s\S]*body: request\.body[\s\S]*signal: controller\.signal/);
+  assert.equal((overview.match(/fetch\(request\.url/g) ?? []).length, 1);
+  assert.doesNotMatch(overview, /Promise\.all\(favorites/);
+  assert.doesNotMatch(overview, /\/api\/local\/market\/order-book/);
+  assert.match(overview, /setFavoriteRows\(marketFavoriteQuoteRows\(selectedFavorites, payload\)\)/);
+  assert.doesNotMatch(overview, /setFavoriteRows\(\[\]\)/);
   assert.match(overview, /trackRefresh\("global-market-favorites",[\s\S]*\.catch\(\(\) => \{\}\)/);
 });
