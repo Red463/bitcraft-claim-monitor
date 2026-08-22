@@ -20,10 +20,11 @@ function numericItemType(value: unknown): number {
   return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo" ? 1 : 0;
 }
 
-export function DealWatchlist({ claimId, monitoredRegionId, auth, refreshSequence, refreshHeaders, trackRefresh, onDiscordLogin }: MarketRefreshProps & {
+export function DealWatchlist({ claimId, monitoredRegionId, auth, refreshSequence, refreshHeaders, trackRefresh, onAuthInvalidated, onDiscordLogin }: MarketRefreshProps & {
   claimId: string;
   monitoredRegionId: string;
   auth: UserAuthState;
+  onAuthInvalidated: () => void;
   onDiscordLogin: (returnTo?: string) => void;
 }) {
   const defaultRegion = monitoredRegionId;
@@ -80,7 +81,13 @@ export function DealWatchlist({ claimId, monitoredRegionId, auth, refreshSequenc
     const controller = new AbortController();
     setWatchState((current) => ({ ...current, error: null, loading: true }));
     trackRefresh("global-market-deal-watches", fetch(`${LOCAL_API}/market/deal-watches`, { headers: refreshHeaders, signal: controller.signal }))
-      .then((response) => response.status === 401 ? { watches: [], settings: null, signedOut: true } : response.ok ? response.json() : Promise.reject(new Error(`deal watches HTTP ${response.status}`)))
+      .then((response) => {
+        if (response.status === 401) {
+          onAuthInvalidated();
+          return { watches: [], settings: null, signedOut: true };
+        }
+        return response.ok ? response.json() : Promise.reject(new Error(`deal watches HTTP ${response.status}`));
+      })
       .then((payload) => setWatchState({ data: payload, error: null, loading: false }))
       .catch((error) => {
         if (!controller.signal.aborted) {
@@ -92,7 +99,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, auth, refreshSequenc
         }
       });
     return () => controller.abort();
-  }, [refreshSequence]);
+  }, [onAuthInvalidated, refreshSequence]);
 
   React.useEffect(() => refreshDealWatches(), [refreshDealWatches]);
 
@@ -159,6 +166,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, auth, refreshSequenc
         }),
       });
       if (response.status === 401) {
+        onAuthInvalidated();
         onDiscordLogin(`${window.location.pathname}${window.location.search}`);
         return;
       }
@@ -186,6 +194,10 @@ export function DealWatchlist({ claimId, monitoredRegionId, auth, refreshSequenc
         headers: { "content-type": "application/json", "x-csrf-token": String(auth.csrfToken ?? "") },
         body: JSON.stringify(patch),
       });
+      if (response.status === 401) {
+        onAuthInvalidated();
+        return;
+      }
       if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
       refreshDealWatches();
     } catch (error) {
@@ -204,6 +216,10 @@ export function DealWatchlist({ claimId, monitoredRegionId, auth, refreshSequenc
         method: "DELETE",
         headers: { "x-csrf-token": String(auth.csrfToken ?? "") },
       });
+      if (response.status === 401) {
+        onAuthInvalidated();
+        return;
+      }
       if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
       refreshDealWatches();
     } catch (error) {

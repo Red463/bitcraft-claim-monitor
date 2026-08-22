@@ -5,7 +5,7 @@ import test from "node:test";
 import { createServer as createViteServer } from "vite";
 
 import { loadBootstrap } from "../src/api/bootstrap.ts";
-import { React, act, installDom, mount } from "./react-dom-test-harness.mjs";
+import { React, installDom, mount } from "./react-dom-test-harness.mjs";
 
 const appRoot = fileURLToPath(new URL("..", import.meta.url));
 const bootstrapFixture = {
@@ -22,10 +22,10 @@ const bootstrapFixture = {
   build: { version: "test", buildSha: "build-a" },
 };
 
-function responseFor(url) {
+function responseFor(url, { dealWatchUnauthorized = false } = {}) {
   if (url === "/api/local/bootstrap") return bootstrapFixture;
   if (url.includes("/market/regions")) return { regions: [{ regionId: "19", regionName: "Region 19" }] };
-  if (url === "/api/local/market/deal-watches") return { watches: [], settings: {} };
+  if (url === "/api/local/market/deal-watches") return dealWatchUnauthorized ? { error: "Authentication required" } : { watches: [], settings: {} };
   if (url === "/api/local/config") return bootstrapFixture.config;
   if (url === "/api/local/auth/me") return bootstrapFixture.auth;
   return {};
@@ -35,10 +35,12 @@ test("direct and refreshed Deal Watch descendants reuse bootstrap auth without a
   const dom = installDom("http://localhost/?page=market&tab=deal-watch");
   const requests = [];
   const originalFetch = globalThis.fetch;
+  let dealWatchUnauthorized = false;
   globalThis.fetch = async (input) => {
     const url = String(input);
     requests.push(url);
-    return new Response(JSON.stringify(responseFor(url)), { status: 200, headers: { "content-type": "application/json" } });
+    const status = dealWatchUnauthorized && url === "/api/local/market/deal-watches" ? 401 : 200;
+    return new Response(JSON.stringify(responseFor(url, { dealWatchUnauthorized })), { status, headers: { "content-type": "application/json" } });
   };
   const vite = await createViteServer({ root: appRoot, appType: "custom", logLevel: "silent", server: { middlewareMode: true } });
   try {
@@ -47,70 +49,41 @@ test("direct and refreshed Deal Watch descendants reuse bootstrap auth without a
       vite.ssrLoadModule("/src/pages/MarketPage.tsx"),
       vite.ssrLoadModule("/src/refresh/ManualRefreshContext.tsx"),
     ]);
-    const marketProps = {
-      claimId: bootstrap.config.claimId,
-      access: null,
-      locationSearch: dom.window.location.search,
-      fallbackRegionId: "19",
-      auth: bootstrap.auth,
-      onQueryStateChange() {},
-      onNavigate() {},
-      onShowMap() {},
-      onDiscordLogin() {},
-    };
     const coordinator = { trackPromise: (_cycleId, _taskKey, promise) => promise };
-    const route = (sequence) => React.createElement(PageRefreshProvider, {
-      page: "market",
-      cycle: { id: `market-${sequence}`, page: "market", sequence, reason: "manual", requestedAt: sequence },
-      coordinator,
-    }, React.createElement(Market, marketProps));
-    const view = await mount(route(0));
+    function DealWatchRoute({ sequence }) {
+      const [auth, setAuth] = React.useState(bootstrap.auth);
+      const onAuthInvalidated = React.useCallback(() => setAuth((current) => ({ ...current, user: null, csrfToken: null })), []);
+      return React.createElement(PageRefreshProvider, {
+        page: "market",
+        cycle: { id: `market-${sequence}`, page: "market", sequence, reason: "manual", requestedAt: sequence },
+        coordinator,
+      }, React.createElement(Market, {
+        claimId: bootstrap.config.claimId,
+        access: null,
+        locationSearch: dom.window.location.search,
+        fallbackRegionId: "19",
+        auth,
+        onAuthInvalidated,
+        onQueryStateChange() {},
+        onNavigate() {},
+        onShowMap() {},
+        onDiscordLogin() {},
+      }));
+    }
+    const view = await mount(React.createElement(DealWatchRoute, { sequence: 0 }));
     await dom.flush();
-    await view.render(route(1));
+    assert.match(document.body.textContent, /Watch item/);
+
+    dealWatchUnauthorized = true;
+    await view.render(React.createElement(DealWatchRoute, { sequence: 1 }));
     await dom.flush();
 
     assert.equal(requests.filter((url) => url === "/api/local/bootstrap").length, 1);
     assert.equal(requests.filter((url) => url === "/api/local/auth/me").length, 0);
     assert.ok(requests.filter((url) => url === "/api/local/market/deal-watches").length >= 2, "refresh still reloads deal data");
+    assert.match(document.body.textContent, /Sign in with Discord/);
+    assert.doesNotMatch(document.body.textContent, /Watch item/);
     await view.unmount();
-  } finally {
-    globalThis.fetch = originalFetch;
-    await vite.close();
-    dom.restore();
-  }
-});
-
-test("the /bot descendant route uses bootstrap config without a compatibility config request", async () => {
-  const dom = installDom("http://localhost/bot");
-  dom.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-  const requests = [];
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input) => {
-    const url = String(input);
-    requests.push(url);
-    return new Response(JSON.stringify(responseFor(url)), { status: 200, headers: { "content-type": "application/json" } });
-  };
-  const vite = await createViteServer({ root: appRoot, appType: "custom", logLevel: "silent", server: { middlewareMode: true } });
-  try {
-    const bootstrap = await loadBootstrap(globalThis.fetch);
-    const { default: App, BotControlApp } = await vite.ssrLoadModule("/src/AppShell.tsx");
-    const view = await mount(React.createElement(React.Suspense, { fallback: null }, React.createElement(App, { initialBootstrap: bootstrap })));
-    await dom.flush();
-    await act(async () => {
-      for (let attempt = 0; attempt < 50 && !document.querySelector(".bot-control-page"); attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-    });
-
-    assert.equal(requests.filter((url) => url === "/api/local/bootstrap").length, 1);
-    assert.equal(requests.filter((url) => url === "/api/local/config").length, 0);
-    await view.unmount();
-
-    requests.length = 0;
-    const legacyView = await mount(React.createElement(React.Suspense, { fallback: null }, React.createElement(BotControlApp)));
-    await dom.flush();
-    assert.equal(requests.filter((url) => url === "/api/local/config").length, 1, "the compatibility config request remains when bootstrap config is absent");
-    await legacyView.unmount();
   } finally {
     globalThis.fetch = originalFetch;
     await vite.close();

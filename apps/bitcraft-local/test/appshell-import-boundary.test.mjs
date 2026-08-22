@@ -77,8 +77,11 @@ test("main gates AppShell on bootstrap and AppShell consumes the resolved initia
 
 test("administrator settings stay behind authenticated admin loading instead of public bootstrap", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const adminSession = readFileSync(new URL("../src/api/adminSession.ts", import.meta.url), "utf8");
 
-  assert.match(appShell, /if \(nextAuth\.authenticated\)[\s\S]*fetch\(`\$\{LOCAL_API\}\/admin\/settings`\)/);
+  assert.match(appShell, /loadAdminConsoleSession\(fetch\)/);
+  assert.match(adminSession, /if \(!auth\?\.authenticated\)/);
+  assert.match(adminSession, /fetchImpl\(`\$\{LOCAL_API\}\/admin\/settings`/);
 });
 
 test("AppShell wires public access-control decisions into navigation and blocked states", () => {

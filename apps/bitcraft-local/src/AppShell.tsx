@@ -26,6 +26,7 @@ import {
 import packageJson from "../package.json";
 import { useFeaturebase } from "featurebase-js/react";
 import type { BootstrapPayload } from "./api/bootstrap";
+import { loadAdminConsoleSession } from "./api/adminSession";
 import { clearPreviousClaimGameData, gameDataScopeKey, useGameData } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
 import {
@@ -453,23 +454,14 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
   }, []);
   const refreshAdminAuth = React.useCallback(async () => {
     try {
-      const response = await fetch(`${LOCAL_API}/admin/me`);
-      if (!response.ok) {
-        setAdminAuth({ authenticated: false });
-        return;
+      const { auth, settings } = await loadAdminConsoleSession(fetch);
+      if (settings) {
+        clearPreviousClaimGameData(claimIdRef.current, settings.claimId);
+        setAppSettings(settings);
+        setClaimId(settings.claimId);
+        setSyncUrl(settings.syncUrl);
       }
-      const nextAuth = await response.json();
-      setAdminAuth(nextAuth);
-      if (nextAuth.authenticated) {
-        const settingsResponse = await fetch(`${LOCAL_API}/admin/settings`);
-        if (settingsResponse.ok) {
-          const nextSettings = normalizeAppSettings(await settingsResponse.json());
-          clearPreviousClaimGameData(claimIdRef.current, nextSettings.claimId);
-          setAppSettings(nextSettings);
-          setClaimId(nextSettings.claimId);
-          setSyncUrl(nextSettings.syncUrl);
-        }
-      }
+      setAdminAuth(auth);
     } catch {
       setAdminAuth({ authenticated: false });
     }
@@ -521,6 +513,10 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
     if (!response.ok) throw new Error(body.error ?? "Unable to sign out");
     shutdownFeaturebase();
     setUserAuth(body);
+  }, [shutdownFeaturebase]);
+  const invalidateUserAuth = React.useCallback(() => {
+    shutdownFeaturebase();
+    setUserAuth((current) => ({ ...current, user: null, csrfToken: null, featurebaseJwt: undefined }));
   }, [shutdownFeaturebase]);
   const linkDiscordCharacter = React.useCallback(async (member: AnyRecord | null) => {
     const payload = member ? { characterPlayerId: String(member.playerEntityId ?? ""), characterName: String(member.userName ?? member.username ?? member.playerUsername ?? member.name ?? "") } : {};
@@ -907,14 +903,14 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     research: <Research data={data} />,
-    market: <Market claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} fallbackRegionId={String(data.claim.regionId ?? "")} activeRegionScopeKey={activeRegionScopeKey} auth={userAuth} onQueryStateChange={syncRouteSearch} onNavigate={navigate} onShowMap={(focus, regionId) => { const target = { ...focus, regionId }; setMapFocus(target); navigate("map", undefined, target); }} onDiscordLogin={discordLogin} />,
+    market: <Market claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} fallbackRegionId={String(data.claim.regionId ?? "")} activeRegionScopeKey={activeRegionScopeKey} auth={userAuth} onAuthInvalidated={invalidateUserAuth} onQueryStateChange={syncRouteSearch} onNavigate={navigate} onShowMap={(focus, regionId) => { const target = { ...focus, regionId }; setMapFocus(target); navigate("map", undefined, target); }} onDiscordLogin={discordLogin} />,
     "settlement-market": <SettlementMarket data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} listingsLoading={state.loading} listingError={state.error} onQueryStateChange={syncRouteSearch} />,
     region: <Region data={data} />,
     empires: <Empires monitoredClaimId={claimId} monitoredRegionId={String(data.claim.regionId ?? "")} activeRegionScopeKey={activeRegionScopeKey} providerData={data.raw} providerLoading={state.loading} providerError={state.error} access={effectiveAccess} />,
     map: <MapPanel data={data} focus={mapFocus} activeRegionScopeKey={activeRegionScopeKey} dedicated={dedicatedMapView} verifiedCharacterPlayerId={verifiedCharacterPlayerId(userAuth.user?.characterStatus, userAuth.user?.characterPlayerId)} playerColourOverrides={normalizedMapPlayerColours} onPlayerColourChange={(playerId, colour) => setMapPlayerColours((current) => withPlayerMarkerColourOverride(current, playerId, colour))} onClearFocus={() => { setMapFocus(null); updateQueryState({ label: null, x: null, z: null, regionId: null, mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} members={data.members} access={effectiveAccess} />,
-    admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} publicAccount={userAuth.user} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); }} onClaimSettingsSaved={(previousClaimId, settings) => clearPreviousClaimGameData(previousClaimId, settings.claimId)} />,
+    admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} publicAccount={userAuth.user} resolvedAuth={adminAuth} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); }} onClaimSettingsSaved={(previousClaimId, settings) => clearPreviousClaimGameData(previousClaimId, settings.claimId)} />,
   };
   const activePageTargetId = targetIdForPage(active);
   const activePageDecision = accessDecisionFor(activePageTargetId);
@@ -1269,31 +1265,86 @@ function DedicatedLegalApp({ type }: { type: "terms" | "privacy" }) {
  * This keeps bot administration separate from the public app while still using
  * the same AdminPanel implementation and server-side admin permissions.
  */
-export function BotControlApp({ initialConfig }: { initialConfig?: BootstrapPayload["config"] }) {
-  const [settings, setSettings] = React.useState<AppSettings>(() => normalizeAppSettings(initialConfig ?? DEFAULT_SETTINGS));
-  const [loading, setLoading] = React.useState(!initialConfig);
+type BotControlConsoleProps = {
+  settings: AppSettings;
+  resolvedAuth: AnyRecord;
+  onAuthChanged: (auth: AnyRecord) => void;
+  onSettingsSaved: (settings: AppSettings) => void;
+};
+
+export function BotControlApp({
+  initialConfig,
+  renderConsole,
+}: {
+  initialConfig?: BootstrapPayload["config"];
+  renderConsole?: (props: BotControlConsoleProps) => React.ReactNode;
+}) {
+  const initialPublicSettings = React.useMemo(() => normalizeAppSettings(initialConfig ?? DEFAULT_SETTINGS), [initialConfig]);
+  const [state, setState] = React.useState<{
+    status: "loading" | "ready" | "signed-out" | "error";
+    publicSettings: AppSettings;
+    settings: AppSettings | null;
+    auth: AnyRecord | null;
+    error: string;
+  }>(() => ({ status: "loading", publicSettings: initialPublicSettings, settings: null, auth: null, error: "" }));
+  const [reloadSequence, setReloadSequence] = React.useState(0);
   React.useEffect(() => {
+    let cancelled = false;
     document.title = "Discord Bot Control — BitCraft Claim Monitor";
-    if (initialConfig) {
-      applyTheme(normalizeAppSettings(initialConfig).theme);
-      return;
+    async function load() {
+      setState((current) => ({ ...current, status: "loading", settings: null, auth: null, error: "" }));
+      try {
+        let publicSettings = initialPublicSettings;
+        if (!initialConfig) {
+          const response = await fetch(`${LOCAL_API}/config`);
+          if (!response.ok) throw new Error(`Public configuration failed with HTTP ${response.status}.`);
+          publicSettings = normalizeAppSettings(await response.json());
+        }
+        applyTheme(publicSettings.theme);
+        const { auth, settings } = await loadAdminConsoleSession(fetch);
+        if (cancelled) return;
+        if (!auth.authenticated) {
+          setState({ status: "signed-out", publicSettings, settings: null, auth, error: "" });
+          return;
+        }
+        if (!settings) throw new Error("Protected administrator settings were unavailable.");
+        applyTheme(settings.theme);
+        setState({ status: "ready", publicSettings, settings, auth, error: "" });
+      } catch (error) {
+        if (!cancelled) setState((current) => ({ ...current, status: "error", settings: null, auth: null, error: error instanceof Error ? error.message : String(error) }));
+      }
     }
-    fetch(`${LOCAL_API}/config`)
-      .then((response) => response.ok ? response.json() : null)
-      .then((config) => {
-        const next = normalizeAppSettings(config);
-        setSettings(next);
-        applyTheme(next.theme);
-      })
-      .catch(() => applyTheme(DEFAULT_THEME))
-      .finally(() => setLoading(false));
-  }, [initialConfig]);
-  return loading ? <main><AppSkeleton /></main> : (
+    void load();
+    return () => { cancelled = true; };
+  }, [initialConfig, initialPublicSettings, reloadSequence]);
+  if (state.status === "loading") return <main><AppSkeleton /></main>;
+  if (state.status === "error") return (
+    <main className="bot-control-page route-entry-state">
+      <section className="empty-state panel" role="alert">
+        <strong>Discord Bot Control could not be loaded safely.</strong>
+        <span>{state.error}</span>
+        <button className="toolbar-button primary" onClick={() => setReloadSequence((value) => value + 1)}>Try again</button>
+      </section>
+    </main>
+  );
+  const settings = state.settings ?? state.publicSettings;
+  const consoleProps: BotControlConsoleProps = {
+    settings,
+    resolvedAuth: state.auth ?? { authenticated: false },
+    onAuthChanged: (auth) => {
+      if (auth.authenticated) setReloadSequence((value) => value + 1);
+      else setState((current) => ({ ...current, status: "signed-out", settings: null, auth }));
+    },
+    onSettingsSaved: (next) => {
+      setState((current) => ({ ...current, settings: next }));
+      applyTheme(next.theme);
+    },
+  };
+  return (
     <main className="bot-control-page">
-      <AdminPanel settings={settings} onSettingsSaved={(next) => {
-        setSettings(next);
-        applyTheme(next.theme);
-      }} botOnly headingLevel={1} />
+      {renderConsole
+        ? renderConsole(consoleProps)
+        : <AdminPanel key={state.status} {...consoleProps} botOnly headingLevel={1} />}
     </main>
   );
 }

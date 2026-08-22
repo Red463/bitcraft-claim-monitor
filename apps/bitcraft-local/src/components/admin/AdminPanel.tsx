@@ -226,6 +226,7 @@ export type AdminPanelProps = {
   headingLevel?: 1 | 2;
   onAuthChanged?: (auth: AnyRecord) => void;
   publicAccount?: AnyRecord | null;
+  resolvedAuth?: AnyRecord;
 };
 
 export function AdminPanel({
@@ -237,10 +238,11 @@ export function AdminPanel({
   headingLevel = 2,
   onAuthChanged,
   publicAccount,
+  resolvedAuth,
 }: AdminPanelProps) {
   const Heading = headingLevel === 1 ? "h1" : "h2";
-  const [auth, setAuth] = React.useState<AnyRecord | null>(null);
-  const [authLoading, setAuthLoading] = React.useState(true);
+  const [auth, setAuth] = React.useState<AnyRecord | null>(() => resolvedAuth ?? null);
+  const [authLoading, setAuthLoading] = React.useState(resolvedAuth === undefined);
   const [authLoaderDelayElapsed, setAuthLoaderDelayElapsed] = React.useState(false);
   const initialAdminLocation = React.useMemo(() => parseAdminLocation(window.location.search), []);
   const hasExplicitInitialAdminTab = React.useMemo(() => new URLSearchParams(window.location.search).has("admin"), []);
@@ -567,12 +569,18 @@ export function AdminPanel({
     return () => window.clearTimeout(timer);
   }, [authLoading]);
   React.useEffect(() => {
+    if (resolvedAuth === undefined) return;
+    setAuth(resolvedAuth);
+    setAuthLoading(false);
+  }, [resolvedAuth]);
+  React.useEffect(() => {
+    if (resolvedAuth !== undefined) return;
     api("/admin/me").then(setAdminAuthState).catch((error) => {
       setAdminAuthState({ authenticated: false, setupRequired: false, error: error instanceof Error ? error.message : String(error) });
       setMessageKind("error");
       setMessage(error.message);
     }).finally(() => setAuthLoading(false));
-  }, []);
+  }, [resolvedAuth]);
   React.useEffect(() => {
     const previousSettings = persistedSettingsRef.current;
     setDraft((current) => syncDraftFromPersistedSettings(previousSettings, settings, current));
