@@ -25,8 +25,7 @@ import {
 } from "lucide-react";
 import packageJson from "../package.json";
 import { useFeaturebase } from "featurebase-js/react";
-import { useGameData } from "./api/gameDataLoader";
-import { gameDataScopeKey } from "./api/gameDataLoader";
+import { clearPreviousClaimGameData, gameDataScopeKey, useGameData } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
 import {
   gameDataQualitySummaries,
@@ -323,6 +322,7 @@ function DashboardApp() {
   const [effectiveAccess, setEffectiveAccess] = React.useState<EffectiveAccess | null>(null);
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
   const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
+  const claimIdRef = React.useRef(claimId);
   const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
   const [browserTheme, setBrowserTheme] = usePersistedState<ThemeSettings>("theme.local", DEFAULT_THEME);
   const [notificationRefreshToken, setNotificationRefreshToken] = React.useState(0);
@@ -776,11 +776,15 @@ function DashboardApp() {
     return () => window.clearTimeout(timer);
   }, [releaseUpdatedNotice]);
   React.useEffect(() => {
+    claimIdRef.current = claimId;
+  }, [claimId]);
+  React.useEffect(() => {
     fetch(`${LOCAL_API}/config`)
       .then((response) => response.ok ? response.json() : null)
       .then((config) => {
         if (!config) return;
         const next = normalizeAppSettings(config);
+        clearPreviousClaimGameData(claimIdRef.current, next.claimId);
         setAppSettings(next);
         setClaimId(next.claimId);
         setSyncUrl(next.syncUrl);
@@ -934,7 +938,7 @@ function DashboardApp() {
     map: <MapPanel data={data} focus={mapFocus} activeRegionScopeKey={activeRegionScopeKey} dedicated={dedicatedMapView} verifiedCharacterPlayerId={verifiedCharacterPlayerId(userAuth.user?.characterStatus, userAuth.user?.characterPlayerId)} playerColourOverrides={normalizedMapPlayerColours} onPlayerColourChange={(playerId, colour) => setMapPlayerColours((current) => withPlayerMarkerColourOverride(current, playerId, colour))} onClearFocus={() => { setMapFocus(null); updateQueryState({ label: null, x: null, z: null, regionId: null, mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} members={data.members} access={effectiveAccess} />,
-    admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} publicAccount={userAuth.user} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); }} />,
+    admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} publicAccount={userAuth.user} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { clearPreviousClaimGameData(claimIdRef.current, settings.claimId); setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); }} />,
   };
   const activePageTargetId = targetIdForPage(active);
   const activePageDecision = accessDecisionFor(activePageTargetId);

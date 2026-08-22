@@ -4,15 +4,50 @@ import type { AnyRecord } from "../main-app-data";
 import type { PageRefreshCycle } from "../refresh/pageRefresh.mjs";
 import { pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
 import type { ActivePanel, LoadState } from "../types/app";
-import { loadGameData } from "./gameData.ts";
+import { loadGameDataWithPayloadBytes } from "./gameData.ts";
 import { pageDomains } from "./pageDomains.ts";
+import { createPageNavigationCache } from "./pageNavigationCache.ts";
 
 type PageFreshness = { updatedAt: string; cacheState: string | null; stale: boolean };
-type CachedGameData = Partial<PageFreshness> & { data: AnyRecord };
-const pageNavigationCache = new Map<string, CachedGameData>();
+type PageNavigationCache = ReturnType<typeof createPageNavigationCache<AnyRecord>>;
+const pageNavigationCache = createPageNavigationCache<AnyRecord>();
 
 export function gameDataScopeKey(claimId: string, activePanel: ActivePanel): string {
   return `${claimId}:${activePanel}`;
+}
+
+export function cacheGameDataForNavigation(
+  cache: PageNavigationCache,
+  scopeKey: string,
+  claimId: string,
+  panel: ActivePanel,
+  data: AnyRecord,
+  payloadBytes: number | undefined,
+  freshness: Partial<PageFreshness> = {},
+): AnyRecord {
+  const responseMeta = data.responseMeta as AnyRecord | null | undefined;
+  cache.set(scopeKey, {
+    claimId,
+    panel,
+    data,
+    payloadBytes,
+    generation: responseMeta?.newestGeneration == null ? null : String(responseMeta.newestGeneration),
+    coherence: responseMeta?.coherence == null ? null : String(responseMeta.coherence),
+    ...stateFreshness(freshness),
+  });
+  return data;
+}
+
+export function clearPreviousClaimNavigationCache(
+  cache: PageNavigationCache,
+  previousClaimId: string,
+  nextClaimId: string,
+): void {
+  if (previousClaimId && nextClaimId && previousClaimId !== nextClaimId) cache.clearClaim(previousClaimId);
+}
+
+export function clearPreviousClaimGameData(previousClaimId: string, nextClaimId: string): void {
+  clearPreviousClaimNavigationCache(pageNavigationCache, previousClaimId, nextClaimId);
 }
 
 function freshnessFromPayload(data: AnyRecord, fallbackMs = Date.now()): PageFreshness {
@@ -130,14 +165,15 @@ export function useGameData(
     const controller = new AbortController();
     async function load() {
       try {
-        const raw = await loadGameData(
+        const result = await loadGameDataWithPayloadBytes(
           claimId,
           domains,
           fetch,
           { headers: { ...refreshHeaders }, signal: controller.signal },
         );
+        const raw = result.data;
         const freshness = freshnessFromPayload(raw);
-        pageNavigationCache.set(requestedScopeKey, { data: raw, ...freshness });
+        cacheGameDataForNavigation(pageNavigationCache, requestedScopeKey, claimId, activePanel, raw, result.payloadBytes, freshness);
         if (!cancelled) {
           React.startTransition(() => {
             setState((previous) => completeGameDataScope(previous, requestedScopeKey, raw, freshness));

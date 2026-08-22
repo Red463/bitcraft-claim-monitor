@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { loadGameData } from "../src/api/gameData.ts";
+import { loadGameData, loadGameDataWithPayloadBytes } from "../src/api/gameData.ts";
 
 const claimProvenance = {
   provider: "relay",
@@ -160,4 +160,25 @@ test("an unavailable requested domain does not make fresh available data globall
   assert.equal(result.stale, false);
   assert.deepEqual(result.domainStatus.market.warnings, ["market has not loaded yet."]);
   assert.deepEqual(result.partialErrors, ["market has not loaded yet."]);
+});
+
+test("captures declared payload bytes or the response text length before parsing", async () => {
+  const payload = {
+    claimId: "1369094286777412590",
+    regionId: "19",
+    generatedAt: "2026-08-22T10:00:02.000Z",
+    domains: { claim: { data: { name: "Timbersteel" }, freshness: "fresh" } },
+    domainStatus: {},
+    meta: { coherence: "coherent" },
+    partialErrors: [],
+  };
+  const text = JSON.stringify(payload);
+  const declared = await loadGameDataWithPayloadBytes("1369094286777412590", ["claim"], async () => new Response(text, {
+    headers: { "content-length": "999" },
+  }));
+  const observed = await loadGameDataWithPayloadBytes("1369094286777412590", ["claim"], async () => new Response(text));
+
+  assert.equal(declared.payloadBytes, 999);
+  assert.equal(observed.payloadBytes, new TextEncoder().encode(text).byteLength);
+  assert.deepEqual(observed.data.claim, { name: "Timbersteel" });
 });

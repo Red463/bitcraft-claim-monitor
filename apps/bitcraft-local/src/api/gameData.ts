@@ -23,6 +23,15 @@ export async function loadGameData(
   fetcher: typeof fetch = fetch,
   init: RequestInit = {},
 ): Promise<AnyRecord> {
+  return (await loadGameDataWithPayloadBytes(claimId, domains, fetcher, init)).data;
+}
+
+export async function loadGameDataWithPayloadBytes(
+  claimId: string,
+  domains: DomainKey[],
+  fetcher: typeof fetch = fetch,
+  init: RequestInit = {},
+): Promise<{ data: AnyRecord; payloadBytes: number }> {
   const query = new URLSearchParams({
     claimId,
     domains: domains.join(","),
@@ -31,7 +40,13 @@ export async function loadGameData(
   if (!response.ok) {
     throw new Error(`Unable to load game data (HTTP ${response.status}).`);
   }
-  const payload = await response.json() as GameDataResponse;
+  const text = await response.text();
+  const declaredLength = response.headers.get("content-length");
+  const declaredPayloadBytes = declaredLength == null ? Number.NaN : Number(declaredLength);
+  const payloadBytes = Number.isFinite(declaredPayloadBytes) && declaredPayloadBytes >= 0
+    ? Math.floor(declaredPayloadBytes)
+    : new TextEncoder().encode(text).byteLength;
+  const payload = JSON.parse(text) as GameDataResponse;
   const flattened: AnyRecord = {
     claimId: payload.claimId,
     regionId: payload.regionId,
@@ -61,5 +76,5 @@ export async function loadGameData(
     collectedAt: oldestReceivedAt,
     lastSuccessAt: oldestReceivedAt,
   };
-  return flattened;
+  return { data: flattened, payloadBytes };
 }
