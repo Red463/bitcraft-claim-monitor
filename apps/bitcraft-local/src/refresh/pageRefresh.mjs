@@ -283,6 +283,7 @@ export function createPageRefreshController(options) {
       timer = null;
       if (!visible) {
         overdue = true;
+        if (reason === "generation") overdueGeneration = true;
         return;
       }
       dirty = false;
@@ -420,7 +421,8 @@ export function createPageRefreshController(options) {
       if (queuedReason) {
         const reason = queuedReason;
         queuedReason = null;
-        startCycle(reason);
+        if (reason === "generation") scheduleGeneration();
+        else startCycle(reason);
       } else if (dirty) scheduleNearLive();
       else scheduleInterval();
     },

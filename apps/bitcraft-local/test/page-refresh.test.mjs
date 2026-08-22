@@ -323,6 +323,45 @@ test("a failed generation runs a queued manual cycle before its pending retry", 
   assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation", "manual", "generation", "generation"]);
 });
 
+test("generation events during a priority manual cycle honor the retained retry deadline", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `manual-generation-deadline-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles[1].id, false);
+  controller.requestManual();
+  clock.advance(3_000);
+  controller.invalidateGeneration();
+  controller.invalidateGeneration();
+  controller.complete(cycles[2].id, true);
+
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation", "manual"]);
+  clock.advance(1_999);
+  assert.equal(cycles.length, 3);
+  clock.advance(1);
+  assert.equal(cycles.length, 4);
+  assert.equal(cycles[3].reason, "generation");
+
+  controller.complete(cycles[3].id, false);
+  clock.advance(9_999);
+  assert.equal(cycles.length, 4);
+  clock.advance(1);
+  assert.equal(cycles.length, 5);
+  assert.equal(cycles[4].reason, "generation");
+});
+
 test("cold-start failures are sealed outside the data branch and enter Craft Monitor backoff", async () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
   assert.match(appShell, /state\.error && !state\.data \? \([\s\S]*<ApiErrorState[\s\S]*<PageRefreshCycleSeal[\s\S]*\) : \(/);
@@ -853,6 +892,51 @@ test("interval-page visibility catch-up preserves a generation failure-backoff d
   clock.advance(1);
   assert.equal(cycles.length, 4);
   assert.equal(cycles[3].reason, "generation");
+});
+
+test("generation retry provenance survives a hidden deadline and continues bounded backoff", () => {
+  const clock = createFakeClock();
+  const cycles = [];
+  const controller = createPageRefreshController({
+    page: "dashboard",
+    intervalMs: 30_000,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    createId: () => `hidden-retry-deadline-${cycles.length + 1}`,
+    onCycle: (cycle) => cycles.push(cycle),
+  });
+
+  controller.start();
+  controller.complete(cycles[0].id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles[1].id, false);
+  controller.setVisible(false);
+  clock.advance(5_000);
+  controller.setVisible(true);
+  assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation", "visibility-catch-up"]);
+
+  for (const delay of [10_000, 20_000, 30_000, 30_000]) {
+    controller.complete(cycles.at(-1).id, false);
+    const beforeRetry = cycles.length;
+    clock.advance(delay - 1);
+    assert.equal(cycles.length, beforeRetry);
+    clock.advance(1);
+    assert.equal(cycles.length, beforeRetry + 1);
+    assert.equal(cycles.at(-1).reason, "generation");
+  }
+
+  controller.complete(cycles.at(-1).id, true);
+  controller.invalidateGeneration();
+  clock.advance(2_000);
+  controller.complete(cycles.at(-1).id, false);
+  const beforeResetRetry = cycles.length;
+  clock.advance(4_999);
+  assert.equal(cycles.length, beforeResetRetry);
+  clock.advance(1);
+  assert.equal(cycles.length, beforeResetRetry + 1);
+  assert.equal(cycles.at(-1).reason, "generation");
 });
 
 test("tracked non-OK HTTP responses fail the whole-page cycle", async () => {
