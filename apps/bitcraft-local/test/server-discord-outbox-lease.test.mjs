@@ -5,7 +5,10 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import { createDiscordOutboxLeaser } from "../src/server/discordOutboxLease.mjs";
+import {
+  completeDiscordOutboxFailure,
+  createDiscordOutboxLeaser,
+} from "../src/server/discordOutboxLease.mjs";
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import {
   applyAdditiveColumnMigrations,
@@ -279,4 +282,111 @@ test("the leased interval covers the configured request timeout and completion m
     Date.parse(claim.leaseExpiresAt) - Date.parse(claim.lockedAt)
       > requestTimeoutMs + completionWriteMarginMs,
   );
+});
+
+test("a slow multi-recipient delivery renews before every network step and cannot be recovered", (t) => {
+  const { firstDb, secondDb } = fixture(t);
+  enqueue(firstDb, { sourceKey: "multi-recipient" });
+  let clock = "2026-08-22T09:01:00.000Z";
+  const owner = createDiscordOutboxLeaser(firstDb, {
+    workerId: "worker-a",
+    leaseMs: 1_000,
+    now: () => new Date(clock),
+  });
+  const competitor = createDiscordOutboxLeaser(secondDb, {
+    workerId: "worker-b",
+    leaseMs: 1_000,
+    now: () => new Date(clock),
+  });
+  const claim = owner.claimNext({ maxAttempts: 8 });
+
+  for (const at of [
+    "2026-08-22T09:01:00.900Z",
+    "2026-08-22T09:01:01.800Z",
+    "2026-08-22T09:01:02.700Z",
+    "2026-08-22T09:01:03.600Z",
+  ]) {
+    clock = at;
+    assert.equal(owner.renewLease({
+      id: claim.id,
+      leaseToken: claim.leaseToken,
+      leaseMs: 1_000,
+      at,
+    }), true);
+    assert.equal(competitor.recoverExpiredLeases(at).recovered, 0);
+    assert.equal(competitor.claimNext({ maxAttempts: 8 }), null);
+  }
+  assert.equal(owner.renewLease({
+    id: claim.id,
+    leaseToken: "stale-token",
+    leaseMs: 1_000,
+    at: clock,
+  }), false);
+  assert.equal(firstDb.prepare("SELECT lease_expires_at FROM discord_notification_outbox WHERE id = ?").get(claim.id).lease_expires_at, "2026-08-22T09:01:04.600Z");
+});
+
+test("a stale failure cannot overwrite a craft occurrence completed by the replacement owner", (t) => {
+  const { firstDb, secondDb } = fixture(t);
+  enqueue(firstDb, { sourceKey: "craft-report" });
+  firstDb.prepare(`
+    INSERT INTO discord_craft_plan_report_occurrences (
+      rule_id, occurrence_key, scheduled_at, status, created_at, updated_at
+    ) VALUES ('daily', 'occurrence-1', '2026-08-22T09:00:00.000Z', 'claimed',
+              '2026-08-22T09:00:00.000Z', '2026-08-22T09:00:00.000Z')
+  `).run();
+  let clock = "2026-08-22T09:01:00.000Z";
+  const staleWorker = createDiscordOutboxLeaser(firstDb, {
+    workerId: "worker-a",
+    leaseMs: 1_000,
+    now: () => new Date(clock),
+  });
+  const replacementWorker = createDiscordOutboxLeaser(secondDb, {
+    workerId: "worker-b",
+    leaseMs: 1_000,
+    now: () => new Date(clock),
+  });
+  const staleClaim = staleWorker.claimNext({ maxAttempts: 8 });
+  clock = "2026-08-22T09:01:01.000Z";
+  replacementWorker.recoverExpiredLeases(clock);
+  const replacementClaim = replacementWorker.claimNext({ maxAttempts: 8 });
+  assert.equal(replacementWorker.markSent({
+    id: replacementClaim.id,
+    leaseToken: replacementClaim.leaseToken,
+    response: { id: "replacement-message" },
+    finishedAt: clock,
+  }), true);
+  secondDb.prepare(`
+    UPDATE discord_craft_plan_report_occurrences
+    SET status = 'sent', discord_message_id = 'replacement-message', updated_at = ?
+    WHERE rule_id = 'daily' AND occurrence_key = 'occurrence-1'
+  `).run(clock);
+
+  let dependentWrites = 0;
+  const completed = completeDiscordOutboxFailure({
+    leaser: staleWorker,
+    row: staleClaim,
+    error: "stale request failed",
+    retryAt: "2026-08-22T09:02:00.000Z",
+    finishedAt: clock,
+    afterCompletion() {
+      dependentWrites += 1;
+      firstDb.prepare(`
+        UPDATE discord_craft_plan_report_occurrences
+        SET status = 'failed', last_error = 'stale request failed', updated_at = ?
+        WHERE rule_id = 'daily' AND occurrence_key = 'occurrence-1'
+      `).run(clock);
+    },
+  });
+
+  assert.equal(completed, false);
+  assert.equal(dependentWrites, 0);
+  assert.deepEqual({ ...firstDb.prepare(`
+    SELECT status, discord_message_id, last_error
+    FROM discord_craft_plan_report_occurrences
+    WHERE rule_id = 'daily' AND occurrence_key = 'occurrence-1'
+  `).get() }, {
+    status: "sent",
+    discord_message_id: "replacement-message",
+    last_error: null,
+  });
 });

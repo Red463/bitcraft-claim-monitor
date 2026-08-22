@@ -61,6 +61,15 @@ export function createDiscordOutboxLeaser(db, {
       AND next_attempt_at <= ?
   `);
   const selectClaimed = db.prepare("SELECT * FROM discord_notification_outbox WHERE id = ? AND lease_token = ? AND status = 'sending'");
+  const renewClaim = db.prepare(`
+    UPDATE discord_notification_outbox
+    SET lease_expires_at = ?, updated_at = ?
+    WHERE id = ?
+      AND lease_token = ?
+      AND status = 'sending'
+      AND lease_expires_at IS NOT NULL
+      AND lease_expires_at > ?
+  `);
   const completeSent = db.prepare(`
     UPDATE discord_notification_outbox
     SET status = 'sent', sent_at = ?, skipped_at = NULL, failed_at = NULL,
@@ -153,6 +162,22 @@ export function createDiscordOutboxLeaser(db, {
       ));
     },
 
+    renewLease({ id, leaseToken, leaseMs: requestedLeaseMs, at }) {
+      const renewedAt = timestamp(at, "Discord outbox renewal time");
+      const requestedDurationMs = Number(requestedLeaseMs);
+      if (!Number.isFinite(requestedDurationMs) || requestedDurationMs <= 0) {
+        throw new TypeError("Discord outbox renewal leaseMs must be a positive number");
+      }
+      const expiresAt = new Date(Date.parse(renewedAt) + requestedDurationMs).toISOString();
+      return changed(renewClaim.run(
+        expiresAt,
+        renewedAt,
+        id,
+        String(leaseToken ?? ""),
+        renewedAt,
+      ));
+    },
+
     markSkipped({ id, leaseToken, reason, finishedAt }) {
       const completedAt = timestamp(finishedAt, "Discord outbox skipped time");
       return changed(completeSkipped.run(
@@ -210,4 +235,31 @@ export function createDiscordOutboxLeaser(db, {
       }
     },
   };
+}
+
+export function completeDiscordOutboxFailure({
+  leaser,
+  row,
+  error,
+  retryAt,
+  finishedAt,
+  canonicalCutoverAttempt = false,
+  afterCompletion,
+}) {
+  const completed = canonicalCutoverAttempt
+    ? leaser.markSkipped({
+      id: row.id,
+      leaseToken: row.leaseToken,
+      reason: CANONICAL_UNKNOWN_OUTCOME_ERROR,
+      finishedAt,
+    })
+    : leaser.markFailed({
+      id: row.id,
+      leaseToken: row.leaseToken,
+      error,
+      retryAt,
+      finishedAt,
+    });
+  if (completed && typeof afterCompletion === "function") afterCompletion();
+  return completed;
 }

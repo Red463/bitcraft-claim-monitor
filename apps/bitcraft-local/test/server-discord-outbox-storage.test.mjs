@@ -116,7 +116,7 @@ test("lease columns migrate additively without losing existing pending and faile
   db.close();
 });
 
-test("duplicate-risk diagnostics include canonical and expired unknown outcomes", () => {
+test("duplicate-risk diagnostics include live expiry, recovered expiry, and both canonical interruption messages", () => {
   const db = new DatabaseSync(":memory:");
   applySchemaBootstrap(db);
   applyAdditiveColumnMigrations(db);
@@ -130,12 +130,29 @@ test("duplicate-risk diagnostics include canonical and expired unknown outcomes"
   });
   leaser.claimNext({ maxAttempts: 8 });
   leaser.recoverExpiredLeases("2026-06-30T12:00:01.000Z");
+  statements.enqueueDiscordNotification.run("live-expired", "app_update", "Live expired", now, "{}", now, now, now);
+  leaser.claimNext({ maxAttempts: 8 });
+  db.prepare(`
+    INSERT INTO discord_notification_outbox (
+      source_key, event_type, summary, occurred_at, metadata_json, status,
+      attempts, next_attempt_at, skipped_at, last_error, created_at, updated_at
+    ) VALUES
+      ('legacy-canonical-risk', 'canonical_cutover', 'Legacy canonical', ?, '{}',
+       'skipped', 1, ?, ?,
+       'Canonical announcement delivery was interrupted; automatic retry is suppressed', ?, ?),
+      ('recovered-expiry-risk', 'app_update', 'Recovered expiry', ?, '{}',
+       'failed', 1, ?, NULL,
+       'Delivery lease expired before completion; retry may duplicate a Discord request that was already accepted', ?, ?)
+  `).run(
+    now, now, now, now, now,
+    now, now, now, now,
+  );
 
-  assert.deepEqual({ ...statements.discordNotificationOutboxDuplicateRisk.get() }, {
-    potential_duplicate_rows: 1,
-    active_leases: 0,
-    expired_lease_rows: 0,
-    unknown_outcome_rows: 1,
+  assert.deepEqual({ ...statements.discordNotificationOutboxDuplicateRisk.get("2026-06-30T12:00:02.000Z") }, {
+    potential_duplicate_rows: 4,
+    active_leases: 1,
+    expired_lease_rows: 2,
+    unknown_outcome_rows: 2,
   });
   db.close();
 });

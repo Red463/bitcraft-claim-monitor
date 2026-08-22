@@ -87,7 +87,7 @@ import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/s
 import {
   canonicalCutoverDiscordDelivery,
 } from "./src/server/canonicalCutoverAnnouncement.mjs";
-import { createDiscordOutboxLeaser } from "./src/server/discordOutboxLease.mjs";
+import { completeDiscordOutboxFailure, createDiscordOutboxLeaser } from "./src/server/discordOutboxLease.mjs";
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
 import {
@@ -4044,7 +4044,7 @@ function isMarketSaleDiscordEvent(eventType) {
   return eventType === "market_sale" || eventType === "market_sale_confirmed";
 }
 
-async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw(), diagnostics = {}) {
+async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw(), diagnostics = {}, deliveryLease = null) {
   const decision = marketSaleDiscordRecipientDecision(metadata, statements.listUserAccounts.all());
   const recipients = decision.recipients;
   if (!recipients.length) {
@@ -4058,7 +4058,7 @@ async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredA
   };
   const responses = [];
   for (const recipientId of recipients) {
-    const response = await sendDiscordDirectMessage(recipientId, payload, settings);
+    const response = await sendDiscordDirectMessage(recipientId, payload, settings, deliveryLease);
     responses.push({ recipientId, ...discordDeliveryResponse(response) });
   }
   recordDiscordDeliverySafe({
@@ -4072,7 +4072,7 @@ async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredA
   return { ok: true, skipped: false, channelKey: "dm", response: { count: responses.length } };
 }
 
-async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw()) {
+async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw(), deliveryLease = null) {
   const channelId = discordChannelForEvent(eventType, metadata, settings);
   const channelKey = discordChannelKeyForEvent(eventType, metadata, settings);
   const diagnostics = discordDiagnosticContext(eventType, metadata, settings);
@@ -4090,16 +4090,16 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
   try {
     if (eventType === "canonical_cutover") {
       const delivery = canonicalCutoverDiscordDelivery({ summary, revision: metadata.admittedRevision, settings });
-      const response = await sendDiscordMessage(delivery.payload, settings, delivery.channelId);
+      const response = await sendDiscordMessage(delivery.payload, settings, delivery.channelId, deliveryLease);
       return { ok: true, skipped: false, channelId: delivery.channelId, channelKey: delivery.channelKey, response: discordDeliveryResponse(response) };
     }
     if (eventType === "craft_plan_report") {
-      const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(metadata.report), settings, channelId);
+      const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(metadata.report), settings, channelId, deliveryLease);
       recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: discordDeliveryResponse(response) });
       return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
     }
     if (isMarketSaleDiscordEvent(eventType) && settings.marketSalesDelivery === "dm") {
-      return await sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata, settings, diagnostics);
+      return await sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata, settings, diagnostics, deliveryLease);
     }
     const role = craftWatchRole(metadata, settings);
     const response = await sendDiscordMessage({
@@ -4107,7 +4107,7 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
       embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata, settings)],
       components: discordCraftWatchComponents(eventType, metadata),
       allowed_mentions: { roles: role ? [role.roleId] : [], parse: [] },
-    }, settings, channelId);
+    }, settings, channelId, deliveryLease);
     recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: discordDeliveryResponse(response) });
     if (eventType === "supplies") statements.upsertSetting.run("discord_last_low_supplies_at", new Date().toISOString(), new Date().toISOString());
     return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
@@ -4160,7 +4160,24 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
       const metadata = safeJson(row.metadata_json, {});
       const canonicalCutoverAttempt = row.event_type === "canonical_cutover";
       try {
-        const result = await sendDiscordActivity(row.event_type, row.summary, row.occurred_at, metadata);
+        const deliveryLease = {
+          beforeRequest() {
+            return discordOutboxLeaser.renewLease({
+              id: row.id,
+              leaseToken: row.leaseToken,
+              leaseMs: discordNotificationLeaseMs,
+              at: new Date().toISOString(),
+            });
+          },
+        };
+        const result = await sendDiscordActivity(
+          row.event_type,
+          row.summary,
+          row.occurred_at,
+          metadata,
+          getDiscordSettingsRaw(),
+          deliveryLease,
+        );
         const finishedAt = new Date().toISOString();
         if (result?.skipped) {
           const completed = discordOutboxLeaser.markSkipped({
@@ -4189,27 +4206,23 @@ async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
       } catch (error) {
         const failedAt = new Date().toISOString();
         const message = error instanceof Error ? error.message : String(error);
-        if (canonicalCutoverAttempt) {
-          discordOutboxLeaser.markSkipped({
-            id: row.id,
-            leaseToken: row.leaseToken,
-            reason: "Canonical announcement delivery outcome is unknown; automatic retry is suppressed",
-            finishedAt: failedAt,
-          });
-        } else {
-          discordOutboxLeaser.markFailed({
-            id: row.id,
-            leaseToken: row.leaseToken,
-            error: message,
-            retryAt: discordNotificationRetryAt(toNumber(row.attempts) - 1),
-            finishedAt: failedAt,
-          });
+        const completed = completeDiscordOutboxFailure({
+          leaser: discordOutboxLeaser,
+          row,
+          error: message,
+          retryAt: discordNotificationRetryAt(toNumber(row.attempts) - 1),
+          finishedAt: failedAt,
+          canonicalCutoverAttempt,
+          afterCompletion() {
+            if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+              statements.updateDiscordCraftPlanReportOccurrence.run("failed", null, redactServerHealthText(message).slice(0, 500), failedAt, metadata.ruleId, metadata.occurrenceKey);
+            }
+          },
+        });
+        if (completed) {
+          if (canonicalCutoverAttempt) skipped += 1;
+          else failed += 1;
         }
-        if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
-          statements.updateDiscordCraftPlanReportOccurrence.run("failed", null, redactServerHealthText(message).slice(0, 500), failedAt, metadata.ruleId, metadata.occurrenceKey);
-        }
-        if (canonicalCutoverAttempt) skipped += 1;
-        else failed += 1;
       }
     }
     return { checked, sent, skipped, failed };
@@ -4228,10 +4241,17 @@ function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata 
   }).catch((error) => console.warn(`Discord notification enqueue failed: ${error instanceof Error ? error.message : String(error)}`));
 }
 
-async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId) {
+function requireDiscordDeliveryLease(deliveryLease) {
+  if (deliveryLease && !deliveryLease.beforeRequest()) {
+    throw new Error("Discord outbox lease ownership was lost before network delivery");
+  }
+}
+
+async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId, deliveryLease = null) {
   if (!settings.enabled || !settings.botToken || !channelId) throw new Error("Discord integration is not fully configured");
   if (configuredDiscordDeliveryMode === "record") return recordedDiscordResponse(channelId, payload);
   assertDiscordNetworkEnabled();
+  requireDiscordDeliveryLease(deliveryLease);
   const response = await fetch(`${discordApiOrigin}/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     signal: AbortSignal.timeout(discordRequestTimeoutMs),
@@ -4245,16 +4265,16 @@ async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), c
   return response.json();
 }
 
-async function sendDiscordDirectMessage(userId, payload, settings = getDiscordSettingsRaw()) {
+async function sendDiscordDirectMessage(userId, payload, settings = getDiscordSettingsRaw(), deliveryLease = null) {
   if (!settings.enabled || !settings.botToken || !/^\d+$/.test(String(userId))) throw new Error("Discord integration is not fully configured");
   if (configuredDiscordDeliveryMode === "record") return recordedDiscordResponse(`dm:${userId}`, payload);
   const channel = await discordApiRequest("/users/@me/channels", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ recipient_id: String(userId) }),
-  }, settings);
+  }, settings, deliveryLease);
   if (!channel?.id) throw new Error("Discord did not return a DM channel.");
-  return sendDiscordMessage(payload, settings, channel.id);
+  return sendDiscordMessage(payload, settings, channel.id, deliveryLease);
 }
 
 async function editDiscordMessage(channelId, messageId, payload, settings = getDiscordSettingsRaw()) {
@@ -4335,9 +4355,10 @@ async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
   return response;
 }
 
-async function discordApiRequest(pathname, options = {}, settings = getDiscordSettingsRaw()) {
+async function discordApiRequest(pathname, options = {}, settings = getDiscordSettingsRaw(), deliveryLease = null) {
   assertDiscordNetworkEnabled();
   if (!settings.botToken) throw new Error("Discord bot token is not configured");
+  requireDiscordDeliveryLease(deliveryLease);
   const response = await fetch(`${discordApiOrigin}${pathname}`, {
     ...options,
     signal: options.signal ?? AbortSignal.timeout(discordRequestTimeoutMs),
@@ -6653,7 +6674,7 @@ function databaseStatus() {
   ]));
   const discordLastDelivery = safeJson(statements.getSetting.get("discord_last_delivery_json")?.value, { status: "none" });
   const discordOutboxCounts = Object.fromEntries(statements.discordNotificationOutboxCounts.all().map((row) => [row.status, toNumber(row.count)]));
-  const discordDuplicateRisk = statements.discordNotificationOutboxDuplicateRisk.get();
+  const discordDuplicateRisk = statements.discordNotificationOutboxDuplicateRisk.get(new Date().toISOString());
   const discordDeliveryLog = statements.recentDiscordDeliveries.all(80).map((row) => ({
     ...row,
     metadata: safeJson(row.metadata_json, {}),

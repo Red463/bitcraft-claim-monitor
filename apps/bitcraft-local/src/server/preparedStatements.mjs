@@ -348,13 +348,23 @@ export function createPreparedStatements(db) {
     SELECT
       SUM(CASE
         WHEN attempts > 1
+          OR (status = 'sending' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?1)
           OR last_error LIKE 'Delivery lease expired before completion;%'
           OR last_error = 'Canonical announcement delivery outcome is unknown; automatic retry is suppressed'
+          OR last_error = 'Canonical announcement delivery was interrupted; automatic retry is suppressed'
         THEN 1 ELSE 0
       END) AS potential_duplicate_rows,
       SUM(CASE WHEN status = 'sending' THEN 1 ELSE 0 END) AS active_leases,
-      SUM(CASE WHEN last_error LIKE 'Delivery lease expired before completion;%' THEN 1 ELSE 0 END) AS expired_lease_rows,
-      SUM(CASE WHEN last_error = 'Canonical announcement delivery outcome is unknown; automatic retry is suppressed' THEN 1 ELSE 0 END) AS unknown_outcome_rows
+      SUM(CASE
+        WHEN (status = 'sending' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?1)
+          OR last_error LIKE 'Delivery lease expired before completion;%'
+        THEN 1 ELSE 0
+      END) AS expired_lease_rows,
+      SUM(CASE
+        WHEN last_error = 'Canonical announcement delivery outcome is unknown; automatic retry is suppressed'
+          OR last_error = 'Canonical announcement delivery was interrupted; automatic retry is suppressed'
+        THEN 1 ELSE 0
+      END) AS unknown_outcome_rows
     FROM discord_notification_outbox
   `),
   recentDiscordDeliveries: db.prepare("SELECT * FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT ?"),
