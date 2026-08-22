@@ -1625,6 +1625,23 @@ function getSettings() {
   };
 }
 
+function publicBootstrapConfig() {
+  const settings = getSettings();
+  return {
+    claimId: settings.claimId,
+    syncUrl: settings.syncUrl,
+    excludedMemberIds: settings.excludedMemberIds,
+    theme: settings.theme,
+    refreshSeconds: settings.refreshSeconds,
+    defaultPage: settings.defaultPage,
+    defaultRegion: settings.defaultRegion,
+    additionalActiveRegions: settings.additionalActiveRegions,
+    toastSettings: settings.toastSettings,
+    marketDealWatch: settings.marketDealWatch,
+    branding: settings.branding,
+  };
+}
+
 const pollStatus = {
   enabled: serverPollingEnabled,
   intervalMs: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("server_refresh_seconds")?.value, Math.round(snapshotIntervalMs / 1000)) * 1000,
@@ -8165,6 +8182,15 @@ const server = createServer(async (req, res) => {
       });
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
+    if (req.method === "GET" && url.pathname === "/api/local/bootstrap") {
+      const auth = authStatus(req);
+      return send(res, 200, {
+        config: publicBootstrapConfig(),
+        auth: { ...auth, authenticated: Boolean(auth.user), featurebaseJwt: auth.featurebaseJwt ?? null },
+        legal: { ...legalPolicy, ...legalDigests, acceptanceRequired: auth.legal.requiresAcceptance },
+        build: { version: appVersion, buildSha: currentAppBuildId() },
+      }, { "cache-control": "no-store" });
+    }
     if (req.method === "GET" && url.pathname === "/api/local/popups") return send(res, 200, { popups: publicPopups(appPopupConfig()) });
     if (req.method === "GET" && url.pathname === "/api/local/catalog/probabilities.xlsx") {
       if (!rateLimit(req, res, "probability-workbook", RATE_LIMITS.expensiveLocal)) return;

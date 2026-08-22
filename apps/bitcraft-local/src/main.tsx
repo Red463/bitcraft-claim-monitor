@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { FeaturebaseProvider } from "featurebase-js/react";
+import { loadBootstrap, type BootstrapPayload } from "./api/bootstrap";
 import { RouteLoadingState } from "./components/main/RouteLoadingState";
 import "./styles.css";
 
@@ -28,31 +29,48 @@ class RouteErrorBoundary extends React.Component<{ children: React.ReactNode }, 
 }
 
 function Root() {
-  const [featurebaseJwt, setFeaturebaseJwt] = React.useState<string | undefined>();
+  const [bootstrap, setBootstrap] = React.useState<BootstrapPayload | null>(null);
+  const [bootstrapError, setBootstrapError] = React.useState("");
+  const [bootstrapAttempt, setBootstrapAttempt] = React.useState(0);
 
   React.useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/local/auth/me", { cache: "no-store", signal: controller.signal })
-      .then((response) => response.ok ? response.json() : null)
-      .then((auth) => {
-        if (typeof auth?.featurebaseJwt === "string") setFeaturebaseJwt(auth.featurebaseJwt);
+    setBootstrap(null);
+    setBootstrapError("");
+    loadBootstrap(fetch, controller.signal)
+      .then((payload) => {
+        if (!controller.signal.aborted) setBootstrap(payload);
       })
-      .catch(() => undefined);
+      .catch((error) => {
+        if (!controller.signal.aborted) setBootstrapError(error instanceof Error ? error.message : "Unable to start the app.");
+      });
     return () => controller.abort();
-  }, []);
+  }, [bootstrapAttempt]);
+
+  const entry = bootstrap ? (
+    <React.Suspense fallback={<main className="route-entry-state"><RouteLoadingState /></main>}>
+      <App initialBootstrap={bootstrap} />
+    </React.Suspense>
+  ) : bootstrapError ? (
+    <main className="route-entry-state">
+      <section className="empty-state panel" role="alert">
+        <strong>The application could not be started.</strong>
+        <span>{bootstrapError}</span>
+        <button className="toolbar-button primary" onClick={() => setBootstrapAttempt((attempt) => attempt + 1)}>Try again</button>
+      </section>
+    </main>
+  ) : <main className="route-entry-state"><RouteLoadingState label="Starting application" /></main>;
 
   return (
     <FeaturebaseProvider
       appId="6a78ff10ace030d1aa7582f2"
-      featurebaseJwt={featurebaseJwt}
+      featurebaseJwt={bootstrap?.auth.featurebaseJwt ?? undefined}
       theme="dark"
       language="en"
       alignment="right"
     >
       <RouteErrorBoundary>
-        <React.Suspense fallback={<main className="route-entry-state"><RouteLoadingState /></main>}>
-          <App />
-        </React.Suspense>
+        {entry}
       </RouteErrorBoundary>
     </FeaturebaseProvider>
   );

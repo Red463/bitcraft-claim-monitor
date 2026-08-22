@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import packageJson from "../package.json";
 import { useFeaturebase } from "featurebase-js/react";
+import type { BootstrapPayload } from "./api/bootstrap";
 import { clearPreviousClaimGameData, gameDataScopeKey, useGameData } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
 import {
@@ -50,7 +51,7 @@ import { useToastNotifications } from "./notifications/useToastNotifications";
 import { normalizeUserToastSettings } from "./notifications/userToastSettings";
 import { clearBrowserLocalSettings, hasPersistedState, usePersistedState } from "./hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "./main-app-data";
-import { DEFAULT_CLAIM_ID, DEFAULT_SETTINGS, DEFAULT_SYNC_URL, DEFAULT_USER_TOAST_SETTINGS } from "./settingsDefaults";
+import { DEFAULT_SETTINGS, DEFAULT_SYNC_URL, DEFAULT_USER_TOAST_SETTINGS } from "./settingsDefaults";
 import { canonicalPanel, DEFAULT_SIDEBAR_GROUPS, isDedicatedMapView, NAV, NAV_GROUPS, panelHref, updateQueryState, urlPanel } from "./navigation";
 import { settlementNavigationLabel } from "./navigation/navigationLabels";
 import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, withdrawAnalyticsConsent, type AnalyticsConsent } from "./utils/analytics";
@@ -280,7 +281,7 @@ function accountDisplayName(user: UserAuthState["user"]): string {
  * This component owns public navigation, live game-data refreshes, browser-local
  * preferences, user Discord auth state, notifications, and page composition.
  */
-function DashboardApp() {
+function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload }) {
   const { shutdown: shutdownFeaturebase } = useFeaturebase();
   const [active, setActive] = usePersistedState<ActivePanel>("navigation.page", "dashboard");
   const [routeSearch, setRouteSearch] = React.useState(() => window.location.search);
@@ -304,26 +305,24 @@ function DashboardApp() {
   }, []);
   const defaultPageAppliedRef = React.useRef(false);
   const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
-  const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
-  const [appBuildId, setAppBuildId] = React.useState("");
-  const appBuildIdRef = React.useRef("");
+  const [appSettings, setAppSettings] = React.useState<AppSettings>(() => normalizeAppSettings(initialBootstrap.config));
+  const [appBuildId, setAppBuildId] = React.useState(initialBootstrap.build.buildSha);
+  const appBuildIdRef = React.useRef(initialBootstrap.build.buildSha);
   const releaseUpdateBuildIdRef = React.useRef("");
   const [releaseUpdateBuildId, setReleaseUpdateBuildId] = React.useState("");
   const [releaseUpdatedNotice, setReleaseUpdatedNotice] = React.useState(false);
-  const [userAuth, setUserAuth] = React.useState<UserAuthState>({
-    user: null,
-    csrfToken: null,
-    discordLoginEnabled: false,
-    legal: { version: "", termsDigest: "", privacyDigest: "", acceptedAt: null, requiresAcceptance: false },
-  });
-  const [publicLegalPolicy, setPublicLegalPolicy] = React.useState<PublicLegalPolicy | null>(null);
+  const [userAuth, setUserAuth] = React.useState<UserAuthState>(() => ({
+    ...initialBootstrap.auth,
+    featurebaseJwt: initialBootstrap.auth.featurebaseJwt ?? undefined,
+  }));
+  const [publicLegalPolicy] = React.useState<PublicLegalPolicy>(() => initialBootstrap.legal);
   const [legalAcceptanceOpen, setLegalAcceptanceOpen] = React.useState(false);
   const [legalLoginReturnTo, setLegalLoginReturnTo] = React.useState("");
   const [effectiveAccess, setEffectiveAccess] = React.useState<EffectiveAccess | null>(null);
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
-  const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
+  const [claimId, setClaimId] = React.useState(initialBootstrap.config.claimId);
   const claimIdRef = React.useRef(claimId);
-  const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
+  const [syncUrl, setSyncUrl] = React.useState(() => normalizeAppSettings(initialBootstrap.config).syncUrl ?? DEFAULT_SYNC_URL);
   const [browserTheme, setBrowserTheme] = usePersistedState<ThemeSettings>("theme.local", DEFAULT_THEME);
   const [notificationRefreshToken, setNotificationRefreshToken] = React.useState(0);
   const [dealRefreshToken, setDealRefreshToken] = React.useState(0);
@@ -446,21 +445,6 @@ function DashboardApp() {
   );
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   syncAnalyticsConsent(consent);
-  const refreshUserAuth = React.useCallback(async () => {
-    const response = await fetch(`${LOCAL_API}/auth/me`);
-    if (!response.ok) return;
-    setUserAuth(await response.json());
-  }, []);
-  React.useEffect(() => {
-    const controller = new AbortController();
-    fetch(`${LOCAL_API}/legal`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`legal policy HTTP ${response.status}`)))
-      .then((policy) => setPublicLegalPolicy(policy))
-      .catch(() => {
-        if (!controller.signal.aborted) setPublicLegalPolicy(null);
-      });
-    return () => controller.abort();
-  }, []);
   const refreshEffectiveAccess = React.useCallback(async () => {
     try {
       const response = await fetch(`${LOCAL_API}/access-control/effective`);
@@ -476,7 +460,18 @@ function DashboardApp() {
         setAdminAuth({ authenticated: false });
         return;
       }
-      setAdminAuth(await response.json());
+      const nextAuth = await response.json();
+      setAdminAuth(nextAuth);
+      if (nextAuth.authenticated) {
+        const settingsResponse = await fetch(`${LOCAL_API}/admin/settings`);
+        if (settingsResponse.ok) {
+          const nextSettings = normalizeAppSettings(await settingsResponse.json());
+          clearPreviousClaimGameData(claimIdRef.current, nextSettings.claimId);
+          setAppSettings(nextSettings);
+          setClaimId(nextSettings.claimId);
+          setSyncUrl(nextSettings.syncUrl);
+        }
+      }
     } catch {
       setAdminAuth({ authenticated: false });
     }
@@ -779,26 +774,11 @@ function DashboardApp() {
     claimIdRef.current = claimId;
   }, [claimId]);
   React.useEffect(() => {
-    fetch(`${LOCAL_API}/config`)
-      .then((response) => response.ok ? response.json() : null)
-      .then((config) => {
-        if (!config) return;
-        const next = normalizeAppSettings(config);
-        clearPreviousClaimGameData(claimIdRef.current, next.claimId);
-        setAppSettings(next);
-        setClaimId(next.claimId);
-        setSyncUrl(next.syncUrl);
-        if (!defaultPageAppliedRef.current && !savedPageRef.current && next.defaultPage !== "admin") {
-          defaultPageAppliedRef.current = true;
-          setActive(next.defaultPage);
-          updateQueryState({ page: next.defaultPage });
-        }
-      })
-      .catch(() => undefined);
-  }, []);
-  React.useEffect(() => {
-    refreshUserAuth().catch(() => undefined);
-  }, [refreshUserAuth]);
+    if (defaultPageAppliedRef.current || savedPageRef.current || appSettings.defaultPage === "admin") return;
+    defaultPageAppliedRef.current = true;
+    setActive(appSettings.defaultPage);
+    updateQueryState({ page: appSettings.defaultPage });
+  }, [appSettings.defaultPage, setActive]);
   React.useEffect(() => {
     refreshAdminAuth().catch(() => undefined);
   }, [refreshAdminAuth]);
@@ -1318,12 +1298,12 @@ function BotControlApp() {
   );
 }
 
-export default function App() {
+export default function App({ initialBootstrap }: { initialBootstrap: BootstrapPayload }) {
   const dedicatedLegalPath = window.location.pathname === "/terms" ? "terms" : window.location.pathname === "/privacy" ? "privacy" : null;
   const dedicatedBotPath = window.location.pathname === "/bot" || window.location.hostname.toLowerCase().startsWith("bot.");
   // Route-level branching happens before mounting DashboardApp so legal pages
   // and the bot console do not initialise public page data unnecessarily.
   if (dedicatedLegalPath) return <DedicatedLegalApp type={dedicatedLegalPath} />;
   if (dedicatedBotPath) return <BotControlApp />;
-  return <DashboardApp />;
+  return <DashboardApp initialBootstrap={initialBootstrap} />;
 }

@@ -2,12 +2,111 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createPopupRefreshController,
   dismissalStateAfterAction,
   normalizePopupConfig,
   popupDismissalKey,
   popupPageLabel,
   selectNextPopup,
 } from "../src/popups/appPopups.ts";
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
+function fakeVisibilityDocument(initialVisibility = "visible") {
+  const listeners = new Set();
+  return {
+    visibilityState: initialVisibility,
+    addEventListener(type, listener) {
+      if (type === "visibilitychange") listeners.add(listener);
+    },
+    removeEventListener(type, listener) {
+      if (type === "visibilitychange") listeners.delete(listener);
+    },
+    setVisibility(next) {
+      this.visibilityState = next;
+      for (const listener of listeners) listener();
+    },
+    listenerCount() { return listeners.size; },
+  };
+}
+
+function fakeIntervals() {
+  const callbacks = new Map();
+  let nextId = 1;
+  return {
+    setInterval(callback, intervalMs) {
+      const id = nextId++;
+      callbacks.set(id, { callback, intervalMs });
+      return id;
+    },
+    clearInterval(id) { callbacks.delete(id); },
+    tick() { for (const { callback } of callbacks.values()) callback(); },
+    intervals() { return [...callbacks.values()].map(({ intervalMs }) => intervalMs); },
+    size() { return callbacks.size; },
+  };
+}
+
+test("popup refresh loads on mount and when the page becomes visible, but stays idle while hidden", async () => {
+  const documentTarget = fakeVisibilityDocument("visible");
+  const timers = fakeIntervals();
+  let loads = 0;
+  const controller = createPopupRefreshController({
+    documentTarget,
+    setInterval: timers.setInterval,
+    clearInterval: timers.clearInterval,
+    load: async () => { loads += 1; },
+  });
+
+  await controller.start();
+  assert.equal(loads, 1);
+  assert.deepEqual(timers.intervals(), [300_000]);
+
+  documentTarget.setVisibility("hidden");
+  timers.tick();
+  await Promise.resolve();
+  assert.equal(loads, 1, "the fallback interval must not fetch in a hidden tab");
+
+  documentTarget.setVisibility("visible");
+  await Promise.resolve();
+  assert.equal(loads, 2, "returning to the app should refresh operational popups");
+
+  controller.stop();
+  assert.equal(documentTarget.listenerCount(), 0);
+  assert.equal(timers.size(), 0);
+});
+
+test("popup refresh coalesces overlapping triggers and cleanup prevents later loads", async () => {
+  const documentTarget = fakeVisibilityDocument("visible");
+  const timers = fakeIntervals();
+  const firstLoad = deferred();
+  let loads = 0;
+  const controller = createPopupRefreshController({
+    documentTarget,
+    setInterval: timers.setInterval,
+    clearInterval: timers.clearInterval,
+    load: async () => {
+      loads += 1;
+      if (loads === 1) await firstLoad.promise;
+    },
+  });
+
+  const started = controller.start();
+  timers.tick();
+  documentTarget.setVisibility("visible");
+  assert.equal(loads, 1, "concurrent visibility and timer triggers must share the in-flight load");
+  firstLoad.resolve();
+  await started;
+
+  controller.stop();
+  timers.tick();
+  documentTarget.setVisibility("visible");
+  await Promise.resolve();
+  assert.equal(loads, 1);
+});
 
 test("normalizePopupConfig trims, clamps, and keeps valid popup definitions", () => {
   const config = normalizePopupConfig({

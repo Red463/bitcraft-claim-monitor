@@ -11,7 +11,8 @@ test("shared Dialog owns the accessible modal interaction contract", () => {
   assert.match(dialog, /createPortal\(/);
   assert.match(dialog, /role="dialog"/);
   assert.match(dialog, /aria-modal=\{modal \? "true" : undefined\}/);
-  assert.match(dialog, /aria-labelledby=\{titleId\}/);
+  assert.match(dialog, /aria-labelledby=\{titleElementId \?\? titleId\}/);
+  assert.match(dialog, /!titleElementId \? <span className="dialog-sr-only" id=\{titleId\}>/);
   assert.match(dialog, /aria-describedby=\{description \? descriptionId : undefined\}/);
   assert.match(dialog, /event\.key === "Escape"/);
   assert.match(dialog, /event\.key !== "Tab"/);
