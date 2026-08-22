@@ -215,6 +215,17 @@ The maintained Relay deployment is isolated under these production identities:
 bitcraft-claim-monitor-relay.service
 ```
 
+Routine releases are merged to `main`, then deployed with the manual
+**Deploy Relay preview** workflow after approval in the protected
+`relay-preview` environment. Despite its historical name, that workflow is the
+documented revision-bound application updater: it builds and tests the exact
+commit, uses the isolated Relay deployment identity, and retains automatic
+application rollback. Canonical admission is a separate `relay-cutover`
+workflow and approval boundary. Before its irreversible admission marker, a
+pre-admission failure may abort and restore the saved deployment state;
+post-admission recovery is fix-forward only. See the runbook before operating
+either workflow.
+
 - [Deployment guide](./DEPLOYMENT.md) — preview, canonical cutover, backups,
   diagnostics, and rollback
 - [Whole-app developer guide and technical review](./output/pdf/bitcraft-claim-monitor-whole-app-developer-guide.pdf)

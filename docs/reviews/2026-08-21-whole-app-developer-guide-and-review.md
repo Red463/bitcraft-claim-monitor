@@ -308,7 +308,7 @@ The runtime therefore stopped the affected generation and preserved last-good da
 
 Task 1 completed that recovery path. Fresh exact v9 response-byte hashes were
 captured as global
-`17e7e2ddc0ad3416bac036d5463655fb8d2a9f2bc21b79f2e9f076b9c1a25232`
+`f538457640d0bb0d0dfa85577c4dfd71760854ba0fa9bb681c7b5de0e6e7f4db`
 and unchanged regional
 `3d0b4c9bba59f7b1daad5122369599ea557e333124c4f778079a45af1683f65b`.
 The repaired staged global generator output matched the tracked bindings
