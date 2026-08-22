@@ -18,6 +18,7 @@ import { originFromRequest as requestOriginFromRequest, requestLogPolicy, safeRe
 import { appUserCsrfToken, csrfToken, validCsrfHeader } from "./src/server/httpCsrf.mjs";
 import { BODY_LIMITS, readJson, readRawBody } from "./src/server/httpBodies.mjs";
 import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/httpRateLimit.mjs";
+import { HeavyRouteCapacityError, createHeavyRouteGate, createRoutePerformanceTelemetry, normalizeRoutePerformancePath } from "./src/server/routePerformance.mjs";
 import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
 import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySettings.mjs";
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
@@ -143,7 +144,7 @@ import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSe
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
 import { installRetiredTableAuthorizer } from "./src/server/retiredTableAuthorizer.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
-import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
+import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, publicRoutePerformanceHealth, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
 import {
   createCurrentStateRepository,
@@ -277,6 +278,17 @@ const eventLoopHistogram = monitorEventLoopDelay({ resolution: 20 });
 eventLoopHistogram.enable();
 const requestTelemetry = [];
 const mapPerformanceTelemetry = createMapPerformanceTelemetry();
+const routePerformanceTelemetry = createRoutePerformanceTelemetry({ maxEntries: 10_000 });
+const gameDataHeavyRouteGate = createHeavyRouteGate({ maxConcurrent: 8, maxQueued: 16 });
+const marketHeavyRouteGate = createHeavyRouteGate({ maxConcurrent: 8, maxQueued: 16 });
+const measuredRoutePaths = new Set([
+  "/api/local/game-data",
+  "/api/local/market/overview",
+  "/api/local/market/order-book",
+  "/api/local/market/favorite-quotes",
+  "/api/local/history",
+  "/api/local/admin/server-health",
+]);
 const plannerTelemetry = {
   freshCalculations: 0,
   cacheHits: 0,
@@ -301,7 +313,10 @@ function applicationHealthTelemetry() {
     current.count += 1; current.totalMs += entry.durationMs; current.maxMs = Math.max(current.maxMs, entry.durationMs); groups[entry.path] = current;
     return groups;
   }, {})).map((entry) => ({ ...entry, averageMs: Math.round(entry.totalMs / entry.count) })).sort((a, b) => b.maxMs - a.maxMs).slice(0, 20);
-  return { requests: recent.length, status5xx, status5xxRate: recent.length ? status5xx / recent.length : 0, p50Ms: percentile(.5), p95Ms: percentile(.95), p99Ms: percentile(.99), eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0, memory: process.memoryUsage(), uptimeSeconds: process.uptime(), slowEndpoints: slow, planner: { ...plannerTelemetry } };
+  const routePerformance = publicRoutePerformanceHealth(routePerformanceTelemetry.snapshot(), {
+    gates: { gameData: gameDataHeavyRouteGate.snapshot(), market: marketHeavyRouteGate.snapshot() },
+  });
+  return { requests: recent.length, status5xx, status5xxRate: recent.length ? status5xx / recent.length : 0, p50Ms: percentile(.5), p95Ms: percentile(.95), p99Ms: percentile(.99), eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0, memory: process.memoryUsage(), uptimeSeconds: process.uptime(), slowEndpoints: slow, routePerformance, planner: { ...plannerTelemetry } };
 }
 
 async function serverHealthResponse(url, { includeDiagnosticBundle = false } = {}) {
@@ -315,7 +330,7 @@ async function serverHealthResponse(url, { includeDiagnosticBundle = false } = {
     FROM production_contribution_events
   `).all();
   const craftContributionDiagnostics = partitionCraftContributionRows(contributionRows).adminDiagnostics;
-  const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), craftContributionDiagnostics, incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: false }, version: appVersion, buildId: currentAppBuildId() };
+  const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), craftContributionDiagnostics, incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: "not-retained", requestIdentifiers: "not-retained" }, version: appVersion, buildId: currentAppBuildId() };
   return buildServerHealthResponse(response, { includeDiagnosticBundle });
 }
 
@@ -369,7 +384,36 @@ async function evaluateServerHealthIncidents() {
   }
 }
 
-const rateLimit = createRateLimiter({ sendJson: send });
+const trustedProxyAddresses = String(process.env.TRUSTED_PROXY_ADDRESSES ?? "")
+  .split(",")
+  .map((address) => address.trim())
+  .filter(Boolean);
+const clientAddress = (req) => requestAddress(req, { trustedProxyAddresses });
+const rateLimit = createRateLimiter({
+  sendJson: send,
+  addressForRequest: clientAddress,
+  onDecision: (decision) => routePerformanceTelemetry.recordRateLimitDecision(decision),
+});
+
+async function runHeavyProjection(gate, measurement, project) {
+  return gate.run(() => {
+    const startedAt = Date.now();
+    try {
+      return project();
+    } finally {
+      measurement?.recordProjection(Date.now() - startedAt);
+    }
+  });
+}
+
+function runMeasuredProjection(measurement, project) {
+  const startedAt = Date.now();
+  try {
+    return project();
+  } finally {
+    measurement?.recordProjection(Date.now() - startedAt);
+  }
+}
 
 // This server is the local app boundary: it serves the built frontend, owns
 // SQLite history/configuration, validates admin sessions,
@@ -2878,7 +2922,7 @@ function recordVisitorSecurityEvent(req, pathname, statusCode) {
   if (!shouldLogVisitor(pathname)) return;
   const nowIso = new Date().toISOString();
   if (Date.now() - lastVisitorSecurityPruneAt > 60 * 60 * 1000) pruneVisitorSecurityEvents();
-  const ip = normalizeIpAddress(requestAddress(req));
+  const ip = normalizeIpAddress(clientAddress(req));
   const anonymized = anonymizeIpAddress(ip);
   const userAgent = String(req.headers["user-agent"] ?? "").slice(0, 500);
   const userAgentHash = userAgent ? createHash("sha256").update(userAgent).digest("hex") : null;
@@ -7469,7 +7513,7 @@ async function serveBuiltFrontend(url, method, res) {
 function manualRefreshAccess(req, res) {
   const rawHeader = req.headers[MANUAL_REFRESH_HEADER];
   const refreshId = String(Array.isArray(rawHeader) ? rawHeader[0] ?? "" : rawHeader ?? "").trim();
-  const decision = manualRefreshGuard.authorize(requestAddress(req), refreshId);
+  const decision = manualRefreshGuard.authorize(clientAddress(req), refreshId);
   if (decision.allowed) return { forceRefresh: decision.forceRefresh, refreshId };
   const status = decision.reason === "invalid-id" ? 400 : 429;
   const headers = decision.retryAfterSeconds ? { "retry-after": String(decision.retryAfterSeconds) } : {};
@@ -7489,6 +7533,9 @@ const server = createServer(async (req, res) => {
     // before authenticated admin routes, while static frontend fallback stays at
     // the end so API typos do not accidentally return index.html.
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    const routeMeasurement = measuredRoutePaths.has(url.pathname)
+      ? routePerformanceTelemetry.observe(req, res, { path: url.pathname })
+      : null;
     const requestLogTarget = mapRequestLogTarget(url);
     const requestStartedAt = Date.now();
     const slowRequestLogPolicy = requestLogPolicy(url.pathname, "slow");
@@ -7498,7 +7545,7 @@ const server = createServer(async (req, res) => {
     res.once("finish", () => {
       requestFinished = true;
       const durationMs = Date.now() - requestStartedAt;
-      requestTelemetry.push({ at: Date.now(), path: url.pathname, status: res.statusCode, durationMs });
+      requestTelemetry.push({ at: Date.now(), path: normalizeRoutePerformancePath(url.pathname), status: res.statusCode, durationMs });
       if (requestTelemetry.length > 10_000) requestTelemetry.splice(0, requestTelemetry.length - 10_000);
       if (url.pathname.startsWith("/api/local/map/") && shouldRecordMapRequestLatency(url.pathname)) {
         mapPerformanceTelemetry.recordMapRequest({ durationMs, statusCode: res.statusCode });
@@ -7592,6 +7639,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/local/game-data") {
+      if (!rateLimit(req, res, "gameDataRead", RATE_LIMITS.gameDataRead)) return;
       const claimId = String(url.searchParams.get("claimId") ?? "").trim();
       const domains = parseDomainKeys(url.searchParams.get("domains"));
       if (!claimId) return send(res, 400, { error: "claimId is required." });
@@ -7627,7 +7675,7 @@ const server = createServer(async (req, res) => {
           // The route below deliberately serves last-good envelopes when present.
         }
       }
-      const result = gameDataResponse({
+      const result = await runHeavyProjection(gameDataHeavyRouteGate, routeMeasurement, () => gameDataResponse({
         configuredClaimId: currentClaimId(),
         claimId,
         domains,
@@ -7731,7 +7779,7 @@ const server = createServer(async (req, res) => {
           }
           return { data };
         },
-      });
+      }));
       return send(res, result.status, result.body);
     }
     if (req.method === "GET" && url.pathname === "/api/local/player-data") {
@@ -8606,11 +8654,11 @@ const server = createServer(async (req, res) => {
       if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator sign-in rejected" });
       const body = await readJson(req, BODY_LIMITS.auth);
       const username = String(body.username ?? "admin").trim();
-      const attemptKey = loginAttemptKey(requestAddress(req), username);
+      const attemptKey = loginAttemptKey(clientAddress(req), username);
       if (adminLoginAttempts.blocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
       const user = statements.adminByUsername.get(username);
       const successful = Boolean(user && await verifyPassword(String(body.password ?? ""), user.password_hash));
-      statements.insertLoginEvent.run(username, successful ? 1 : 0, new Date().toISOString(), requestAddress(req));
+      statements.insertLoginEvent.run(username, successful ? 1 : 0, new Date().toISOString(), clientAddress(req));
       if (!successful) {
         adminLoginAttempts.recordFailure(attemptKey);
         return send(res, 401, { error: "Invalid username or password" });
@@ -9626,7 +9674,7 @@ const server = createServer(async (req, res) => {
       if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
         return send(res, 403, { error: "Region is outside the configured active-region scope" });
       }
-      return send(res, 200, {
+      const body = await runHeavyProjection(marketHeavyRouteGate, routeMeasurement, () => ({
         ...regionalMarketOverviewView(current?.data, {
           regionId,
           allowedRegionIds,
@@ -9635,7 +9683,8 @@ const server = createServer(async (req, res) => {
         }),
         ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
         generatedAt: current?.provenance?.receivedAt ?? null,
-      });
+      }));
+      return send(res, 200, body);
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/deals") {
       if (!rateLimit(req, res, "global-market-deals", RATE_LIMITS.expensiveLocal)) return;
@@ -9776,6 +9825,7 @@ const server = createServer(async (req, res) => {
       });
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/order-book") {
+      if (!rateLimit(req, res, "orderBookRead", RATE_LIMITS.orderBookRead)) return;
       const configuredClaimId = currentClaimId();
       const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
       if (claimId !== configuredClaimId) {
@@ -9798,7 +9848,7 @@ const server = createServer(async (req, res) => {
         return send(res, 403, { error: "Region is outside the configured active-region scope" });
       }
       const catalogKey = `${requestedItemType === "cargo" ? "cargo" : "items"}:${itemId}`;
-      return send(res, 200, {
+      const body = await runHeavyProjection(marketHeavyRouteGate, routeMeasurement, () => ({
         ...regionalMarketOrderBookView(
           current?.data,
           providerCatalogRepository.getEntity(catalogKey),
@@ -9811,7 +9861,8 @@ const server = createServer(async (req, res) => {
         ),
         ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
         generatedAt: current?.provenance?.receivedAt ?? null,
-      });
+      }));
+      return send(res, 200, body);
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/price-history") {
       const configuredClaimId = currentClaimId();
@@ -9867,9 +9918,10 @@ const server = createServer(async (req, res) => {
       const include = String(url.searchParams.get("include") ?? "").split(",").map((part) => part.trim()).filter(Boolean);
       const allowed = new Set(["market", "activity", "dashboard"]);
       const sections = include.length ? new Set(include.filter((part) => allowed.has(part))) : null;
-      return send(res, 200, localHistory(url.searchParams.get("claimId") ?? "", sections, {
+      const body = runMeasuredProjection(routeMeasurement, () => localHistory(url.searchParams.get("claimId") ?? "", sections, {
         activityLimit: Number(url.searchParams.get("activityLimit") ?? 2000),
       }));
+      return send(res, 200, body);
     }
     if (req.method === "POST" && url.pathname === "/api/local/market/event/resolve") {
       if (isProduction) {
@@ -9892,6 +9944,13 @@ const server = createServer(async (req, res) => {
     if (!url.pathname.startsWith("/api/") && await serveBuiltFrontend(url, req.method, res)) return;
     send(res, 404, { error: "Not found" });
   } catch (error) {
+    if (error instanceof HeavyRouteCapacityError && !res.headersSent) {
+      return send(res, 503, {
+        error: error.message,
+        source: "projection-capacity",
+        retryAfter: error.retryAfter,
+      }, { "retry-after": String(error.retryAfter) });
+    }
     const status = Number(error?.statusCode) || 500;
     const logPolicy = requestLogPolicy(req.url, "exception");
     if (!isTestRuntime) {
