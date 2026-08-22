@@ -26,6 +26,7 @@ import {
 import packageJson from "../package.json";
 import { useFeaturebase } from "featurebase-js/react";
 import { useGameData } from "./api/gameDataLoader";
+import { gameDataScopeKey } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
 import { pageDomains } from "./api/pageDomains";
 import { pageGameDataWarnings, staleDataWarning } from "./api/pageGameDataWarnings";
@@ -61,7 +62,7 @@ import { applyMemberTrackingFilter } from "./utils/memberTracking";
 import { getTrackedOwnerName } from "./utils/ownership";
 import { normalizeData } from "./utils/normalize";
 import { urlMapFocus } from "./utils/mapFocus";
-import type { ActivePanel } from "./types/app";
+import type { ActivePanel, LoadState } from "./types/app";
 import type { AppSettings, AppUser, UserAuthState, UserToastSettings } from "./types/settings";
 import type { MapFocus } from "./pages/map/mapUtils";
 import { accountPlayerMarkerColourOverrides, normalizePlayerMarkerColourOverrides, withPlayerMarkerColourOverride } from "./map/playerMarkerColours.mjs";
@@ -155,6 +156,19 @@ class RouteErrorBoundary extends React.Component<{ routeKey: string; children: R
 
 function hasProductionPayload(raw: AnyRecord | null): boolean {
   return Boolean(raw && Object.prototype.hasOwnProperty.call(raw, "crafts"));
+}
+
+function useScopedGameData(
+  claimId: string,
+  activePanel: ActivePanel,
+  pageRefreshCycle: PageRefreshCycle | null,
+  trackPageRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T>,
+): LoadState<AnyRecord> {
+  const state = useGameData(claimId, activePanel, pageRefreshCycle, trackPageRefreshPromise);
+  const requestedGameDataScopeKey = gameDataScopeKey(claimId, activePanel);
+  return state.scopeKey === requestedGameDataScopeKey
+    ? state
+    : { data: null, error: null, loading: true, scopeKey: requestedGameDataScopeKey };
 }
 
 function RestrictedAccessState({
@@ -351,7 +365,7 @@ function DashboardApp() {
     if (!activeCycle) return promise;
     return pageRefreshCoordinator.trackPromise(activeCycle.id, taskKey, promise);
   }, [active, pageRefreshCoordinator, pageRefreshCycle]);
-  const state = useGameData(claimId, active, pageRefreshCycle, trackPageRefreshPromise);
+  const state = useScopedGameData(claimId, active, pageRefreshCycle, trackPageRefreshPromise);
   const excludedMemberIds = appSettings.excludedMemberIds;
   const data = React.useMemo(() => {
     // Provider payloads vary by domain during migration. Normalize them once, then apply

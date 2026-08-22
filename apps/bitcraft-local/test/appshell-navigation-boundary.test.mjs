@@ -85,6 +85,13 @@ test("route shell restores history and announces explicit route changes", () => 
   assert.match(appShell, /<Market[\s\S]*?locationSearch=\{routeSearch\}[\s\S]*?onQueryStateChange=\{syncRouteSearch\}/);
 });
 
+test("AppShell composes game data only from the active claim and page scope", () => {
+  assert.match(appShell, /gameDataScopeKey\(claimId, activePanel\)/);
+  assert.match(appShell, /state\.scopeKey === requestedGameDataScopeKey/);
+  assert.match(appShell, /normalizeData\(state\.data\)/);
+  assert.match(appShell, /state\.loading && !state\.data/);
+});
+
 test("sidebar and command palette consume the same effective page access", () => {
   assert.match(appShell, /<CommandPalette adminAuthenticated=\{Boolean\(adminAuth\.authenticated\)\} access=\{effectiveAccess\}/);
   assert.match(commandPalette, /visiblePagePaletteItems\(NAV, adminAuthenticated\)/);

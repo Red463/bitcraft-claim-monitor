@@ -8,7 +8,12 @@ import { loadGameData } from "./gameData.ts";
 import { pageDomains } from "./pageDomains.ts";
 
 type PageFreshness = { updatedAt: string; cacheState: string | null; stale: boolean };
-const pageNavigationCache = new Map<string, PageFreshness & { data: AnyRecord }>();
+type CachedGameData = Partial<PageFreshness> & { data: AnyRecord };
+const pageNavigationCache = new Map<string, CachedGameData>();
+
+export function gameDataScopeKey(claimId: string, activePanel: ActivePanel): string {
+  return `${claimId}:${activePanel}`;
+}
 
 function freshnessFromPayload(data: AnyRecord, fallbackMs = Date.now()): PageFreshness {
   const serverFreshness = data?.serverFreshness ?? {};
@@ -29,12 +34,45 @@ function freshnessFromPayload(data: AnyRecord, fallbackMs = Date.now()): PageFre
   return { updatedAt, cacheState, stale };
 }
 
-function loadedState(data: AnyRecord): LoadState<AnyRecord> {
+function stateFreshness(freshness?: Partial<PageFreshness>): Partial<PageFreshness> {
+  if (!freshness) return {};
   return {
-    loading: false,
+    ...(freshness.updatedAt === undefined ? {} : { updatedAt: freshness.updatedAt }),
+    ...(freshness.cacheState === undefined ? {} : { cacheState: freshness.cacheState }),
+    ...(freshness.stale === undefined ? {} : { stale: freshness.stale }),
+  };
+}
+
+export function beginGameDataScope<T>(
+  previous: LoadState<T>,
+  scopeKey: string,
+  cached?: Partial<PageFreshness> & { data: T },
+): LoadState<T> {
+  if (previous.scopeKey === scopeKey) {
+    return { ...previous, loading: true, error: null };
+  }
+  return {
+    data: cached?.data ?? null,
     error: null,
+    loading: true,
+    scopeKey,
+    ...stateFreshness(cached),
+  };
+}
+
+export function completeGameDataScope<T>(
+  previous: LoadState<T>,
+  scopeKey: string,
+  data: T | null,
+  freshness?: Partial<PageFreshness>,
+): LoadState<T> {
+  if (previous.scopeKey !== scopeKey) return previous;
+  return {
     data,
-    ...freshnessFromPayload(data),
+    error: null,
+    loading: false,
+    scopeKey,
+    ...stateFreshness(freshness),
   };
 }
 
@@ -48,31 +86,23 @@ export function useGameData(
   ) => promise,
 ): LoadState<AnyRecord> {
   const domains = pageDomains(activePanel);
+  const requestedScopeKey = gameDataScopeKey(claimId, activePanel);
   const [state, setState] = React.useState<LoadState<AnyRecord>>({
     data: null,
     error: null,
     loading: true,
+    scopeKey: requestedScopeKey,
   });
 
   React.useEffect(() => {
-    if (!pageRefreshCycle || pageRefreshCycle.page !== activePanel) return;
-    const cacheKey = `${claimId}:${activePanel}`;
-    const cached = pageNavigationCache.get(cacheKey);
+    const cached = pageNavigationCache.get(requestedScopeKey);
     const refreshHeaders = pageRefreshHeaders(pageRefreshCycle, activePanel);
     if (domains.length === 0) {
-      setState({ data: null, loading: false, error: null });
+      setState((previous) => completeGameDataScope(previous, requestedScopeKey, null));
       return;
     }
-    if (cached) {
-      setState({
-        loading: true,
-        error: null,
-        data: cached.data,
-        updatedAt: cached.updatedAt,
-        cacheState: cached.cacheState,
-        stale: cached.stale,
-      });
-    }
+    setState((previous) => beginGameDataScope(previous, requestedScopeKey, cached));
+    if (!pageRefreshCycle || pageRefreshCycle.page !== activePanel) return;
 
     let cancelled = false;
     const controller = new AbortController();
@@ -85,8 +115,12 @@ export function useGameData(
           { headers: { ...refreshHeaders }, signal: controller.signal },
         );
         const freshness = freshnessFromPayload(raw);
-        pageNavigationCache.set(cacheKey, { data: raw, ...freshness });
-        if (!cancelled) React.startTransition(() => setState(loadedState(raw)));
+        pageNavigationCache.set(requestedScopeKey, { data: raw, ...freshness });
+        if (!cancelled) {
+          React.startTransition(() => {
+            setState((previous) => completeGameDataScope(previous, requestedScopeKey, raw, freshness));
+          });
+        }
       } catch (error) {
         if (cancelled || controller.signal.aborted) return;
         setState((previous) => ({
@@ -108,6 +142,7 @@ export function useGameData(
     activePanel,
     claimId,
     pageRefreshCycle?.sequence,
+    requestedScopeKey,
     trackPageRefreshPromise,
   ]);
 

@@ -21,7 +21,7 @@ export type ActivePanel =
   | "activity"
   | "admin";
 
-export type LoadState<T> = { data: T | null; error: string | null; loading: boolean; updatedAt?: string | null; cacheState?: string | null; stale?: boolean };
+export type LoadState<T> = { data: T | null; error: string | null; loading: boolean; scopeKey?: string; updatedAt?: string | null; cacheState?: string | null; stale?: boolean };
 
 export type LocalHistoryState = {
   market: AnyRecord | null;
