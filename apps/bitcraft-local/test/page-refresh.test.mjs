@@ -708,6 +708,36 @@ test("controller cleanup cancels an independently owned generation retry timer",
   assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation"]);
 });
 
+test("late generation completions are inert after controller cleanup", () => {
+  for (const succeeded of [false, true]) {
+    const clock = createFakeClock();
+    const cycles = [];
+    const controller = createPageRefreshController({
+      page: "dashboard",
+      intervalMs: 30_000,
+      now: clock.now,
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      createId: () => `late-generation-${succeeded}-${cycles.length + 1}`,
+      onCycle: (cycle) => cycles.push(cycle),
+    });
+
+    controller.start();
+    controller.complete(cycles[0].id, true);
+    controller.invalidateGeneration();
+    clock.advance(2_000);
+    const lateCycle = cycles[1];
+
+    controller.stop();
+    assert.equal(clock.pendingTimers(), 0);
+    controller.complete(lateCycle.id, succeeded);
+    assert.equal(clock.pendingTimers(), 0);
+    clock.advance(60_000);
+
+    assert.deepEqual(cycles.map(({ reason }) => reason), ["initial", "generation"]);
+  }
+});
+
 test("generation watcher combines SSE with a 1000 ms poll and deduplicates generations", async () => {
   const clock = createFakeClock();
   const observed = [];

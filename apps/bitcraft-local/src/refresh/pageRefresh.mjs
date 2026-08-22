@@ -430,7 +430,7 @@ export function createPageRefreshController(options) {
       scheduleGeneration();
     },
     complete(cycleId, succeeded = true) {
-      if (!activeCycle || activeCycle.id !== String(cycleId ?? "")) return;
+      if (stopped || !activeCycle || activeCycle.id !== String(cycleId ?? "")) return;
       const completedGenerationTriggered = activeGenerationTriggered;
       activeCycle = null;
       activeGenerationTriggered = false;
