@@ -73,7 +73,7 @@ test("global catalog runtime discovers topology and atomically publishes reposit
       extraction_recipe: [],
       item_list: [],
       construction_recipe: [],
-      building: [],
+      building: [{ kind: "building", id: "9", name: "Carpentry Station" }],
       building_type: [],
       skill: [{ kind: "skill", id: "5", name: "Forestry", category: "Profession" }],
       resource: [],
@@ -129,7 +129,7 @@ test("global catalog runtime discovers topology and atomically publishes reposit
             extraction_recipe: 0,
             item_list: 0,
             construction_recipe: 0,
-            building: 0,
+            building: 1,
             building_type: 0,
             skill: 1,
             resource: 0,
@@ -138,7 +138,7 @@ test("global catalog runtime discovers topology and atomically publishes reposit
             buff: 0,
             claim_tech: 0,
           },
-          rowCount: 4,
+          rowCount: 5,
         },
         confidence: "authoritative",
         provenance: {
@@ -156,6 +156,22 @@ test("global catalog runtime discovers topology and atomically publishes reposit
         data: {
           profession: [{ kind: "skill", id: "5", name: "Forestry", category: "Profession" }],
           adventure: [],
+        },
+        confidence: "authoritative",
+        provenance: {
+          provider: "relay",
+          sourceKey: "global",
+          regionId: null,
+          database: "relay-global",
+          schemaFingerprint: "global-v1",
+          sourceObservedAt: null,
+          receivedAt: "2026-07-29T20:20:00.000Z",
+        },
+        warnings: [],
+      },
+      buildings: {
+        data: {
+          buildings: [{ kind: "building", id: "9", name: "Carpentry Station" }],
         },
         confidence: "authoritative",
         provenance: {
@@ -315,6 +331,56 @@ test("global catalog runtime persists a truthful blocked-by-schema diagnostic be
   }]);
   assert.deepEqual(runtime.health().schemaDiagnostic, diagnostic);
   assert.equal(runtime.health().subscription.typedState, "blocked_by_schema");
+});
+
+test("global catalog runtime sanitizes fallback diagnostics for publisher fingerprint mismatches", async () => {
+  const diagnostics = [];
+  let sessionCreates = 0;
+  const runtime = new runtimeModule.RelayGlobalCatalogRuntime({
+    manifest: { schemas: { global: { fingerprint: "global-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => ({
+      cacheReady: true,
+      global: {
+        sourceKey: "global",
+        database: "bitcraft-live-global",
+        port: 3000,
+        schemaFingerprint: "global-v2",
+        ready: true,
+      },
+      regions: new Map(),
+      discoveredAt: "2026-08-22T10:05:00.000Z",
+    }),
+    createSession: () => {
+      sessionCreates += 1;
+      throw new Error("session must not be created for a mismatched schema");
+    },
+    catalogRepository: {
+      getSourceState: () => ({ generation: 12 }),
+      replaceCatalogSnapshot: () => {},
+    },
+    currentStateRepository: {
+      nextGeneration: () => 13,
+      commitGeneration: () => {},
+      recordSchemaFingerprintDiagnostic: (value) => diagnostics.push(value),
+      recordSubscriptionHealth: () => {},
+    },
+  });
+
+  await assert.rejects(
+    runtime.start({
+      relayBaseUrl: "https://relay-user:relay-password@relay.example",
+      claimId: "1",
+    }),
+    /Relay global schema fingerprint mismatch/,
+  );
+
+  assert.equal(sessionCreates, 0);
+  assert.equal(diagnostics.length, 1);
+  assert.equal(
+    diagnostics[0].diagnostic.schemaUrl,
+    "https://relay.example:3000/v1/database/bitcraft-live-global/schema?version=9",
+  );
+  assert.doesNotMatch(JSON.stringify(diagnostics), /relay-user|relay-password/);
 });
 
 test("global catalog runtime refuses an unavailable global source without constructing a session", async () => {

@@ -98,11 +98,39 @@ function schemaUrl(baseUrl: string, source: Record<string, unknown>, database: s
   return url.href;
 }
 
-function operationalSchemaUrl(value: string): string {
-  const url = new URL(value);
-  url.username = "";
-  url.password = "";
-  return url.href;
+export function operationalSchemaUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    return url.href;
+  } catch {
+    return "unavailable";
+  }
+}
+
+export function operationalRelaySchemaUrl(
+  baseUrl: string,
+  port: number,
+  database: string,
+): string {
+  return operationalSchemaUrl(schemaUrl(baseUrl, { port }, database));
+}
+
+export function sanitizeSchemaFingerprintDiagnostic(
+  diagnostic: SchemaFingerprintDiagnostic,
+): SchemaFingerprintDiagnostic {
+  const schemaUrl = operationalSchemaUrl(diagnostic.schemaUrl);
+  let error: string | null = null;
+  if (diagnostic.status === "mismatch") {
+    error = `Relay ${diagnostic.sourceKey === "global" ? "global" : "regional"} schema fingerprint mismatch`;
+  } else if (diagnostic.status === "download_error") {
+    const httpStatus = String(diagnostic.error ?? "").match(/ returned HTTP (\d{3})$/)?.[1];
+    error = httpStatus
+      ? `Relay schema ${schemaUrl} returned HTTP ${httpStatus}`
+      : `Relay schema ${schemaUrl} request failed`;
+  }
+  return { ...diagnostic, schemaUrl, error };
 }
 
 async function fetchSchemaFingerprint(
@@ -116,8 +144,8 @@ async function fetchSchemaFingerprint(
     let response: Response;
     try {
       response = await fetcher(url, { signal: AbortSignal.timeout(8_000) });
-    } catch (error) {
-      lastError = error;
+    } catch {
+      lastError = new Error(`Relay schema ${diagnosticUrl} request failed`);
       continue;
     }
     if (!response.ok) {
@@ -133,8 +161,8 @@ async function fetchSchemaFingerprint(
         fingerprint: createHash("sha256").update(schema).digest("hex"),
         attemptedAt,
       };
-    } catch (error) {
-      lastError = error;
+    } catch {
+      lastError = new Error(`Relay schema ${diagnosticUrl} response could not be read`);
     }
   }
   throw lastError instanceof Error
@@ -272,6 +300,7 @@ export async function discoverRelayTopologyWithClient(
       : topology.regions.get(sourceKey.slice("region:".length));
     if (!target?.ready || target.schemaFingerprint) continue;
     const url = schemaUrl(baseUrl, source, target.database);
+    const diagnosticUrl = operationalRelaySchemaUrl(baseUrl, target.port, target.database);
     const expectedKind = sourceKey === "global" ? "global" : "regional";
     const expected = String(options.expectedFingerprints?.[expectedKind] ?? "").trim() || null;
     fingerprintTasks.push(
@@ -280,26 +309,26 @@ export async function discoverRelayTopologyWithClient(
           target.schemaFingerprint = fingerprint;
           if (expected == null) return;
           const mismatch = expected != null && expected.toLowerCase() !== fingerprint.toLowerCase();
-          target.schemaFingerprintDiagnostic = {
+          target.schemaFingerprintDiagnostic = sanitizeSchemaFingerprintDiagnostic({
             sourceKey,
-            schemaUrl: operationalSchemaUrl(url),
+            schemaUrl: diagnosticUrl,
             expected,
             observed: fingerprint,
             attemptedAt,
             status: mismatch ? "mismatch" : "verified",
             error: mismatch ? `Relay ${expectedKind} schema fingerprint mismatch` : null,
-          };
+          });
         })
         .catch((error) => {
-          target.schemaFingerprintDiagnostic = {
+          target.schemaFingerprintDiagnostic = sanitizeSchemaFingerprintDiagnostic({
             sourceKey,
-            schemaUrl: operationalSchemaUrl(url),
+            schemaUrl: diagnosticUrl,
             expected,
             observed: null,
             attemptedAt: new Date((options.now ?? Date.now)()).toISOString(),
             status: "download_error",
             error: error instanceof Error ? error.message : String(error),
-          };
+          });
           // A source can remain topology-ready while its schema is unavailable.
           // Subscription runtimes require a non-null fingerprint and preserve
           // their last-good generation until the schema can be verified.

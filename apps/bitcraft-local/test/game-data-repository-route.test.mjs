@@ -495,6 +495,50 @@ test("repository persists provider health for the separate web process", async (
   db.close();
 });
 
+test("later Relay HTTP health cannot erase a persisted schema-blocking diagnostic", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const repository = createCurrentStateRepository(db);
+  const diagnostic = {
+    sourceKey: "global",
+    schemaUrl: "https://relay.example:3000/v1/database/relay-global/schema?version=9",
+    expected: "expected-global",
+    observed: "observed-global",
+    attemptedAt: "2026-08-22T10:00:00.000Z",
+    status: "mismatch",
+    error: "Relay global schema fingerprint mismatch",
+  };
+
+  await repository.recordSchemaFingerprintDiagnostic({
+    diagnostic,
+    database: "relay-global",
+    ready: true,
+  });
+  await repository.recordHealth({
+    provider: "relay",
+    running: true,
+    topologyReady: true,
+    cacheReady: true,
+    generation: 4,
+    lastRefreshAt: "2026-08-22T10:00:01.000Z",
+    lastError: null,
+    sources: {
+      global: {
+        ready: true,
+        database: "relay-global",
+        schemaFingerprint: "observed-global",
+      },
+    },
+  }, "2026-08-22T10:00:01.000Z");
+
+  assert.deepEqual(
+    repository.readHealth()?.sources.global?.schemaFingerprintDiagnostic,
+    diagnostic,
+  );
+  db.close();
+});
+
 test("repository persists subscription-specific health for split worker/web reads", async () => {
   const db = new DatabaseSync(":memory:");
   applySchemaBootstrap(db);

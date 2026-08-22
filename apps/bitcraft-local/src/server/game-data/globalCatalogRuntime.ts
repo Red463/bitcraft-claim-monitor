@@ -8,6 +8,8 @@ import {
 } from "./globalCatalogSession.ts";
 import {
   discoverRelayTopology,
+  operationalRelaySchemaUrl,
+  sanitizeSchemaFingerprintDiagnostic,
   type RelayTopology,
   type RelayTopologyDiscoveryOptions,
 } from "./topology.ts";
@@ -184,7 +186,9 @@ export class RelayGlobalCatalogRuntime {
           global: String(this.#manifest.schemas?.global?.fingerprint ?? "").trim(),
         },
       });
-      this.#schemaDiagnostic = topology.global?.schemaFingerprintDiagnostic ?? null;
+      this.#schemaDiagnostic = topology.global?.schemaFingerprintDiagnostic
+        ? sanitizeSchemaFingerprintDiagnostic(topology.global.schemaFingerprintDiagnostic)
+        : null;
       if (this.#schemaDiagnostic) {
         await this.#currentStateRepository.recordSchemaFingerprintDiagnostic?.({
           diagnostic: this.#schemaDiagnostic,
@@ -213,17 +217,21 @@ export class RelayGlobalCatalogRuntime {
       if (!this.#schemaDiagnostic && /schema fingerprint mismatch/i.test(message)) {
         const expected = String(this.#manifest.schemas?.global?.fingerprint ?? "").trim() || null;
         const observed = topology?.global?.schemaFingerprint ?? null;
-        this.#schemaDiagnostic = {
+        this.#schemaDiagnostic = sanitizeSchemaFingerprintDiagnostic({
           sourceKey: "global",
           schemaUrl: topology?.global
-            ? `${this.#relayBaseUrl}:${topology.global.port}/v1/database/${encodeURIComponent(topology.global.database)}/schema?version=9`
-            : `${this.#relayBaseUrl}/v1/database/unknown/schema?version=9`,
+            ? operationalRelaySchemaUrl(
+                this.#relayBaseUrl,
+                topology.global.port,
+                topology.global.database,
+              )
+            : operationalRelaySchemaUrl(this.#relayBaseUrl, 443, "unknown"),
           expected,
           observed,
           attemptedAt: topology?.discoveredAt ?? new Date(this.#now()).toISOString(),
           status: "mismatch",
           error: "Relay global schema fingerprint mismatch",
-        };
+        });
       }
       if (lifecycleGeneration === this.#lifecycleGeneration) {
         this.#lastError = message;
@@ -408,6 +416,12 @@ export class RelayGlobalCatalogRuntime {
         };
         domains.skills = {
           data: skills,
+          confidence: "authoritative",
+          provenance,
+          warnings: [],
+        };
+        domains.buildings = {
+          data: { buildings: snapshot.descriptions.building ?? [] },
           confidence: "authoritative",
           provenance,
           warnings: [],

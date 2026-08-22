@@ -193,6 +193,7 @@ import {
   RelayMapResourceReadiness,
   mapResourceScopeKey,
   sanitizedMapResourceHealth,
+  sanitizeSchemaFingerprintDiagnostic,
   RelayStorageActivityService,
   RelayTerrainRuntime,
   runtimeHealthWithPersistedSnapshot,
@@ -809,6 +810,15 @@ const relayClaimScopeFence = createRelayClaimScopeFence([
 function gameDataProviderHealth() {
   const processHealth = relayProvider.health();
   const health = processHealth.running ? processHealth : currentStateRepository.readHealth() ?? processHealth;
+  const safeSources = Object.fromEntries(Object.entries(health.sources ?? {}).map(([sourceKey, source]) => [
+    sourceKey,
+    {
+      ...source,
+      schemaFingerprintDiagnostic: source.schemaFingerprintDiagnostic
+        ? sanitizeSchemaFingerprintDiagnostic(source.schemaFingerprintDiagnostic)
+        : null,
+    },
+  ]));
   const catalogSnapshot = currentStateRepository.read(currentClaimId(), "catalogs");
   const globalCatalog = runtimeHealthWithPersistedSnapshot({
     runtimeHealth: relayGlobalCatalogRuntime.health(),
@@ -866,13 +876,20 @@ function gameDataProviderHealth() {
       ? currentStateRepository.readSubscriptionHealth(empireSnapshot.provenance.sourceKey, "empires")
       : null,
   });
-  const diagnostic = globalCatalog.schemaDiagnostic
-    ?? health.sources?.global?.schemaFingerprintDiagnostic
+  const rawDiagnostic = globalCatalog.schemaDiagnostic
+    ?? safeSources.global?.schemaFingerprintDiagnostic
     ?? null;
+  const diagnostic = rawDiagnostic
+    ? sanitizeSchemaFingerprintDiagnostic(rawDiagnostic)
+    : null;
   return {
     ...health,
+    sources: safeSources,
     globalCatalog: {
       ...globalCatalog,
+      schemaDiagnostic: globalCatalog.schemaDiagnostic
+        ? sanitizeSchemaFingerprintDiagnostic(globalCatalog.schemaDiagnostic)
+        : null,
       schemaHealth: {
         source: "global",
         typedState: globalCatalog.subscription?.typedState ?? "disconnected",

@@ -259,6 +259,55 @@ test("topology discovery retains a sanitized schema download diagnostic", async 
   assert.equal(schemaRequests, 1);
 });
 
+test("topology discovery normalizes credential-bearing network exceptions", async () => {
+  const attemptedAt = "2026-08-22T09:32:00.000Z";
+  const fetcher = async (input) => {
+    if (String(input).endsWith("/health")) {
+      return new Response(JSON.stringify({
+        sources: {
+          global: {
+            connectivity: "live",
+            database: "bitcraft-live-global",
+            port: 3000,
+            schema_cached: true,
+            tables_live: 281,
+            tables_total: 281,
+          },
+        },
+      }), { status: 200 });
+    }
+    if (String(input).endsWith("/cache-health")) {
+      return new Response(JSON.stringify({ ready: true, regions: [] }), { status: 200 });
+    }
+    throw new TypeError(
+      "request to https://relay-user:relay-password@relay.example failed: bearer secret-schema-body",
+    );
+  };
+
+  const topology = await discoverRelayTopology(
+    "https://relay-user:relay-password@relay.example",
+    fetcher,
+    {
+      expectedFingerprints: { global: "expected-global" },
+      now: () => Date.parse(attemptedAt),
+    },
+  );
+
+  assert.deepEqual(topology.global?.schemaFingerprintDiagnostic, {
+    sourceKey: "global",
+    schemaUrl: "https://relay.example:3000/v1/database/bitcraft-live-global/schema?version=9",
+    expected: "expected-global",
+    observed: null,
+    attemptedAt,
+    status: "download_error",
+    error: "Relay schema https://relay.example:3000/v1/database/bitcraft-live-global/schema?version=9 request failed",
+  });
+  assert.doesNotMatch(
+    JSON.stringify(topology.global?.schemaFingerprintDiagnostic),
+    /relay-user|relay-password|secret-schema-body/,
+  );
+});
+
 test("topology discovery reports an expected and observed schema fingerprint mismatch", async () => {
   const attemptedAt = "2026-08-22T09:35:00.000Z";
   const fetcher = async (input) => {

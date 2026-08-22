@@ -142,6 +142,11 @@ export function createCurrentStateRepository(
       updated_at = excluded.updated_at
   `);
   const readHealth = db.prepare("SELECT * FROM provider_source_health WHERE provider = ? ORDER BY source_key");
+  const readSourceHealthDetails = db.prepare(`
+    SELECT details_json
+    FROM provider_source_health
+    WHERE provider = ? AND source_key = ?
+  `);
   const upsertSubscriptionHealth = db.prepare(`
     INSERT INTO provider_subscription_health (
       provider, source_key, domain, generation, connected, runtime_state, apply_duration_ms,
@@ -459,6 +464,17 @@ export function createCurrentStateRepository(
           observedAt,
         );
         for (const [sourceKey, source] of Object.entries(health.sources)) {
+          let schemaFingerprintDiagnostic = source.schemaFingerprintDiagnostic ?? null;
+          if (schemaFingerprintDiagnostic == null) {
+            const existing = readSourceHealthDetails.get(health.provider, sourceKey);
+            try {
+              schemaFingerprintDiagnostic = (
+                JSON.parse(String(existing?.details_json ?? "{}")) as Record<string, unknown>
+              ).schemaFingerprintDiagnostic as SchemaFingerprintDiagnostic | null ?? null;
+            } catch {
+              schemaFingerprintDiagnostic = null;
+            }
+          }
           upsertHealth.run(
             health.provider,
             sourceKey,
@@ -468,7 +484,7 @@ export function createCurrentStateRepository(
             health.lastRefreshAt,
             health.lastError,
             JSON.stringify({
-              schemaFingerprintDiagnostic: source.schemaFingerprintDiagnostic ?? null,
+              schemaFingerprintDiagnostic,
             }),
             observedAt,
           );
