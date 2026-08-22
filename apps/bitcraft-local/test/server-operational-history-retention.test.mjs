@@ -265,6 +265,64 @@ test("late trades with missing or invalid ingestion identities remain visible an
   db.close();
 });
 
+test("unsafe pre-build market identities prevent rollup coverage and are never prune candidates", () => {
+  const db = fixture();
+  insertTrade(db, { tradeId: "valid", occurredAt: "2025-08-21T12:00:00.000Z" });
+  db.exec("DROP TRIGGER operational_history_market_trade_ingestion_id");
+  insertTrade(db, { tradeId: "missing", occurredAt: "2025-08-21T00:45:00.000Z", quantity: "2", totalPrice: "4" });
+  insertTrade(db, { tradeId: "zero", occurredAt: "2025-08-21T00:30:00.000Z", quantity: "3", totalPrice: "6" });
+  insertTrade(db, { tradeId: "negative", occurredAt: "2025-08-21T00:15:00.000Z", quantity: "4", totalPrice: "8" });
+  insertTrade(db, { tradeId: "too-large", occurredAt: "2025-08-21T00:05:00.000Z", quantity: "5", totalPrice: "10" });
+  db.prepare(`
+    INSERT INTO operational_history_source_ingestion_ids (ingestion_id, source_table, source_key)
+    VALUES
+      (0, 'market_trades', 'zero'),
+      (-1, 'market_trades', 'negative'),
+      (9007199254740992, 'market_trades', 'too-large')
+  `).run();
+
+  const build = buildOperationalHistoryRollups(db, { beforeDay: "2025-08-22", sourceTables: ["market_trades"] });
+  assert.equal(build.completedDays.length, 0);
+  assert.equal(build.failedDays.length, 1);
+  assert.match(build.failedDays[0].error, /safe positive ingestion identity/i);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM operational_history_market_trade_daily").get().count, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM operational_history_rollup_watermarks
+    WHERE source_table = 'market_trades' AND completion_state = 'complete'
+  `).get().count, 0);
+
+  const diagnostics = [];
+  assert.deepEqual(
+    readOperationalMarketTradeDaily(db, {
+      claimId: "claim-a",
+      startDay: "2025-08-21",
+      endDay: "2025-08-21",
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    }),
+    { daily: [{ day: "2025-08-21", salesCount: 5, unitsSold: "15", totalValue: "30" }], observedSince: "2025-08-21T00:05:00.000Z" },
+  );
+  assert.deepEqual(diagnostics, [{
+    code: "operational_history_missing_ingestion_identity",
+    claimId: "claim-a",
+    rowCount: 4,
+  }]);
+
+  const prune = runOperationalHistoryRetention(db, {
+    now: NOW,
+    enabled: true,
+    dryRun: false,
+    days: 365,
+    tables: ["market_trades"],
+    approvedTables: new Set(["market_trades"]),
+    explicitConfirmation: "ENABLE OPERATIONAL HISTORY RETENTION",
+    backupVerification: verifiedBackup(),
+    approvedBackupRoot: BACKUP_FIXTURE_ROOT,
+  });
+  assert.equal(prune.deletedRows, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM market_trades").get().count, 5);
+  db.close();
+});
+
 test("earlier and same-time lower-key late trades remain visible after a partial prune", () => {
   const db = fixture();
   insertTrade(db, { tradeId: "trade-z", occurredAt: "2025-08-21T12:00:00.000Z" });

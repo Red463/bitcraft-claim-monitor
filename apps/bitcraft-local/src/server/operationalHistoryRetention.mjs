@@ -7,6 +7,7 @@ import { addDecimal } from "./game-data/exactDecimal.ts";
 
 const DAY_MS = 86_400_000;
 const MAX_BATCH_SIZE = 5_000;
+const MAX_SAFE_INGESTION_ID = Number.MAX_SAFE_INTEGER;
 const ENABLE_CONFIRMATION = "ENABLE OPERATIONAL HISTORY RETENTION";
 
 const operationalHistoryMarketTradeTriggerSql = `
@@ -187,41 +188,112 @@ export const operationalHistoryRetentionSchemaSql = `
 `;
 
 export function applyOperationalHistoryRetentionSchema(db) {
-  db.exec(operationalHistoryRetentionSchemaSql);
-  const watermarkColumns = new Set(db.prepare("PRAGMA table_info(operational_history_rollup_watermarks)").all().map((column) => column.name));
-  if (!watermarkColumns.has("source_max_occurred_at")) {
-    db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_max_occurred_at TEXT");
-  }
-  if (!watermarkColumns.has("source_max_ingestion_id")) {
-    db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_max_ingestion_id INTEGER");
-  }
-  if (!watermarkColumns.has("source_max_mutation_id")) {
-    db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_max_mutation_id INTEGER");
-  }
-  if (!watermarkColumns.has("source_fingerprint")) {
-    db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_fingerprint TEXT NOT NULL DEFAULT ''");
-  }
-  if (!watermarkColumns.has("remaining_source_fingerprint")) {
-    db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN remaining_source_fingerprint TEXT NOT NULL DEFAULT ''");
-  }
-  const backupColumns = new Set(db.prepare("PRAGMA table_info(operational_history_backup_verifications)").all().map((column) => column.name));
-  for (const column of ["backup_path", "manifest_path", "restored_database_sha256", "restored_manifest_sha256"]) {
-    if (!backupColumns.has(column)) {
-      db.exec(`ALTER TABLE operational_history_backup_verifications ADD COLUMN "${column}" TEXT NOT NULL DEFAULT ''`);
+  let transactionStarted = false;
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    transactionStarted = true;
+    db.exec(operationalHistoryRetentionSchemaSql);
+    const watermarkColumns = new Set(db.prepare("PRAGMA table_info(operational_history_rollup_watermarks)").all().map((column) => column.name));
+    if (!watermarkColumns.has("source_max_occurred_at")) {
+      db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_max_occurred_at TEXT");
     }
+    if (!watermarkColumns.has("source_max_ingestion_id")) {
+      db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_max_ingestion_id INTEGER");
+    }
+    if (!watermarkColumns.has("source_max_mutation_id")) {
+      db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_max_mutation_id INTEGER");
+    }
+    if (!watermarkColumns.has("source_fingerprint")) {
+      db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN source_fingerprint TEXT NOT NULL DEFAULT ''");
+    }
+    if (!watermarkColumns.has("remaining_source_fingerprint")) {
+      db.exec("ALTER TABLE operational_history_rollup_watermarks ADD COLUMN remaining_source_fingerprint TEXT NOT NULL DEFAULT ''");
+    }
+    const backupColumns = new Set(db.prepare("PRAGMA table_info(operational_history_backup_verifications)").all().map((column) => column.name));
+    for (const column of ["backup_path", "manifest_path", "restored_database_sha256", "restored_manifest_sha256"]) {
+      if (!backupColumns.has(column)) {
+        db.exec(`ALTER TABLE operational_history_backup_verifications ADD COLUMN "${column}" TEXT NOT NULL DEFAULT ''`);
+      }
+    }
+    db.exec(`
+      DROP TABLE IF EXISTS temp.operational_history_reconciled_periods;
+      CREATE TEMP TABLE operational_history_reconciled_periods (
+        claim_id TEXT NOT NULL,
+        utc_day TEXT NOT NULL,
+        PRIMARY KEY (claim_id, utc_day)
+      ) WITHOUT ROWID;
+      INSERT OR IGNORE INTO operational_history_reconciled_periods (claim_id, utc_day)
+      SELECT source.claim_id, substr(source.occurred_at, 1, 10)
+      FROM market_trades AS source
+      LEFT JOIN operational_history_source_ingestion_ids AS ingestion
+        ON ingestion.source_table = 'market_trades' AND ingestion.source_key = source.trade_id
+      WHERE ingestion.ingestion_id IS NULL
+        OR typeof(ingestion.ingestion_id) <> 'integer'
+        OR ingestion.ingestion_id <= 0
+        OR ingestion.ingestion_id > ${MAX_SAFE_INGESTION_ID}
+      GROUP BY source.claim_id, substr(source.occurred_at, 1, 10);
+
+      DROP TRIGGER IF EXISTS operational_history_market_trade_ingestion_id;
+      DROP TRIGGER IF EXISTS operational_history_market_trade_update;
+      DROP TRIGGER IF EXISTS operational_history_market_trade_delete;
+
+      DELETE FROM operational_history_source_ingestion_ids
+      WHERE source_table = 'market_trades'
+        AND (
+          typeof(ingestion_id) <> 'integer'
+          OR ingestion_id <= 0
+          OR ingestion_id > ${MAX_SAFE_INGESTION_ID}
+        );
+      UPDATE sqlite_sequence
+      SET seq = (
+        SELECT COALESCE(MAX(ingestion_id), 0)
+        FROM operational_history_source_ingestion_ids
+        WHERE typeof(ingestion_id) = 'integer'
+          AND ingestion_id > 0
+          AND ingestion_id <= ${MAX_SAFE_INGESTION_ID}
+      )
+      WHERE name = 'operational_history_source_ingestion_ids';
+      INSERT OR IGNORE INTO operational_history_source_ingestion_ids (source_table, source_key)
+      SELECT 'market_trades', trade_id
+      FROM market_trades
+      ORDER BY rowid;
+
+      ${operationalHistoryMarketTradeTriggerSql}
+
+      INSERT OR IGNORE INTO operational_history_source_ingestion_ids (source_table, source_key)
+      SELECT 'market_trades', trade_id
+      FROM market_trades
+      ORDER BY rowid;
+      UPDATE operational_history_rollup_watermarks AS watermark
+      SET completion_state = 'failed',
+        last_error = 'Market trade ingestion identities were reconciled; rebuild required'
+      WHERE watermark.source_table = 'market_trades'
+        AND EXISTS (
+          SELECT 1 FROM operational_history_reconciled_periods AS affected
+          WHERE affected.claim_id = watermark.claim_id AND affected.utc_day = watermark.utc_day
+        );
+    `);
+    const unreconciled = Number(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM market_trades AS source
+      LEFT JOIN operational_history_source_ingestion_ids AS ingestion
+        ON ingestion.source_table = 'market_trades' AND ingestion.source_key = source.trade_id
+      WHERE ingestion.ingestion_id IS NULL
+        OR typeof(ingestion.ingestion_id) <> 'integer'
+        OR ingestion.ingestion_id <= 0
+        OR ingestion.ingestion_id > ?
+    `).get(MAX_SAFE_INGESTION_ID)?.count ?? 0);
+    if (unreconciled > 0) {
+      throw new Error(`Operational history migration left ${unreconciled} market trade(s) without exactly one safe positive ingestion identity`);
+    }
+    db.exec("DROP TABLE temp.operational_history_reconciled_periods; COMMIT");
+    transactionStarted = false;
+  } catch (error) {
+    if (transactionStarted) {
+      try { db.exec("ROLLBACK"); } catch {}
+    }
+    throw error;
   }
-  db.exec(`
-    INSERT OR IGNORE INTO operational_history_source_ingestion_ids (source_table, source_key)
-    SELECT 'market_trades', trade_id
-    FROM market_trades
-    ORDER BY rowid
-  `);
-  db.exec(`
-    DROP TRIGGER IF EXISTS operational_history_market_trade_ingestion_id;
-    DROP TRIGGER IF EXISTS operational_history_market_trade_update;
-    DROP TRIGGER IF EXISTS operational_history_market_trade_delete;
-    ${operationalHistoryMarketTradeTriggerSql}
-  `);
 }
 
 function integerInRange(value, minimum, maximum, label) {
@@ -363,11 +435,16 @@ function updateBounds(group, occurredAt) {
 
 function buildMarketTradeDay(db, claimId, day) {
   const rows = db.prepare(`
-    SELECT trade_id, region_id, item_id, item_type, quantity, total_price, occurred_at
-    FROM market_trades
-    WHERE claim_id = ? AND substr(occurred_at, 1, 10) = ?
-    ORDER BY occurred_at, trade_id
-  `).all(claimId, day);
+    SELECT source.trade_id, source.region_id, source.item_id, source.item_type,
+      source.quantity, source.total_price, source.occurred_at
+    FROM market_trades AS source
+    INNER JOIN operational_history_source_ingestion_ids AS ingestion
+      ON ingestion.source_table = 'market_trades' AND ingestion.source_key = source.trade_id
+    WHERE source.claim_id = ? AND substr(source.occurred_at, 1, 10) = ?
+      AND typeof(ingestion.ingestion_id) = 'integer'
+      AND ingestion.ingestion_id > 0 AND ingestion.ingestion_id <= ?
+    ORDER BY ingestion.ingestion_id
+  `).all(claimId, day, MAX_SAFE_INGESTION_ID);
   const groups = new Map();
   for (const row of rows) {
     const key = `${String(row.region_id ?? "")}\0${String(row.item_id ?? "")}\0${String(row.item_type ?? "")}`;
@@ -484,15 +561,38 @@ function fingerprintRows(rows, columns) {
   return hash.digest("hex");
 }
 
-function sourceIngestionIdentity(sourceTable, sourceAlias = "source") {
+function sourceIngestionIdentity(sourceTable, sourceAlias = "source", joinType = "INNER") {
   if (sourceTable === "market_trades") {
     return {
       expression: "ingestion.ingestion_id",
-      join: `INNER JOIN operational_history_source_ingestion_ids AS ingestion
+      join: `${joinType} JOIN operational_history_source_ingestion_ids AS ingestion
         ON ingestion.source_table = 'market_trades' AND ingestion.source_key = ${sourceAlias}.trade_id`,
     };
   }
   return { expression: `${sourceAlias}."${PRUNE_IDENTIFIERS[sourceTable]}"`, join: "" };
+}
+
+function unsafeSourceIdentityCount(db, sourceTable, claimId, day) {
+  const identity = sourceIngestionIdentity(sourceTable, "source", "LEFT");
+  return Number(db.prepare(`
+    SELECT COUNT(*) AS unsafe_count
+    FROM "${sourceTable}" AS source
+    ${identity.join}
+    WHERE source.claim_id = ? AND substr(source.occurred_at, 1, 10) = ?
+      AND NOT (
+        ${identity.expression} IS NOT NULL
+        AND typeof(${identity.expression}) = 'integer'
+        AND ${identity.expression} > 0
+        AND ${identity.expression} <= ?
+      )
+  `).get(claimId, day, MAX_SAFE_INGESTION_ID)?.unsafe_count ?? 0);
+}
+
+function assertSafeSourceMembership(db, sourceTable, claimId, day) {
+  const unsafeCount = unsafeSourceIdentityCount(db, sourceTable, claimId, day);
+  if (unsafeCount > 0) {
+    throw new Error(`Operational history ${sourceTable} ${claimId}/${day} has ${unsafeCount} row(s) without exactly one safe positive ingestion identity`);
+  }
 }
 
 function sourceMutationVersion(db, sourceTable, claimId, day, sourceMaxIngestionId) {
@@ -517,9 +617,11 @@ function sourceSnapshot(db, sourceTable, claimId, day, boundary = null) {
     FROM "${sourceTable}" AS source
     ${identity.join}
     WHERE source.claim_id = ? AND substr(source.occurred_at, 1, 10) = ?
+      AND typeof(${identity.expression}) = 'integer'
+      AND ${identity.expression} > 0 AND ${identity.expression} <= ?
     ORDER BY ${identity.expression} DESC
     LIMIT 1
-  `).get(claimId, day);
+  `).get(claimId, day, MAX_SAFE_INGESTION_ID);
   if (!Number.isSafeInteger(Number(resolvedBoundary?.source_max_ingestion_id)) || Number(resolvedBoundary.source_max_ingestion_id) <= 0) {
     return { sourceRowCount: 0, sourceMaxKey: null, sourceMaxOccurredAt: null, sourceMaxIngestionId: null, sourceMaxMutationId: 0, sourceFingerprint: fingerprintRows([], ["__ingestion_id", ...columns]) };
   }
@@ -529,11 +631,14 @@ function sourceSnapshot(db, sourceTable, claimId, day, boundary = null) {
     FROM "${sourceTable}" AS source
     ${identity.join}
     WHERE source.claim_id = ? AND substr(source.occurred_at, 1, 10) = ?
+      AND typeof(${identity.expression}) = 'integer'
+      AND ${identity.expression} > 0 AND ${identity.expression} <= ?
       AND ${identity.expression} <= ?
     ORDER BY ${identity.expression}
   `).all(
     claimId,
     day,
+    MAX_SAFE_INGESTION_ID,
     resolvedBoundary.source_max_ingestion_id,
   );
   return {
@@ -590,17 +695,21 @@ export function buildOperationalHistoryRollups(db, {
         WHERE source_table = ? AND claim_id = ? AND utc_day = ?
       `).get(sourceTable, period.claim_id, period.utc_day);
       if (existing?.completion_state === "complete" && Number(existing.pruned_row_count ?? 0) > 0) continue;
-      if (existing?.completion_state === "complete") {
-        const current = sourceSnapshot(db, sourceTable, period.claim_id, period.utc_day);
-        if (current.sourceRowCount === Number(existing.source_row_count ?? 0)
-          && current.sourceMaxKey === String(existing.source_max_key ?? "")
-          && current.sourceMaxOccurredAt === String(existing.source_max_occurred_at ?? "")
-          && current.sourceMaxIngestionId === Number(existing.source_max_ingestion_id)
-          && current.sourceMaxMutationId === Number(existing.source_max_mutation_id)
-          && current.sourceFingerprint === String(existing.source_fingerprint ?? "")) continue;
-      }
       db.exec("BEGIN IMMEDIATE");
       try {
+        assertSafeSourceMembership(db, sourceTable, String(period.claim_id), String(period.utc_day));
+        if (existing?.completion_state === "complete") {
+          const current = sourceSnapshot(db, sourceTable, period.claim_id, period.utc_day);
+          if (current.sourceRowCount === Number(existing.source_row_count ?? 0)
+            && current.sourceMaxKey === String(existing.source_max_key ?? "")
+            && current.sourceMaxOccurredAt === String(existing.source_max_occurred_at ?? "")
+            && current.sourceMaxIngestionId === Number(existing.source_max_ingestion_id)
+            && current.sourceMaxMutationId === Number(existing.source_max_mutation_id)
+            && current.sourceFingerprint === String(existing.source_fingerprint ?? "")) {
+            db.exec("COMMIT");
+            continue;
+          }
+        }
         BUILD_DAY[sourceTable](db, String(period.claim_id), String(period.utc_day));
         const result = sourceSnapshot(db, sourceTable, String(period.claim_id), String(period.utc_day));
         const completedAt = (now instanceof Date ? now : new Date(now)).toISOString();
@@ -688,7 +797,11 @@ export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay,
       FROM json_each(?)
     )
     SELECT substr(source.occurred_at, 1, 10) AS utc_day, source.quantity,
-      source.total_price, source.occurred_at, ingestion.ingestion_id
+      source.total_price, source.occurred_at,
+      CASE WHEN typeof(ingestion.ingestion_id) = 'integer'
+        AND ingestion.ingestion_id > 0
+        AND ingestion.ingestion_id <= ${MAX_SAFE_INGESTION_ID}
+        THEN 1 ELSE 0 END AS has_safe_ingestion_identity
     FROM market_trades AS source
     LEFT JOIN operational_history_source_ingestion_ids AS ingestion
       ON ingestion.source_table = 'market_trades' AND ingestion.source_key = source.trade_id
@@ -708,9 +821,7 @@ export function readOperationalMarketTradeDaily(db, { claimId, startDay, endDay,
   `).all(coverageJson, String(claimId), `${startDay}T00:00:00.000Z`, endExclusive.toISOString());
   let missingIngestionIdentityRows = 0;
   for (const row of raw) {
-    const ingestionId = Number(row.ingestion_id);
-    const hasIngestionIdentity = row.ingestion_id != null && Number.isSafeInteger(ingestionId) && ingestionId > 0;
-    if (!hasIngestionIdentity) missingIngestionIdentityRows += 1;
+    if (!Boolean(row.has_safe_ingestion_identity)) missingIngestionIdentityRows += 1;
     add(String(row.utc_day), 1, row.quantity, row.total_price, String(row.occurred_at));
   }
   if (missingIngestionIdentityRows > 0) {
@@ -912,6 +1023,11 @@ export function runOperationalHistoryRetention(db, {
       `).all(table);
       for (const watermark of watermarks) {
         if (remaining - tableDeleted <= 0) break;
+        const sourceMaxIngestionId = Number(watermark.source_max_ingestion_id);
+        if (watermark.source_max_ingestion_id == null
+          || !Number.isSafeInteger(sourceMaxIngestionId)
+          || sourceMaxIngestionId <= 0
+          || String(watermark.remaining_source_fingerprint).length !== 64) continue;
         const boundary = {
           source_max_key: watermark.source_max_key,
           source_max_occurred_at: watermark.source_max_occurred_at,
@@ -928,6 +1044,8 @@ export function runOperationalHistoryRetention(db, {
           ${identity.join}
           WHERE source.claim_id = ? AND substr(source.occurred_at, 1, 10) = ?
             AND source.occurred_at < ?
+            AND typeof(${identity.expression}) = 'integer'
+            AND ${identity.expression} > 0 AND ${identity.expression} <= ?
             AND ${identity.expression} <= ?
           ORDER BY ${identity.expression}
           LIMIT ?
@@ -935,6 +1053,7 @@ export function runOperationalHistoryRetention(db, {
           watermark.claim_id,
           watermark.utc_day,
           cutoff,
+          MAX_SAFE_INGESTION_ID,
           watermark.source_max_ingestion_id,
           remaining - tableDeleted,
         );
