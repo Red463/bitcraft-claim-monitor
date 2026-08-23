@@ -1,4 +1,7 @@
 import { PAGE_REFRESH_POLL_MS } from "./pageRefresh.mjs";
+import { pageDomains, usesProviderNeutralGameData } from "../api/pageDomains.ts";
+
+export const INTERVAL_PAGE_GENERATION_POLL_MS = 30_000;
 
 function generationNumber(value) {
   const generation = Number(value);
@@ -6,8 +9,11 @@ function generationNumber(value) {
 }
 
 export function createGameDataGenerationWatcher(options) {
-  const domainKey = [...new Set((options.domains ?? []).map(String).filter(Boolean))].sort().join(",");
-  const search = new URLSearchParams({ claimId: String(options.claimId ?? ""), domains: domainKey });
+  const claimId = String(options.claimId ?? "");
+  const domains = [...new Set((options.domains ?? []).map(String).filter(Boolean))].sort();
+  const domainKey = domains.join(",");
+  const domainSet = new Set(domains);
+  const search = new URLSearchParams({ claimId, domains: domainKey });
   const fetcher = options.fetch ?? globalThis.fetch;
   const EventSourceClass = options.EventSource ?? globalThis.EventSource;
   const setIntervalFn = options.setInterval ?? globalThis.setInterval;
@@ -18,6 +24,8 @@ export function createGameDataGenerationWatcher(options) {
   let pollInFlight = false;
 
   function apply(event) {
+    if (event?.claimId != null && String(event.claimId) !== claimId) return;
+    if (Array.isArray(event?.changedDomains) && !event.changedDomains.some((domain) => domainSet.has(String(domain)))) return;
     const generation = generationNumber(event?.generation);
     if (closed || generation <= lastGeneration) return;
     lastGeneration = generation;
@@ -56,4 +64,16 @@ export function createGameDataGenerationWatcher(options) {
       clearIntervalFn(pollTimer);
     },
   };
+}
+
+export function createPageGameDataGenerationWatcher(options) {
+  const { activePanel, ...watcherOptions } = options;
+  const claimId = String(options.claimId ?? "");
+  if (!claimId || !usesProviderNeutralGameData(activePanel)) return null;
+  return createGameDataGenerationWatcher({
+    ...watcherOptions,
+    claimId,
+    domains: pageDomains(activePanel),
+    pollMs: activePanel === "craft-monitor" ? PAGE_REFRESH_POLL_MS : INTERVAL_PAGE_GENERATION_POLL_MS,
+  });
 }

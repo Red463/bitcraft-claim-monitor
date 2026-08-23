@@ -4,10 +4,9 @@ import { DataTable } from "../../components/main/DataTable";
 import { ItemLabel } from "../../components/main/ItemDisplay";
 import type { AnyRecord } from "../../main-app-data";
 import { formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
-import type { MarketItemKey, MarketRefreshProps } from "./globalMarket";
-import { exactMarketInteger } from "./marketUi";
-import { marketFreshnessNotice } from "./globalMarket";
+import { marketFreshnessNotice, type MarketItemKey, type MarketRefreshProps } from "./globalMarket";
 import { MarketFavorites } from "./MarketFavorites";
+import { exactMarketInteger } from "./marketUi";
 
 type Props = MarketRefreshProps & {
   claimId: string;

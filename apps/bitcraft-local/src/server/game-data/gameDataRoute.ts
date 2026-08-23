@@ -2,8 +2,10 @@ import {
   DOMAIN_KEYS,
   type Confidence,
   type CurrentStateReader,
+  type DomainDependencies,
   type DomainEnvelope,
   type DomainKey,
+  type DomainStatus,
   type EntityId,
 } from "./contracts.ts";
 import type { MapResourceLease, MapResourceRuntimeHealth } from "./mapResourceRuntime.ts";
@@ -31,6 +33,28 @@ type MapGenerationListener = {
   mapSpatialScopeKeys?: Set<string>;
   mapResourceScopeKeys?: Set<string>;
 };
+
+const MAP_LAYER_GENERATION_DOMAINS: Readonly<Record<string, readonly DomainKey[]>> = Object.freeze({
+  claims: ["region-claims", "map-spatial"],
+  markets: ["market"],
+  waystones: ["region-claims"],
+  "empire-settlements": ["empires"],
+  "empire-territory": ["empires"],
+  watchtowers: ["empires"],
+  players: ["members", "players", "map-spatial"],
+  resources: ["map-resources"],
+  enemies: ["map-spatial"],
+  roads: [],
+  "claim-areas": [],
+});
+
+export function mapGenerationDomainsForLayers(layers: readonly string[]): DomainKey[] {
+  const required = new Set<DomainKey>();
+  for (const layer of layers) {
+    for (const domain of MAP_LAYER_GENERATION_DOMAINS[layer] ?? []) required.add(domain);
+  }
+  return DOMAIN_KEYS.filter((domain) => required.has(domain));
+}
 
 export function mapResourceLeaseInputs(scope: MapScopeSelection): Array<{ regionId: string; resourceId: string }> {
   if (!scope.layers.includes("resources")) return [];
@@ -253,6 +277,7 @@ export function gameDataResponse(options: {
     data: unknown;
     confidence?: Confidence;
     warnings?: string[];
+    dependencies?: DomainDependencies;
   };
   now?: Date;
   freshForMs?: number;
@@ -268,17 +293,31 @@ export function gameDataResponse(options: {
   const freshForMs = options.freshForMs ?? 90_000;
   const liveForMs = options.liveForMs ?? 45_000;
   const domains: Partial<Record<DomainKey, DomainEnvelope<unknown>>> = {};
+  const domainStatus: Partial<Record<DomainKey, DomainStatus>> = {};
+  const availableGenerations = new Set<number>();
   const partialErrors: string[] = [];
   let availableCount = 0;
+  let unknownDependencyGeneration = false;
   let regionId = "";
 
   for (const domain of options.domains) {
     const snapshot = options.repository.read(options.claimId, domain);
     if (!snapshot) {
-      partialErrors.push(`${domain} has not loaded yet.`);
+      const warning = `${domain} has not loaded yet.`;
+      partialErrors.push(warning);
+      domainStatus[domain] = {
+        generation: null,
+        freshness: "unavailable",
+        confidence: "unknown",
+        ageMs: null,
+        warnings: [warning],
+        provenance: null,
+        dependencies: {},
+      };
       continue;
     }
     availableCount += 1;
+    availableGenerations.add(snapshot.generation);
     const observedAt = snapshot.provenance.sourceObservedAt ?? snapshot.provenance.receivedAt;
     const observedMs = Date.parse(observedAt);
     const ageMs = Number.isFinite(observedMs) ? Math.max(0, now.getTime() - observedMs) : null;
@@ -307,13 +346,36 @@ export function gameDataResponse(options: {
       ...(Array.isArray(transformed.warnings) ? transformed.warnings : []),
     ];
     const confidence = transformed.confidence ?? snapshot.confidence;
+    const dependencies = transformed.dependencies ?? {};
+    const statusWarnings = [...new Set([
+      ...warnings,
+      ...(snapshot.lastError ? [snapshot.lastError] : []),
+    ])];
+    for (const dependency of Object.values(dependencies)) {
+      if (!dependency) continue;
+      if (dependency.generation == null) {
+        unknownDependencyGeneration = true;
+      } else {
+        availableGenerations.add(dependency.generation);
+      }
+    }
+    const freshness = live ? "live" : stale ? "stale" : "fresh";
     domains[domain] = {
       data: transformed.data,
-      freshness: live ? "live" : stale ? "stale" : "fresh",
+      freshness,
       confidence,
       ageMs,
       provenance: snapshot.provenance,
       warnings,
+    };
+    domainStatus[domain] = {
+      generation: snapshot.generation,
+      freshness,
+      confidence,
+      ageMs,
+      warnings: statusWarnings,
+      provenance: snapshot.provenance,
+      dependencies,
     };
     if (snapshot.lastError) partialErrors.push(`${domain}: ${snapshot.lastError}`);
     for (const warning of warnings) {
@@ -327,6 +389,8 @@ export function gameDataResponse(options: {
     }
   }
 
+  const sortedGenerations = [...availableGenerations].sort((left, right) => left - right);
+
   return {
     status: availableCount ? 200 : 503,
     body: {
@@ -334,6 +398,15 @@ export function gameDataResponse(options: {
       regionId,
       generatedAt: now.toISOString(),
       domains,
+      domainStatus,
+      meta: {
+        coherence: sortedGenerations.length === 0
+          ? "unavailable"
+          : unknownDependencyGeneration || sortedGenerations.length > 1 ? "mixed" : "coherent",
+        availableGenerations: sortedGenerations,
+        newestGeneration: sortedGenerations.at(-1) ?? null,
+        oldestGeneration: sortedGenerations[0] ?? null,
+      },
       partialErrors,
     },
   };

@@ -41,7 +41,8 @@ test("Market page groups alerts and opportunities into canonical workspaces", ()
   assert.match(marketPage, /id: "saved"/);
   assert.match(marketPage, /label: "Saved"/);
   assert.match(marketPage, /id: "opportunities"/);
-  assert.match(marketPage, /<MarketSaved[^>]*monitoredRegionId=\{regionId\}/);
+  assert.match(marketPage, /<MarketSaved[^\n]*monitoredRegionId=\{regionId\}/);
+  assert.match(marketPage, /<MarketSaved[^\n]*auth=\{auth\}[^\n]*onAuthInvalidated=\{onAuthInvalidated\}/);
   assert.match(marketPage, /onDiscordLogin=\{onDiscordLogin\}/);
   assert.match(commandPalette, /onNavigate\("market", "saved"\)/);
   assert.match(commandPalette, /onNavigate\("market", "opportunities"\)/);

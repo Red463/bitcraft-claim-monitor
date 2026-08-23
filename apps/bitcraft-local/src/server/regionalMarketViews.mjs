@@ -575,6 +575,133 @@ export function regionalMarketOrderBookView(snapshot, catalogRow, options = {}) 
   };
 }
 
+function favoriteQuoteScope(options = {}) {
+  const selectedRegion = String(options.regionId ?? "all").trim().toLowerCase() || "all";
+  const allowedRegionIds = regionIds(options.allowedRegionIds).sort(compareText);
+  return {
+    selectedRegion,
+    allowedRegionIds,
+    key: `${selectedRegion}:${allowedRegionIds.join(",")}`,
+  };
+}
+
+function emptyFavoriteQuote() {
+  return { bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0 };
+}
+
+const FAVORITE_QUOTE_CACHE_BASE_BYTES = 1_024;
+const FAVORITE_QUOTE_CACHE_ENTRY_OVERHEAD_BYTES = 1_024;
+
+function conservativeRetainedStringBytes(value) {
+  // V8 may store Latin-1 strings compactly, but two bytes per UTF-16 code unit
+  // plus allocator/header slack safely estimates either representation.
+  return 64 + String(value).length * 2;
+}
+
+function estimateFavoriteQuoteCacheEntryBytes(cacheKey, serializedIndex) {
+  // The retained form is deliberately one serialized string rather than a Map
+  // of nested objects. One KiB of per-entry slack covers the Map slot, entry
+  // object, number field, alignment, and allocator bookkeeping.
+  return FAVORITE_QUOTE_CACHE_ENTRY_OVERHEAD_BYTES
+    + conservativeRetainedStringBytes(cacheKey)
+    + conservativeRetainedStringBytes(serializedIndex);
+}
+
+export function createRegionalMarketFavoriteQuotesView({
+  maxEntries = 8,
+  maxEstimatedBytes = 2 * 1024 * 1024,
+} = {}) {
+  const entryLimit = Math.max(1, Math.floor(Number(maxEntries) || 8));
+  const byteLimit = Math.max(
+    FAVORITE_QUOTE_CACHE_BASE_BYTES,
+    Math.floor(Number(maxEstimatedBytes) || (2 * 1024 * 1024)),
+  );
+  const cache = new Map();
+  let estimatedBytes = FAVORITE_QUOTE_CACHE_BASE_BYTES;
+
+  function buildIndex(snapshot, scope) {
+    const source = record(snapshot);
+    const allowed = new Set(scope.allowedRegionIds);
+    const index = new Map();
+    const orders = source.orders;
+    for (const rawOrder of Array.isArray(orders) ? orders : []) {
+      const order = record(rawOrder);
+      const regionId = decimal(order.regionId);
+      if ((allowed.size && !allowed.has(regionId))
+        || (scope.selectedRegion !== "all" && scope.selectedRegion !== regionId)) continue;
+      const key = `${itemType(order.itemType)}:${decimal(order.itemId)}`;
+      const quote = index.get(key) ?? emptyFavoriteQuote();
+      const price = decimal(order.price ?? order.priceThreshold);
+      if (String(order.side ?? "buy").toLowerCase() === "sell") {
+        quote.sellCount += 1;
+        if (quote.bestSell == null || compareBigInt(price, quote.bestSell) < 0) quote.bestSell = price;
+      } else {
+        quote.buyCount += 1;
+        if (quote.bestBuy == null || compareBigInt(price, quote.bestBuy) > 0) quote.bestBuy = price;
+      }
+      index.set(key, quote);
+    }
+    return index;
+  }
+
+  function view(snapshot, favorites, options = {}) {
+    const scope = favoriteQuoteScope(options);
+    const generation = String(options.generation ?? "").trim();
+    const cacheKey = generation ? `${generation}:${scope.key}` : null;
+    const cachedEntry = cacheKey ? cache.get(cacheKey) : null;
+    let index = cachedEntry ? new Map(JSON.parse(cachedEntry.serializedIndex)) : null;
+    if (cachedEntry && cacheKey) {
+      const entry = cache.get(cacheKey);
+      cache.delete(cacheKey);
+      cache.set(cacheKey, entry);
+    } else {
+      index = buildIndex(snapshot, scope);
+      if (cacheKey) {
+        const serializedIndex = JSON.stringify([...index]);
+        const entryBytes = estimateFavoriteQuoteCacheEntryBytes(cacheKey, serializedIndex);
+        if (FAVORITE_QUOTE_CACHE_BASE_BYTES + entryBytes <= byteLimit) {
+          while (cache.size >= entryLimit || estimatedBytes + entryBytes > byteLimit) {
+            const oldestKey = cache.keys().next().value;
+            if (oldestKey == null) break;
+            estimatedBytes -= cache.get(oldestKey).estimatedBytes;
+            cache.delete(oldestKey);
+          }
+          cache.set(cacheKey, { serializedIndex, estimatedBytes: entryBytes });
+          estimatedBytes += entryBytes;
+        }
+      }
+    }
+    return Object.fromEntries((Array.isArray(favorites) ? favorites : []).map((favorite) => {
+      const key = `${itemType(favorite?.itemType)}:${decimal(favorite?.itemId)}`;
+      return [key, index.get(key) ?? emptyFavoriteQuote()];
+    }));
+  }
+
+  view.cacheStats = () => ({
+    entries: cache.size,
+    estimatedBytes,
+    maxEntries: entryLimit,
+    maxEstimatedBytes: byteLimit,
+  });
+  return view;
+}
+
+export const regionalMarketFavoriteQuotesView = createRegionalMarketFavoriteQuotesView();
+
+export function regionalMarketFavoriteItemsView(favorites, options = {}) {
+  const getEntity = typeof options.getEntity === "function" ? options.getEntity : () => null;
+  return Object.fromEntries((Array.isArray(favorites) ? favorites : []).map((favorite) => {
+    const normalizedItemType = itemType(favorite?.itemType);
+    const itemId = decimal(favorite?.itemId);
+    const key = `${normalizedItemType}:${itemId}`;
+    const catalogKey = `${normalizedItemType === "cargo" ? "cargo" : "items"}:${itemId}`;
+    return [key, catalogItem(getEntity(catalogKey) ?? {
+      itemType: normalizedItemType,
+      targetId: itemId,
+    })];
+  }));
+}
+
 function exactMedian(values) {
   const sorted = values
     .map(decimal)

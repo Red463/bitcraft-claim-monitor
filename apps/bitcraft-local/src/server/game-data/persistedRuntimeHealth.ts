@@ -6,6 +6,7 @@ type RuntimeHealth = {
     applied: boolean;
     lastAppliedAt: string | null;
     lastError: string | null;
+    typedState?: "connected" | "disconnected" | "blocked_by_schema";
   };
   lastError: string | null;
   [key: string]: unknown;
@@ -26,17 +27,25 @@ type PersistedSnapshot = {
 export function runtimeHealthWithPersistedSnapshot(options: {
   runtimeHealth: RuntimeHealth;
   snapshot: PersistedSnapshot | null;
-  providerHealth: { running: boolean; lastRefreshAt: string | null } | null;
+  providerHealth?: { running: boolean; lastRefreshAt: string | null } | null;
+  subscriptionHealth?: {
+    runtimeState: "connected" | "disconnected" | "blocked_by_schema";
+    connected: boolean;
+    updatedAt: string;
+  } | null;
   now?: Date;
   workerFreshForMs?: number;
 }): RuntimeHealth & { persisted?: boolean } {
   if (options.runtimeHealth.running || !options.snapshot) return options.runtimeHealth;
   const now = options.now ?? new Date();
   const workerFreshForMs = options.workerFreshForMs ?? 180_000;
-  const lastRefreshMs = Date.parse(options.providerHealth?.lastRefreshAt ?? "");
-  const workerRecent = options.providerHealth?.running === true
-    && Number.isFinite(lastRefreshMs)
-    && now.getTime() - lastRefreshMs <= workerFreshForMs;
+  const heartbeatMs = Date.parse(options.subscriptionHealth?.updatedAt ?? "");
+  const heartbeatRecent = Number.isFinite(heartbeatMs)
+    && now.getTime() - heartbeatMs <= workerFreshForMs;
+  const typedState = options.subscriptionHealth?.runtimeState ?? "disconnected";
+  const typedConnected = typedState === "connected"
+    && options.subscriptionHealth?.connected === true
+    && heartbeatRecent;
   const { provenance } = options.snapshot;
   return {
     ...options.runtimeHealth,
@@ -48,10 +57,11 @@ export function runtimeHealthWithPersistedSnapshot(options: {
       schemaFingerprint: provenance.schemaFingerprint,
     },
     subscription: {
-      connected: workerRecent,
+      connected: typedConnected,
       applied: true,
       lastAppliedAt: provenance.receivedAt,
       lastError: options.snapshot.lastError,
+      typedState,
     },
     lastError: options.snapshot.lastError,
   };

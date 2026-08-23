@@ -26,7 +26,7 @@ test("local page history joins the same active page cycle", () => {
   const history = source("../src/api/localHistory.ts");
 
   assert.match(history, /pageRefreshHeaders\(pageRefreshCycle, activePanel\)/);
-  assert.match(history, /trackPageRefreshPromise\("local-history", load\(\)\)/);
+  assert.match(history, /trackPageRefreshPromise\("local-history", load\(request\)\)/);
   assert.match(history, /pageRefreshCycle\?\.sequence/);
 });
 
@@ -56,7 +56,7 @@ test("provider-neutral Public Craft Finder uses the central live manual refresh"
 
   assert.equal(usesProviderNeutralGameData("publiccrafts"), true);
   assert.doesNotMatch(page, /useManualRefresh|manualRefreshHeaders|trackPromise|fetch\(/);
-  assert.match(loader, /loadGameData\([\s\S]*headers:\s*\{\s*\.\.\.refreshHeaders\s*\}/);
+  assert.match(loader, /loadGameDataWithPayloadBytes\([\s\S]*headers:\s*\{\s*\.\.\.refreshHeaders\s*\}/);
 });
 
 test("provider-neutral Production joins selected-member Toolbelt to the active refresh", () => {
@@ -67,7 +67,7 @@ test("provider-neutral Production joins selected-member Toolbelt to the active r
   assert.match(page, /request\?\.sequence/);
   assert.match(page, /\/api\/local\/player-data/);
   assert.equal(usesProviderNeutralGameData("craft-monitor"), true);
-  assert.match(loader, /loadGameData\([\s\S]*headers:\s*\{\s*\.\.\.refreshHeaders\s*\}/);
+  assert.match(loader, /loadGameDataWithPayloadBytes\([\s\S]*headers:\s*\{\s*\.\.\.refreshHeaders\s*\}/);
 });
 
 for (const [label, path, task] of [

@@ -234,7 +234,7 @@ test("Deal Watch renders operational facts as labelled units", () => {
 test("favorite order-book failures fail the active page cycle without clearing last-good rows", () => {
   const favorites = source("../src/pages/market/MarketFavorites.tsx");
 
-  assert.match(favorites, /if \(!response\.ok\) throw new Error\(`favorite order book HTTP \$\{response\.status\}`\)/);
+  assert.match(favorites, /if \(!response\.ok\) throw new Error\(`favorite quotes HTTP \$\{response\.status\}`\)/);
   assert.doesNotMatch(favorites, /catch \{\s*return null;\s*\}/);
   assert.match(favorites, /trackRefresh\("global-market-favorites",[\s\S]*\.catch\(\(failure\) =>/);
   assert.match(favorites, /Saved item prices unavailable/);
@@ -257,4 +257,17 @@ test("signed-out Deal Watch presents one Discord sign-in action", () => {
   const prompts = watch.match(/Sign in with Discord to save watched items and receive deal alerts\./g) ?? [];
 
   assert.equal(prompts.length, 1);
+});
+
+test("favorites use one retained bulk-quote request per refresh cycle", () => {
+  const overview = source("../src/pages/market/MarketOverview.tsx");
+  const favorites = source("../src/pages/market/MarketFavorites.tsx");
+
+  assert.match(favorites, /fetch\(request\.url,[\s\S]*method: "POST"[\s\S]*body: request\.body[\s\S]*signal: controller\.signal/);
+  assert.equal((favorites.match(/fetch\(request\.url/g) ?? []).length, 1);
+  assert.doesNotMatch(favorites, /Promise\.all\(favorites/);
+  assert.doesNotMatch(favorites, /\/api\/local\/market\/order-book/);
+  assert.match(favorites, /setRows\(marketFavoriteQuoteRows\(selectedFavorites, payload\)\)/);
+  assert.doesNotMatch(favorites, /setRows\(\[\]\)/);
+  assert.match(overview, /<MarketFavorites/);
 });

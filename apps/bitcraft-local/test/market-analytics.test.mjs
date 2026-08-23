@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 
 import { BEST_SELLER_SORTS, MARKET_INCOME_RANGES, bestSellerSortValue, buildMarketDaily, buildMarketIncomeSummary, buildMarketRangeAnalytics, buildMarketTopItems, formatMarketDay } from "../src/pages/market/marketAnalytics.ts";
+import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
+import { buildOperationalHistoryRollups, readOperationalMarketTradeDaily } from "../src/server/operationalHistoryRetention.mjs";
 
 test("buildMarketTopItems aggregates sales by item and sorts by units then value", () => {
   const topItems = buildMarketTopItems([
@@ -174,4 +177,28 @@ test("best seller sort helpers expose stable ranking options and values", () => 
   assert.equal(bestSellerSortValue(row, "sales"), 3);
   assert.equal(bestSellerSortValue(row, "average"), 20);
   assert.equal(bestSellerSortValue(row, "recent"), new Date("2026-06-28T12:30:00.000Z").getTime());
+});
+
+test("rollup-backed market daily history matches retained raw fixture results", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  const rows = [
+    { tradeId: "a", quantity: "9007199254740993", total: "9007199254740995", at: "2026-08-20T01:00:00.000Z" },
+    { tradeId: "b", quantity: "2", total: "4", at: "2026-08-20T02:00:00.000Z" },
+    { tradeId: "c", quantity: "3", total: "9", at: "2026-08-21T02:00:00.000Z" },
+  ];
+  const insert = db.prepare(`
+    INSERT INTO market_trades (
+      trade_id, claim_id, item_id, item_type, item_name, quantity, unit_price,
+      total_price, occurred_at, imported_at, raw_json
+    ) VALUES (?, 'claim-a', '42', '0', 'Timber', ?, '1', ?, ?, ?, '{}')
+  `);
+  for (const row of rows) insert.run(row.tradeId, row.quantity, row.total, row.at, row.at);
+  buildOperationalHistoryRollups(db, { beforeDay: "2026-08-22", sourceTables: ["market_trades"] });
+
+  const expected = buildMarketDaily(rows.map((row) => ({ quantity: row.quantity, total_value: row.total, occurred_at: row.at })));
+  const actual = readOperationalMarketTradeDaily(db, { claimId: "claim-a", startDay: "2026-08-20", endDay: "2026-08-21" });
+  assert.deepEqual(actual.daily, expected);
+  assert.equal(actual.observedSince, "2026-08-20T01:00:00.000Z");
+  db.close();
 });

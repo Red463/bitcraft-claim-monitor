@@ -25,10 +25,16 @@ import {
 } from "lucide-react";
 import packageJson from "../package.json";
 import { useFeaturebase } from "featurebase-js/react";
-import { useGameData } from "./api/gameDataLoader";
+import type { BootstrapPayload } from "./api/bootstrap";
+import { loadAdminConsoleSession } from "./api/adminSession";
+import { clearPreviousClaimGameData, gameDataScopeKey, useGameData } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
-import { pageDomains } from "./api/pageDomains";
-import { pageGameDataWarnings, staleDataWarning } from "./api/pageGameDataWarnings";
+import {
+  groupDomainWarnings,
+  pageGameDataWarnings,
+  publicGameDataQualitySummaries,
+  staleDataWarning,
+} from "./api/pageGameDataWarnings";
 import { ApiErrorState, AppSkeleton, RefreshStatus, type ApiStatusDiagnostics } from "./components/main/AppChrome";
 import { RouteLoadingState } from "./components/main/RouteLoadingState";
 import { CommandPalette } from "./components/main/CommandPalette";
@@ -46,22 +52,21 @@ import { useToastNotifications } from "./notifications/useToastNotifications";
 import { normalizeUserToastSettings } from "./notifications/userToastSettings";
 import { clearBrowserLocalSettings, hasPersistedState, usePersistedState } from "./hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "./main-app-data";
-import { DEFAULT_CLAIM_ID, DEFAULT_SETTINGS, DEFAULT_SYNC_URL, DEFAULT_USER_TOAST_SETTINGS } from "./settingsDefaults";
+import { DEFAULT_SETTINGS, DEFAULT_SYNC_URL, DEFAULT_USER_TOAST_SETTINGS } from "./settingsDefaults";
 import { canonicalPanel, DEFAULT_SIDEBAR_GROUPS, isDedicatedMapView, NAV, NAV_GROUPS, panelHref, updateQueryState, urlPanel } from "./navigation";
 import { settlementNavigationLabel } from "./navigation/navigationLabels";
 import { readAnalyticsConsent, setAnalyticsPreference, syncAnalyticsConsent, trackAnalyticsEvent, withdrawAnalyticsConsent, type AnalyticsConsent } from "./utils/analytics";
 import {
   normalizeReleaseBuildId,
-  readLastLoadedReleaseBuild,
-  releaseUpdateDecision,
-  writeLastLoadedReleaseBuild,
+  observeReleaseBuild,
 } from "./utils/releaseUpdate";
 import { normalizeAppSettings } from "./utils/appSettings";
 import { applyMemberTrackingFilter } from "./utils/memberTracking";
 import { getTrackedOwnerName } from "./utils/ownership";
 import { normalizeData } from "./utils/normalize";
 import { urlMapFocus } from "./utils/mapFocus";
-import type { ActivePanel } from "./types/app";
+import type { ActivePanel, LoadState } from "./types/app";
+import type { DomainKey, DomainStatus, GameDataResponseMeta } from "./server/game-data/contracts";
 import type { AppSettings, AppUser, UserAuthState, UserToastSettings } from "./types/settings";
 import type { MapFocus } from "./pages/map/mapUtils";
 import { accountPlayerMarkerColourOverrides, normalizePlayerMarkerColourOverrides, withPlayerMarkerColourOverride } from "./map/playerMarkerColours.mjs";
@@ -71,7 +76,7 @@ import { ACCESS_CONTROL_TARGETS, effectiveTargetAllowed, targetIdForPage, type E
 import { restrictedAccessGuidance } from "./access/restrictedAccess";
 import { PageRefreshProvider } from "./refresh/ManualRefreshContext";
 import { cooldownRemainingMs } from "./refresh/manualRefresh.mjs";
-import { createGameDataGenerationWatcher } from "./refresh/generationWatcher.mjs";
+import { createPageGameDataGenerationWatcher } from "./refresh/generationWatcher.mjs";
 import {
   createPageRefreshController,
   createPageRefreshTaskCoordinator,
@@ -157,6 +162,75 @@ function hasProductionPayload(raw: AnyRecord | null): boolean {
   return Boolean(raw && Object.prototype.hasOwnProperty.call(raw, "crafts"));
 }
 
+function GameDataQualityNotice({
+  activePanel,
+  domainStatus,
+  responseMeta,
+}: {
+  activePanel: ActivePanel;
+  domainStatus: Partial<Record<DomainKey, DomainStatus>>;
+  responseMeta: GameDataResponseMeta | null;
+}) {
+  const summaries = publicGameDataQualitySummaries(
+    activePanel,
+    domainStatus,
+    responseMeta?.coherence ?? null,
+  );
+  const warningDetails = groupDomainWarnings(domainStatus);
+  if (!summaries.length) return null;
+  return (
+    <section className="game-data-quality" aria-label="Game data quality">
+      <strong role="status">{summaries.join("; ")}</strong>
+      <details>
+        <summary>Warning and provenance details</summary>
+        <p>
+          Local coherence: <strong>{responseMeta?.coherence ?? "unknown"}</strong>
+          {responseMeta?.availableGenerations?.length
+            ? ` (generations ${responseMeta.availableGenerations.join(", ")})`
+            : ""}. Coherence compares local application generations and declared enrichment dependencies only; source receive times remain authoritative.
+        </p>
+        <div className="game-data-provenance-list">
+          {(Object.entries(domainStatus) as Array<[DomainKey, DomainStatus]>).map(([domain, status]) => (
+            <div key={domain}>
+              <strong>{domain}</strong>
+              <span>{status.freshness} · generation {status.generation ?? "unavailable"}</span>
+              <small>{status.provenance
+                ? `${status.provenance.sourceKey} received ${status.provenance.receivedAt}`
+                : "No source provenance available"}</small>
+              {Object.keys(status.dependencies).length ? <small>Dependencies: {Object.entries(status.dependencies).map(([name, dependency]) => (
+                `${name} generation ${dependency?.generation ?? "unavailable"}${dependency?.sourceGeneration == null ? "" : `, source generation ${dependency.sourceGeneration}`} (${dependency?.sourceKey ?? "unknown"}, ${dependency?.receivedAt ?? "unknown"})`
+              )).join("; ")}</small> : null}
+            </div>
+          ))}
+        </div>
+        {warningDetails.groups.length ? <div className="game-data-warning-groups">
+          <strong>Grouped warnings</strong>
+          {warningDetails.groups.map((group) => <div key={group.key}>
+            <span>{group.domain}: {group.message} <b>×{group.count}</b></span>
+            {group.examples.length ? <ul>{group.examples.map((example) => <li key={example}>{example}</li>)}</ul> : null}
+          </div>)}
+          {warningDetails.omittedGroupCount ? <small>
+            {warningDetails.omittedGroupCount} additional warning group{warningDetails.omittedGroupCount === 1 ? "" : "s"} omitted ({warningDetails.omittedWarningCount} warning{warningDetails.omittedWarningCount === 1 ? "" : "s"}).
+          </small> : null}
+        </div> : null}
+      </details>
+    </section>
+  );
+}
+
+function useScopedGameData(
+  claimId: string,
+  activePanel: ActivePanel,
+  pageRefreshCycle: PageRefreshCycle | null,
+  trackPageRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T>,
+): LoadState<AnyRecord> {
+  const state = useGameData(claimId, activePanel, pageRefreshCycle, trackPageRefreshPromise);
+  const requestedGameDataScopeKey = gameDataScopeKey(claimId, activePanel);
+  return state.scopeKey === requestedGameDataScopeKey
+    ? state
+    : { data: null, error: null, loading: true, scopeKey: requestedGameDataScopeKey };
+}
+
 function RestrictedAccessState({
   title,
   decision,
@@ -204,7 +278,7 @@ function accountDisplayName(user: UserAuthState["user"]): string {
  * This component owns public navigation, live game-data refreshes, browser-local
  * preferences, user Discord auth state, notifications, and page composition.
  */
-function DashboardApp() {
+function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload }) {
   const { shutdown: shutdownFeaturebase } = useFeaturebase();
   const [active, setActive] = usePersistedState<ActivePanel>("navigation.page", "dashboard");
   const [routeSearch, setRouteSearch] = React.useState(() => window.location.search);
@@ -228,25 +302,24 @@ function DashboardApp() {
   }, []);
   const defaultPageAppliedRef = React.useRef(false);
   const savedPageRef = React.useRef(hasPersistedState("navigation.page") || Boolean(urlPanel()));
-  const [appSettings, setAppSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
+  const [appSettings, setAppSettings] = React.useState<AppSettings>(() => normalizeAppSettings(initialBootstrap.config));
   const [appBuildId, setAppBuildId] = React.useState("");
   const appBuildIdRef = React.useRef("");
   const releaseUpdateBuildIdRef = React.useRef("");
   const [releaseUpdateBuildId, setReleaseUpdateBuildId] = React.useState("");
   const [releaseUpdatedNotice, setReleaseUpdatedNotice] = React.useState(false);
-  const [userAuth, setUserAuth] = React.useState<UserAuthState>({
-    user: null,
-    csrfToken: null,
-    discordLoginEnabled: false,
-    legal: { version: "", termsDigest: "", privacyDigest: "", acceptedAt: null, requiresAcceptance: false },
-  });
-  const [publicLegalPolicy, setPublicLegalPolicy] = React.useState<PublicLegalPolicy | null>(null);
+  const [userAuth, setUserAuth] = React.useState<UserAuthState>(() => ({
+    ...initialBootstrap.auth,
+    featurebaseJwt: initialBootstrap.auth.featurebaseJwt ?? undefined,
+  }));
+  const [publicLegalPolicy] = React.useState<PublicLegalPolicy>(() => initialBootstrap.legal);
   const [legalAcceptanceOpen, setLegalAcceptanceOpen] = React.useState(false);
   const [legalLoginReturnTo, setLegalLoginReturnTo] = React.useState("");
   const [effectiveAccess, setEffectiveAccess] = React.useState<EffectiveAccess | null>(null);
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
-  const [claimId, setClaimId] = React.useState(DEFAULT_CLAIM_ID);
-  const [syncUrl, setSyncUrl] = React.useState(DEFAULT_SYNC_URL);
+  const [claimId, setClaimId] = React.useState(initialBootstrap.config.claimId);
+  const claimIdRef = React.useRef(claimId);
+  const [syncUrl, setSyncUrl] = React.useState(() => normalizeAppSettings(initialBootstrap.config).syncUrl ?? DEFAULT_SYNC_URL);
   const [browserTheme, setBrowserTheme] = usePersistedState<ThemeSettings>("theme.local", DEFAULT_THEME);
   const [notificationRefreshToken, setNotificationRefreshToken] = React.useState(0);
   const [dealRefreshToken, setDealRefreshToken] = React.useState(0);
@@ -351,7 +424,7 @@ function DashboardApp() {
     if (!activeCycle) return promise;
     return pageRefreshCoordinator.trackPromise(activeCycle.id, taskKey, promise);
   }, [active, pageRefreshCoordinator, pageRefreshCycle]);
-  const state = useGameData(claimId, active, pageRefreshCycle, trackPageRefreshPromise);
+  const state = useScopedGameData(claimId, active, pageRefreshCycle, trackPageRefreshPromise);
   const excludedMemberIds = appSettings.excludedMemberIds;
   const data = React.useMemo(() => {
     // Provider payloads vary by domain during migration. Normalize them once, then apply
@@ -369,21 +442,6 @@ function DashboardApp() {
   );
   const selectedProductionMember = selectedMemberId === "All" ? null : data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedMemberId) ?? null;
   syncAnalyticsConsent(consent);
-  const refreshUserAuth = React.useCallback(async () => {
-    const response = await fetch(`${LOCAL_API}/auth/me`);
-    if (!response.ok) return;
-    setUserAuth(await response.json());
-  }, []);
-  React.useEffect(() => {
-    const controller = new AbortController();
-    fetch(`${LOCAL_API}/legal`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`legal policy HTTP ${response.status}`)))
-      .then((policy) => setPublicLegalPolicy(policy))
-      .catch(() => {
-        if (!controller.signal.aborted) setPublicLegalPolicy(null);
-      });
-    return () => controller.abort();
-  }, []);
   const refreshEffectiveAccess = React.useCallback(async () => {
     try {
       const response = await fetch(`${LOCAL_API}/access-control/effective`);
@@ -394,12 +452,14 @@ function DashboardApp() {
   }, []);
   const refreshAdminAuth = React.useCallback(async () => {
     try {
-      const response = await fetch(`${LOCAL_API}/admin/me`);
-      if (!response.ok) {
-        setAdminAuth({ authenticated: false });
-        return;
+      const { auth, settings } = await loadAdminConsoleSession(fetch);
+      if (settings) {
+        clearPreviousClaimGameData(claimIdRef.current, settings.claimId);
+        setAppSettings(settings);
+        setClaimId(settings.claimId);
+        setSyncUrl(settings.syncUrl);
       }
-      setAdminAuth(await response.json());
+      setAdminAuth(auth);
     } catch {
       setAdminAuth({ authenticated: false });
     }
@@ -451,6 +511,10 @@ function DashboardApp() {
     if (!response.ok) throw new Error(body.error ?? "Unable to sign out");
     shutdownFeaturebase();
     setUserAuth(body);
+  }, [shutdownFeaturebase]);
+  const invalidateUserAuth = React.useCallback(() => {
+    shutdownFeaturebase();
+    setUserAuth((current) => ({ ...current, user: null, csrfToken: null, featurebaseJwt: undefined }));
   }, [shutdownFeaturebase]);
   const linkDiscordCharacter = React.useCallback(async (member: AnyRecord | null) => {
     const payload = member ? { characterPlayerId: String(member.playerEntityId ?? ""), characterName: String(member.userName ?? member.username ?? member.playerUsername ?? member.name ?? "") } : {};
@@ -655,21 +719,19 @@ function DashboardApp() {
       try {
         const response = await fetch(`${LOCAL_API}/health`, { cache: "no-store" });
         const nextBuildId = normalizeReleaseBuildId(response.ok ? await response.json() : null);
-        const lastLoadedBuildId = readLastLoadedReleaseBuild(window.localStorage);
-        const decision = releaseUpdateDecision({
+        const observation = observeReleaseBuild({
           currentBuildId: appBuildIdRef.current,
-          lastLoadedBuildId,
           nextBuildId,
           documentHidden: document.hidden,
+          storage: window.localStorage,
         });
+        const { decision } = observation;
         if (decision === "remember") {
           rememberBuildId(nextBuildId);
-          writeLastLoadedReleaseBuild(window.localStorage, nextBuildId);
         }
         if (decision === "updated") {
           rememberBuildId(nextBuildId);
-          writeLastLoadedReleaseBuild(window.localStorage, nextBuildId);
-          if (!cancelled) setReleaseUpdatedNotice(true);
+          if (!cancelled && observation.showUpdatedNotice) setReleaseUpdatedNotice(true);
         }
         if (decision === "prompt") showReleaseUpdate(nextBuildId);
         if (decision === "reload") reloadForReleaseUpdate();
@@ -699,25 +761,14 @@ function DashboardApp() {
     return () => window.clearTimeout(timer);
   }, [releaseUpdatedNotice]);
   React.useEffect(() => {
-    fetch(`${LOCAL_API}/config`)
-      .then((response) => response.ok ? response.json() : null)
-      .then((config) => {
-        if (!config) return;
-        const next = normalizeAppSettings(config);
-        setAppSettings(next);
-        setClaimId(next.claimId);
-        setSyncUrl(next.syncUrl);
-        if (!defaultPageAppliedRef.current && !savedPageRef.current && next.defaultPage !== "admin") {
-          defaultPageAppliedRef.current = true;
-          setActive(next.defaultPage);
-          updateQueryState({ page: next.defaultPage });
-        }
-      })
-      .catch(() => undefined);
-  }, []);
+    claimIdRef.current = claimId;
+  }, [claimId]);
   React.useEffect(() => {
-    refreshUserAuth().catch(() => undefined);
-  }, [refreshUserAuth]);
+    if (defaultPageAppliedRef.current || savedPageRef.current || appSettings.defaultPage === "admin") return;
+    defaultPageAppliedRef.current = true;
+    setActive(appSettings.defaultPage);
+    updateQueryState({ page: appSettings.defaultPage });
+  }, [appSettings.defaultPage, setActive]);
   React.useEffect(() => {
     refreshAdminAuth().catch(() => undefined);
   }, [refreshAdminAuth]);
@@ -768,14 +819,13 @@ function DashboardApp() {
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [pageRefreshController]);
   React.useEffect(() => {
-    if (active !== "craft-monitor" || !claimId) return;
-    const watcher = createGameDataGenerationWatcher({
+    const watcher = createPageGameDataGenerationWatcher({
+      activePanel: active,
       claimId,
-      domains: pageDomains(active),
       isVisible: () => document.visibilityState !== "hidden",
-      onGeneration: () => pageRefreshController.invalidateNearLive(),
+      onGeneration: () => pageRefreshController.invalidateGeneration(),
     });
-    return () => watcher.stop();
+    return () => watcher?.stop();
   }, [active, claimId, pageRefreshController]);
   React.useEffect(() => {
     const intervalMs = appSettings.refreshSeconds * 1000;
@@ -851,14 +901,14 @@ function DashboardApp() {
     inventory: <Inventory data={data} />,
     construction: <Construction data={data} />,
     research: <Research data={data} />,
-    market: <Market claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} fallbackRegionId={String(data.claim.regionId ?? "")} activeRegionScopeKey={activeRegionScopeKey} onQueryStateChange={syncRouteSearch} onNavigate={navigate} onShowMap={(focus, regionId) => { const target = { ...focus, regionId }; setMapFocus(target); navigate("map", undefined, target); }} onDiscordLogin={discordLogin} />,
+    market: <Market claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} fallbackRegionId={String(data.claim.regionId ?? "")} activeRegionScopeKey={activeRegionScopeKey} auth={userAuth} onAuthInvalidated={invalidateUserAuth} onQueryStateChange={syncRouteSearch} onNavigate={navigate} onShowMap={(focus, regionId) => { const target = { ...focus, regionId }; setMapFocus(target); navigate("map", undefined, target); }} onDiscordLogin={discordLogin} />,
     "settlement-market": <SettlementMarket data={data} history={localHistory.market} claimId={claimId} access={effectiveAccess} locationSearch={routeSearch} listingsLoading={state.loading} listingError={state.error} onQueryStateChange={syncRouteSearch} />,
     region: <Region data={data} />,
     empires: <Empires monitoredClaimId={claimId} monitoredRegionId={String(data.claim.regionId ?? "")} activeRegionScopeKey={activeRegionScopeKey} providerData={data.raw} providerLoading={state.loading} providerError={state.error} access={effectiveAccess} />,
     map: <MapPanel data={data} focus={mapFocus} activeRegionScopeKey={activeRegionScopeKey} dedicated={dedicatedMapView} verifiedCharacterPlayerId={verifiedCharacterPlayerId(userAuth.user?.characterStatus, userAuth.user?.characterPlayerId)} playerColourOverrides={normalizedMapPlayerColours} onPlayerColourChange={(playerId, colour) => setMapPlayerColours((current) => withPlayerMarkerColourOverride(current, playerId, colour))} onClearFocus={() => { setMapFocus(null); updateQueryState({ label: null, x: null, z: null, regionId: null, mapName: null, mapX: null, mapZ: null }); }} />,
     sync: <SyncPanel syncUrl={syncUrl} />,
     activity: <ActivityPanel activity={localHistory.activity} activityTotal={localHistory.activityTotal} claimId={claimId} error={localHistory.error} members={data.members} access={effectiveAccess} />,
-    admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} publicAccount={userAuth.user} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); }} />,
+    admin: <AdminPanel settings={appSettings} members={normalizeData(state.data).members} publicAccount={userAuth.user} resolvedAuth={adminAuth} onAuthChanged={setAdminAuth} onSettingsSaved={(settings) => { setAppSettings(settings); setClaimId(settings.claimId); setSyncUrl(settings.syncUrl ?? DEFAULT_SYNC_URL); }} onClaimSettingsSaved={(previousClaimId, settings) => clearPreviousClaimGameData(previousClaimId, settings.claimId)} />,
   };
   const activePageTargetId = targetIdForPage(active);
   const activePageDecision = accessDecisionFor(activePageTargetId);
@@ -1059,6 +1109,11 @@ function DashboardApp() {
         <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{routeStatus}</p>
         <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{manualRefreshStatusText}</p>
         <div className={`page-refresh-line ${visibleRefreshProgress ? "is-visible" : ""}`} aria-hidden="true" />
+        <GameDataQualityNotice
+          activePanel={active}
+          domainStatus={state.domainStatus ?? {}}
+          responseMeta={state.responseMeta ?? null}
+        />
         {state.loading && !state.data ? <AppSkeleton /> : state.error && !state.data ? (
           <>
             <ApiErrorState message={state.error} />
@@ -1208,37 +1263,96 @@ function DedicatedLegalApp({ type }: { type: "terms" | "privacy" }) {
  * This keeps bot administration separate from the public app while still using
  * the same AdminPanel implementation and server-side admin permissions.
  */
-function BotControlApp() {
-  const [settings, setSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
-  const [loading, setLoading] = React.useState(true);
+type BotControlConsoleProps = {
+  settings: AppSettings;
+  resolvedAuth: AnyRecord;
+  onAuthChanged: (auth: AnyRecord) => void;
+  onSettingsSaved: (settings: AppSettings) => void;
+};
+
+export function BotControlApp({
+  initialConfig,
+  renderConsole,
+}: {
+  initialConfig?: BootstrapPayload["config"];
+  renderConsole?: (props: BotControlConsoleProps) => React.ReactNode;
+}) {
+  const initialPublicSettings = React.useMemo(() => normalizeAppSettings(initialConfig ?? DEFAULT_SETTINGS), [initialConfig]);
+  const [state, setState] = React.useState<{
+    status: "loading" | "ready" | "signed-out" | "error";
+    publicSettings: AppSettings;
+    settings: AppSettings | null;
+    auth: AnyRecord | null;
+    error: string;
+  }>(() => ({ status: "loading", publicSettings: initialPublicSettings, settings: null, auth: null, error: "" }));
+  const [reloadSequence, setReloadSequence] = React.useState(0);
   React.useEffect(() => {
+    let cancelled = false;
     document.title = "Discord Bot Control — BitCraft Claim Monitor";
-    fetch(`${LOCAL_API}/config`)
-      .then((response) => response.ok ? response.json() : null)
-      .then((config) => {
-        const next = normalizeAppSettings(config);
-        setSettings(next);
-        applyTheme(next.theme);
-      })
-      .catch(() => applyTheme(DEFAULT_THEME))
-      .finally(() => setLoading(false));
-  }, []);
-  return loading ? <main><AppSkeleton /></main> : (
+    async function load() {
+      setState((current) => ({ ...current, status: "loading", settings: null, auth: null, error: "" }));
+      try {
+        let publicSettings = initialPublicSettings;
+        if (!initialConfig) {
+          const response = await fetch(`${LOCAL_API}/config`);
+          if (!response.ok) throw new Error(`Public configuration failed with HTTP ${response.status}.`);
+          publicSettings = normalizeAppSettings(await response.json());
+        }
+        applyTheme(publicSettings.theme);
+        const { auth, settings } = await loadAdminConsoleSession(fetch);
+        if (cancelled) return;
+        if (!auth.authenticated) {
+          setState({ status: "signed-out", publicSettings, settings: null, auth, error: "" });
+          return;
+        }
+        if (!settings) throw new Error("Protected administrator settings were unavailable.");
+        applyTheme(settings.theme);
+        setState({ status: "ready", publicSettings, settings, auth, error: "" });
+      } catch (error) {
+        if (!cancelled) setState((current) => ({ ...current, status: "error", settings: null, auth: null, error: error instanceof Error ? error.message : String(error) }));
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [initialConfig, initialPublicSettings, reloadSequence]);
+  if (state.status === "loading") return <main><AppSkeleton /></main>;
+  if (state.status === "error") return (
+    <main className="bot-control-page route-entry-state">
+      <section className="empty-state panel" role="alert">
+        <strong>Discord Bot Control could not be loaded safely.</strong>
+        <span>{state.error}</span>
+        <button className="toolbar-button primary" onClick={() => setReloadSequence((value) => value + 1)}>Try again</button>
+      </section>
+    </main>
+  );
+  const settings = state.settings ?? state.publicSettings;
+  const consoleProps: BotControlConsoleProps = {
+    settings,
+    resolvedAuth: state.auth ?? { authenticated: false },
+    onAuthChanged: (auth) => {
+      if (auth.authenticated) setReloadSequence((value) => value + 1);
+      else setState((current) => ({ ...current, status: "signed-out", settings: null, auth }));
+    },
+    onSettingsSaved: (next) => {
+      setState((current) => ({ ...current, settings: next }));
+      applyTheme(next.theme);
+    },
+  };
+  return (
     <main className="bot-control-page">
-      <AdminPanel settings={settings} onSettingsSaved={(next) => {
-        setSettings(next);
-        applyTheme(next.theme);
-      }} botOnly headingLevel={1} />
+      {renderConsole
+        ? renderConsole(consoleProps)
+        : <AdminPanel key={state.status} {...consoleProps} botOnly headingLevel={1} />}
     </main>
   );
 }
 
-export default function App() {
+export default function App({ initialBootstrap }: { initialBootstrap: BootstrapPayload }) {
   const dedicatedLegalPath = window.location.pathname === "/terms" ? "terms" : window.location.pathname === "/privacy" ? "privacy" : null;
   const dedicatedBotPath = window.location.pathname === "/bot" || window.location.hostname.toLowerCase().startsWith("bot.");
   // Route-level branching happens before mounting DashboardApp so legal pages
   // and the bot console do not initialise public page data unnecessarily.
   if (dedicatedLegalPath) return <DedicatedLegalApp type={dedicatedLegalPath} />;
-  if (dedicatedBotPath) return <BotControlApp />;
-  return <DashboardApp />;
+  if (dedicatedBotPath) return <BotControlApp initialConfig={initialBootstrap.config} />;
+  return <DashboardApp initialBootstrap={initialBootstrap} />;
 }

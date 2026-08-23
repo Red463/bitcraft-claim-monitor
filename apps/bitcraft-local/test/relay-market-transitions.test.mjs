@@ -593,6 +593,13 @@ test("Relay transition history is idempotent and needs no current-listing table"
     CREATE UNIQUE INDEX idx_activity_source
       ON activity_events (claim_id, event_type, source_key)
       WHERE source_key IS NOT NULL;
+    CREATE TABLE discord_notification_outbox (
+      source_key TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      metadata_json TEXT NOT NULL
+    );
   `);
   const activityInsert = db.prepare(`
     INSERT OR IGNORE INTO activity_events
@@ -616,7 +623,15 @@ test("Relay transition history is idempotent and needs no current-listing table"
     },
   });
 
-  const first = writer.apply({ claimId: "100", previous, current, observedAt });
+  const compactEvents = transitionsModule.compactRelayMarketTransitionEvents(
+    transitionsModule.deriveRelayMarketTransitions({ previous, current, observedAt }),
+  );
+  assert.doesNotMatch(JSON.stringify(compactEvents), /"raw"|previousData|currentData/);
+  const first = writer.applyDerived({
+    claimId: "100",
+    events: compactEvents,
+    observedAt,
+  });
   const duplicate = writer.apply({ claimId: "100", previous, current, observedAt });
 
   assert.deepEqual(first, { derived: 3, inserted: 3, trades: 0, activities: 3 });
@@ -716,6 +731,62 @@ test("Relay transition history is idempotent and needs no current-listing table"
     },
   );
   assert.equal(outboxKicks, 2);
+
+  const transactionalDiscordEvents = transitionsModule.compactRelayMarketTransitionEvents(
+    transitionsModule.deriveRelayMarketTransitions({
+      previous: { claimId: "100", regionId: "19", listings: [], closedListings: [] },
+      current: {
+        claimId: "100",
+        regionId: "19",
+        listings: [sellOrder({ entityId: "777" })],
+        closedListings: [],
+      },
+      observedAt,
+    }),
+  );
+  const rollbackWriter = transitionsModule.createRelayMarketTransitionWriter(db, {
+    addActivity: (claimId, eventType, summary, occurredAt, metadata, sourceKey) => (
+      Number(activityInsert.run(
+        claimId,
+        eventType,
+        summary,
+        occurredAt,
+        JSON.stringify(metadata),
+        sourceKey,
+      ).changes) > 0
+    ),
+    enqueueDiscordActivity: (claimId, eventType, summary, occurredAt, metadata, sourceKey) => {
+      db.prepare(`
+        INSERT INTO discord_notification_outbox (
+          source_key, event_type, summary, occurred_at, metadata_json
+        ) VALUES (?, ?, ?, ?, ?)
+      `).run(
+        `${claimId}:${sourceKey}`,
+        eventType,
+        summary,
+        occurredAt,
+        JSON.stringify(metadata),
+      );
+      throw new Error("forced Discord enqueue failure");
+    },
+  });
+  assert.throws(() => rollbackWriter.applyDerived({
+    claimId: "100",
+    events: transactionalDiscordEvents,
+    observedAt,
+  }), /forced Discord enqueue failure/);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM market_events WHERE listing_key = '777'").get().count,
+    0,
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM activity_events WHERE source_key LIKE '%:777:%'").get().count,
+    0,
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM discord_notification_outbox").get().count,
+    0,
+  );
 });
 
 function assertClaimScopeRejectionHasNoSideEffects(currentSnapshot) {

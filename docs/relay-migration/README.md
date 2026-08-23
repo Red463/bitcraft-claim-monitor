@@ -54,11 +54,22 @@ Live-first data policy:
 - browser requests and scheduled jobs never own live-data freshness: page
   navigation reads an already committed generation, while subscriptions and
   bounded provider refresh loops keep the next generation ready;
-- committed domain generations notify open browsers through the
-  provider-neutral local event stream; when streaming is unavailable, a
-  single-flight 750-millisecond local generation poll keeps the same
-  invalidation path inside the one-second browser publication budget without
-  accumulating requests behind a slow response;
+- committed domain generations notify matching claim/domain browser watchers
+  through the provider-neutral local event stream; SSE remains the low-latency
+  path, while Craft Monitor polls every second and other interval provider pages
+  poll every 30 seconds only to recover missed events. Hidden tabs do not poll,
+  manual/non-provider pages create no watcher, and invalidations remain
+  single-flight with one trailing cycle rather than accumulating behind a slow
+  response;
+- generation-triggered request failures, including a visibility catch-up for a
+  generation observed while hidden, retry after 5, 10, 20, then at most 30
+  seconds and reset on generation success; a queued manual cycle runs before
+  the background retry, and ordinary interval failures retain their normal
+  next-interval behavior;
+- browser history reads follow exact ownership: Dashboard requests activity,
+  market, and dashboard history, Activity requests activity, and Local Market
+  requests market. Other pages issue no `/api/local/history` request and enroll
+  no history refresh task;
 - a migrated feature is not accepted if disabling ingestion schedules makes
   its current data stop updating, even when a scheduled fallback could mask
   the problem in production;

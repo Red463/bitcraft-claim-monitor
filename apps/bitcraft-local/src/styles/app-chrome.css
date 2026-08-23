@@ -336,6 +336,19 @@ body:has(.admin-loading-panel) .floating-actions {
 .analytics-status strong { color: var(--muted); font-size: 13px; }
 .analytics-status.enabled strong { color: var(--good); }
 .analytics-status span { color: var(--text); font-size: 12px; line-height: 1.4; }
+
+.game-data-quality { margin: 10px 14px 0; padding: 8px 10px; border: 1px solid rgba(241, 183, 71, .42); border-radius: 8px; background: rgba(83, 57, 17, .18); color: var(--text); font-size: 12px; }
+.game-data-quality > strong { color: #f0c36a; }
+.game-data-quality details { margin-top: 4px; }
+.game-data-quality summary { width: fit-content; cursor: pointer; color: var(--muted); }
+.game-data-quality details > p { margin: 8px 0; color: var(--muted); line-height: 1.4; }
+.game-data-provenance-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
+.game-data-provenance-list > div { display: grid; gap: 2px; padding: 6px 8px; border: 1px solid rgba(108, 123, 145, .22); border-radius: 6px; background: rgba(7, 11, 18, .35); }
+.game-data-provenance-list span, .game-data-provenance-list small { color: var(--muted); overflow-wrap: anywhere; }
+.game-data-warning-groups { display: grid; gap: 6px; margin-top: 8px; }
+.game-data-warning-groups > div { padding-top: 5px; border-top: 1px solid rgba(108, 123, 145, .2); }
+.game-data-warning-groups b { color: #f0c36a; }
+.game-data-warning-groups ul { margin: 3px 0 0; padding-left: 18px; color: var(--muted); }
 .privacy-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .cookie-consent-overlay {
   position: fixed;

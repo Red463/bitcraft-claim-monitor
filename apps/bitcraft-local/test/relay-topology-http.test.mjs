@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { discoverRelayTopology, discoverRelayTopologyWithClient } = await import(
+const { createRelayTopologyDiscoveryCache, discoverRelayTopology, discoverRelayTopologyWithClient } = await import(
   new URL("../src/server/game-data/topology.ts", import.meta.url).href,
 );
 const { RelayHttpClient } = await import(
@@ -66,6 +66,70 @@ test("topology discovery derives global and regional databases without fixed por
     schemaFingerprint: "region-fingerprint",
     ready: true,
   });
+});
+
+test("shared topology discovery normalizes trailing slashes, singleflights, and caches successes for sixty seconds", async () => {
+  let now = 1_000;
+  let calls = 0;
+  let finishFirst;
+  const firstDiscovery = new Promise((resolve) => { finishFirst = resolve; });
+  const cachedDiscover = createRelayTopologyDiscoveryCache({
+    discover: async (baseUrl) => {
+      calls += 1;
+      if (calls === 1) return firstDiscovery;
+      return { baseUrl, call: calls };
+    },
+    now: () => now,
+  });
+
+  const withoutSlash = cachedDiscover("https://relay.example");
+  const withSlash = cachedDiscover("https://relay.example/");
+  assert.equal(calls, 1);
+  const first = { baseUrl: "https://relay.example", call: 1 };
+  finishFirst(first);
+  assert.equal(await withoutSlash, first);
+  assert.equal(await withSlash, first);
+
+  now = 60_999;
+  assert.equal(await cachedDiscover("https://relay.example///"), first);
+  assert.equal(calls, 1);
+
+  now = 61_000;
+  assert.deepEqual(await cachedDiscover("https://relay.example/"), {
+    baseUrl: "https://relay.example",
+    call: 2,
+  });
+  assert.equal(calls, 2);
+});
+
+test("shared topology discovery evicts failures immediately", async () => {
+  let calls = 0;
+  const cachedDiscover = createRelayTopologyDiscoveryCache({
+    discover: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("Relay discovery failed");
+      return { call: calls };
+    },
+  });
+
+  await assert.rejects(cachedDiscover("https://relay.example/"), /Relay discovery failed/);
+  assert.deepEqual(await cachedDiscover("https://relay.example"), { call: 2 });
+  assert.equal(calls, 2);
+});
+
+test("shared topology discovery immediately evicts a synchronous discovery throw", async () => {
+  let calls = 0;
+  const cachedDiscover = createRelayTopologyDiscoveryCache({
+    discover: () => {
+      calls += 1;
+      if (calls === 1) throw new Error("Synchronous Relay discovery failure");
+      return Promise.resolve({ call: calls });
+    },
+  });
+
+  await assert.rejects(cachedDiscover("https://relay.example///"), /Synchronous Relay discovery failure/);
+  assert.deepEqual(await cachedDiscover("https://relay.example"), { call: 2 });
+  assert.equal(calls, 2);
 });
 
 test("topology discovery supports current live-source health and fingerprints public schemas", async () => {
@@ -207,8 +271,9 @@ test("topology discovery can fingerprint only the source required by a runtime",
   );
 });
 
-test("topology discovery leaves a live source fingerprint unavailable when schema retrieval fails", async () => {
+test("topology discovery retains a sanitized schema download diagnostic", async () => {
   let schemaRequests = 0;
+  const attemptedAt = "2026-08-22T09:30:00.000Z";
   const fetcher = async (input) => {
     if (String(input).endsWith("/health")) {
       return new Response(JSON.stringify({
@@ -228,14 +293,127 @@ test("topology discovery leaves a live source fingerprint unavailable when schem
       return new Response(JSON.stringify({ ready: true, regions: [] }), { status: 200 });
     }
     schemaRequests += 1;
-    return new Response("schema unavailable", { status: 404 });
+    return new Response("schema unavailable: bearer secret-schema-body", { status: 404 });
   };
 
-  const topology = await discoverRelayTopology("https://relay.example", fetcher);
+  const topology = await discoverRelayTopology(
+    "https://relay-user:relay-password@relay.example",
+    fetcher,
+    {
+      expectedFingerprints: { global: "expected-global" },
+      now: () => Date.parse(attemptedAt),
+    },
+  );
 
   assert.equal(topology.global?.ready, true);
   assert.equal(topology.global?.schemaFingerprint, null);
+  assert.deepEqual(topology.global?.schemaFingerprintDiagnostic, {
+    sourceKey: "global",
+    schemaUrl: "https://relay.example:3000/v1/database/bitcraft-live-global/schema?version=9",
+    expected: "expected-global",
+    observed: null,
+    attemptedAt,
+    status: "download_error",
+    error: "Relay schema https://relay.example:3000/v1/database/bitcraft-live-global/schema?version=9 returned HTTP 404",
+  });
+  assert.doesNotMatch(
+    JSON.stringify(topology.global?.schemaFingerprintDiagnostic),
+    /relay-password|secret-schema-body/,
+  );
   assert.equal(schemaRequests, 1);
+});
+
+test("topology discovery normalizes credential-bearing network exceptions", async () => {
+  const attemptedAt = "2026-08-22T09:32:00.000Z";
+  const fetcher = async (input) => {
+    if (String(input).endsWith("/health")) {
+      return new Response(JSON.stringify({
+        sources: {
+          global: {
+            connectivity: "live",
+            database: "bitcraft-live-global",
+            port: 3000,
+            schema_cached: true,
+            tables_live: 281,
+            tables_total: 281,
+          },
+        },
+      }), { status: 200 });
+    }
+    if (String(input).endsWith("/cache-health")) {
+      return new Response(JSON.stringify({ ready: true, regions: [] }), { status: 200 });
+    }
+    throw new TypeError(
+      "request to https://relay-user:relay-password@relay.example failed: bearer secret-schema-body",
+    );
+  };
+
+  const topology = await discoverRelayTopology(
+    "https://relay-user:relay-password@relay.example",
+    fetcher,
+    {
+      expectedFingerprints: { global: "expected-global" },
+      now: () => Date.parse(attemptedAt),
+    },
+  );
+
+  assert.deepEqual(topology.global?.schemaFingerprintDiagnostic, {
+    sourceKey: "global",
+    schemaUrl: "https://relay.example:3000/v1/database/bitcraft-live-global/schema?version=9",
+    expected: "expected-global",
+    observed: null,
+    attemptedAt,
+    status: "download_error",
+    error: "Relay schema https://relay.example:3000/v1/database/bitcraft-live-global/schema?version=9 request failed",
+  });
+  assert.doesNotMatch(
+    JSON.stringify(topology.global?.schemaFingerprintDiagnostic),
+    /relay-user|relay-password|secret-schema-body/,
+  );
+});
+
+test("topology discovery reports an expected and observed schema fingerprint mismatch", async () => {
+  const attemptedAt = "2026-08-22T09:35:00.000Z";
+  const fetcher = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/health")) {
+      return new Response(JSON.stringify({
+        sources: {
+          global: {
+            connectivity: "live",
+            database: "bitcraft-live-global",
+            port: 3000,
+            schema_cached: true,
+            tables_live: 281,
+            tables_total: 281,
+          },
+        },
+      }), { status: 200 });
+    }
+    if (url.endsWith("/cache-health")) {
+      return new Response(JSON.stringify({ ready: true, regions: [] }), { status: 200 });
+    }
+    return new Response('{"tables":[]}', { status: 200 });
+  };
+
+  const topology = await discoverRelayTopology("https://relay.example", fetcher, {
+    expectedFingerprints: { global: "expected-global" },
+    now: () => Date.parse(attemptedAt),
+  });
+
+  assert.equal(
+    topology.global?.schemaFingerprint,
+    "cb2b03b89678ec1fb9db96f116e8e8ad81a81f6b9bbc2594bcb7d941e5234ecc",
+  );
+  assert.deepEqual(topology.global?.schemaFingerprintDiagnostic, {
+    sourceKey: "global",
+    schemaUrl: "https://relay.example:3000/v1/database/bitcraft-live-global/schema?version=9",
+    expected: "expected-global",
+    observed: "cb2b03b89678ec1fb9db96f116e8e8ad81a81f6b9bbc2594bcb7d941e5234ecc",
+    attemptedAt,
+    status: "mismatch",
+    error: "Relay global schema fingerprint mismatch",
+  });
 });
 
 test("topology discovery can retain one HTTP circuit across refreshes", async () => {

@@ -78,33 +78,37 @@ test("record-mode Admin manual tests post only to the local fake sandbox channel
   const appPort = await availablePort();
   const dataDir = path.join(appDir, `.test-discord-sandbox-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   await mkdir(dataDir, { recursive: true });
+  const childEnv = {
+    ...process.env,
+    NODE_ENV: "production",
+    BITCRAFT_TEST: "true",
+    LEGAL_CONFIGURATION_CONFIRMED: "true",
+    ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
+    ENABLE_SERVER_POLLING: "false",
+    ENABLE_SCHEDULED_JOBS: "false",
+    ENABLE_RELAY_PROVIDER: "false",
+    ENABLE_RELAY_GLOBAL_CATALOG: "false",
+    BITCRAFT_PROCESS_ROLE: "all",
+    DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS: "1000",
+    DISCORD_REQUEST_TIMEOUT_MS: "10000",
+    DISCORD_OUTBOX_COMPLETION_MARGIN_MS: "5000",
+    DISCORD_NOTIFICATION_LEASE_MS: "1000",
+    ADMIN_SETUP_KEY: "sandbox-setup-key",
+    APP_HOST: "127.0.0.1",
+    BITCRAFT_LOCAL_DATA_DIR: dataDir,
+    DISCORD_API_ORIGIN: `http://127.0.0.1:${discordPort}`,
+    DISCORD_BOT_TOKEN: "sandbox-test-token",
+    DISCORD_DELIVERY_MODE: "record",
+    DISCORD_SANDBOX_CHANNEL_ID: sandboxChannelId,
+  };
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: appDir,
-    env: {
-      ...process.env,
-      NODE_ENV: "production",
-      BITCRAFT_TEST: "true",
-      LEGAL_CONFIGURATION_CONFIRMED: "true",
-      ENABLE_LEGACY_ADMIN_PASSWORD_AUTH: "true",
-      ENABLE_SERVER_POLLING: "false",
-      ENABLE_SCHEDULED_JOBS: "false",
-      ENABLE_RELAY_PROVIDER: "false",
-      ENABLE_RELAY_GLOBAL_CATALOG: "false",
-      BITCRAFT_PROCESS_ROLE: "all",
-      DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS: "1000",
-      ADMIN_SETUP_KEY: "sandbox-setup-key",
-      APP_HOST: "127.0.0.1",
-      APP_PORT: String(appPort),
-      BITCRAFT_LOCAL_DATA_DIR: dataDir,
-      DISCORD_API_ORIGIN: `http://127.0.0.1:${discordPort}`,
-      DISCORD_BOT_TOKEN: "sandbox-test-token",
-      DISCORD_DELIVERY_MODE: "record",
-      DISCORD_SANDBOX_CHANNEL_ID: sandboxChannelId,
-    },
+    env: { ...childEnv, APP_PORT: String(appPort) },
     stdio: "ignore",
   });
+  const children = [child];
   t.after(async () => {
-    await stop(child);
+    for (const runningChild of children) await stop(runningChild);
     await rm(dataDir, { recursive: true, force: true });
   });
 
@@ -142,6 +146,15 @@ test("record-mode Admin manual tests post only to the local fake sandbox channel
     channelId: "555555555555555555",
   }), new Date().toISOString());
   db.close();
+
+  const secondAppPort = await availablePort();
+  const secondChild = spawn(process.execPath, ["server.mjs"], {
+    cwd: appDir,
+    env: { ...childEnv, APP_PORT: String(secondAppPort) },
+    stdio: "ignore",
+  });
+  children.push(secondChild);
+  await waitForHealth(`http://127.0.0.1:${secondAppPort}`, secondChild);
 
   const anonymous = await fetch(`${origin}/api/local/admin/discord/test`, {
     method: "POST",
@@ -213,7 +226,8 @@ test("record-mode Admin manual tests post only to the local fake sandbox channel
   const processedOutbox = await waitForCondition("recorded automatic Discord outbox delivery", () => {
     const checkDb = new DatabaseSync(dbPath, { readOnly: true });
     const row = checkDb.prepare(`
-      SELECT status, response_json
+      SELECT status, attempts, response_json, locked_at, locked_by,
+             lease_token, lease_expires_at
       FROM discord_notification_outbox
       WHERE source_key = 'task5:automatic-preview-outbox'
     `).get();
@@ -221,7 +235,23 @@ test("record-mode Admin manual tests post only to the local fake sandbox channel
     return row?.status === "sent" ? row : null;
   });
   assert.equal(JSON.parse(processedOutbox.response_json).response.recorded, true);
+  assert.equal(processedOutbox.attempts, 1);
+  assert.equal(processedOutbox.locked_at, null);
+  assert.equal(processedOutbox.locked_by, null);
+  assert.equal(processedOutbox.lease_token, null);
+  assert.equal(processedOutbox.lease_expires_at, null);
   assert.equal(discordRequests.length, automaticOutboxRequests);
+
+  const healthResponse = await fetch(`${origin}/api/local/admin/server-health`, {
+    headers: { cookie },
+  });
+  assert.equal(healthResponse.status, 200);
+  const health = await healthResponse.json();
+  assert.equal(health.database.discord.deliveryGuarantee.semantics, "at-least-once");
+  assert.equal(health.database.discord.deliveryGuarantee.requestTimeoutMs, 10_000);
+  assert.equal(health.database.discord.deliveryGuarantee.completionWriteMarginMs, 5_000);
+  assert.ok(health.database.discord.deliveryGuarantee.leaseMs > 15_000);
+  assert.equal(health.database.discord.deliveryGuarantee.potentialDuplicateRows, 0);
 
   const auditDb = new DatabaseSync(dbPath, { readOnly: true });
   const rows = auditDb.prepare(`

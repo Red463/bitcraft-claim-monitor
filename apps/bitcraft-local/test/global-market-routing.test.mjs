@@ -70,8 +70,8 @@ test("legacy local Market tabs redirect to Settlement Market", () => {
 });
 
 test("only Settlement Market requests monitored market history", () => {
-  assert.equal(localHistoryIncludeForPanel("market"), "activity");
-  assert.equal(localHistoryIncludeForPanel("settlement-market"), "activity,market");
+  assert.equal(localHistoryIncludeForPanel("market"), "");
+  assert.equal(localHistoryIncludeForPanel("settlement-market"), "market");
   assert.equal(localHistoryIncludeForPanel("dashboard"), "activity,market,dashboard");
 });
 

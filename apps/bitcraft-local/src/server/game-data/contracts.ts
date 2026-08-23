@@ -60,6 +60,35 @@ export type DomainEnvelope<T> = {
   warnings: string[];
 };
 
+export type GenerationDependency = {
+  generation: number | null;
+  sourceGeneration?: number | null;
+  sourceKey: string;
+  receivedAt: string | null;
+};
+
+export type DomainDependencies = Partial<Record<
+  "catalog" | "inventory-banks" | "public-crafts",
+  GenerationDependency
+>>;
+
+export type DomainStatus = {
+  generation: number | null;
+  freshness: Freshness;
+  confidence: Confidence;
+  ageMs: number | null;
+  warnings: string[];
+  provenance: Provenance | null;
+  dependencies: DomainDependencies;
+};
+
+export type GameDataResponseMeta = {
+  coherence: "coherent" | "mixed" | "unavailable";
+  availableGenerations: number[];
+  newestGeneration: number | null;
+  oldestGeneration: number | null;
+};
+
 export type PendingDomainSnapshot<T = unknown> = {
   data: T;
   confidence: Confidence;
@@ -100,6 +129,16 @@ export type RefreshResult = {
   failed: Partial<Record<DomainKey, string>>;
 };
 
+export type SchemaFingerprintDiagnostic = {
+  sourceKey: "global" | `region:${number}`;
+  schemaUrl: string;
+  expected: string | null;
+  observed: string | null;
+  attemptedAt: string;
+  status: "verified" | "mismatch" | "download_error";
+  error: string | null;
+};
+
 export type ProviderHealth = {
   provider: "relay";
   running: boolean;
@@ -112,6 +151,7 @@ export type ProviderHealth = {
     ready: boolean;
     database: string | null;
     schemaFingerprint: string | null;
+    schemaFingerprintDiagnostic?: SchemaFingerprintDiagnostic;
   }>;
 };
 

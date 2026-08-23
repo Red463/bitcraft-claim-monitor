@@ -9,7 +9,7 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
-## [0.59.0-beta.1] - 2026-08-23
+## [0.61.0-beta.1] - 2026-08-23
 
 ### Added
 
@@ -21,6 +21,58 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 - Improved global market discovery with preserved search context, accessible price history, compact opportunity and depth summaries, and responsive navigation.
 - Combined saved items and deal watches with direct watch setup from item details.
 - Improved market freshness, warning visibility, large-price accuracy, and keyboard navigation.
+
+## [0.60.1-beta.1] - 2026-08-23
+
+### Fixed
+
+- Removed the internal mixed-generation provenance banner from ordinary pages while retaining meaningful stale, partial, and unavailable data warnings.
+
+## [0.60.0-beta.1] - 2026-08-22
+
+### Added
+
+- Added per-domain generation and coherence diagnostics so mixed or stale Relay data is visible instead of silently combined.
+- Added bounded route-performance telemetry, trusted-proxy handling, and report-only request-limit profiles for the heaviest local API routes.
+- Added durable restart-safe market-transition dispatch and leased Discord delivery with explicit at-least-once diagnostics.
+- Added fail-safe operational-history retention previews and verified-backup readiness checks; deletion remains disabled with an empty approved-table allowlist and no prune route.
+- Added an in-depth whole-app developer guide, Relay/backend audit, implementation plan, and PDF handoff document.
+
+### Changed
+
+- Reduced page refresh work with claim-scoped generations, domain-aware invalidation, exact history ownership, and a bounded navigation cache.
+- Batched favorite market quotes into one scoped request and preserved catalog labels while substantially reducing response size and projection work.
+- Consolidated startup data into one provider-neutral bootstrap request and reused accessible shared dialogs for popup workflows.
+- Improved game-data handling with explicit empty-domain completion, exact dependency generations, and complete six-domain publication including buildings.
+- Refreshed the global Relay schema fingerprint against the current live schema while retaining the generated binding set after byte-equivalence verification.
+
+### Fixed
+
+- Fixed stale request completions, generation retry priority, hidden-tab recovery, and cleanup races that could leave pages on the wrong claim or generation.
+- Fixed protected Bot controls and Deal Watch authentication state so admin settings fail closed and expired sessions cannot retain mutation controls.
+- Fixed operational-history rollup boundaries, migration ordering, ingestion membership, backup artifact binding, and partial-prune failure handling.
+
+### Security
+
+- Isolated enforced rate-limit state from report-only traffic and bounded its memory use without trusting spoofed forwarded client addresses.
+- Kept Discord secrets, protected settings, schema response bodies, credentials, and request identifiers out of public diagnostics and telemetry.
+
+## [0.59.0-beta.1] - 2026-08-21
+
+### Added
+
+- Added immediate locating and highlighting for newly selected map resources as soon as the first matching position is available.
+
+### Changed
+
+- Improved map resource loading and warm reselection by prioritizing useful results, bounding background work, and reusing recently decoded resource data.
+- Improved map responsiveness by batching resource drawing and keeping claim, watchtower, focus, and player markers stable during resource updates.
+- Replaced the verified-character halo with a compact diamond marker.
+
+### Fixed
+
+- Fixed stale saved region selections unexpectedly broadening to every ready region.
+- Fixed cancelled, superseded, closed, or restarted resource streams applying obsolete results.
 
 ## [0.58.0-beta.4] - 2026-08-21
 

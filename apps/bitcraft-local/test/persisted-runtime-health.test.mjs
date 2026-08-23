@@ -33,20 +33,22 @@ test("web-process health reports a worker-owned subscription from persisted doma
       },
       warnings: [],
     },
-    providerHealth: {
-      running: true,
-      lastRefreshAt: "2026-07-29T20:45:30.000Z",
+    subscriptionHealth: {
+      runtimeState: "connected",
+      connected: true,
+      updatedAt: "2026-07-29T20:45:30.000Z",
     },
     now: new Date("2026-07-29T20:46:00.000Z"),
   });
   assert.equal(result.persisted, true);
   assert.equal(result.subscription.applied, true);
   assert.equal(result.subscription.connected, true);
+  assert.equal(result.subscription.typedState, "connected");
   assert.equal(result.subscription.lastAppliedAt, "2026-07-29T20:45:00.000Z");
   assert.equal(result.source.sourceKey, "region:19");
 });
 
-test("persisted health does not claim the worker is connected after refresh health ages out", () => {
+test("recent Relay HTTP polling cannot make a disconnected typed subscription appear connected", () => {
   assert.ok(healthModule, "persisted runtime health module must exist");
   const result = healthModule.runtimeHealthWithPersistedSnapshot({
     runtimeHealth: {
@@ -68,12 +70,18 @@ test("persisted health does not claim the worker is connected after refresh heal
     },
     providerHealth: {
       running: true,
-      lastRefreshAt: "2026-07-29T20:40:00.000Z",
+      lastRefreshAt: "2026-07-29T20:45:59.000Z",
+    },
+    subscriptionHealth: {
+      runtimeState: "disconnected",
+      connected: false,
+      updatedAt: "2026-07-29T20:45:59.000Z",
     },
     now: new Date("2026-07-29T20:46:00.000Z"),
     workerFreshForMs: 180_000,
   });
   assert.equal(result.subscription.applied, true);
   assert.equal(result.subscription.connected, false);
+  assert.equal(result.subscription.typedState, "disconnected");
   assert.equal(result.lastError, "regional reconnecting");
 });

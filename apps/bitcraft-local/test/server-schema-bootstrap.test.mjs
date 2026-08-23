@@ -24,6 +24,22 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "discord_channel_id TEXT",
     "CREATE TABLE IF NOT EXISTS discord_youtube_videos",
     "CREATE TABLE IF NOT EXISTS provider_transition_outbox",
+    "CREATE TABLE IF NOT EXISTS operational_history_market_trade_daily",
+    "CREATE TABLE IF NOT EXISTS operational_history_market_event_daily",
+    "CREATE TABLE IF NOT EXISTS operational_history_activity_daily",
+    "CREATE TABLE IF NOT EXISTS operational_history_source_ingestion_ids",
+    "CREATE TABLE IF NOT EXISTS operational_history_source_mutations",
+    "CREATE INDEX IF NOT EXISTS idx_operational_history_source_mutations_coverage",
+    "CREATE TRIGGER IF NOT EXISTS operational_history_market_trade_ingestion_id",
+    "CREATE TRIGGER IF NOT EXISTS operational_history_market_trade_update",
+    "CREATE TRIGGER IF NOT EXISTS operational_history_market_trade_delete",
+    "CREATE TABLE IF NOT EXISTS operational_history_rollup_watermarks",
+    "CREATE TABLE IF NOT EXISTS operational_history_retention_runs",
+    "CREATE TABLE IF NOT EXISTS operational_history_backup_verifications",
+    "locked_by TEXT",
+    "lease_token TEXT",
+    "locked_at TEXT",
+    "lease_expires_at TEXT",
     "CREATE TABLE IF NOT EXISTS empire_membership_tracking",
     "CREATE TABLE IF NOT EXISTS empire_membership_periods",
     "CREATE INDEX IF NOT EXISTS idx_market_events_claim_time",
@@ -52,7 +68,9 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_buy_orders_current/);
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_regional_sale_averages_current/);
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS empire_hexite_/);
+  assert.doesNotMatch(schemaBootstrapSql, /idx_provider_transition_lease/);
   assert.match(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_trades[\s\S]*region_id TEXT/);
+  assert.doesNotMatch(schemaBootstrapSql, /operational_history_[\s\S]*raw_json/);
 });
 
 test("applySchemaBootstrap executes the complete bootstrap SQL once", () => {
@@ -113,6 +131,27 @@ test("fresh Relay schema keeps market history without a duplicate current-listin
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name IN ('market_buy_orders_current', 'market_regional_sale_averages_current')").get().count,
     0,
+  );
+  db.close();
+});
+
+test("fresh Relay subscription health starts explicitly disconnected", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+
+  db.prepare(`
+    INSERT INTO provider_subscription_health (
+      provider, source_key, domain, connected, updated_at
+    ) VALUES ('relay', 'global', 'region', 0, '2026-08-22T09:40:00.000Z')
+  `).run();
+
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT connected, runtime_state
+      FROM provider_subscription_health
+      WHERE provider = 'relay' AND source_key = 'global' AND domain = 'region'
+    `).get() },
+    { connected: 0, runtime_state: "disconnected" },
   );
   db.close();
 });

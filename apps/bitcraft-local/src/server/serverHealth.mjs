@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { normalizeRoutePerformancePath } from "./routePerformance.mjs";
 
 export const SERVER_HEALTH_SCHEMA_VERSION = 1;
 export const SERVER_HEALTH_THRESHOLDS = Object.freeze({ staleMs: 180_000, diskWarning: 80, diskCritical: 90, memoryWarning: 80, memoryCritical: 90, eventLoopWarningMs: 100, eventLoopCriticalMs: 250, http5xxWarningRate: 0.02, http5xxCriticalRate: 0.1 });
@@ -146,4 +147,44 @@ export function runApplicationMetricPersistence(write, warn = () => {}) {
     warn(`Application health metric persistence skipped: ${message}`);
     return { ok: false, error: message };
   }
+}
+
+function publicPercentiles(raw) {
+  return { p50: number(raw?.p50), p95: number(raw?.p95), p99: number(raw?.p99) };
+}
+
+function publicGate(raw) {
+  return {
+    active: Math.max(0, Math.floor(number(raw?.active))),
+    queued: Math.max(0, Math.floor(number(raw?.queued))),
+    rejected: Math.max(0, Math.floor(number(raw?.rejected))),
+    maxConcurrent: Math.max(0, Math.floor(number(raw?.maxConcurrent))),
+    maxQueued: Math.max(0, Math.floor(number(raw?.maxQueued))),
+  };
+}
+
+export function publicRoutePerformanceHealth(raw = {}, { gates = {} } = {}) {
+  const allowedProfiles = ["gameDataRead", "orderBookRead", "favoriteQuotesRead"];
+  const rateLimits = {};
+  for (const name of allowedProfiles) {
+    if (!raw.rateLimits?.[name]) continue;
+    rateLimits[name] = {
+      reportOnly: Boolean(raw.rateLimits[name].reportOnly),
+      wouldLimit: Math.max(0, Math.floor(number(raw.rateLimits[name].wouldLimit))),
+    };
+  }
+  return {
+    sampleCount: Math.max(0, Math.floor(number(raw.sampleCount))),
+    routes: safeArray(raw.routes, 20).map((route) => ({
+      path: normalizeRoutePerformancePath(route.path),
+      sampleCount: Math.max(0, Math.floor(number(route.sampleCount))),
+      statusCounts: Object.fromEntries(Object.entries(route.statusCounts ?? {}).filter(([status]) => /^[1-5]\d\d$/.test(status)).map(([status, count]) => [status, Math.max(0, Math.floor(number(count)))])),
+      status429: Math.max(0, Math.floor(number(route.status429))),
+      durationMs: publicPercentiles(route.durationMs),
+      responseBytes: publicPercentiles(route.responseBytes),
+      projectionMs: publicPercentiles(route.projectionMs),
+    })),
+    rateLimits,
+    gates: Object.fromEntries(["gameData", "market"].filter((name) => gates[name]).map((name) => [name, publicGate(gates[name])])),
+  };
 }

@@ -186,3 +186,43 @@ export function marketFavoriteKeys(value: string | null): MarketItemKey[] {
     return [];
   }
 }
+
+export function marketFavoriteQuotesRequest(regionId: string, items: MarketItemKey[]) {
+  return {
+    url: "/api/local/market/favorite-quotes",
+    body: JSON.stringify({
+      regionId: String(regionId).trim() || "all",
+      items,
+    }),
+  };
+}
+
+export function marketFavoriteQuoteRows(items: MarketItemKey[], payload: AnyRecord): AnyRecord[] {
+  const quotes = payload?.quotes && typeof payload.quotes === "object" && !Array.isArray(payload.quotes)
+    ? payload.quotes as AnyRecord
+    : {};
+  const itemMetadata = payload?.items && typeof payload.items === "object" && !Array.isArray(payload.items)
+    ? payload.items as AnyRecord
+    : {};
+  return items.map((favorite) => {
+    const key = `${favorite.itemType}:${favorite.itemId}`;
+    const quote = quotes[key];
+    const metadata = itemMetadata[key] && typeof itemMetadata[key] === "object" && !Array.isArray(itemMetadata[key])
+      ? itemMetadata[key] as AnyRecord
+      : {};
+    const bestSell = quote?.bestSell == null ? null : decimalInteger(quote.bestSell);
+    const bestBuy = quote?.bestBuy == null ? null : decimalInteger(quote.bestBuy);
+    const sellCount = Math.max(0, Math.floor(Number(quote?.sellCount) || 0));
+    const buyCount = Math.max(0, Math.floor(Number(quote?.buyCount) || 0));
+    return {
+      ...metadata,
+      ...favorite,
+      itemName: String(metadata.name ?? metadata.itemName ?? `${favorite.itemType === "cargo" ? "Cargo" : "Item"} ${favorite.itemId}`),
+      bestSell,
+      bestBuy,
+      sellCount,
+      buyCount,
+      currentOrderCount: sellCount + buyCount,
+    };
+  });
+}

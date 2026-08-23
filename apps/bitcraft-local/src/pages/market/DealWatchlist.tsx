@@ -10,6 +10,7 @@ import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
 import { usePersistedState } from "../../hooks/usePersistedState";
 import { unique } from "../../utils/array";
 import type { LoadState } from "../../types/app";
+import type { UserAuthState } from "../../types/settings";
 import { createDelayedRefreshTask } from "../../refresh/pageRefresh.mjs";
 import { marketDealWatchSearchUrl, marketRegionScopeUrl, type MarketRefreshProps } from "./globalMarket";
 
@@ -19,11 +20,13 @@ function numericItemType(value: unknown): number {
   return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo" ? 1 : 0;
 }
 
-export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onInitialItemConsumed, refreshSequence, refreshHeaders, trackRefresh, onDiscordLogin }: MarketRefreshProps & {
+export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onInitialItemConsumed, auth, refreshSequence, refreshHeaders, trackRefresh, onAuthInvalidated, onDiscordLogin }: MarketRefreshProps & {
   claimId: string;
   monitoredRegionId: string;
   initialItem: AnyRecord | null;
   onInitialItemConsumed: () => void;
+  auth: UserAuthState;
+  onAuthInvalidated: () => void;
   onDiscordLogin: (returnTo?: string) => void;
 }) {
   const defaultRegion = monitoredRegionId;
@@ -33,7 +36,6 @@ export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onIniti
   const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
   const [regionChoice, setRegionChoice] = usePersistedState("market.dealWatch.region", defaultRegion);
   const [activeRegions, setActiveRegions] = React.useState<ActiveRegion[]>([]);
-  const [authState, setAuthState] = React.useState<AnyRecord>({ loading: true, user: null, discordLoginEnabled: false });
   const [watchState, setWatchState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
   const [watchBusy, setWatchBusy] = React.useState("");
   const [thresholdDraft, setThresholdDraft] = React.useState("30");
@@ -98,7 +100,13 @@ export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onIniti
     const controller = new AbortController();
     setWatchState((current) => ({ ...current, error: null, loading: true }));
     trackRefresh("global-market-deal-watches", fetch(`${LOCAL_API}/market/deal-watches`, { headers: refreshHeaders, signal: controller.signal }))
-      .then((response) => response.status === 401 ? { watches: [], settings: null, signedOut: true } : response.ok ? response.json() : Promise.reject(new Error(`deal watches HTTP ${response.status}`)))
+      .then((response) => {
+        if (response.status === 401) {
+          onAuthInvalidated();
+          return { watches: [], settings: null, signedOut: true };
+        }
+        return response.ok ? response.json() : Promise.reject(new Error(`deal watches HTTP ${response.status}`));
+      })
       .then((payload) => setWatchState({ data: payload, error: null, loading: false }))
       .catch((error) => {
         if (!controller.signal.aborted) {
@@ -110,18 +118,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onIniti
         }
       });
     return () => controller.abort();
-  }, [refreshSequence]);
-
-  React.useEffect(() => {
-    const controller = new AbortController();
-    trackRefresh("global-market-auth", fetch(`${LOCAL_API}/auth/me`, { headers: refreshHeaders, signal: controller.signal }))
-      .then((response) => response.ok ? response.json() : { user: null, discordLoginEnabled: false })
-      .then((payload) => setAuthState({ ...(payload ?? { user: null, discordLoginEnabled: false }), loading: false }))
-      .catch(() => {
-        if (!controller.signal.aborted) setAuthState({ loading: false, user: null, discordLoginEnabled: false });
-      });
-    return () => controller.abort();
-  }, [refreshSequence]);
+  }, [onAuthInvalidated, refreshSequence]);
 
   React.useEffect(() => refreshDealWatches(), [refreshDealWatches]);
 
@@ -175,7 +172,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onIniti
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-csrf-token": String(authState.csrfToken ?? "") },
+        headers: { "content-type": "application/json", "x-csrf-token": String(auth.csrfToken ?? "") },
         body: JSON.stringify({
           regionId: activeRegion,
           itemId: selectedItem.id,
@@ -188,6 +185,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onIniti
         }),
       });
       if (response.status === 401) {
+        onAuthInvalidated();
         onDiscordLogin(`${window.location.pathname}${window.location.search}`);
         return;
       }
@@ -212,9 +210,13 @@ export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onIniti
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json", "x-csrf-token": String(authState.csrfToken ?? "") },
+        headers: { "content-type": "application/json", "x-csrf-token": String(auth.csrfToken ?? "") },
         body: JSON.stringify(patch),
       });
+      if (response.status === 401) {
+        onAuthInvalidated();
+        return;
+      }
       if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
       refreshDealWatches();
     } catch (error) {
@@ -231,8 +233,12 @@ export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onIniti
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, {
         method: "DELETE",
-        headers: { "x-csrf-token": String(authState.csrfToken ?? "") },
+        headers: { "x-csrf-token": String(auth.csrfToken ?? "") },
       });
+      if (response.status === 401) {
+        onAuthInvalidated();
+        return;
+      }
       if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
       refreshDealWatches();
     } catch (error) {
@@ -260,8 +266,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onIniti
     ? dealWatches.find((watch) => String(watch.regionId) === String(activeRegion) && String(watch.itemId) === String(selectedItem.id) && numericItemType(watch.itemType) === numericItemType(selectedItem.itemType))
     : null;
 
-  if (authState.loading) return <section className="deal-watchlist-page"><div className="market-loading-strip">Loading saved alerts…</div></section>;
-  if (!authState.user) return <section className="deal-watchlist-page"><div className="deal-watch-empty deal-watch-signed-out"><span><strong>Turn saved items into alerts</strong>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button primary" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div></section>;
+  if (!auth.user) return <section className="deal-watchlist-page"><div className="deal-watch-empty deal-watch-signed-out"><span><strong>Turn saved items into alerts</strong>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button primary" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div></section>;
 
   return (
     <section className="deal-watchlist-page">
@@ -310,7 +315,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onIniti
       </section>
 
       <section className="deal-watchlist-section">
-        <h3><Bell size={17} /> Deal Watchlist <small>{authState.user ? `${formatNumber(dealWatches.length)} watched items` : "Discord sign-in required"}</small></h3>
+        <h3><Bell size={17} /> Deal Watchlist <small>{auth.user ? `${formatNumber(dealWatches.length)} watched items` : "Discord sign-in required"}</small></h3>
         {watchState.error ? <div className="error">Deal watchlist: {watchState.error}</div> : null}
         {dealWatches.length ? (
           <div className="deal-watch-list">

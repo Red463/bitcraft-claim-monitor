@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { filterServerHealthLogs, normalizeServerHealthSnapshot, redactServerHealthText, serverHealthState } from "../src/server/serverHealth.mjs";
 import * as serverHealth from "../src/server/serverHealth.mjs";
+import { readCraftContributionDiagnostics } from "../src/server/craftContributionVisibility.mjs";
 
 const snapshot = (overrides = {}) => normalizeServerHealthSnapshot({ schemaVersion: 1, capturedAt: new Date().toISOString(), host: { diskPercent: 40, memoryPercent: 50, cores: 2 }, services: [{ name: "web", active: true }], processes: [], logs: [], ...overrides });
 
@@ -89,4 +91,58 @@ test("application metric persistence reports SQLite locks without terminating th
   );
   assert.equal(result.ok, false);
   assert.match(warnings[0], /database is locked/);
+});
+
+test("server health exposes bounded route performance without identifiers or raw queries", () => {
+  assert.equal(typeof serverHealth.publicRoutePerformanceHealth, "function");
+  const result = serverHealth.publicRoutePerformanceHealth({
+    sampleCount: 4,
+    routes: [
+      { path: "/api/local/market/order-book/987?claimId=123", sampleCount: 3, statusCounts: { 200: 2, 429: 1 }, status429: 1, durationMs: { p50: 2, p95: 4, p99: 5 }, responseBytes: { p50: 100, p95: 200, p99: 300 }, projectionMs: { p50: 1, p95: 2, p99: 3 }, cookie: "private" },
+      ...Array.from({ length: 30 }, (_, index) => ({ path: `/api/local/history/${index}`, sampleCount: 1 })),
+    ],
+    rateLimits: { gameDataRead: { reportOnly: true, wouldLimit: 2, address: "203.0.113.5" } },
+  }, {
+    gates: { gameData: { active: 1, queued: 2, rejected: 3, maxConcurrent: 8, maxQueued: 16 } },
+  });
+
+  assert.equal(result.routes.length, 20);
+  assert.equal(result.routes[0].path, "/api/local/market/order-book/:id");
+  assert.deepEqual(result.rateLimits, { gameDataRead: { reportOnly: true, wouldLimit: 2 } });
+  assert.deepEqual(result.gates.gameData, { active: 1, queued: 2, rejected: 3, maxConcurrent: 8, maxQueued: 16 });
+  assert.doesNotMatch(JSON.stringify(result), /987|123|private|203\.0\.113\.5|claimId/);
+});
+
+test("Server Health contribution diagnostics use one fixed aggregate SQL row", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE production_contribution_events (
+      source_key TEXT PRIMARY KEY,
+      contributor_entity_id TEXT,
+      attribution_confidence TEXT NOT NULL
+    );
+    INSERT INTO production_contribution_events VALUES
+      ('a', '1', 'authoritative'),
+      ('b', '2', 'matched_action'),
+      ('c', NULL, 'authoritative'),
+      ('d', '4', 'owner_fallback'),
+      ('e', '5', 'unknown');
+  `);
+  const sql = [];
+  const wrapped = {
+    prepare(statement) {
+      sql.push(statement);
+      return db.prepare(statement);
+    },
+  };
+
+  assert.deepEqual(readCraftContributionDiagnostics(wrapped), {
+    totalEventCount: 5,
+    attributableEventCount: 2,
+    unknownAttributionCount: 3,
+  });
+  assert.equal(sql.length, 1);
+  assert.match(sql[0], /COUNT\(\*\)[\s\S]*SUM\(CASE/);
+  assert.doesNotMatch(sql[0], /SELECT\s+contributor_entity_id|SELECT\s+\*/i);
+  db.close();
 });

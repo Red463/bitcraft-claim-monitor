@@ -2,6 +2,8 @@ import type { AnyRecord } from "../main-app-data.ts";
 import type {
   DomainEnvelope,
   DomainKey,
+  DomainStatus,
+  GameDataResponseMeta,
 } from "../server/game-data/contracts.ts";
 export { pageDomains, usesProviderNeutralGameData } from "./pageDomains.ts";
 
@@ -10,6 +12,8 @@ type GameDataResponse = {
   regionId: string;
   generatedAt: string;
   domains: Partial<Record<DomainKey, DomainEnvelope<unknown>>>;
+  domainStatus: Partial<Record<DomainKey, DomainStatus>>;
+  meta: GameDataResponseMeta;
   partialErrors: string[];
 };
 
@@ -19,6 +23,15 @@ export async function loadGameData(
   fetcher: typeof fetch = fetch,
   init: RequestInit = {},
 ): Promise<AnyRecord> {
+  return (await loadGameDataWithPayloadBytes(claimId, domains, fetcher, init)).data;
+}
+
+export async function loadGameDataWithPayloadBytes(
+  claimId: string,
+  domains: DomainKey[],
+  fetcher: typeof fetch = fetch,
+  init: RequestInit = {},
+): Promise<{ data: AnyRecord; payloadBytes: number }> {
   const query = new URLSearchParams({
     claimId,
     domains: domains.join(","),
@@ -27,18 +40,33 @@ export async function loadGameData(
   if (!response.ok) {
     throw new Error(`Unable to load game data (HTTP ${response.status}).`);
   }
-  const payload = await response.json() as GameDataResponse;
+  const text = await response.text();
+  const declaredLength = response.headers.get("content-length");
+  const declaredPayloadBytes = declaredLength == null ? Number.NaN : Number(declaredLength);
+  const textPayloadBytes = new TextEncoder().encode(text).byteLength;
+  const payloadBytes = Number.isSafeInteger(declaredPayloadBytes) && declaredPayloadBytes >= 0
+    ? Math.max(declaredPayloadBytes, textPayloadBytes)
+    : textPayloadBytes;
+  const payload = JSON.parse(text) as GameDataResponse;
   const flattened: AnyRecord = {
     claimId: payload.claimId,
     regionId: payload.regionId,
     partialErrors: payload.partialErrors,
+    domainStatus: payload.domainStatus ?? {},
+    responseMeta: payload.meta ?? null,
   };
-  let stale = false;
+  const requestedStatuses = domains.flatMap((domain) => {
+    const status = payload.domainStatus?.[domain];
+    return status ? [status] : [];
+  });
+  let stale = requestedStatuses.some((status) => (
+    status.generation != null && status.freshness === "stale"
+  ));
   let oldestReceivedAt = payload.generatedAt;
   for (const [domain, envelope] of Object.entries(payload.domains)) {
     if (!envelope) continue;
     flattened[domain] = envelope.data;
-    stale ||= envelope.freshness === "stale" || envelope.freshness === "unavailable";
+    if (!requestedStatuses.length) stale ||= envelope.freshness === "stale";
     const receivedAt = envelope.provenance?.receivedAt;
     if (receivedAt && Date.parse(receivedAt) < Date.parse(oldestReceivedAt)) oldestReceivedAt = receivedAt;
   }
@@ -49,5 +77,5 @@ export async function loadGameData(
     collectedAt: oldestReceivedAt,
     lastSuccessAt: oldestReceivedAt,
   };
-  return flattened;
+  return { data: flattened, payloadBytes };
 }

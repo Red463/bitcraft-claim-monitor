@@ -99,6 +99,7 @@ import {
   type ConfigurationSection,
 } from "./adminNavigationState";
 import { shouldConfirmConfigurationNavigation } from "./adminConfigurationState";
+import { applyBrandingSettingsResult, applyConfirmedSettingsSave, syncDraftFromPersistedSettings } from "./adminSettingsSave";
 import { AdminShellHeader } from "./AdminShellHeader";
 import { AdminSectionNavigation } from "./AdminSectionNavigation";
 import { AdminStatusOverview } from "./AdminStatusOverview";
@@ -220,24 +221,28 @@ export type AdminPanelProps = {
   settings: AppSettings;
   members?: AnyRecord[];
   onSettingsSaved: (settings: AppSettings) => void;
+  onClaimSettingsSaved?: (previousClaimId: string, settings: AppSettings) => void;
   botOnly?: boolean;
   headingLevel?: 1 | 2;
   onAuthChanged?: (auth: AnyRecord) => void;
   publicAccount?: AnyRecord | null;
+  resolvedAuth?: AnyRecord;
 };
 
 export function AdminPanel({
   settings,
   members = [],
   onSettingsSaved,
+  onClaimSettingsSaved,
   botOnly = false,
   headingLevel = 2,
   onAuthChanged,
   publicAccount,
+  resolvedAuth,
 }: AdminPanelProps) {
   const Heading = headingLevel === 1 ? "h1" : "h2";
-  const [auth, setAuth] = React.useState<AnyRecord | null>(null);
-  const [authLoading, setAuthLoading] = React.useState(true);
+  const [auth, setAuth] = React.useState<AnyRecord | null>(() => resolvedAuth ?? null);
+  const [authLoading, setAuthLoading] = React.useState(resolvedAuth === undefined);
   const [authLoaderDelayElapsed, setAuthLoaderDelayElapsed] = React.useState(false);
   const initialAdminLocation = React.useMemo(() => parseAdminLocation(window.location.search), []);
   const hasExplicitInitialAdminTab = React.useMemo(() => new URLSearchParams(window.location.search).has("admin"), []);
@@ -256,6 +261,7 @@ export function AdminPanel({
   const pendingActionsRef = React.useRef(new Set<string>());
   const [pendingActions, setPendingActions] = React.useState<Set<string>>(() => new Set());
   const [draft, setDraft] = React.useState<AppSettings>(settings);
+  const persistedSettingsRef = React.useRef(settings);
   const hasUnsavedSettings = React.useMemo(() => JSON.stringify(draft) !== JSON.stringify(settings), [draft, settings]);
   const requestDiscardSettings = React.useCallback((onDiscard: () => void) => {
     if (!hasUnsavedSettings) {
@@ -563,13 +569,23 @@ export function AdminPanel({
     return () => window.clearTimeout(timer);
   }, [authLoading]);
   React.useEffect(() => {
+    if (resolvedAuth === undefined) return;
+    setAuth(resolvedAuth);
+    setAuthLoading(false);
+  }, [resolvedAuth]);
+  React.useEffect(() => {
+    if (resolvedAuth !== undefined) return;
     api("/admin/me").then(setAdminAuthState).catch((error) => {
       setAdminAuthState({ authenticated: false, setupRequired: false, error: error instanceof Error ? error.message : String(error) });
       setMessageKind("error");
       setMessage(error.message);
     }).finally(() => setAuthLoading(false));
-  }, []);
-  React.useEffect(() => setDraft(settings), [settings]);
+  }, [resolvedAuth]);
+  React.useEffect(() => {
+    const previousSettings = persistedSettingsRef.current;
+    setDraft((current) => syncDraftFromPersistedSettings(previousSettings, settings, current));
+    persistedSettingsRef.current = settings;
+  }, [settings]);
   React.useEffect(() => {
     const applyLocation = () => {
       const params = new URLSearchParams(window.location.search);
@@ -605,13 +621,13 @@ export function AdminPanel({
       if (botOnly && tab === "discord" && botSection === "commands") await refreshCustomCommands();
       if (tab === "analytics") await refreshAnalytics();
       if (tab === "empire-membership") await refreshEmpireMembership();
-      if (tab === "database") await refreshTables();
+      if (tab === "database") await Promise.all([refreshTables(), refreshStatus()]);
       if (tab === "users") await refreshUsers();
       if (tab === "accounts") await refreshLinkedAccountsAndFallbackMembers();
       if (tab === "configuration") await refreshAccessControl();
       if (tab === "audit") await refreshAudit();
       if (tab === "diagnostics") { await refreshStatus(); await refreshPopupDiagnostics(); }
-      if (tab === "backups") await refreshBackups();
+      if (tab === "backups") await Promise.all([refreshBackups(), refreshStatus()]);
     }, undefined, `tab-load:${tab}:${botSection}:${analyticsDays}:${securityEventSearch}:${securityEventPage}:${securityEventPageSize}:${settings.claimId}:${members.length}`);
   }, [auth?.authenticated, tab, analyticsDays, botSection, securityEventSearch, securityEventPage, securityEventPageSize, settings.claimId, members.length]);
   const scheduledJobsRunning = Boolean((scheduledJobs?.jobs ?? []).some((job: AnyRecord) => job.running));
@@ -643,7 +659,12 @@ export function AdminPanel({
       const result = await api("/admin/settings", { method: "PUT", body: JSON.stringify(draft) });
       const next = normalizeAppSettings(result);
       setDraft(next);
-      onSettingsSaved(next);
+      applyConfirmedSettingsSave({
+        previousSettings: settings,
+        persistedSettings: next,
+        onSettingsSaved,
+        onClaimSettingsSaved,
+      });
     }, "Settings saved and applied.", "settings-save");
   }
 
@@ -863,18 +884,18 @@ export function AdminPanel({
     });
     await run(async () => {
       const result = await api("/admin/branding", { method: "POST", body: JSON.stringify({ type, dataUrl }) });
-      const next = { ...draft, branding: result.branding };
-      setDraft(next);
-      onSettingsSaved(next);
+      const next = applyBrandingSettingsResult(settings, draft, result.branding);
+      setDraft(next.nextDraft);
+      onSettingsSaved(next.savedSettings);
     }, `${type === "logo" ? "Logo" : "Favicon"} uploaded.`, `branding-upload:${type}`);
   }
 
   async function removeBrand(type: "logo" | "favicon") {
     await run(async () => {
       const result = await api(`/admin/branding?type=${type}`, { method: "DELETE" });
-      const next = { ...draft, branding: result.branding };
-      setDraft(next);
-      onSettingsSaved(next);
+      const next = applyBrandingSettingsResult(settings, draft, result.branding);
+      setDraft(next.nextDraft);
+      onSettingsSaved(next.savedSettings);
     }, `${type === "logo" ? "Logo" : "Favicon"} removed.`, `branding-remove:${type}`);
   }
 
@@ -2197,7 +2218,7 @@ export function AdminPanel({
       {tab === "database" ? (
         <AdminDataSection
           tab="database"
-          data={{ tables, selectedTable, tableResult, tableSearch, tableOffset, backups }}
+          data={{ tables, selectedTable, tableResult, tableSearch, tableOffset, backups, operationalHistory: status?.operationalHistory }}
           pending={isBusyAction}
           error={messageKind === "error" ? message : null}
           result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
@@ -2206,6 +2227,7 @@ export function AdminPanel({
           onPreviousTablePage={() => setTableOffset(Math.max(0, tableOffset - 50))}
           onNextTablePage={() => setTableOffset(tableOffset + 50)}
           onCreateBackup={() => undefined}
+          onRunRetentionDryRun={() => run(async () => { await api("/admin/operational-history-retention/dry-run", { method: "POST", body: "{}" }); await refreshStatus(); }, "Retention dry-run completed without deleting rows.", "retention-dry-run")}
           tableExportHref={(format) => `${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=${format}&search=${encodeURIComponent(tableSearch)}`}
           backupDownloadHref={(name) => `${LOCAL_API}/admin/backup?name=${encodeURIComponent(name)}`}
         />
@@ -2291,7 +2313,7 @@ export function AdminPanel({
       {tab === "backups" ? (
         <AdminDataSection
           tab="backups"
-          data={{ tables, selectedTable, tableResult, tableSearch, tableOffset, backups }}
+          data={{ tables, selectedTable, tableResult, tableSearch, tableOffset, backups, operationalHistory: status?.operationalHistory }}
           pending={isBusyAction}
           error={messageKind === "error" ? message : null}
           result={message && messageKind !== "error" ? { message, kind: messageKind } : null}
@@ -2299,7 +2321,8 @@ export function AdminPanel({
           onTableSearchChange={(value) => { setTableSearch(value); setTableOffset(0); }}
           onPreviousTablePage={() => setTableOffset(Math.max(0, tableOffset - 50))}
           onNextTablePage={() => setTableOffset(tableOffset + 50)}
-          onCreateBackup={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await refreshBackups(); }, "Backup created.", "backup-create")}
+          onCreateBackup={() => run(async () => { await api("/admin/backups", { method: "POST", body: "{}" }); await Promise.all([refreshBackups(), refreshStatus()]); }, "Backup created and verified.", "backup-create")}
+          onRunRetentionDryRun={() => run(async () => { await api("/admin/operational-history-retention/dry-run", { method: "POST", body: "{}" }); await refreshStatus(); }, "Retention dry-run completed without deleting rows.", "retention-dry-run")}
           tableExportHref={(format) => `${LOCAL_API}/admin/export?name=${encodeURIComponent(selectedTable)}&format=${format}&search=${encodeURIComponent(tableSearch)}`}
           backupDownloadHref={(name) => `${LOCAL_API}/admin/backup?name=${encodeURIComponent(name)}`}
         />

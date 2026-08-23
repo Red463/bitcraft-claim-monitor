@@ -4,6 +4,7 @@ import test from "node:test";
 let performanceModule = null;
 let benchmarkModule = null;
 let binaryBenchmarkModule = null;
+let resourceClientBenchmarkModule = null;
 try {
   performanceModule = await import("../src/server/mapPerformance.mjs");
 } catch {
@@ -19,6 +20,11 @@ try {
 } catch {
   // RED: the deterministic binary resource benchmark has not been implemented yet.
 }
+try {
+  resourceClientBenchmarkModule = await import("../scripts/benchmark-map-resource-client.mjs");
+} catch {
+  // RED: the production-loader resource-client benchmark has not been implemented yet.
+}
 
 test("400,000-point binary resource processing stays bounded", async () => {
   assert.ok(binaryBenchmarkModule?.runBinaryResourceBenchmark);
@@ -29,6 +35,31 @@ test("400,000-point binary resource processing stays bounded", async () => {
   assert.ok(result.maxHeapMiB <= 256);
   assert.ok(result.p95CodecMs <= 5_000);
   assert.ok(result.p95DeltaMs <= 2_000);
+});
+
+test("resource-client benchmark complements the retained server and binary benchmarks", () => {
+  assert.ok(benchmarkModule?.runNativeMapBenchmark);
+  assert.ok(binaryBenchmarkModule?.runBinaryResourceBenchmark);
+  assert.ok(resourceClientBenchmarkModule?.runMapResourceClientBenchmark);
+  const result = resourceClientBenchmarkModule.evaluateMapResourceClientBenchmark({
+    expectedPartitionCount: 1,
+    committedPartitionCount: 1,
+    firstPartitionElapsedMs: 10,
+    completeSelectionElapsedMs: 20,
+    warmReselectElapsedMs: 1,
+    decodedBytes: 4,
+    warmPartitionCount: 1,
+    coldRequestCount: 1,
+    warmRequestCount: 0,
+    coldHttpRequestCount: 1,
+    warmHttpRequestCount: 0,
+    recoveryRequestCount: 0,
+    changedGenerationCount: 0,
+    maxActiveHttpLoads: 1,
+    configuredMaxConcurrentLoads: 4,
+    unexpectedHttpCount: 0,
+  });
+  assert.equal(result.ok, true, result.failures.join("; "));
 });
 
 test("public map health contains aggregate partition metrics without coordinates or selected ids", () => {

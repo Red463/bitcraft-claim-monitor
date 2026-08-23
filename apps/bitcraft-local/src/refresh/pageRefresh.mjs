@@ -175,36 +175,50 @@ export function createPageRefreshController(options) {
   let page = String(options.page ?? "");
   let sequence = 0;
   let activeCycle = null;
+  let activeGenerationTriggered = false;
   let lastStartedAt = Number.NEGATIVE_INFINITY;
   let dirty = false;
   let timer = null;
+  let generationScheduled = false;
+  let generationRetryTimer = null;
+  let generationRetryReason = "generation";
   let stopped = false;
   let failureCount = 0;
   let failureRetryAt = Number.NEGATIVE_INFINITY;
   let visible = options.visible !== false;
   let overdue = false;
+  let overdueGeneration = false;
   let queuedReason = null;
   let intervalMs = Number(options.intervalMs ?? 30_000);
 
   function clearScheduled() {
     if (timer != null) clearTimer(timer);
     timer = null;
+    generationScheduled = false;
   }
 
-  function startCycle(reason) {
+  function clearGenerationRetry() {
+    if (generationRetryTimer != null) clearTimer(generationRetryTimer);
+    generationRetryTimer = null;
+    generationRetryReason = "generation";
+  }
+
+  function startCycle(reason, generationTriggered = reason === "generation") {
     if (stopped) return null;
     if (!visible) {
       overdue = true;
+      if (generationTriggered) overdueGeneration = true;
       return null;
     }
     if (activeCycle) {
       if (reason === "near-live") dirty = true;
-      else queuedReason = reason;
+      else if (reason !== "generation" || queuedReason !== "manual") queuedReason = reason;
       return null;
     }
     clearScheduled();
     sequence += 1;
     activeCycle = createPageRefreshCycle(page, sequence, reason, { now, createId });
+    activeGenerationTriggered = generationTriggered;
     lastStartedAt = now();
     onCycle(activeCycle);
     return activeCycle;
@@ -226,6 +240,7 @@ export function createPageRefreshController(options) {
       timer = null;
       if (!visible) {
         overdue = true;
+        if (reason === "generation") overdueGeneration = true;
         return;
       }
       if (activeCycle) {
@@ -237,18 +252,74 @@ export function createPageRefreshController(options) {
     }, wait);
   }
 
-  function scheduleFailureRetry() {
+  function scheduleGeneration(reason = "generation") {
+    if (stopped || generationScheduled || pageRefreshPolicy(page).mode === "manual") return;
+    if (!visible) {
+      overdue = true;
+      overdueGeneration = true;
+      return;
+    }
+    if (generationRetryTimer != null) {
+      if (reason === "visibility-catch-up") generationRetryReason = reason;
+      return;
+    }
+    clearScheduled();
+    generationScheduled = true;
+    const wait = Math.max(0, Math.max(lastStartedAt + PAGE_REFRESH_COALESCE_MS, failureRetryAt) - now());
+    if (wait === 0 && !activeCycle) {
+      generationScheduled = false;
+      startCycle(reason, true);
+      return;
+    }
+    timer = setTimer(() => {
+      timer = null;
+      generationScheduled = false;
+      if (!visible) {
+        overdue = true;
+        overdueGeneration = true;
+        return;
+      }
+      if (activeCycle) {
+        if (queuedReason !== "manual") queuedReason = "generation";
+        return;
+      }
+      startCycle(reason, true);
+    }, wait);
+  }
+
+  function scheduleFailureRetry(reason = "near-live") {
     clearScheduled();
     const delay = PAGE_REFRESH_BACKOFF_MS[Math.min(failureCount - 1, PAGE_REFRESH_BACKOFF_MS.length - 1)];
     failureRetryAt = now() + delay;
+    if (reason === "generation") {
+      clearGenerationRetry();
+      generationRetryReason = reason;
+      generationRetryTimer = setTimer(() => {
+        const retryReason = generationRetryReason;
+        generationRetryTimer = null;
+        generationRetryReason = "generation";
+        if (!visible) {
+          overdue = true;
+          overdueGeneration = true;
+          return;
+        }
+        if (activeCycle) {
+          if (queuedReason !== "manual") queuedReason = "generation";
+          return;
+        }
+        startCycle(retryReason, true);
+      }, delay);
+      return;
+    }
     timer = setTimer(() => {
       timer = null;
       if (!visible) {
         overdue = true;
+        if (reason === "generation") overdueGeneration = true;
         return;
       }
       dirty = false;
-      startCycle("near-live");
+      startCycle(reason);
     }, delay);
   }
 
@@ -278,15 +349,19 @@ export function createPageRefreshController(options) {
       stopped = true;
       dirty = false;
       clearScheduled();
+      clearGenerationRetry();
     },
     setPage(nextPage) {
       const normalizedPage = String(nextPage ?? "");
       if (normalizedPage === page) return null;
       clearScheduled();
+      clearGenerationRetry();
       page = normalizedPage;
       activeCycle = null;
+      activeGenerationTriggered = false;
       dirty = false;
       overdue = false;
+      overdueGeneration = false;
       queuedReason = null;
       failureCount = 0;
       failureRetryAt = Number.NEGATIVE_INFINITY;
@@ -294,9 +369,12 @@ export function createPageRefreshController(options) {
     },
     restart() {
       clearScheduled();
+      clearGenerationRetry();
       activeCycle = null;
+      activeGenerationTriggered = false;
       dirty = false;
       overdue = false;
+      overdueGeneration = false;
       queuedReason = null;
       failureCount = 0;
       failureRetryAt = Number.NEGATIVE_INFINITY;
@@ -316,10 +394,13 @@ export function createPageRefreshController(options) {
         && !activeCycle
         && now() >= lastStartedAt + intervalMs;
       if (becameVisible && (overdue || intervalExpired)) {
+        const generationOverdue = overdueGeneration;
         clearScheduled();
         overdue = false;
+        overdueGeneration = false;
         dirty = false;
         if (pageRefreshPolicy(page).mode === "near-live") scheduleNearLive("visibility-catch-up");
+        else if (generationOverdue || failureRetryAt > now()) scheduleGeneration("visibility-catch-up");
         else startCycle("visibility-catch-up");
       }
     },
@@ -335,22 +416,49 @@ export function createPageRefreshController(options) {
       }
       if (!activeCycle) scheduleNearLive();
     },
-    complete(cycleId, succeeded = true) {
-      if (!activeCycle || activeCycle.id !== String(cycleId ?? "")) return;
-      activeCycle = null;
-      if (!succeeded && pageRefreshPolicy(page).mode === "near-live") {
-        failureCount += 1;
-        scheduleFailureRetry();
+    invalidateGeneration() {
+      if (pageRefreshPolicy(page).mode === "manual" || stopped) return;
+      if (!visible) {
+        overdue = true;
+        overdueGeneration = true;
         return;
       }
-      if (succeeded) {
+      if (activeCycle) {
+        if (queuedReason !== "manual") queuedReason = "generation";
+        return;
+      }
+      scheduleGeneration();
+    },
+    complete(cycleId, succeeded = true) {
+      if (stopped || !activeCycle || activeCycle.id !== String(cycleId ?? "")) return;
+      const completedGenerationTriggered = activeGenerationTriggered;
+      activeCycle = null;
+      activeGenerationTriggered = false;
+      const retryReason = completedGenerationTriggered
+        ? "generation"
+        : pageRefreshPolicy(page).mode === "near-live" ? "near-live" : null;
+      if (!succeeded && retryReason) {
+        failureCount += 1;
+        const runManualFirst = queuedReason === "manual";
+        queuedReason = null;
+        if (runManualFirst) {
+          startCycle("manual");
+          scheduleFailureRetry(retryReason);
+        } else {
+          scheduleFailureRetry(retryReason);
+        }
+        return;
+      }
+      if (succeeded && (completedGenerationTriggered || pageRefreshPolicy(page).mode === "near-live")) {
+        if (completedGenerationTriggered) clearGenerationRetry();
         failureCount = 0;
         failureRetryAt = Number.NEGATIVE_INFINITY;
       }
       if (queuedReason) {
         const reason = queuedReason;
         queuedReason = null;
-        startCycle(reason);
+        if (reason === "generation") scheduleGeneration();
+        else startCycle(reason);
       } else if (dirty) scheduleNearLive();
       else scheduleInterval();
     },

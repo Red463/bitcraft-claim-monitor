@@ -12,6 +12,7 @@ import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import "../styles/market.css";
 import type { ActivePanel } from "../types/app";
+import type { UserAuthState } from "../types/settings";
 import type { MapFocus } from "./map/mapUtils";
 import { timeAgo } from "../utils/format";
 import { MarketBrowse } from "./market/MarketBrowse";
@@ -38,6 +39,8 @@ export function Market({
   locationSearch,
   fallbackRegionId,
   activeRegionScopeKey,
+  auth,
+  onAuthInvalidated,
   onQueryStateChange,
   onNavigate,
   onShowMap,
@@ -48,6 +51,8 @@ export function Market({
   locationSearch: string;
   fallbackRegionId: string;
   activeRegionScopeKey?: string;
+  auth: UserAuthState;
+  onAuthInvalidated: () => void;
   onQueryStateChange: () => void;
   onNavigate: (panel: ActivePanel, tab?: string) => void;
   onShowMap: (focus: NonNullable<MapFocus>, regionId?: string) => void;
@@ -68,7 +73,6 @@ export function Market({
   const activeRegions = useActiveRegions(undefined, claimId, activeRegionScopeKey);
   const marketGeneration = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
   const [overviewState, setOverviewState] = React.useState<{ loading: boolean; error: string; data: AnyRecord | null }>({ loading: true, error: "", data: null });
-  const [, setFreshnessTick] = React.useState(0);
   const activeRegionIds = React.useMemo(() => new Set(activeRegions.map((region) => region.regionId)), [activeRegions]);
   const regionId = regionChoice !== "All" && activeRegionIds.has(regionChoice) ? regionChoice : "";
   const tabAllowed = React.useCallback((tab: string) => effectiveTargetAllowed(access, targetIdForTab("market", tab)), [access]);
@@ -93,11 +97,6 @@ export function Market({
       });
     return () => controller.abort();
   }, [claimId, marketGeneration, marketRefresh.refreshHeaders, regionId, request?.sequence, trackPromise]);
-  React.useEffect(() => {
-    const timer = window.setInterval(() => setFreshnessTick((value) => value + 1), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
   React.useEffect(() => {
     if (location.page === "settlement-market") {
       onNavigate("settlement-market", location.canonicalTab);
@@ -183,7 +182,7 @@ export function Market({
       {currentView === "overview" ? <div id="market-panel-overview" role="tabpanel" aria-labelledby="market-tab-overview"><MarketOverview {...marketRefresh} claimId={claimId} regionId={regionId} overviewState={overviewState} favorites={favorites} onOpenItem={openItem} /></div> : null}
       {currentView === "browse" ? <div id="market-panel-browse" role="tabpanel" aria-labelledby="market-tab-browse"><MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} canWatch={tabAllowed("deal-watch")} onWatchItem={watchItem} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /></div> : null}
       {currentView === "opportunities" ? <MarketOpportunities {...marketRefresh} claimId={claimId} regionId={regionId} activeRegions={activeRegions} canViewRoutes={tabAllowed("deals")} canViewDemand={tabAllowed("buy-orders")} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
-      {currentView === "saved" ? <MarketSaved {...marketRefresh} claimId={claimId} monitoredRegionId={regionId} favorites={favorites} canViewFavorites={tabAllowed("browse")} canViewWatches={tabAllowed("deal-watch")} initialWatchItem={pendingWatchItem} onWatchItemConsumed={() => setPendingWatchItem(null)} onOpenItem={openItem} onDiscordLogin={onDiscordLogin} /> : null}
+      {currentView === "saved" ? <MarketSaved {...marketRefresh} claimId={claimId} monitoredRegionId={regionId} favorites={favorites} canViewFavorites={tabAllowed("browse")} canViewWatches={tabAllowed("deal-watch")} initialWatchItem={pendingWatchItem} onWatchItemConsumed={() => setPendingWatchItem(null)} onOpenItem={openItem} auth={auth} onAuthInvalidated={onAuthInvalidated} onDiscordLogin={onDiscordLogin} /> : null}
       {currentView === "stalls" ? <div id="market-panel-stalls" role="tabpanel" aria-labelledby="market-tab-stalls"><MarketStalls {...marketRefresh} claimId={claimId} regionId={regionId} onShowMap={onShowMap} /></div> : null}
     </div>
   );

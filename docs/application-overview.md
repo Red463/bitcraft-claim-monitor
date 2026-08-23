@@ -1,170 +1,196 @@
 # Application overview
 
 BitCraft Claim Monitor is a local-first settlement operations dashboard. The
-standalone Relay repository keeps the public product name while isolating all
-deployment identities and fresh data from the maintained application.
+maintained application is [`apps/bitcraft-local`](../apps/bitcraft-local/).
 
-Local development uses frontend port `19428` and local API port `19430`.
-The parallel preview is `https://relay.timbersteeltrade.com`.
+Local development uses frontend port `19428` and API port `19430`. The built
+smoke server on `18449` is an optional verification tool, not a normal runtime
+service.
 
 ## Runtime topology
 
 ```mermaid
 flowchart LR
   RelayHttp["Relay HTTP cache"]
-  Global["Global typed subscription"]
-  Primary["Primary-region typed subscription"]
-  Pool["Bounded region-session pool"]
-  Provider["RelayBitCraftProvider"]
-  Repo["Current-state repository"]
-  Sqlite["SQLite"]
-  LocalApi["Provider-neutral local routes"]
+  Global["Global typed subscriptions"]
+  Regional["Regional typed subscriptions"]
+  Normalize["Provider normalization"]
+  Current["Per-domain current state"]
+  SQLite["SQLite last-good and history"]
+  Worker["Worker side effects and delivery"]
+  Api["Provider-neutral local API"]
   Browser["React"]
 
-  RelayHttp --> Provider
-  Global --> Provider
-  Primary --> Provider
-  Pool --> Provider
-  Provider --> Repo
-  Repo --> Sqlite
-  Repo --> LocalApi
-  LocalApi --> Browser
+  RelayHttp --> Normalize
+  Global --> Normalize
+  Regional --> Normalize
+  Normalize --> Current
+  Current --> SQLite
+  Current --> Api
+  Current --> Worker
+  Worker --> SQLite
+  Api --> Browser
 ```
 
-The server discovers Relay topology from health and cache-readiness responses;
-database names and ports are not hard-coded. HTTP adapters handle proven joined
-routes. Official generated TypeScript bindings handle SpacetimeDB subscriptions;
-the project does not implement a wire codec.
+The server discovers Relay topology from health and cache-readiness responses.
+Relay HTTP adapters consume proven joined routes. Generated TypeScript bindings
+drive the typed SpacetimeDB subscriptions; the application does not implement a
+wire codec. The primary settlement region stays connected, while cross-region
+market, public-craft, claim, empire, and map work uses bounded regional sessions.
 
-The primary region remains connected for the monitored settlement. Global
-catalog subscriptions provide descriptions and recipes. Cross-region market and
-empire work uses filtered, staggered sessions with connection and idle-close
-budgets.
+## Provider and publication boundary
 
-## Provider boundary
+`apps/bitcraft-local/src/server/game-data/` owns topology, HTTP adapters, typed
+sessions, schema validation, normalization, current-state publication, and
+provider health. Relay field names and wire records stay behind this boundary.
 
-`apps/bitcraft-local/src/server/game-data/` owns the provider interface,
-topology, HTTP adapters, typed sessions, normalization, current-state
-repository, and provider health.
+Each domain publication is atomic. A schema fingerprint mismatch stops the
+affected typed generation and retains the previous valid domain. Separate
+domains can advance independently, so a response containing several domains is
+not automatically one synchronized snapshot.
 
-`RelayBitCraftProvider` implements:
+The public response makes that distinction explicit:
 
-- `start(config, sink)` for long-lived ingestion;
-- `refresh(request)` for coordinated manual refresh;
-- `health()` for source, schema, lag, reconnect, and apply diagnostics;
-- `stop()` for orderly shutdown.
+- `domainStatus` reports generation, freshness, confidence, receipt/source age,
+  warnings, provenance, and declared enrichment dependencies for each requested
+  domain;
+- `meta.coherence` is `coherent`, `mixed`, or `unavailable`; and
+- coherence compares known local application generations and exact dependency
+  publications only. It does not claim simultaneous upstream observation.
 
-Provider commits use numbered staging generations. A domain becomes current only
-after its required inputs validate, preventing mixed-generation reads. A schema
-fingerprint mismatch stops the affected live generation and preserves
-last-good data. The same interface reserves a later
-`DirectBitCraftProvider`; React and SQLite do not depend on Relay wire DTOs.
+When a source omits its own observation timestamp, reported age is based on
+local receipt time and cannot prove upstream freshness.
 
-## Browser contract
+## Browser contract and refresh
 
-React requests only same-origin provider-neutral local routes. The main contract
-is:
+React reads same-origin, provider-neutral routes. The main contract is:
 
 ```http
 GET /api/local/game-data?claimId=<configured-claim>&domains=claim,members
 ```
 
-The response contains the configured claim and region, generation time, partial
-domain envelopes, and partial errors. Each envelope records:
+The requested claim must match the configured claim, and cross-region data is
+restricted to configured active regions. Available last-good domains return
+with stale/partial metadata; HTTP `503` is reserved for requests where none of
+the requested domains has ever loaded.
 
-- `freshness`: live, fresh, stale, or unavailable;
-- `confidence`: authoritative, joined, partial, or unknown;
-- exact age and warnings;
-- provider, source key, region, database, schema fingerprint, source time, and
-  receive time provenance.
+Provider-neutral pages create one claim- and domain-scoped generation watcher.
+SSE delivers prompt invalidation. Craft Monitor polls the generation endpoint
+every second as a recovery path; other interval provider pages poll every 30
+seconds. Hidden tabs do not poll and perform one visibility catch-up. Manual-only
+and non-provider pages create no watcher.
 
-The claim must equal the configured monitored claim. Cross-region domains are
-restricted to configured active regions. Last-good data returns `200` with
-stale metadata; `503` is reserved for requests where no requested domain has
-ever loaded.
+Invalidation is single-flight and coalesced to one trailing cycle. A failed
+generation cycle retries after 5, 10, 20, then at most 30 seconds. A queued
+manual cycle runs before the background retry without discarding its deadline.
+Ordinary interval failures retain their normal next-interval cadence.
 
-Open pages subscribe to provider generation events and refetch only their owned
-domains through `/api/local/game-data`. A short bounded poll recovers missed
-events. Users therefore see committed Relay generations quickly rather than
-waiting for broad scheduled acquisition jobs.
+Browser navigation data is scoped by claim and panel. Its cache uses access
+order, at most eight entries, a 4 MiB conservative byte budget, and a five-minute
+absolute TTL. Oversized or size-unknown responses remain usable for the active
+request but are not retained.
+
+Durable `/api/local/history` ownership is narrow: Dashboard requests activity,
+market, and dashboard history; Activity requests activity; Settlement Market
+requests market. Other pages issue no history request.
 
 ## Domain ownership
 
 | Domain | Current authority |
 | --- | --- |
-| Claim summary, members, joined inventories/crafts | Relay HTTP cache |
-| Storage events | Relay storage-log HTTP, durably copied before expiry |
-| Deposits | Relay HTTP with explicit active, respawning, or unknown state |
-| Items, cargo, recipes, buildings, skills, resources, equipment, buffs | Global typed subscription |
+| Claim, members, joined inventories/crafts, deposits | Relay HTTP cache |
+| Storage events | Relay storage-log HTTP, copied durably before upstream expiry |
+| Items, cargo, recipes, buildings, skills, resources, equipment, buffs | Global typed subscriptions |
 | Construction, research, recruitment | Regional typed subscriptions plus global catalogs |
-| Market | Regional buy/sell order state enriched with catalog, building, claim, and player indexes |
-| Equipment, buffs, player state | Member-ID-filtered regional subscriptions |
-| Layout and map | Claim/building/tile state plus bounded entity-location subscriptions |
-| Empires, watchtowers, siege | Proven global rows or configured regional sessions |
-| Charts, membership periods, notifications | Locally derived SQLite history |
+| Settlement and regional market | Regional order state and corroborated closure evidence |
+| Equipment, buffs, player state | Member-filtered regional subscriptions |
+| Layout and map | Claim/building/tile state plus bounded spatial/resource sessions |
+| Empires, watchtowers, siege | Proven global rows and configured regional sessions |
+| Charts, membership periods, notifications | Locally observed SQLite history |
 
-Regional craft-progress transactions provide contributor attribution. Listing
-closure is classified as sold only with corroborating trade/close evidence;
-otherwise it remains removed or cancelled. Deposit `unknown` never means active
-or harvestable.
+Normalizers preserve 64-bit IDs and large integers as decimal strings and keep
+item type `0` and cargo type `1` as different identities. Deposit `unknown` is
+never treated as active or harvestable. A listing closure is a sale only when
+corroborating evidence exists.
 
-## Persistence ownership
-
-Wire records never enter React or history tables directly. Normalizers preserve
-64-bit IDs and large integers as decimal strings and include item kind in every
-item/cargo key.
+## Persistence and background work
 
 SQLite owns:
 
-- atomic current-domain envelopes and normalized catalog projections;
-- restart-safe checkpoints and source/subscription health;
-- durable storage, market, membership, production, and notification events;
-- locally observed history and analytics;
-- admin, user, consent, legal, Discord, outbox, dedupe, delivery, and audit
-  state;
-- backup and operational metadata.
+- durable last-good domain envelopes and catalog projections;
+- provider/subscription health, checkpoints, and provider-transition outboxes;
+- locally observed storage, market, membership, production, activity, and
+  notification history;
+- Discord outbox/deduplication, user/admin settings, sessions, legal/privacy,
+  audit, backup, and operational metadata.
 
-SQLite does not own retired browser snapshots or periodic catalog caches used as
-a substitute for live data. Current pages read committed Relay generations.
-History tables remain because upstream event retention is finite and because
-charts, transition semantics, and notification dedupe require durable local
-observation.
+Most Discord operational configuration is stored in `discord_json` and managed
+through authenticated Admin. The bot token is stored in the protected secret
+store unless an environment override is present. Environment variables can
+override the token and Discord identity fields and own delivery mode, gateway
+startup, sandbox-channel, and bot-network safeguards.
 
-## Background operation and failures
+OAuth resolves separately. When defined, `DISCORD_OAUTH_CLIENT_ID` is the client
+ID; otherwise the server uses the resolved bot application ID—defined
+`DISCORD_APPLICATION_ID`, or stored `discord_json.applicationId`. A defined
+blank client-ID value masks its lower-priority source. A non-empty
+`DISCORD_OAUTH_CLIENT_SECRET` wins; otherwise the server reads protected SQLite
+secret `discord_oauth_client_secret`. Preview redirect URI comes from
+non-empty `DISCORD_OAUTH_REDIRECT_URI` or the request origin; canonical mode
+forces `https://app.timbersteeltrade.com/api/local/auth/discord/callback`.
+Redirect configuration alone does not enable OAuth—the resolved client ID and
+secret must both be present.
 
-The web and worker processes continue ingestion, history, analytics, and
-notification processing without a browser. Relay HTTP requests use bounded
-timeouts, retry only transient failures, and enter a circuit-breaker cooldown.
-Typed sessions reconnect with jittered backoff and rediscover topology after
-repeated failures.
+In separated production, the worker owns long-running Relay acquisition,
+reconciliation, history work, transition dispatch, scheduled jobs, and Discord
+delivery. The web process owns HTTP assets, provider-neutral routes,
+authentication, and administration. Local development uses the combined
+process role.
+Current market state and its compact transition are committed together; the
+worker later leases and applies history/activity/Discord enqueue effects in a
+separate bounded transaction. Current-state publication therefore does not wait
+for those effects.
 
-An upstream outage never clears a last-good generation. Admin health surfaces
-readiness, schema fingerprints, lag, reconnects, malformed rows, apply time, and
-the last error. Browser pages display freshness and cause rather than silently
-showing old data as live.
+Discord outbox rows use durable leases. External delivery is at-least-once, not
+exactly-once, because Discord acknowledgement and SQLite completion cannot be
+one transaction.
 
-## Assets
+Preview mode records automatic delivery and disables the gateway. It does not
+disable all Discord HTTP by itself: authenticated exact-channel sandbox tests
+can use the live API while `ENABLE_DISCORD_NETWORK` is enabled (the default).
+Setting it to `false` blocks bot delivery, manual bot API calls, and Discord
+interaction handling, but not OAuth start/callback/token/profile traffic. To
+suppress server-side Discord bot/API/OAuth traffic, also leave or clear all
+OAuth client-ID and client-secret sources above so
+`discordOAuthConfig.enabled` is false. A blank environment secret does not mask
+a stored SQLite secret. The stored application ID is managed through
+authenticated Admin; the protected OAuth secret requires an approved
+database-secret procedure because the ordinary Discord settings form does not
+write it.
 
-Runtime icons prefer `/game-icons/`. Missing verified local assets may use the
-bounded same-origin `/api/local/game-icon/:itemType/:itemId` fallback.
-`apps/bitcraft-local/assets/game-icons-manifest.json` is immutable build-time
-provenance and is not used as a runtime URL source. Its original source URLs are retained
-only to prove identity, permission, retrieval time, and SHA-256 digest.
+That scope does not include browser asset requests. Authenticated views render
+stored Discord avatar URLs from `cdn.discordapp.com`, and the Content Security
+Policy allows that host, so browsers may fetch those avatars directly. Remote
+avatar assets must be suppressed separately when required; there is no single
+documented setting for that behavior.
 
-## Deployment isolation
+Operational-history rollups and dry-run diagnostics exist, but destructive
+retention is disabled: the runtime default is off, the approved table allowlist
+is empty, and scheduled/Admin actions do not delete rows.
 
-The Relay service uses:
+## Failure behavior and known limits
 
-- `/opt/bitcraft-claim-monitor-relay`
-- `/var/lib/bitcraft-claim-monitor-relay`
-- `/var/backups/bitcraft-claim-monitor-relay`
-- `/etc/bitcraft-claim-monitor-relay.env`
-- `bitcraft-claim-monitor-relay.service`
-- `bitcraft-claim-monitor-relay-worker.service`
-- local port `19430`
+Relay HTTP requests use bounded timeouts, transient retry, and circuit-breaker
+cooldown. Typed sessions reconnect with backoff and rediscover topology after
+repeated failures. Source failure never clears a last-good generation.
 
-Preview Discord is forced to record mode at process execution. The maintained
-application and its database remain untouched until cutover gates pass.
-Automatic Discord work remains recorded. Authenticated manual tests are the
-only exception and can post only to the exact configured sandbox Discord
-channel, with mentions disabled.
+The application deliberately does not invent unavailable semantics:
+
+- siege cancellation remains removed-or-unknown;
+- purchaser identity for a confirmed market sale remains unavailable;
+- regional trade totals are locally observed confirmed sales from a displayed
+  observation start, not a complete upstream historical aggregate; and
+- cross-region coordinates are not assumed to share one geometry.
+
+See [known Relay semantic limits](./relay-migration/unresolved-semantics-2026-08-02.md)
+and the [deployment guide](../DEPLOYMENT.md).

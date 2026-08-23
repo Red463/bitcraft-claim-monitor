@@ -358,7 +358,7 @@ test("repository commits current state and a retryable transition edge atomicall
       observedAt: "2026-07-30T12:00:00.000Z",
     },
   };
-  await repository.commitGenerationWithTransition({
+  const publication = await repository.commitGenerationWithTransition({
     claimId: transition.claimId,
     generation: 42,
     domains: {
@@ -371,6 +371,12 @@ test("repository commits current state and a retryable transition edge atomicall
     },
   }, transition);
 
+  assert.deepEqual(publication, {
+    published: true,
+    changedDomains: ["regional-market"],
+    generation: 42,
+  });
+
   const restartedProcess = createCurrentStateRepository(db);
   assert.equal(
     restartedProcess.read(transition.claimId, "regional-market").generation,
@@ -382,21 +388,44 @@ test("repository commits current state and a retryable transition edge atomicall
       ...transition,
       attempts: 0,
       lastError: null,
+      lockedBy: null,
+      leaseToken: null,
+      lockedAt: null,
+      leaseExpiresAt: null,
       createdAt: transition.observedAt,
       updatedAt: transition.observedAt,
     }],
   );
 
-  await restartedProcess.recordTransitionError(
-    transition.transitionKey,
-    "history disk temporarily unavailable",
-    "2026-07-30T12:00:01.000Z",
-  );
+  const lease = restartedProcess.claimPendingTransition({
+    claimId: transition.claimId,
+    domain: "regional-market",
+    workerId: "repository-test",
+    leaseMs: 30_000,
+    at: "2026-07-30T12:00:00.000Z",
+  });
+  assert.ok(lease?.leaseToken);
+  assert.equal(restartedProcess.recordTransitionError({
+    transitionKey: transition.transitionKey,
+    leaseToken: lease.leaseToken,
+    error: "history disk temporarily unavailable",
+    retryAt: "2026-07-30T12:00:01.000Z",
+  }), true);
   assert.equal(
     restartedProcess.listPendingTransitions(transition.claimId, "regional-market")[0].attempts,
     1,
   );
-  await restartedProcess.ackTransition(transition.transitionKey);
+  const retryLease = restartedProcess.claimPendingTransition({
+    claimId: transition.claimId,
+    domain: "regional-market",
+    workerId: "repository-test",
+    leaseMs: 30_000,
+    at: "2026-07-30T12:00:01.000Z",
+  });
+  assert.equal(restartedProcess.ackTransition({
+    transitionKey: transition.transitionKey,
+    leaseToken: retryLease.leaseToken,
+  }), true);
   assert.deepEqual(
     restartedProcess.listPendingTransitions(transition.claimId, "regional-market"),
     [],
@@ -482,14 +511,112 @@ test("repository persists provider health for the separate web process", async (
         ready: true,
         database: "relay-global",
         schemaFingerprint: "global-fingerprint",
+        schemaFingerprintDiagnostic: null,
       },
       "region:19": {
         ready: true,
         database: "relay-region-19",
         schemaFingerprint: "regional-fingerprint",
+        schemaFingerprintDiagnostic: null,
       },
     },
   });
+  db.close();
+});
+
+test("repository rejects stale and equal transition generations without creating outbox rows", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const repository = createCurrentStateRepository(db);
+  const claimId = "1369094286777412590";
+  const transitionFor = (generation) => ({
+    transitionKey: `claim-market:${claimId}:market:${generation}`,
+    claimId,
+    domain: "market",
+    observedAt: "2026-07-30T12:00:00.000Z",
+    payload: {
+      version: 1,
+      claimId,
+      generation,
+      observedAt: "2026-07-30T12:00:00.000Z",
+      events: [],
+    },
+  });
+  const batchFor = (generation) => ({
+    claimId,
+    generation,
+    domains: {
+      market: {
+        data: { claimId, regionId: "19", listings: [] },
+        confidence: "authoritative",
+        provenance: relayProvenance("2026-07-30T12:00:00.000Z"),
+        warnings: [],
+      },
+    },
+  });
+
+  assert.deepEqual(
+    await repository.commitGenerationWithTransition(batchFor(42), transitionFor(42)),
+    { published: true, changedDomains: ["market"], generation: 42 },
+  );
+  assert.deepEqual(
+    await repository.commitGenerationWithTransition(batchFor(42), transitionFor(42)),
+    { published: false, changedDomains: [], generation: 42 },
+  );
+  assert.deepEqual(
+    await repository.commitGenerationWithTransition(batchFor(41), transitionFor(41)),
+    { published: false, changedDomains: [], generation: 41 },
+  );
+  assert.equal(repository.read(claimId, "market").generation, 42);
+  assert.deepEqual(
+    repository.listPendingTransitions(claimId, "market").map((row) => row.transitionKey),
+    [`claim-market:${claimId}:market:42`],
+  );
+  db.close();
+});
+
+test("later Relay HTTP health cannot erase a persisted schema-blocking diagnostic", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  applyAdditiveColumnMigrations(db);
+  const repository = createCurrentStateRepository(db);
+  const diagnostic = {
+    sourceKey: "global",
+    schemaUrl: "https://relay.example:3000/v1/database/relay-global/schema?version=9",
+    expected: "expected-global",
+    observed: "observed-global",
+    attemptedAt: "2026-08-22T10:00:00.000Z",
+    status: "mismatch",
+    error: "Relay global schema fingerprint mismatch",
+  };
+
+  await repository.recordSchemaFingerprintDiagnostic({
+    diagnostic,
+    database: "relay-global",
+    ready: true,
+  });
+  await repository.recordHealth({
+    provider: "relay",
+    running: true,
+    topologyReady: true,
+    cacheReady: true,
+    generation: 4,
+    lastRefreshAt: "2026-08-22T10:00:01.000Z",
+    lastError: null,
+    sources: {
+      global: {
+        ready: true,
+        database: "relay-global",
+        schemaFingerprint: "observed-global",
+      },
+    },
+  }, "2026-08-22T10:00:01.000Z");
+
+  assert.deepEqual(
+    repository.readHealth()?.sources.global?.schemaFingerprintDiagnostic,
+    diagnostic,
+  );
   db.close();
 });
 
@@ -516,6 +643,7 @@ test("repository persists subscription-specific health for split worker/web read
     domain: "region",
     generation: 12,
     connected: true,
+    runtimeState: "connected",
     applyDurationMs: 18,
     lagMs: 4,
     reconnects: 2,
@@ -630,6 +758,258 @@ test("game-data route rejects other claims and returns 503 before any requested 
     "claim has not loaded yet.",
     "members has not loaded yet.",
   ]);
+  assert.deepEqual(unavailable.body.meta, {
+    coherence: "unavailable",
+    availableGenerations: [],
+    newestGeneration: null,
+    oldestGeneration: null,
+  });
+  assert.deepEqual(unavailable.body.domainStatus, {
+    claim: {
+      generation: null,
+      freshness: "unavailable",
+      confidence: "unknown",
+      ageMs: null,
+      warnings: ["claim has not loaded yet."],
+      provenance: null,
+      dependencies: {},
+    },
+    members: {
+      generation: null,
+      freshness: "unavailable",
+      confidence: "unknown",
+      ageMs: null,
+      warnings: ["members has not loaded yet."],
+      provenance: null,
+      dependencies: {},
+    },
+  });
+});
+
+test("game-data route reports coherent application generations without mixing unavailable domains", () => {
+  const rows = new Map([
+    ["claim", {
+      data: { entityId: "1369094286777412590", regionId: "19" },
+      confidence: "joined",
+      generation: 12,
+      lastError: null,
+      provenance: relayProvenance("2026-07-29T11:00:00.000Z"),
+      warnings: [],
+    }],
+    ["members", {
+      data: [{ playerEntityId: "1" }],
+      confidence: "joined",
+      generation: 12,
+      lastError: null,
+      provenance: relayProvenance("2026-07-29T11:00:00.000Z"),
+      warnings: [],
+    }],
+  ]);
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["claim", "members", "research"],
+    repository: { read: (_claimId, domain) => rows.get(domain) ?? null },
+    now: new Date("2026-07-29T11:00:01.000Z"),
+  });
+
+  assert.deepEqual(result.body.meta, {
+    coherence: "coherent",
+    availableGenerations: [12],
+    newestGeneration: 12,
+    oldestGeneration: 12,
+  });
+  assert.equal(result.body.domainStatus.claim.generation, 12);
+  assert.equal(result.body.domainStatus.members.generation, 12);
+  assert.equal(result.body.domainStatus.research.generation, null);
+  assert.equal(result.body.domainStatus.research.freshness, "unavailable");
+});
+
+test("game-data route reports independently current application generations as mixed", () => {
+  const rows = new Map([
+    ["claim", {
+      data: { entityId: "1369094286777412590", regionId: "19" },
+      confidence: "joined",
+      generation: 21,
+      lastError: null,
+      provenance: relayProvenance("2026-07-29T11:00:00.000Z"),
+      warnings: [],
+    }],
+    ["members", {
+      data: [{ playerEntityId: "1" }],
+      confidence: "joined",
+      generation: 22,
+      lastError: null,
+      provenance: relayProvenance("2026-07-29T11:00:00.000Z"),
+      warnings: [],
+    }],
+  ]);
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["claim", "members"],
+    repository: { read: (_claimId, domain) => rows.get(domain) ?? null },
+    now: new Date("2026-07-29T11:00:01.000Z"),
+  });
+
+  assert.deepEqual(result.body.meta, {
+    coherence: "mixed",
+    availableGenerations: [21, 22],
+    newestGeneration: 22,
+    oldestGeneration: 21,
+  });
+});
+
+test("game-data route includes catalog and composed-domain generation dependencies", () => {
+  const rows = new Map([
+    ["inventories", {
+      data: { buildings: [] },
+      confidence: "joined",
+      generation: 31,
+      lastError: null,
+      provenance: relayProvenance("2026-07-29T11:00:00.000Z"),
+      warnings: [],
+    }],
+    ["crafts", {
+      data: { craftResults: [] },
+      confidence: "authoritative",
+      generation: 31,
+      lastError: null,
+      provenance: relayProvenance("2026-07-29T11:00:00.000Z"),
+      warnings: [],
+    }],
+  ]);
+  const catalog = {
+    generation: 31,
+    sourceGeneration: 908,
+    sourceKey: "global",
+    receivedAt: "2026-07-29T10:59:00.000Z",
+  };
+  const inventoryBanks = { generation: 31, sourceKey: "region:19", receivedAt: "2026-07-29T11:00:00.000Z" };
+  const publicCrafts = { generation: 31, sourceKey: "region:19", receivedAt: "2026-07-29T11:00:00.000Z" };
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["inventories", "crafts"],
+    repository: { read: (_claimId, domain) => rows.get(domain) ?? null },
+    transformDomain: (domain, data) => ({
+      data,
+      dependencies: domain === "inventories"
+        ? { catalog, "inventory-banks": inventoryBanks }
+        : { catalog, "public-crafts": publicCrafts },
+    }),
+    now: new Date("2026-07-29T11:00:01.000Z"),
+  });
+
+  assert.deepEqual(result.body.domainStatus.inventories.dependencies, {
+    catalog,
+    "inventory-banks": inventoryBanks,
+  });
+  assert.deepEqual(result.body.domainStatus.crafts.dependencies, {
+    catalog,
+    "public-crafts": publicCrafts,
+  });
+  assert.equal(result.body.meta.coherence, "coherent");
+});
+
+test("game-data route does not treat a coincidentally equal catalog source generation as coherent", () => {
+  const snapshot = {
+    data: { marketplaces: [], listings: [] },
+    confidence: "authoritative",
+    generation: 31,
+    lastError: null,
+    provenance: relayProvenance("2026-07-29T11:00:00.000Z"),
+    warnings: [],
+  };
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["market"],
+    repository: { read: () => snapshot },
+    transformDomain: (_domain, data) => ({
+      data,
+      dependencies: {
+        catalog: {
+          generation: null,
+          sourceGeneration: 31,
+          sourceKey: "global",
+          receivedAt: "2026-07-29T10:59:00.000Z",
+        },
+      },
+    }),
+    now: new Date("2026-07-29T11:00:01.000Z"),
+  });
+
+  assert.deepEqual(result.body.meta, {
+    coherence: "mixed",
+    availableGenerations: [31],
+    newestGeneration: 31,
+    oldestGeneration: 31,
+  });
+  assert.equal(result.body.domainStatus.market.dependencies.catalog.sourceGeneration, 31);
+});
+
+test("game-data route marks a legacy catalog dependency with unknown publication generation as mixed", () => {
+  const snapshot = {
+    data: { marketplaces: [], listings: [] },
+    confidence: "authoritative",
+    generation: 44,
+    lastError: null,
+    provenance: relayProvenance("2026-07-29T11:00:00.000Z"),
+    warnings: [],
+  };
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["market"],
+    repository: { read: () => snapshot },
+    transformDomain: (_domain, data) => ({
+      data,
+      dependencies: {
+        catalog: {
+          generation: null,
+          sourceKey: "global",
+          receivedAt: "2026-07-29T10:59:00.000Z",
+        },
+      },
+    }),
+    now: new Date("2026-07-29T11:00:01.000Z"),
+  });
+
+  assert.equal(result.body.meta.coherence, "mixed");
+  assert.deepEqual(result.body.meta.availableGenerations, [44]);
+});
+
+test("game-data route marks a matching primary envelope with a different enrichment revision as mixed", () => {
+  const snapshot = {
+    data: { buildings: [] },
+    confidence: "joined",
+    generation: 41,
+    lastError: null,
+    provenance: relayProvenance("2026-07-29T11:00:00.000Z"),
+    warnings: [],
+  };
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["inventories"],
+    repository: { read: () => snapshot },
+    transformDomain: (_domain, data) => ({
+      data,
+      dependencies: {
+        catalog: { generation: 42, sourceKey: "global", receivedAt: "2026-07-29T11:00:00.000Z" },
+        "inventory-banks": { generation: 40, sourceKey: "region:19", receivedAt: "2026-07-29T11:00:00.000Z" },
+      },
+    }),
+    now: new Date("2026-07-29T11:00:01.000Z"),
+  });
+
+  assert.deepEqual(result.body.meta, {
+    coherence: "mixed",
+    availableGenerations: [40, 41, 42],
+    newestGeneration: 42,
+    oldestGeneration: 40,
+  });
 });
 
 test("game-data route accepts the provider-neutral public crafts domain", () => {
@@ -671,6 +1051,15 @@ test("game-data route serves last-good data as stale with age and partial errors
   assert.equal(result.body.domains.claim.freshness, "stale");
   assert.equal(result.body.domains.claim.ageMs, 120_000);
   assert.equal(result.body.domains.claim.data.name, "Timbersteel Trade");
+  assert.deepEqual(result.body.domainStatus.claim, {
+    generation: 4,
+    freshness: "stale",
+    confidence: "joined",
+    ageMs: 120_000,
+    warnings: ["Relay HTTP 503"],
+    provenance: relayProvenance("2026-07-29T10:00:00.000Z"),
+    dependencies: {},
+  });
   assert.deepEqual(result.body.partialErrors, [
     "claim: Relay HTTP 503",
     "members has not loaded yet.",
@@ -716,6 +1105,31 @@ test("game-data route reports an old unchanged snapshot as live while its subscr
   assert.equal(result.status, 200);
   assert.equal(result.body.domains.players.freshness, "live");
   assert.equal(result.body.domains.players.ageMs, 300_000);
+});
+
+test("game-data route keeps age-stale status visible without a last error", () => {
+  const result = gameDataResponse({
+    configuredClaimId: "1369094286777412590",
+    claimId: "1369094286777412590",
+    domains: ["research"],
+    repository: {
+      read: () => ({
+        data: { nodes: [] },
+        confidence: "authoritative",
+        generation: 17,
+        lastError: null,
+        provenance: relayProvenance("2026-07-29T10:00:00.000Z"),
+        warnings: [],
+      }),
+    },
+    now: new Date("2026-07-29T10:02:00.000Z"),
+    freshForMs: 60_000,
+  });
+
+  assert.equal(result.body.domainStatus.research.generation, 17);
+  assert.equal(result.body.domainStatus.research.freshness, "stale");
+  assert.equal(result.body.domainStatus.research.ageMs, 120_000);
+  assert.deepEqual(result.body.domainStatus.research.provenance, relayProvenance("2026-07-29T10:00:00.000Z"));
 });
 
 test("game-data route does not trust a stale or disconnected subscription heartbeat", () => {
