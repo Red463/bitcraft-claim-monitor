@@ -14,11 +14,7 @@ import {
   marketFreshnessNotice,
   type MarketRefreshProps,
 } from "./globalMarket";
-
-function decimalBigInt(value: unknown): bigint {
-  const normalized = String(value ?? "0").trim();
-  return /^\d+$/.test(normalized) ? BigInt(normalized) : 0n;
-}
+import { exactMarketInteger } from "./marketUi";
 
 export function MarketDeals({
   claimId,
@@ -101,18 +97,18 @@ export function MarketDeals({
   const rows = React.useMemo(() => filterMarketDeals(state.rows, regions)
     .filter((deal) => {
       const percent = toNumber(deal.profitPercent);
-      if (decimalBigInt(deal.maxQuantity) < decimalBigInt(minimumQuantity)) return false;
+      if (exactMarketInteger(deal.maxQuantity) < exactMarketInteger(minimumQuantity)) return false;
       if (percent < toNumber(minimumProfit)) return false;
       if (maximumProfit && percent > toNumber(maximumProfit)) return false;
       return true;
     })
     .sort((left, right) => {
-      const leftProfit = decimalBigInt(left.profit);
-      const rightProfit = decimalBigInt(right.profit);
+      const leftProfit = exactMarketInteger(left.profit);
+      const rightProfit = exactMarketInteger(right.profit);
       return leftProfit < rightProfit ? 1 : leftProfit > rightProfit ? -1 : 0;
     }), [maximumProfit, minimumProfit, minimumQuantity, regions, state.rows]);
   const topProfit = rows.reduce((best, row) => {
-    const profit = decimalBigInt(row.profit);
+    const profit = exactMarketInteger(row.profit);
     return profit > best ? profit : best;
   }, 0n);
   const bestRoutePotential = bestMarketDealPotential(rows);

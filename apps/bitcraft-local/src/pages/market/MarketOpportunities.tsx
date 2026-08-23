@@ -6,6 +6,7 @@ import type { ActiveRegion } from "../../hooks/useActiveRegions";
 import { BuyOrderFinder } from "./BuyOrderFinder";
 import { MarketDeals } from "./MarketDeals";
 import type { MarketRefreshProps } from "./globalMarket";
+import { nextTabIndex } from "./marketUi";
 
 type OpportunityMode = "routes" | "demand";
 
@@ -44,7 +45,7 @@ export function MarketOpportunities({
     const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (!buttons.length || current < 0) return;
     event.preventDefault();
-    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+    const next = nextTabIndex(current, buttons.length, event.key);
     buttons[next]?.focus();
     buttons[next]?.click();
   }
@@ -59,7 +60,7 @@ export function MarketOpportunities({
           return <button id={`opportunity-tab-${entry.id}`} role="tab" aria-selected={activeMode === entry.id} aria-controls={`opportunity-panel-${entry.id}`} tabIndex={activeMode === entry.id ? 0 : -1} className={activeMode === entry.id ? "active" : ""} key={entry.id} onClick={() => setPreferredMode(entry.id)}><Icon size={15} />{entry.label}</button>;
         })}
       </div> : null}
-      <div id={`opportunity-panel-${activeMode}`} role="tabpanel" aria-labelledby={`opportunity-tab-${activeMode}`}>
+      <div id={`opportunity-panel-${activeMode}`} role="tabpanel" aria-labelledby={modes.length > 1 ? `opportunity-tab-${activeMode}` : undefined} aria-label={modes.length === 1 ? modes[0]?.label : undefined}>
         {activeMode === "routes" ? <MarketDeals {...refresh} claimId={claimId} sharedRegionId={regionId} activeRegions={activeRegions} /> : null}
         {activeMode === "demand" ? <BuyOrderFinder {...refresh} claimId={claimId} regionId={regionId} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
       </div>

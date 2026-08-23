@@ -7,6 +7,7 @@ import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
 import type { AnyRecord } from "../../main-app-data";
 import { formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
 import type { MarketItemKey, MarketRefreshProps } from "./globalMarket";
+import { exactMarketInteger } from "./marketUi";
 import { marketFreshnessNotice } from "./globalMarket";
 import { MarketFavorites } from "./MarketFavorites";
 
@@ -16,11 +17,6 @@ type Props = MarketRefreshProps & {
   favorites: MarketItemKey[];
   onOpenItem: (item: AnyRecord) => void;
 };
-
-function decimalBigInt(value: unknown): bigint {
-  const normalized = String(value ?? "0").trim();
-  return /^\d+$/.test(normalized) ? BigInt(normalized) : 0n;
-}
 
 function itemShape(row: AnyRecord) {
   return {
@@ -115,7 +111,7 @@ export function MarketOverview({
         </section>
         <section className="market-overview-section">
           <h3><Activity size={16} /> Current liquidity <small>Open orders</small></h3>
-          <div className="market-ranking-list">{liquid.slice(0, 10).map((row) => <button key={`${row.itemType}:${row.itemId}`} onClick={() => onOpenItem(itemShape(row))}><ItemLabel item={itemShape(row)} /><span>{formatNumber(decimalBigInt(row.offeredQuantity) + decimalBigInt(row.wantedQuantity))} units · {formatGoldAmount(row.currentNotional)} notional</span></button>)}</div>
+          <div className="market-ranking-list">{liquid.slice(0, 10).map((row) => <button key={`${row.itemType}:${row.itemId}`} onClick={() => onOpenItem(itemShape(row))}><ItemLabel item={itemShape(row)} /><span>{formatNumber(exactMarketInteger(row.offeredQuantity) + exactMarketInteger(row.wantedQuantity))} units · {formatGoldAmount(row.currentNotional)} notional</span></button>)}</div>
           {!liquid.length ? <div className="empty-state compact">No current order liquidity is available.</div> : null}
         </section>
       </div>

@@ -577,6 +577,25 @@
   min-width: 0;
 }
 
+.global-market-toolbar-meta {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.global-market-freshness {
+  color: #98a5b7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.global-market-freshness svg {
+  color: #8fd7b0;
+}
+
 .global-market-workspace {
   display: grid;
   gap: 14px;
@@ -838,6 +857,14 @@
   gap: 10px;
 }
 
+.market-item-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
 .market-toggle-group {
   display: flex;
   align-items: end;
@@ -951,7 +978,29 @@
 }
 
 .market-order-summary {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.market-depth-summary {
+  border-block: 1px solid rgba(108, 123, 145, .16);
+  padding: 9px 2px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.market-depth-summary > span {
+  display: grid;
+  gap: 2px;
+}
+
+.market-depth-summary small {
+  color: #7f8c9e;
+}
+
+.market-depth-summary strong {
+  color: #e7ecf3;
+  font-size: 12px;
 }
 
 .market-deal-summary {
@@ -1213,8 +1262,8 @@
   .market-toggle-group {
     grid-column: 1 / -1;
   }
-  .market-order-summary {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .market-depth-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1360,7 +1409,7 @@
     grid-template-columns: 1fr;
   }
   .market-order-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
   .market-activity-list > button,
   .market-recent-trades > div {
@@ -1410,7 +1459,7 @@
 }
 
 @media (max-width: 520px) {
-  .market-order-summary {
+  .market-depth-summary {
     grid-template-columns: 1fr;
   }
 }
@@ -1754,7 +1803,7 @@
 .market-catalog-result {
   width: 100%;
   display: grid;
-  grid-template-columns: 42px minmax(180px, 1fr) minmax(140px, .55fr) minmax(140px, .55fr);
+  grid-template-columns: 42px minmax(180px, 1fr) repeat(3, minmax(125px, .5fr));
   align-items: center;
   gap: 12px;
   padding: 10px 12px;

@@ -2,7 +2,7 @@ import React from "react";
 
 import type { AnyRecord } from "../../main-app-data";
 import { formatGoldAmount } from "../../utils/format";
-import { marketChartPoints } from "./marketUi";
+import { exactMarketInteger, marketChartPoints } from "./marketUi";
 
 function shortLabel(value: string): string {
   if (!value) return "Observation";
@@ -18,8 +18,8 @@ export function MarketPriceChart({ rows, range }: { rows: AnyRecord[]; range: st
   const points = marketChartPoints(rows, width, height);
   if (!points.length) return <div className="empty-state market-chart-empty">No completed-trade price history is available for this selection.</div>;
 
-  const low = Math.min(...points.map((point) => point.price));
-  const high = Math.max(...points.map((point) => point.price));
+  const low = points.reduce((best, point) => exactMarketInteger(point.price) < exactMarketInteger(best) ? point.price : best, points[0].price);
+  const high = points.reduce((best, point) => exactMarketInteger(point.price) > exactMarketInteger(best) ? point.price : best, points[0].price);
   const polyline = points.map((point) => `${point.x},${point.y}`).join(" ");
   const area = `0,${height} ${polyline} ${width},${height}`;
   const first = points[0];

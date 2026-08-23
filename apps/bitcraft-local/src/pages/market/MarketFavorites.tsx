@@ -6,11 +6,7 @@ import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
 import type { AnyRecord } from "../../main-app-data";
 import { formatGoldAmount, formatNumber } from "../../utils/format";
 import type { MarketItemKey, MarketRefreshProps } from "./globalMarket";
-
-function decimalBigInt(value: unknown): bigint {
-  const normalized = String(value ?? "0").trim();
-  return /^\d+$/.test(normalized) ? BigInt(normalized) : 0n;
-}
+import { exactMarketInteger } from "./marketUi";
 
 function itemShape(row: AnyRecord) {
   return {
@@ -25,8 +21,8 @@ function bestPrice(rows: AnyRecord[], direction: "low" | "high"): string | null 
   return rows.reduce<string | null>((best, row) => {
     const price = String(row.price ?? row.priceThreshold ?? row.unitPrice ?? "0");
     if (best == null) return price;
-    if (direction === "low") return decimalBigInt(price) < decimalBigInt(best) ? price : best;
-    return decimalBigInt(price) > decimalBigInt(best) ? price : best;
+    if (direction === "low") return exactMarketInteger(price) < exactMarketInteger(best) ? price : best;
+    return exactMarketInteger(price) > exactMarketInteger(best) ? price : best;
   }, null);
 }
 
@@ -47,10 +43,14 @@ export function MarketFavorites({
   title?: string;
 }) {
   const [rows, setRows] = React.useState<AnyRecord[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState("");
   const generationSequence = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
 
   React.useEffect(() => {
     const controller = new AbortController();
+    setLoading(true);
+    setError("");
     trackRefresh("global-market-favorites", Promise.all(favorites.slice(0, 20).map(async (favorite) => {
       const search = new URLSearchParams({
         claimId,
@@ -73,26 +73,36 @@ export function MarketFavorites({
         bestSell: bestPrice(sells, "low"),
         bestBuy: bestPrice(buys, "high"),
         currentQuantity: [...sells, ...buys]
-          .reduce((total, order) => total + decimalBigInt(order.quantity), 0n)
+          .reduce((total, order) => total + exactMarketInteger(order.quantity), 0n)
           .toString(),
       };
     })))
       .then((nextRows) => {
-        if (!controller.signal.aborted) setRows(nextRows);
+        if (!controller.signal.aborted) {
+          setRows(nextRows);
+          setLoading(false);
+        }
       })
-      .catch(() => {});
+      .catch((failure) => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+          setError(failure instanceof Error ? failure.message : String(failure));
+        }
+      });
     return () => controller.abort();
   }, [claimId, favorites, generationSequence, refreshSequence, regionId]);
 
   return (
     <section className="market-overview-section market-favorites-section">
       <h3><Star size={16} /> {title} <small>Stored only in this browser</small></h3>
+      {error ? <div className="error">Saved item prices unavailable: {error}. Last-good prices remain visible.</div> : null}
+      {loading && !rows.length ? <div className="market-loading-strip">Loading saved item prices…</div> : null}
       {rows.length ? <div className="market-favorite-strip">{rows.map((row) => {
         const spread = row.bestSell != null && row.bestBuy != null
-          ? (decimalBigInt(row.bestSell) - decimalBigInt(row.bestBuy)).toString()
+          ? (exactMarketInteger(row.bestSell) - exactMarketInteger(row.bestBuy)).toString()
           : null;
         return <button key={`${row.itemType}:${row.itemId}`} onClick={() => onOpenItem(itemShape(row))}><ItemLabel item={itemShape(row)} /><span>Sell <b>{row.bestSell == null ? "—" : formatGoldAmount(row.bestSell)}</b></span><span>Buy <b>{row.bestBuy == null ? "—" : formatGoldAmount(row.bestBuy)}</b></span><span>Spread <b>{spread == null ? "—" : formatGoldAmount(spread)}</b></span><small>{formatNumber(row.currentQuantity)} units in current orders</small></button>;
-      })}</div> : <div className="empty-state compact"><Star size={22} /><span>Save items in Browse to track their current order books here.</span></div>}
+      })}</div> : !loading && !error ? <div className="empty-state compact"><Star size={22} /><span>Save items in Browse to track their current order books here.</span></div> : null}
     </section>
   );
 }

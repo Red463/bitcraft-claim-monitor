@@ -10,6 +10,8 @@ export function MarketSaved({
   favorites,
   canViewFavorites,
   canViewWatches,
+  initialWatchItem,
+  onWatchItemConsumed,
   onOpenItem,
   onDiscordLogin,
   ...refresh
@@ -19,13 +21,15 @@ export function MarketSaved({
   favorites: MarketItemKey[];
   canViewFavorites: boolean;
   canViewWatches: boolean;
+  initialWatchItem: AnyRecord | null;
+  onWatchItemConsumed: () => void;
   onOpenItem: (item: AnyRecord) => void;
   onDiscordLogin: (returnTo?: string) => void;
 }) {
   return (
     <section className="global-market-workspace market-saved" id="market-panel-saved" role="tabpanel" aria-labelledby="market-tab-saved">
       {canViewFavorites ? <MarketFavorites {...refresh} claimId={claimId} regionId={monitoredRegionId} favorites={favorites} onOpenItem={onOpenItem} /> : null}
-      {canViewWatches ? <DealWatchlist {...refresh} claimId={claimId} monitoredRegionId={monitoredRegionId} onDiscordLogin={onDiscordLogin} /> : null}
+      {canViewWatches ? <DealWatchlist {...refresh} claimId={claimId} monitoredRegionId={monitoredRegionId} initialItem={initialWatchItem} onInitialItemConsumed={onWatchItemConsumed} onDiscordLogin={onDiscordLogin} /> : null}
     </section>
   );
 }

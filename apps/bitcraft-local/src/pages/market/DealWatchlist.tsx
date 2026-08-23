@@ -19,9 +19,11 @@ function numericItemType(value: unknown): number {
   return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo" ? 1 : 0;
 }
 
-export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, refreshHeaders, trackRefresh, onDiscordLogin }: MarketRefreshProps & {
+export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onInitialItemConsumed, refreshSequence, refreshHeaders, trackRefresh, onDiscordLogin }: MarketRefreshProps & {
   claimId: string;
   monitoredRegionId: string;
+  initialItem: AnyRecord | null;
+  onInitialItemConsumed: () => void;
   onDiscordLogin: (returnTo?: string) => void;
 }) {
   const defaultRegion = monitoredRegionId;
@@ -42,6 +44,23 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
     : activeRegionIds.has(defaultRegion)
       ? defaultRegion
       : String(activeRegions[0]?.regionId ?? "");
+
+  React.useEffect(() => {
+    if (defaultRegion && regionChoice !== defaultRegion) setRegionChoice(defaultRegion);
+  }, [defaultRegion, regionChoice, setRegionChoice]);
+
+  React.useEffect(() => {
+    if (!initialItem) return;
+    const item = {
+      ...initialItem,
+      id: String(initialItem.id ?? initialItem.itemId ?? "0"),
+      name: String(initialItem.name ?? initialItem.itemName ?? "Unknown item"),
+    };
+    setSelectedItem(item);
+    setQuery(item.name);
+    setSuggestions([]);
+    onInitialItemConsumed();
+  }, [initialItem, onInitialItemConsumed]);
 
   React.useEffect(() => {
     const controller = new AbortController();

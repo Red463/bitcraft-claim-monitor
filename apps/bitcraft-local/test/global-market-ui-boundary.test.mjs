@@ -35,8 +35,9 @@ test("stall cards show coordinates and item detail shows metadata plus order cou
   assert.doesNotMatch(stalls, /setSelectedStall\(stall\)/);
   assert.doesNotMatch(stalls, /api\/bitjita|BitJita/i);
   assert.match(browse, /itemMetadata\.category \?\? itemMetadata\.tag/);
-  assert.match(browse, /label="Sell Orders" value=\{formatNumber\(sells\.length\)\}/);
-  assert.match(browse, /label="Buy Orders" value=\{formatNumber\(buys\.length\)\}/);
+  assert.match(browse, /market-depth-summary/);
+  assert.match(browse, /\{formatNumber\(sells\.length\)\} sell/);
+  assert.match(browse, /\{formatNumber\(buys\.length\)\} buy/);
 });
 
 test("global market money and locations use the shared legible presentation", () => {
@@ -98,6 +99,18 @@ test("Browse consolidates availability and preserves an explicit result return p
   assert.match(browse, /role="option"/);
   assert.match(browse, /className="market-item-identity"/);
   assert.match(browse, /className="market-item-meta"/);
+});
+
+test("Browse exposes decision signals, restores catalog context, and offers Watch", () => {
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+
+  assert.match(browse, /value="lowest-sell"/);
+  assert.match(browse, /value="highest-buy"/);
+  assert.match(browse, /value="spread"/);
+  assert.match(browse, /Order count/);
+  assert.match(browse, /catalogScrollRef/);
+  assert.doesNotMatch(browse, /function chooseItem[\s\S]{0,300}setQuery\(/);
+  assert.match(browse, /onWatchItem/);
 });
 
 test("stall details trap focus and restore it to the opening control", () => {
@@ -219,7 +232,8 @@ test("favorite order-book failures fail the active page cycle without clearing l
 
   assert.match(favorites, /if \(!response\.ok\) throw new Error\(`favorite order book HTTP \$\{response\.status\}`\)/);
   assert.doesNotMatch(favorites, /catch \{\s*return null;\s*\}/);
-  assert.match(favorites, /trackRefresh\("global-market-favorites",[\s\S]*\.catch\(\(\) => \{\}\)/);
+  assert.match(favorites, /trackRefresh\("global-market-favorites",[\s\S]*\.catch\(\(failure\) =>/);
+  assert.match(favorites, /Saved item prices unavailable/);
 });
 
 test("Overview and Saved share live favorites without low-value overview feeds", () => {

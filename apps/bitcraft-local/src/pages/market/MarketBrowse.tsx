@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowDownUp, ArrowLeft, BarChart3, MapPin, Search, ShoppingBag, Star, X } from "lucide-react";
+import { ArrowDownUp, ArrowLeft, BarChart3, Bell, MapPin, Search, ShoppingBag, Star, X } from "lucide-react";
 
 import { DataTable } from "../../components/main/DataTable";
 import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
@@ -19,7 +19,7 @@ import {
   marketItemType,
   normalizeMarketOrders,
 } from "./globalMarket";
-import { availabilityFlags, nextOptionIndex, type MarketAvailability } from "./marketUi";
+import { availabilityFlags, exactMarketInteger, nextOptionIndex, type MarketAvailability } from "./marketUi";
 import { MarketPriceChart } from "./MarketPriceChart";
 
 type Props = MarketRefreshProps & {
@@ -28,6 +28,8 @@ type Props = MarketRefreshProps & {
   regionId: string;
   favorites: MarketItemKey[];
   onToggleFavorite: (key: MarketItemKey) => void;
+  canWatch: boolean;
+  onWatchItem: (item: AnyRecord) => void;
   onShowMap: (focus: NonNullable<MapFocus>, regionId?: string) => void;
   locationSearch: string;
   onQueryStateChange: () => void;
@@ -41,22 +43,17 @@ function itemKey(item: AnyRecord): MarketItemKey {
   };
 }
 
-function decimalBigInt(value: unknown): bigint {
-  const normalized = String(value ?? "0").trim();
-  return /^\d+$/.test(normalized) ? BigInt(normalized) : 0n;
-}
-
 function compareDecimal(left: unknown, right: unknown): number {
-  const a = decimalBigInt(left);
-  const b = decimalBigInt(right);
+  const a = exactMarketInteger(left);
+  const b = exactMarketInteger(right);
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
 function multiplyDecimal(left: unknown, right: unknown): string {
-  return (decimalBigInt(left) * decimalBigInt(right)).toString();
+  return (exactMarketInteger(left) * exactMarketInteger(right)).toString();
 }
 
-export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavorite, onShowMap, locationSearch, onQueryStateChange, refreshSequence, refreshHeaders, trackRefresh }: Props) {
+export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavorite, canWatch, onWatchItem, onShowMap, locationSearch, onQueryStateChange, refreshSequence, refreshHeaders, trackRefresh }: Props) {
   const params = React.useMemo(() => new URLSearchParams(locationSearch), [locationSearch]);
   const [query, setQuery] = React.useState(mode === "browse" ? params.get("q") ?? "" : params.get("buyQ") ?? "");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
@@ -77,9 +74,9 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
     const buy = params.get("buy") === "true";
     return sell && buy ? "both" : sell ? "sell" : buy ? "buy" : "any";
   });
-  const [catalogSort, setCatalogSort] = React.useState<"relevance" | "name" | "orders">(() => {
+  const [catalogSort, setCatalogSort] = React.useState<"relevance" | "name" | "orders" | "lowest-sell" | "highest-buy" | "spread">(() => {
     const saved = params.get("sort");
-    return saved === "relevance" || saved === "orders" ? saved : "name";
+    return saved === "relevance" || saved === "orders" || saved === "lowest-sell" || saved === "highest-buy" || saved === "spread" ? saved : "name";
   });
   const [orderTab, setOrderTab] = React.useState<"sell" | "buy">(mode === "buy" ? "buy" : "sell");
   const [minimumQuantity, setMinimumQuantity] = React.useState("0");
@@ -89,6 +86,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const [detailTab, setDetailTab] = React.useState<"orders" | "stats">("orders");
   const [range, setRange] = React.useState<"24h" | "7d" | "30d" | "all">("30d");
   const [page, setPage] = React.useState(1);
+  const catalogScrollRef = React.useRef(0);
   const generationSequence = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
   const availabilityFilter = availabilityFlags(availability);
 
@@ -196,8 +194,8 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   }, [range, refreshSequence, regionId, selectedItem]);
 
   function chooseItem(item: AnyRecord) {
+    catalogScrollRef.current = window.scrollY;
     setSelectedItem(item);
-    setQuery(String(item.name ?? item.itemName ?? ""));
     setSuggestions([]);
     setPage(1);
     const key = itemKey(item);
@@ -221,6 +219,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
     setSuggestions([]);
     updateQueryState(mode === "browse" ? { item: null, itemName: null, itemType: null } : { buyItem: null, buyItemName: null, buyItemType: null }, "replace");
     onQueryStateChange();
+    requestAnimationFrame(() => window.scrollTo(0, catalogScrollRef.current));
   }
 
   function clearCatalogFilters() {
@@ -275,19 +274,21 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       const key = String(order.regionId ?? "unknown");
       const current = byRegion.get(key) ?? { name: order.regionName || (order.regionId ? `R${order.regionId}` : "Unknown region"), sells: 0, buys: 0, quantity: 0n };
       current[order.side === "sell" ? "sells" : "buys"] += 1;
-      current.quantity += decimalBigInt(order.quantity);
+      current.quantity += exactMarketInteger(order.quantity);
       byRegion.set(key, current);
     }
     return [...byRegion.entries()].sort(([left], [right]) => toNumber(left) - toNumber(right));
   }, [orders]);
-  const bestSell = sells.reduce<string | null>((best, order) => (
-    best == null || compareDecimal(order.unitPrice, best) < 0 ? order.unitPrice : best
+  const bestSellOrder = sells.reduce<AnyRecord | null>((best, order) => (
+    best == null || compareDecimal(order.unitPrice, best.unitPrice) < 0 ? order : best
   ), null);
-  const bestBuy = buys.reduce<string | null>((best, order) => (
-    best == null || compareDecimal(order.unitPrice, best) > 0 ? order.unitPrice : best
+  const bestBuyOrder = buys.reduce<AnyRecord | null>((best, order) => (
+    best == null || compareDecimal(order.unitPrice, best.unitPrice) > 0 ? order : best
   ), null);
+  const bestSell = bestSellOrder?.unitPrice ?? null;
+  const bestBuy = bestBuyOrder?.unitPrice ?? null;
   const spread = bestSell != null && bestBuy != null
-    ? (decimalBigInt(bestSell) - decimalBigInt(bestBuy)).toString()
+    ? (exactMarketInteger(bestSell) - exactMarketInteger(bestBuy)).toString()
     : null;
   const stats = detailState.history?.priceStats ?? {};
   const priceData: AnyRecord[] = Array.isArray(detailState.history?.priceData) ? detailState.history.priceData : [];
@@ -311,7 +312,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
         </label>
         {mode === "browse" ? <>
           <label className="field"><span>Category</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">All categories</option>{catalogState.categories.map((entry) => <option key={entry}>{entry}</option>)}</select></label>
-          <label className="field"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)}><option value="relevance">Relevance</option><option value="name">Item name</option><option value="orders">Order count</option></select></label>
+          <label className="field"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)}><option value="relevance">Relevance</option><option value="name">Item name</option><option value="orders">Order count</option><option value="lowest-sell">Lowest sell</option><option value="highest-buy">Highest buy</option><option value="spread">Smallest spread</option></select></label>
           <label className="field market-availability-field"><span>Availability</span><select value={availability} onChange={(event) => setAvailability(event.target.value as MarketAvailability)}><option value="any">Any item</option><option value="sell">For sale</option><option value="buy">Wanted</option><option value="both">Buy and sell</option></select></label>
           <div className="market-filter-actions"><button className="toolbar-button" type="button" disabled={!hasCatalogFilters} onClick={clearCatalogFilters}><X size={14} /> Clear filters</button></div>
         </> : null}
@@ -326,6 +327,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
               <span className="market-catalog-result-name"><strong>{item.name}</strong><small>{item.category || "Uncategorised"}</small></span>
               <span><small>Lowest sell</small><strong>{item.lowestSellPrice == null ? "Unavailable" : formatGoldAmount(item.lowestSellPrice)}</strong><small>{item.lowestSellLocation || "No seller location"}</small></span>
               <span><small>Highest buy</small><strong>{item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount(item.highestBuyPrice)}</strong><small>{item.highestBuyLocation || "No buyer location"}</small></span>
+              <span><small>Spread</small><strong>{item.lowestSellPrice == null || item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount((exactMarketInteger(item.lowestSellPrice) - exactMarketInteger(item.highestBuyPrice)).toString())}</strong><small>{formatNumber(item.orderCount)} current orders</small></span>
             </button>
           ))}
           {!catalogState.loading && !catalogItems.length ? <div className="empty-state"><ShoppingBag size={28} /><strong>No catalog items match these filters</strong><span>Clear a filter or search for another item or cargo name.</span></div> : null}
@@ -349,7 +351,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
               </div>
               </div>
             </div>
-            <button className={`toolbar-button ${favorite ? "active" : ""}`} type="button" onClick={() => selectedKey && onToggleFavorite(selectedKey)} aria-pressed={favorite}><Star size={15} fill={favorite ? "currentColor" : "none"} /> {favorite ? "Favorited" : "Favorite"}</button>
+            <div className="market-item-actions"><button className={`toolbar-button ${favorite ? "active" : ""}`} type="button" onClick={() => selectedKey && onToggleFavorite(selectedKey)} aria-pressed={favorite}><Star size={15} fill={favorite ? "currentColor" : "none"} /> {favorite ? "Saved" : "Save"}</button>{canWatch ? <button className="toolbar-button" type="button" onClick={() => onWatchItem(itemMetadata)}><Bell size={15} /> Watch</button> : null}</div>
           </header>
           {detailState.error ? <div className="error">Unable to load this market: {detailState.error}</div> : null}
           {freshnessNotice ? <div className="info">{freshnessNotice}</div> : null}
@@ -358,10 +360,8 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
             <MiniStat icon={<ArrowDownUp />} label="Best Sell" value={bestSell == null ? "—" : `${formatNumber(bestSell)}g`} />
             <MiniStat icon={<ArrowDownUp />} label="Best Buy" value={bestBuy == null ? "—" : `${formatNumber(bestBuy)}g`} />
             <MiniStat icon={<ArrowDownUp />} label="Spread" value={spread == null ? "—" : `${formatNumber(spread)}g`} />
-            <MiniStat icon={<ShoppingBag />} label="Liquidity" value={formatNumber(orders.reduce((sum, order) => sum + decimalBigInt(order.quantity), 0n))} />
-            <MiniStat icon={<ShoppingBag />} label="Sell Orders" value={formatNumber(sells.length)} />
-            <MiniStat icon={<ShoppingBag />} label="Buy Orders" value={formatNumber(buys.length)} />
           </div>
+          <div className="market-depth-summary" aria-label="Current market depth"><span><small>Liquidity</small><strong>{formatNumber(orders.reduce((sum, order) => sum + exactMarketInteger(order.quantity), 0n))} units</strong></span><span><small>Orders</small><strong>{formatNumber(sells.length)} sell · {formatNumber(buys.length)} buy</strong></span><span><small>Best sell location</small><strong>{bestSellOrder?.claimName || bestSellOrder?.regionName || "Unavailable"}</strong></span><span><small>Best buy location</small><strong>{bestBuyOrder?.claimName || bestBuyOrder?.regionName || "Unavailable"}</strong></span></div>
           {regionSummaries.length ? <div className="market-region-summaries" aria-label="Regional order summaries">{regionSummaries.map(([key, summary]) => <span key={key}><b>{summary.name}</b>{formatNumber(summary.sells)} sell · {formatNumber(summary.buys)} buy · {formatCompactNumber(summary.quantity)} units</span>)}</div> : null}
           <div className="tabs market-order-tabs">
             <button className={detailTab === "orders" ? "active" : ""} onClick={() => setDetailTab("orders")}>Orders</button>

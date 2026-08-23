@@ -551,6 +551,23 @@ test("regional market catalog exposes exact best prices and locations", () => {
   assert.equal(result.items[0].highestBuyLocation, "Buyer Hall");
 });
 
+test("regional market catalog sorts exact price and spread signals before limiting", () => {
+  const snapshot = { orders: [
+    { entityId: "1", side: "sell", regionId: "19", itemType: "item", itemId: "1", price: "90071992547409931" },
+    { entityId: "2", side: "buy", regionId: "19", itemType: "item", itemId: "1", priceThreshold: "90071992547409930" },
+    { entityId: "3", side: "sell", regionId: "19", itemType: "item", itemId: "2", price: "20" },
+    { entityId: "4", side: "buy", regionId: "19", itemType: "item", itemId: "2", priceThreshold: "10" },
+  ] };
+  const catalog = [
+    { kind: "items", targetId: "1", name: "Exact" },
+    { kind: "items", targetId: "2", name: "Wide" },
+  ];
+
+  assert.deepEqual(views.regionalMarketCatalogView(snapshot, catalog, { regionId: "19", sort: "lowest-sell" }).items.map((item) => item.name), ["Wide", "Exact"]);
+  assert.deepEqual(views.regionalMarketCatalogView(snapshot, catalog, { regionId: "19", sort: "highest-buy" }).items.map((item) => item.name), ["Exact", "Wide"]);
+  assert.deepEqual(views.regionalMarketCatalogView(snapshot, catalog, { regionId: "19", sort: "spread" }).items.map((item) => item.name), ["Exact", "Wide"]);
+});
+
 test("market response freshness includes the older global catalog dependency", () => {
   const orderStatus = {
     freshness: "fresh",
