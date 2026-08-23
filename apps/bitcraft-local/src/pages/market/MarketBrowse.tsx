@@ -20,6 +20,7 @@ import {
   normalizeMarketOrders,
 } from "./globalMarket";
 import { availabilityFlags, nextOptionIndex, type MarketAvailability } from "./marketUi";
+import { MarketPriceChart } from "./MarketPriceChart";
 
 type Props = MarketRefreshProps & {
   claimId: string;
@@ -290,7 +291,6 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
     : null;
   const stats = detailState.history?.priceStats ?? {};
   const priceData: AnyRecord[] = Array.isArray(detailState.history?.priceData) ? detailState.history.priceData : [];
-  const chartMax = Math.max(1, ...priceData.map((row) => toNumber(row.vwap ?? row.avgPrice ?? row.price)));
   const recentTrades: AnyRecord[] = Array.isArray(detailState.history?.recentTrades) ? detailState.history.recentTrades : [];
   const hasCatalogFilters = Boolean(query || category || availability !== (mode === "buy" ? "buy" : "any") || catalogSort !== "name");
 
@@ -397,7 +397,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
               {detailState.historyError ? <div className="error">Price history unavailable: {detailState.historyError}</div> : null}
               <div className="market-range-tabs">{(["24h", "7d", "30d", "all"] as const).map((entry) => <button className={range === entry ? "active" : ""} key={entry} onClick={() => setRange(entry)}>{entry}</button>)}</div>
               <div className="metric-grid"><MiniStat icon={<BarChart3 />} label="24h VWAP" value={stats.avg24h == null ? "—" : `${formatNumber(stats.avg24h)}g`} /><MiniStat icon={<BarChart3 />} label="7d VWAP" value={stats.avg7d == null ? "—" : `${formatNumber(stats.avg7d)}g`} /><MiniStat icon={<BarChart3 />} label="30d Average" value={stats.avg30d == null ? "—" : `${formatNumber(stats.avg30d)}g`} /><MiniStat icon={<BarChart3 />} label="High / Low" value={stats.allTimeHigh == null ? "—" : `${formatNumber(stats.allTimeHigh)} / ${formatNumber(stats.allTimeLow)}g`} /><MiniStat icon={<BarChart3 />} label="Volume" value={formatNumber(stats.totalVolume)} /><MiniStat icon={<BarChart3 />} label="24h Change" value={stats.priceChange24h == null ? "—" : `${toNumber(stats.priceChange24h) >= 0 ? "+" : ""}${formatNumber(stats.priceChange24h)}%`} /></div>
-              <section className="market-price-chart" aria-label={`${range} price history chart`}>{priceData.length ? priceData.map((row, index) => { const price = toNumber(row.vwap ?? row.avgPrice ?? row.price); return <span key={String(row.bucket ?? row.timestamp ?? index)} title={`${formatNumber(price)}g`} style={{ height: `${Math.max(4, (price / chartMax) * 100)}%` }} />; }) : <div className="empty-state">No completed-trade price history is available for this selection.</div>}</section>
+              <MarketPriceChart rows={priceData} range={range} />
               {detailState.history?.coverage === "collecting" ? <div className="info">Collecting confirmed local sales for this selection. Current buy and sell orders remain live.</div> : null}
               {detailState.history?.coverage === "locally-observed" ? <div className="info">This chart contains confirmed sales observed by this app only.{detailState.history?.observedSince ? ` Local observation window began ${timeAgo(detailState.history.observedSince)}.` : ""}</div> : null}
               <section className="market-recent-trades"><h3>Recent trades <small>Representative item history</small></h3>{recentTrades.length ? recentTrades.slice(0, 20).map((trade, index) => <div key={String(trade.id ?? `${trade.timestamp}-${index}`)}><ItemLabel item={{ ...selectedItem, itemName: selectedItem.name }} /><span>{formatNumber(trade.quantity)} @ {formatNumber(trade.unitPrice ?? trade.price)}g</span><small>{trade.regionName ?? trade.claimName ?? "Unknown market"} · {timeAgo(trade.createdAt ?? trade.timestamp)}</small></div>) : <div className="empty-state">No recent trades were returned.</div>}</section>
