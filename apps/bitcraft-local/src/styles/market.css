@@ -532,6 +532,15 @@
   color: #f3c532;
 }
 
+.global-market-nav {
+  position: relative;
+  min-width: 0;
+}
+
+.global-market-tabs-hint {
+  display: none;
+}
+
 .global-market-tabs button.active {
   box-shadow: inset 0 -2px 0 #f3c532;
 }
@@ -599,6 +608,12 @@
 .global-market-freshness.warning,
 .global-market-freshness.warning svg {
   color: #ffd27a;
+}
+
+.global-market-warning {
+  color: #ffd27a;
+  line-height: 1.35;
+  text-align: right;
 }
 
 .global-market-workspace {
@@ -1391,12 +1406,29 @@
   }
   .global-market-tabs {
     margin: 0 -4px;
+    padding-right: 58px;
+  }
+  .global-market-tabs-hint {
+    position: absolute;
+    right: -1px;
+    bottom: 3px;
+    min-height: 34px;
+    padding: 0 5px 0 18px;
+    display: flex;
+    align-items: center;
+    background: linear-gradient(90deg, transparent, rgba(7, 11, 16, .97) 35%);
+    color: #f3c532;
+    font: 750 10px Outfit, system-ui, sans-serif;
+    pointer-events: none;
   }
   .global-market-command {
     top: 4px;
   }
   .global-market-region {
     width: 100%;
+  }
+  .global-market-warning {
+    text-align: left;
   }
   .market-toggle-group {
     grid-column: auto;

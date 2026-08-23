@@ -1,9 +1,7 @@
-import React from "react";
 import { Activity, TrendingUp } from "lucide-react";
 
 import { DataTable } from "../../components/main/DataTable";
 import { ItemLabel } from "../../components/main/ItemDisplay";
-import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
 import type { AnyRecord } from "../../main-app-data";
 import { formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
 import type { MarketItemKey, MarketRefreshProps } from "./globalMarket";
@@ -14,6 +12,7 @@ import { MarketFavorites } from "./MarketFavorites";
 type Props = MarketRefreshProps & {
   claimId: string;
   regionId: string;
+  overviewState: { loading: boolean; error: string; data: AnyRecord | null };
   favorites: MarketItemKey[];
   onOpenItem: (item: AnyRecord) => void;
 };
@@ -30,47 +29,13 @@ function itemShape(row: AnyRecord) {
 export function MarketOverview({
   claimId,
   regionId,
+  overviewState: state,
   favorites,
   onOpenItem,
   refreshSequence,
   refreshHeaders,
   trackRefresh,
 }: Props) {
-  const [state, setState] = React.useState<{
-    loading: boolean;
-    error: string;
-    data: AnyRecord | null;
-  }>({ loading: true, error: "", data: null });
-  const generationSequence = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
-
-  React.useEffect(() => {
-    const controller = new AbortController();
-    const search = new URLSearchParams({
-      claimId,
-      regionId: regionId || "all",
-    });
-    setState((current) => ({ ...current, loading: true, error: "" }));
-    const refresh = fetch(`/api/local/market/overview?${search}`, {
-      headers: refreshHeaders,
-      signal: controller.signal,
-    })
-      .then((response) => response.ok
-        ? response.json()
-        : Promise.reject(new Error(`overview HTTP ${response.status}`)));
-    trackRefresh("global-market-overview", refresh)
-      .then((payload) => setState({ loading: false, error: "", data: payload }))
-      .catch((error) => {
-        if (!controller.signal.aborted) {
-          setState((current) => ({
-            ...current,
-            loading: false,
-            error: error instanceof Error ? error.message : String(error),
-          }));
-        }
-      });
-    return () => controller.abort();
-  }, [claimId, generationSequence, refreshSequence, regionId]);
-
   const data = state.data ?? {};
   const deals: AnyRecord[] = Array.isArray(data.topDeals) ? data.topDeals : [];
   const movers: AnyRecord[] = Array.isArray(data.movers) ? data.movers : [];

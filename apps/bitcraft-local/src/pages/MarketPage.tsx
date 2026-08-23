@@ -67,7 +67,7 @@ export function Market({
   const [pendingWatchItem, setPendingWatchItem] = React.useState<AnyRecord | null>(null);
   const activeRegions = useActiveRegions(undefined, claimId, activeRegionScopeKey);
   const marketGeneration = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
-  const [marketStatus, setMarketStatus] = React.useState<{ loading: boolean; error: string; generatedAt: string; freshness: string; warnings: string[] }>({ loading: true, error: "", generatedAt: "", freshness: "unavailable", warnings: [] });
+  const [overviewState, setOverviewState] = React.useState<{ loading: boolean; error: string; data: AnyRecord | null }>({ loading: true, error: "", data: null });
   const [, setFreshnessTick] = React.useState(0);
   const activeRegionIds = React.useMemo(() => new Set(activeRegions.map((region) => region.regionId)), [activeRegions]);
   const regionId = regionChoice !== "All" && activeRegionIds.has(regionChoice) ? regionChoice : "";
@@ -84,18 +84,12 @@ export function Market({
   React.useEffect(() => {
     const controller = new AbortController();
     const search = new URLSearchParams({ claimId, regionId: regionId || "all" });
-    setMarketStatus((current) => ({ ...current, loading: true, error: "" }));
+    setOverviewState((current) => ({ ...current, loading: true, error: "" }));
     trackPromise("global-market-toolbar", fetch(`/api/local/market/overview?${search}`, { headers: marketRefresh.refreshHeaders, signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market status HTTP ${response.status}`))))
-      .then((payload) => setMarketStatus({
-        loading: false,
-        error: "",
-        generatedAt: String(payload.generatedAt ?? ""),
-        freshness: String(payload.freshness ?? "unavailable"),
-        warnings: Array.isArray(payload.warnings) ? payload.warnings.map(String).filter(Boolean) : [],
-      }))
+      .then((payload) => setOverviewState({ loading: false, error: "", data: payload }))
       .catch((error) => {
-        if (!controller.signal.aborted) setMarketStatus((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
+        if (!controller.signal.aborted) setOverviewState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
       });
     return () => controller.abort();
   }, [claimId, marketGeneration, marketRefresh.refreshHeaders, regionId, request?.sequence, trackPromise]);
@@ -166,6 +160,10 @@ export function Market({
     selectView("saved");
   }
 
+  const marketStatus = overviewState.data ?? {};
+  const marketWarnings = Array.isArray(marketStatus.warnings) ? marketStatus.warnings.map(String).filter(Boolean) : [];
+  const marketStatusMessage = overviewState.error || marketWarnings.join(" ");
+
   if (!allowedView) return <div className="panel restricted-access-panel"><section className="empty-state restricted-access-state"><Globe2 size={34} /><strong>Market is restricted</strong><span>No global market workspaces are available for your account.</span></section></div>;
 
   return (
@@ -174,15 +172,15 @@ export function Market({
         <div><h2>Market</h2><p>Global listings, demand, price intelligence and barter offers across every active region.</p></div>
       </header>
       <section className="market-command-panel global-market-command" data-tour="market-tools">
-        <div className="global-market-tabs" role="tablist" aria-label="Global market workspaces" onKeyDown={onTabsKeyDown}>
+        <div className="global-market-nav"><div className="global-market-tabs" role="tablist" aria-label="Global market workspaces" onKeyDown={onTabsKeyDown}>
           {views.map((entry) => {
             const Icon = entry.icon;
             return <button id={`market-tab-${entry.id}`} role="tab" aria-selected={currentView === entry.id} aria-controls={`market-panel-${entry.id}`} tabIndex={currentView === entry.id ? 0 : -1} className={currentView === entry.id ? "active" : ""} key={entry.id} onClick={() => selectView(entry.id)}><Icon size={15} />{entry.label}</button>;
           })}
-        </div>
-        <div className="global-market-toolbar-meta"><span className={`global-market-freshness ${marketStatus.freshness !== "fresh" || marketStatus.error ? "warning" : ""}`} title={[marketStatus.error, ...marketStatus.warnings].filter(Boolean).join(" ") || undefined}><Clock3 size={13} /> {marketStatus.generatedAt ? `Updated ${timeAgo(marketStatus.generatedAt)}` : marketStatus.loading ? "Checking freshness…" : "Freshness unavailable"}</span><label className="field global-market-region"><span>Market region</span><select value={regionId || "All"} onChange={(event) => setRegionChoice(event.target.value)}><option value="All">All active regions</option>{activeRegions.map((region) => <option value={region.regionId} key={region.regionId}>{activeRegionLabel(region, fallbackRegionId)}</option>)}</select></label></div>
+        </div><span className="global-market-tabs-hint" aria-hidden="true">More →</span></div>
+        <div className="global-market-toolbar-meta"><span className={`global-market-freshness ${marketStatus.freshness !== "fresh" || overviewState.error ? "warning" : ""}`}><Clock3 size={13} /> {marketStatus.generatedAt ? `Updated ${timeAgo(marketStatus.generatedAt)}` : overviewState.loading ? "Checking freshness…" : "Freshness unavailable"}</span><label className="field global-market-region"><span>Market region</span><select value={regionId || "All"} onChange={(event) => setRegionChoice(event.target.value)}><option value="All">All active regions</option>{activeRegions.map((region) => <option value={region.regionId} key={region.regionId}>{activeRegionLabel(region, fallbackRegionId)}</option>)}</select></label>{marketStatusMessage ? <small className="global-market-warning" role="status">{marketStatusMessage}</small> : null}</div>
       </section>
-      {currentView === "overview" ? <div id="market-panel-overview" role="tabpanel" aria-labelledby="market-tab-overview"><MarketOverview {...marketRefresh} claimId={claimId} regionId={regionId} favorites={favorites} onOpenItem={openItem} /></div> : null}
+      {currentView === "overview" ? <div id="market-panel-overview" role="tabpanel" aria-labelledby="market-tab-overview"><MarketOverview {...marketRefresh} claimId={claimId} regionId={regionId} overviewState={overviewState} favorites={favorites} onOpenItem={openItem} /></div> : null}
       {currentView === "browse" ? <div id="market-panel-browse" role="tabpanel" aria-labelledby="market-tab-browse"><MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} canWatch={tabAllowed("deal-watch")} onWatchItem={watchItem} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /></div> : null}
       {currentView === "opportunities" ? <MarketOpportunities {...marketRefresh} claimId={claimId} regionId={regionId} activeRegions={activeRegions} canViewRoutes={tabAllowed("deals")} canViewDemand={tabAllowed("buy-orders")} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
       {currentView === "saved" ? <MarketSaved {...marketRefresh} claimId={claimId} monitoredRegionId={regionId} favorites={favorites} canViewFavorites={tabAllowed("browse")} canViewWatches={tabAllowed("deal-watch")} initialWatchItem={pendingWatchItem} onWatchItemConsumed={() => setPendingWatchItem(null)} onOpenItem={openItem} onDiscordLogin={onDiscordLogin} /> : null}

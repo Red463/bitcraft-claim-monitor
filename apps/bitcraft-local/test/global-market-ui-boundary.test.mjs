@@ -141,15 +141,17 @@ test("Opportunities keeps trade depth compact and prioritises three demand metri
 });
 
 test("Overview and Deals use generation-invalidated local Relay projections", () => {
+  const marketPage = source("../src/pages/MarketPage.tsx");
   const overview = source("../src/pages/market/MarketOverview.tsx");
   const deals = source("../src/pages/market/MarketDeals.tsx");
 
-  for (const page of [overview, deals]) {
+  for (const page of [marketPage, deals]) {
     assert.match(page, /useGameDataGeneration/);
     assert.match(page, /"catalogs", "regional-market"/);
     assert.doesNotMatch(page, /\/api\/bitjita/);
   }
-  assert.match(overview, /\/api\/local\/market\/overview/);
+  assert.match(marketPage, /\/api\/local\/market\/overview/);
+  assert.doesNotMatch(overview, /\/api\/bitjita/);
   assert.match(overview, /Current liquidity/);
   assert.doesNotMatch(overview, /Recent open orders/);
   assert.match(deals, /\/api\/local\/market\/deals/);
@@ -181,11 +183,13 @@ test("Browse follows the central page cycle and keeps history non-blocking", () 
   assert.match(watcher, /finally \{\s*pollInFlight = false/);
 });
 
-test("Market Overview tracks response parsing as part of page completion", () => {
+test("Market toolbar owns the shared Overview response and tracks parsing", () => {
+  const marketPage = source("../src/pages/MarketPage.tsx");
   const overview = source("../src/pages/market/MarketOverview.tsx");
 
-  assert.match(overview, /const refresh = fetch\(`\/api\/local\/market\/overview[\s\S]*response\.json\(\)[\s\S]*trackRefresh\(\s*"global-market-overview",\s*refresh\s*\)/);
-  assert.doesNotMatch(overview, /trackRefresh\(\s*"global-market-overview",\s*fetch\(/);
+  assert.match(marketPage, /trackPromise\("global-market-toolbar",\s*fetch\(`\/api\/local\/market\/overview[\s\S]*response\.json\(\)/);
+  assert.match(marketPage, /overviewState=\{overviewState\}/);
+  assert.doesNotMatch(overview, /fetch\(`\/api\/local\/market\/overview/);
 });
 
 test("Browse labels progressive locally observed history without blocking live orders", () => {

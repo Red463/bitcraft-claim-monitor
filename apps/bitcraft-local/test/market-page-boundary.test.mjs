@@ -104,3 +104,13 @@ test("Market header metadata wraps under text scaling on phones", () => {
   assert.match(css, /\.market-topbar\s*\{[^}]*min-width:\s*0/s);
   assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.market-page \.dashboard-top-meta\s*\{[^}]*flex-wrap:\s*wrap/s);
 });
+
+test("Market exposes source-backed warnings and a mobile navigation cue", () => {
+  const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
+
+  assert.match(marketPage, /marketStatus\.generatedAt/);
+  assert.match(marketPage, /className="global-market-warning" role="status"/);
+  assert.match(marketPage, /global-market-tabs-hint/);
+  assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*\.global-market-tabs-hint\s*\{[^}]*display:\s*flex/s);
+});
