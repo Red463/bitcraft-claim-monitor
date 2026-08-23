@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowDownUp, BarChart3, MapPin, Search, ShoppingBag, Star } from "lucide-react";
+import { ArrowDownUp, ArrowLeft, BarChart3, Bell, MapPin, Search, ShoppingBag, Star, X } from "lucide-react";
 
 import { DataTable } from "../../components/main/DataTable";
 import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
@@ -19,6 +19,8 @@ import {
   marketItemType,
   normalizeMarketOrders,
 } from "./globalMarket";
+import { availabilityFlags, exactMarketInteger, nextOptionIndex, type MarketAvailability } from "./marketUi";
+import { MarketPriceChart } from "./MarketPriceChart";
 
 type Props = MarketRefreshProps & {
   claimId: string;
@@ -26,6 +28,8 @@ type Props = MarketRefreshProps & {
   regionId: string;
   favorites: MarketItemKey[];
   onToggleFavorite: (key: MarketItemKey) => void;
+  canWatch: boolean;
+  onWatchItem: (item: AnyRecord) => void;
   onShowMap: (focus: NonNullable<MapFocus>, regionId?: string) => void;
   locationSearch: string;
   onQueryStateChange: () => void;
@@ -39,25 +43,21 @@ function itemKey(item: AnyRecord): MarketItemKey {
   };
 }
 
-function decimalBigInt(value: unknown): bigint {
-  const normalized = String(value ?? "0").trim();
-  return /^\d+$/.test(normalized) ? BigInt(normalized) : 0n;
-}
-
 function compareDecimal(left: unknown, right: unknown): number {
-  const a = decimalBigInt(left);
-  const b = decimalBigInt(right);
+  const a = exactMarketInteger(left);
+  const b = exactMarketInteger(right);
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
 function multiplyDecimal(left: unknown, right: unknown): string {
-  return (decimalBigInt(left) * decimalBigInt(right)).toString();
+  return (exactMarketInteger(left) * exactMarketInteger(right)).toString();
 }
 
-export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavorite, onShowMap, locationSearch, onQueryStateChange, refreshSequence, refreshHeaders, trackRefresh }: Props) {
+export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavorite, canWatch, onWatchItem, onShowMap, locationSearch, onQueryStateChange, refreshSequence, refreshHeaders, trackRefresh }: Props) {
   const params = React.useMemo(() => new URLSearchParams(locationSearch), [locationSearch]);
   const [query, setQuery] = React.useState(mode === "browse" ? params.get("q") ?? "" : params.get("buyQ") ?? "");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
+  const [activeSuggestion, setActiveSuggestion] = React.useState(-1);
   const [catalogItems, setCatalogItems] = React.useState<AnyRecord[]>([]);
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(() => {
     const id = params.get(mode === "browse" ? "item" : "buyItem");
@@ -68,12 +68,15 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const [catalogState, setCatalogState] = React.useState<{ loading: boolean; error: string; categories: string[] }>({ loading: false, error: "", categories: [] });
   const [detailState, setDetailState] = React.useState<{ loading: boolean; error: string; historyError: string; detail: AnyRecord | null; history: AnyRecord | null }>({ loading: false, error: "", historyError: "", detail: null, history: null });
   const [category, setCategory] = React.useState(params.get("category") ?? "");
-  const [availableOnly, setAvailableOnly] = React.useState(params.get("available") === "true");
-  const [hasSell, setHasSell] = React.useState(params.get("sell") === "true");
-  const [hasBuy, setHasBuy] = React.useState(mode === "buy" || params.get("buy") === "true");
-  const [catalogSort, setCatalogSort] = React.useState<"relevance" | "name" | "orders">(() => {
+  const [availability, setAvailability] = React.useState<MarketAvailability>(() => {
+    if (mode === "buy") return "buy";
+    const sell = params.get("sell") === "true";
+    const buy = params.get("buy") === "true";
+    return sell && buy ? "both" : sell ? "sell" : buy ? "buy" : "any";
+  });
+  const [catalogSort, setCatalogSort] = React.useState<"relevance" | "name" | "orders" | "lowest-sell" | "highest-buy" | "spread">(() => {
     const saved = params.get("sort");
-    return saved === "relevance" || saved === "orders" ? saved : "name";
+    return saved === "relevance" || saved === "orders" || saved === "lowest-sell" || saved === "highest-buy" || saved === "spread" ? saved : "name";
   });
   const [orderTab, setOrderTab] = React.useState<"sell" | "buy">(mode === "buy" ? "buy" : "sell");
   const [minimumQuantity, setMinimumQuantity] = React.useState("0");
@@ -83,7 +86,9 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const [detailTab, setDetailTab] = React.useState<"orders" | "stats">("orders");
   const [range, setRange] = React.useState<"24h" | "7d" | "30d" | "all">("30d");
   const [page, setPage] = React.useState(1);
+  const catalogScrollRef = React.useRef(0);
   const generationSequence = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
+  const availabilityFilter = availabilityFlags(availability);
 
   React.useEffect(() => {
     if (mode === "buy" && query.trim().length < 2) {
@@ -95,9 +100,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       const catalogUrl = marketBrowseSearchUrl({
         query,
         regionId: regionId || "all",
-        availableOnly,
-        hasSell,
-        hasBuy,
+        ...availabilityFilter,
         category,
         sort: catalogSort,
       });
@@ -111,6 +114,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
         const categories = Array.isArray(payload.categories) ? payload.categories.map(String) : [];
         setCatalogItems(items);
         setSuggestions(query.trim().length >= 2 && selectedItem?.name !== query.trim() ? items.slice(0, 12) : []);
+        setActiveSuggestion(-1);
         setCatalogState({ loading: false, error: "", categories });
       })
       .catch((error) => {
@@ -120,16 +124,16 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       refresh.cancel();
       controller.abort();
     };
-  }, [availableOnly, catalogSort, category, generationSequence, hasBuy, hasSell, query, refreshSequence, regionId, selectedItem?.name]);
+  }, [availability, catalogSort, category, generationSequence, query, refreshSequence, regionId, selectedItem?.name]);
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
       updateQueryState(mode === "browse" ? {
         q: query || null,
         category: category || null,
-        available: availableOnly ? "true" : null,
-        sell: hasSell ? "true" : null,
-        buy: hasBuy ? "true" : null,
+        available: availabilityFilter.availableOnly ? "true" : null,
+        sell: availabilityFilter.hasSell ? "true" : null,
+        buy: availabilityFilter.hasBuy ? "true" : null,
         sort: catalogSort === "name" ? null : catalogSort,
       } : {
         buyQ: query || null,
@@ -137,7 +141,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       onQueryStateChange();
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [availableOnly, catalogSort, category, hasBuy, hasSell, mode, onQueryStateChange, query]);
+  }, [availability, catalogSort, category, mode, onQueryStateChange, query]);
 
   React.useEffect(() => {
     if (!selectedItem) {
@@ -190,8 +194,8 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   }, [range, refreshSequence, regionId, selectedItem]);
 
   function chooseItem(item: AnyRecord) {
+    catalogScrollRef.current = window.scrollY;
     setSelectedItem(item);
-    setQuery(String(item.name ?? item.itemName ?? ""));
     setSuggestions([]);
     setPage(1);
     const key = itemKey(item);
@@ -207,6 +211,40 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       buyQ: query || null,
     }, "replace");
     onQueryStateChange();
+  }
+
+  function showResults() {
+    setSelectedItem(null);
+    setDetailState((current) => ({ ...current, detail: null, history: null, error: "", historyError: "" }));
+    setSuggestions([]);
+    updateQueryState(mode === "browse" ? { item: null, itemName: null, itemType: null } : { buyItem: null, buyItemName: null, buyItemType: null }, "replace");
+    onQueryStateChange();
+    requestAnimationFrame(() => window.scrollTo(0, catalogScrollRef.current));
+  }
+
+  function clearCatalogFilters() {
+    setQuery("");
+    setCategory("");
+    setAvailability(mode === "buy" ? "buy" : "any");
+    setCatalogSort("name");
+    showResults();
+  }
+
+  function onSuggestionKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key) && suggestions.length) {
+      event.preventDefault();
+      setActiveSuggestion((current) => nextOptionIndex(current, suggestions.length, event.key));
+      return;
+    }
+    if (event.key === "Enter" && activeSuggestion >= 0 && suggestions[activeSuggestion]) {
+      event.preventDefault();
+      chooseItem(suggestions[activeSuggestion]);
+      return;
+    }
+    if (event.key === "Escape") {
+      setSuggestions([]);
+      setActiveSuggestion(-1);
+    }
   }
 
   const selectedKey = selectedItem ? itemKey(selectedItem) : null;
@@ -236,24 +274,26 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       const key = String(order.regionId ?? "unknown");
       const current = byRegion.get(key) ?? { name: order.regionName || (order.regionId ? `R${order.regionId}` : "Unknown region"), sells: 0, buys: 0, quantity: 0n };
       current[order.side === "sell" ? "sells" : "buys"] += 1;
-      current.quantity += decimalBigInt(order.quantity);
+      current.quantity += exactMarketInteger(order.quantity);
       byRegion.set(key, current);
     }
     return [...byRegion.entries()].sort(([left], [right]) => toNumber(left) - toNumber(right));
   }, [orders]);
-  const bestSell = sells.reduce<string | null>((best, order) => (
-    best == null || compareDecimal(order.unitPrice, best) < 0 ? order.unitPrice : best
+  const bestSellOrder = sells.reduce<AnyRecord | null>((best, order) => (
+    best == null || compareDecimal(order.unitPrice, best.unitPrice) < 0 ? order : best
   ), null);
-  const bestBuy = buys.reduce<string | null>((best, order) => (
-    best == null || compareDecimal(order.unitPrice, best) > 0 ? order.unitPrice : best
+  const bestBuyOrder = buys.reduce<AnyRecord | null>((best, order) => (
+    best == null || compareDecimal(order.unitPrice, best.unitPrice) > 0 ? order : best
   ), null);
+  const bestSell = bestSellOrder?.unitPrice ?? null;
+  const bestBuy = bestBuyOrder?.unitPrice ?? null;
   const spread = bestSell != null && bestBuy != null
-    ? (decimalBigInt(bestSell) - decimalBigInt(bestBuy)).toString()
+    ? (exactMarketInteger(bestSell) - exactMarketInteger(bestBuy)).toString()
     : null;
   const stats = detailState.history?.priceStats ?? {};
   const priceData: AnyRecord[] = Array.isArray(detailState.history?.priceData) ? detailState.history.priceData : [];
-  const chartMax = Math.max(1, ...priceData.map((row) => toNumber(row.vwap ?? row.avgPrice ?? row.price)));
   const recentTrades: AnyRecord[] = Array.isArray(detailState.history?.recentTrades) ? detailState.history.recentTrades : [];
+  const hasCatalogFilters = Boolean(query || category || availability !== (mode === "buy" ? "buy" : "any") || catalogSort !== "name");
 
   return (
     <section className="global-market-workspace market-browse">
@@ -262,9 +302,9 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
           <span>{mode === "buy" ? "Find an item with buy orders" : "Search global catalog"}</span>
           <div className="suggestion-anchor">
             <Search size={16} />
-            <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); }} placeholder="Item or cargo name" role="combobox" aria-expanded={suggestions.length > 0} aria-controls={`${mode}-market-suggestions`} />
-            {suggestions.length ? <div className="suggestion-menu" id={`${mode}-market-suggestions`} role="listbox">{suggestions.map((item) => (
-              <button key={`${item.itemType}-${item.id}`} type="button" onClick={() => chooseItem(item)}>
+            <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); setActiveSuggestion(-1); }} onKeyDown={onSuggestionKeyDown} placeholder="Item or cargo name" role="combobox" aria-autocomplete="list" aria-expanded={suggestions.length > 0} aria-controls={`${mode}-market-suggestions`} aria-activedescendant={activeSuggestion >= 0 ? `${mode}-market-option-${activeSuggestion}` : undefined} />
+            {suggestions.length ? <div className="suggestion-menu" id={`${mode}-market-suggestions`} role="listbox">{suggestions.map((item, index) => (
+              <button id={`${mode}-market-option-${index}`} role="option" aria-selected={activeSuggestion === index} key={`${item.itemType}-${item.id}`} type="button" onMouseEnter={() => setActiveSuggestion(index)} onClick={() => chooseItem(item)}>
                 <ItemIcon item={item} /><strong>{item.name}</strong>{item.tier ? <TierBadge tier={item.tier} /> : null}<small>{item.rarityStr ? <RarityBadge rarity={item.rarityStr} /> : null}{item.tag ?? ""}</small>
               </button>
             ))}</div> : null}
@@ -272,12 +312,9 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
         </label>
         {mode === "browse" ? <>
           <label className="field"><span>Category</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">All categories</option>{catalogState.categories.map((entry) => <option key={entry}>{entry}</option>)}</select></label>
-          <label className="field"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)}><option value="relevance">Relevance</option><option value="name">Item name</option><option value="orders">Order count</option></select></label>
-          <div className="market-toggle-group">
-            <label className="toggle-line"><input type="checkbox" checked={availableOnly} onChange={(event) => setAvailableOnly(event.target.checked)} /><span>Available only</span></label>
-            <label className="toggle-line"><input type="checkbox" checked={hasSell} onChange={(event) => setHasSell(event.target.checked)} /><span>Has sell</span></label>
-            <label className="toggle-line"><input type="checkbox" checked={hasBuy} onChange={(event) => setHasBuy(event.target.checked)} /><span>Has buy</span></label>
-          </div>
+          <label className="field"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)}><option value="relevance">Relevance</option><option value="name">Item name</option><option value="orders">Order count</option><option value="lowest-sell">Lowest sell</option><option value="highest-buy">Highest buy</option><option value="spread">Smallest spread</option></select></label>
+          <label className="field market-availability-field"><span>Availability</span><select value={availability} onChange={(event) => setAvailability(event.target.value as MarketAvailability)}><option value="any">Any</option><option value="sell">For sale</option><option value="buy">Wanted</option><option value="both">Both</option></select></label>
+          <div className="market-filter-actions"><button className="toolbar-button" type="button" disabled={!hasCatalogFilters} onClick={clearCatalogFilters}><X size={14} /> Clear filters</button></div>
         </> : null}
       </div>
       {catalogState.error ? <div className="error">Market search unavailable: {catalogState.error}</div> : null}
@@ -290,6 +327,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
               <span className="market-catalog-result-name"><strong>{item.name}</strong><small>{item.category || "Uncategorised"}</small></span>
               <span><small>Lowest sell</small><strong>{item.lowestSellPrice == null ? "Unavailable" : formatGoldAmount(item.lowestSellPrice)}</strong><small>{item.lowestSellLocation || "No seller location"}</small></span>
               <span><small>Highest buy</small><strong>{item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount(item.highestBuyPrice)}</strong><small>{item.highestBuyLocation || "No buyer location"}</small></span>
+              <span><small>Spread</small><strong>{item.lowestSellPrice == null || item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount((exactMarketInteger(item.lowestSellPrice) - exactMarketInteger(item.highestBuyPrice)).toString())}</strong><small>{formatNumber(item.orderCount)} current orders</small></span>
             </button>
           ))}
           {!catalogState.loading && !catalogItems.length ? <div className="empty-state"><ShoppingBag size={28} /><strong>No catalog items match these filters</strong><span>Clear a filter or search for another item or cargo name.</span></div> : null}
@@ -297,7 +335,9 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       ) : <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>Choose an item to inspect live demand</strong><span>Buy orders are loaded live after item selection; no monitored-settlement cache is used.</span></div> : (
         <div className="market-item-detail">
           <header>
-            <div className="market-item-identity">
+            <div className="market-item-heading">
+              <button className="toolbar-button market-back-results" type="button" onClick={showResults}><ArrowLeft size={15} /> Back to results</button>
+              <div className="market-item-identity">
               <ItemIcon item={itemMetadata} />
               <div>
                 <h2>{itemMetadata.name}</h2>
@@ -309,8 +349,9 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
                   <span>{itemMetadata.category ?? itemMetadata.tag ?? "Category unavailable"}</span>
                 </div>
               </div>
+              </div>
             </div>
-            <button className={`toolbar-button ${favorite ? "active" : ""}`} type="button" onClick={() => selectedKey && onToggleFavorite(selectedKey)} aria-pressed={favorite}><Star size={15} fill={favorite ? "currentColor" : "none"} /> {favorite ? "Favorited" : "Favorite"}</button>
+            <div className="market-item-actions"><button className={`toolbar-button ${favorite ? "active" : ""}`} type="button" onClick={() => selectedKey && onToggleFavorite(selectedKey)} aria-pressed={favorite}><Star size={15} fill={favorite ? "currentColor" : "none"} /> {favorite ? "Saved" : "Save"}</button>{canWatch ? <button className="toolbar-button" type="button" onClick={() => onWatchItem(itemMetadata)}><Bell size={15} /> Watch</button> : null}</div>
           </header>
           {detailState.error ? <div className="error">Unable to load this market: {detailState.error}</div> : null}
           {freshnessNotice ? <div className="info">{freshnessNotice}</div> : null}
@@ -319,10 +360,8 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
             <MiniStat icon={<ArrowDownUp />} label="Best Sell" value={bestSell == null ? "—" : `${formatNumber(bestSell)}g`} />
             <MiniStat icon={<ArrowDownUp />} label="Best Buy" value={bestBuy == null ? "—" : `${formatNumber(bestBuy)}g`} />
             <MiniStat icon={<ArrowDownUp />} label="Spread" value={spread == null ? "—" : `${formatNumber(spread)}g`} />
-            <MiniStat icon={<ShoppingBag />} label="Liquidity" value={formatNumber(orders.reduce((sum, order) => sum + decimalBigInt(order.quantity), 0n))} />
-            <MiniStat icon={<ShoppingBag />} label="Sell Orders" value={formatNumber(sells.length)} />
-            <MiniStat icon={<ShoppingBag />} label="Buy Orders" value={formatNumber(buys.length)} />
           </div>
+          <div className="market-depth-summary" aria-label="Current market depth"><span><small>Liquidity</small><strong>{formatNumber(orders.reduce((sum, order) => sum + exactMarketInteger(order.quantity), 0n))} units</strong></span><span><small>Orders</small><strong>{formatNumber(sells.length)} sell · {formatNumber(buys.length)} buy</strong></span><span><small>Best sell location</small><strong>{bestSellOrder?.claimName || bestSellOrder?.regionName || "Unavailable"}</strong></span><span><small>Best buy location</small><strong>{bestBuyOrder?.claimName || bestBuyOrder?.regionName || "Unavailable"}</strong></span></div>
           {regionSummaries.length ? <div className="market-region-summaries" aria-label="Regional order summaries">{regionSummaries.map(([key, summary]) => <span key={key}><b>{summary.name}</b>{formatNumber(summary.sells)} sell · {formatNumber(summary.buys)} buy · {formatCompactNumber(summary.quantity)} units</span>)}</div> : null}
           <div className="tabs market-order-tabs">
             <button className={detailTab === "orders" ? "active" : ""} onClick={() => setDetailTab("orders")}>Orders</button>
@@ -358,7 +397,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
               {detailState.historyError ? <div className="error">Price history unavailable: {detailState.historyError}</div> : null}
               <div className="market-range-tabs">{(["24h", "7d", "30d", "all"] as const).map((entry) => <button className={range === entry ? "active" : ""} key={entry} onClick={() => setRange(entry)}>{entry}</button>)}</div>
               <div className="metric-grid"><MiniStat icon={<BarChart3 />} label="24h VWAP" value={stats.avg24h == null ? "—" : `${formatNumber(stats.avg24h)}g`} /><MiniStat icon={<BarChart3 />} label="7d VWAP" value={stats.avg7d == null ? "—" : `${formatNumber(stats.avg7d)}g`} /><MiniStat icon={<BarChart3 />} label="30d Average" value={stats.avg30d == null ? "—" : `${formatNumber(stats.avg30d)}g`} /><MiniStat icon={<BarChart3 />} label="High / Low" value={stats.allTimeHigh == null ? "—" : `${formatNumber(stats.allTimeHigh)} / ${formatNumber(stats.allTimeLow)}g`} /><MiniStat icon={<BarChart3 />} label="Volume" value={formatNumber(stats.totalVolume)} /><MiniStat icon={<BarChart3 />} label="24h Change" value={stats.priceChange24h == null ? "—" : `${toNumber(stats.priceChange24h) >= 0 ? "+" : ""}${formatNumber(stats.priceChange24h)}%`} /></div>
-              <section className="market-price-chart" aria-label={`${range} price history chart`}>{priceData.length ? priceData.map((row, index) => { const price = toNumber(row.vwap ?? row.avgPrice ?? row.price); return <span key={String(row.bucket ?? row.timestamp ?? index)} title={`${formatNumber(price)}g`} style={{ height: `${Math.max(4, (price / chartMax) * 100)}%` }} />; }) : <div className="empty-state">No completed-trade price history is available for this selection.</div>}</section>
+              <MarketPriceChart rows={priceData} range={range} />
               {detailState.history?.coverage === "collecting" ? <div className="info">Collecting confirmed local sales for this selection. Current buy and sell orders remain live.</div> : null}
               {detailState.history?.coverage === "locally-observed" ? <div className="info">This chart contains confirmed sales observed by this app only.{detailState.history?.observedSince ? ` Local observation window began ${timeAgo(detailState.history.observedSince)}.` : ""}</div> : null}
               <section className="market-recent-trades"><h3>Recent trades <small>Representative item history</small></h3>{recentTrades.length ? recentTrades.slice(0, 20).map((trade, index) => <div key={String(trade.id ?? `${trade.timestamp}-${index}`)}><ItemLabel item={{ ...selectedItem, itemName: selectedItem.name }} /><span>{formatNumber(trade.quantity)} @ {formatNumber(trade.unitPrice ?? trade.price)}g</span><small>{trade.regionName ?? trade.claimName ?? "Unknown market"} · {timeAgo(trade.createdAt ?? trade.timestamp)}</small></div>) : <div className="empty-state">No recent trades were returned.</div>}</section>

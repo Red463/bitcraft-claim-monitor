@@ -14,11 +14,7 @@ import {
   marketFreshnessNotice,
   type MarketRefreshProps,
 } from "./globalMarket";
-
-function decimalBigInt(value: unknown): bigint {
-  const normalized = String(value ?? "0").trim();
-  return /^\d+$/.test(normalized) ? BigInt(normalized) : 0n;
-}
+import { exactMarketInteger } from "./marketUi";
 
 export function MarketDeals({
   claimId,
@@ -101,18 +97,18 @@ export function MarketDeals({
   const rows = React.useMemo(() => filterMarketDeals(state.rows, regions)
     .filter((deal) => {
       const percent = toNumber(deal.profitPercent);
-      if (decimalBigInt(deal.maxQuantity) < decimalBigInt(minimumQuantity)) return false;
+      if (exactMarketInteger(deal.maxQuantity) < exactMarketInteger(minimumQuantity)) return false;
       if (percent < toNumber(minimumProfit)) return false;
       if (maximumProfit && percent > toNumber(maximumProfit)) return false;
       return true;
     })
     .sort((left, right) => {
-      const leftProfit = decimalBigInt(left.profit);
-      const rightProfit = decimalBigInt(right.profit);
+      const leftProfit = exactMarketInteger(left.profit);
+      const rightProfit = exactMarketInteger(right.profit);
       return leftProfit < rightProfit ? 1 : leftProfit > rightProfit ? -1 : 0;
     }), [maximumProfit, minimumProfit, minimumQuantity, regions, state.rows]);
   const topProfit = rows.reduce((best, row) => {
-    const profit = decimalBigInt(row.profit);
+    const profit = exactMarketInteger(row.profit);
     return profit > best ? profit : best;
   }, 0n);
   const bestRoutePotential = bestMarketDealPotential(rows);
@@ -139,9 +135,7 @@ export function MarketDeals({
           ["Item", (deal) => <ItemLabel item={{ ...deal, name: deal.itemName, iconAssetName: deal.itemIconAssetName }} />, (deal) => String(deal.itemName ?? "")],
           ["Buy at", (deal) => <span className="market-price-location"><strong>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span>, (deal) => deal.buyPrice],
           ["Sell at", (deal) => <span className="market-price-location"><strong>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span>, (deal) => deal.sellPrice],
-          ["Available", (deal) => formatNumber(deal.buyQuantity), (deal) => deal.buyQuantity],
-          ["Wanted", (deal) => formatNumber(deal.sellQuantity), (deal) => deal.sellQuantity],
-          ["Max trade", (deal) => formatNumber(deal.maxQuantity), (deal) => deal.maxQuantity],
+          ["Trade depth", (deal) => <span className="market-trade-depth"><span><small>Available</small>{formatNumber(deal.buyQuantity)}</span><span><small>Wanted</small>{formatNumber(deal.sellQuantity)}</span><span><small>Max trade</small><strong>{formatNumber(deal.maxQuantity)}</strong></span></span>, (deal) => deal.maxQuantity],
           ["Distance", (deal) => deal.distance == null ? "—" : `${formatNumber(deal.distance)} tiles`, (deal) => deal.distance ?? Number.MAX_SAFE_INTEGER],
           ["Unit profit", (deal) => <span className="positive">{formatGoldAmount(deal.profit)}</span>, (deal) => deal.profit],
           ["Gain", (deal) => <span className="positive">{formatNumber(deal.profitPercent)}%</span>, (deal) => toNumber(deal.profitPercent)],

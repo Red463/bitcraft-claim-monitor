@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, CircleDollarSign, Package, ShoppingBag, ShoppingCart, TrendingUp } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Package, ShoppingBag, TrendingUp } from "lucide-react";
 
 import { RarityBadge, TierBadge } from "../../components/main/Badges";
 import { ItemIcon, ItemLabel } from "../../components/main/ItemDisplay";
@@ -14,7 +14,6 @@ import {
   buyOrderQueryFromLocation,
   buyOrderSearchTransition,
   formatExactDecimalInteger,
-  maxExactDecimalInteger,
   sumExactDecimalIntegers,
 } from "./buyOrderFinderUtils";
 import type { MarketRefreshProps } from "./globalMarket";
@@ -138,10 +137,8 @@ export function BuyOrderFinder({
   const warnings: string[] = Array.isArray(state.data?.warnings) ? state.data.warnings.map(String).filter(Boolean) : [];
   const total = toNumber(state.data?.total);
   const pageCount = toNumber(state.data?.pageCount) || 1;
-  const highestVisibleUnitPrice = maxExactDecimalInteger(rows.map((order) => order.unitPrice));
   const visibleDemand = sumExactDecimalIntegers(rows.map((order) => order.quantity));
   const visibleBuyValue = sumExactDecimalIntegers(rows.map((order) => order.totalValue));
-  const marketCount = new Set(rows.map((order) => order.marketClaimId || order.marketClaimName)).size;
   const regionLabel = regionId ? `R${regionId}` : "All active regions";
   const freshness = String(state.data?.freshness ?? "unavailable");
 
@@ -202,10 +199,8 @@ export function BuyOrderFinder({
       ) : null}
       <div className="metric-grid">
         <MiniStat icon={<ShoppingBag />} label="Current Buy Orders" value={formatNumber(total)} />
-        <MiniStat icon={<CircleDollarSign />} label="Highest Visible Unit Price" value={highestVisibleUnitPrice == null ? "—" : `${formatExactDecimalInteger(highestVisibleUnitPrice)}g`} />
         <MiniStat icon={<Package />} label="Visible Demand" value={formatExactDecimalInteger(visibleDemand)} />
         <MiniStat icon={<TrendingUp />} label="Visible Buy Value" value={`${formatExactDecimalInteger(visibleBuyValue)}g`} />
-        <MiniStat icon={<ShoppingCart />} label="Markets Visible" value={formatNumber(marketCount)} />
       </div>
       <section className="buy-order-opportunities">
         <h3>

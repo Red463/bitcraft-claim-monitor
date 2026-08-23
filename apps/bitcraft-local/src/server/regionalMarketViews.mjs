@@ -515,12 +515,27 @@ export function regionalMarketCatalogView(snapshot, catalogRows, options = {}) {
     }];
   });
   const sort = String(options.sort ?? "relevance").toLowerCase();
+  const compareNullablePrice = (left, right, direction) => {
+    if (left == null && right == null) return 0;
+    if (left == null) return 1;
+    if (right == null) return -1;
+    return direction * compareBigInt(String(left), String(right));
+  };
+  const itemSpread = (item) => item.lowestSellPrice == null || item.highestBuyPrice == null
+    ? null
+    : (BigInt(item.lowestSellPrice) - BigInt(item.highestBuyPrice)).toString();
   if (sort === "name") {
     items.sort((left, right) => left.name.localeCompare(right.name));
   } else if (sort === "orders") {
     items.sort((left, right) => (
       right.orderCount - left.orderCount || left.name.localeCompare(right.name)
     ));
+  } else if (sort === "lowest-sell") {
+    items.sort((left, right) => compareNullablePrice(left.lowestSellPrice, right.lowestSellPrice, 1) || left.name.localeCompare(right.name));
+  } else if (sort === "highest-buy") {
+    items.sort((left, right) => compareNullablePrice(left.highestBuyPrice, right.highestBuyPrice, -1) || left.name.localeCompare(right.name));
+  } else if (sort === "spread") {
+    items.sort((left, right) => compareNullablePrice(itemSpread(left), itemSpread(right), 1) || left.name.localeCompare(right.name));
   }
   return {
     items: items.slice(0, limit),

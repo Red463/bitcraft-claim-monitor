@@ -31,12 +31,15 @@ test("Discord price lookup and autocomplete use the committed Relay market gener
   assert.doesNotMatch(command, /fetchBitjita|price-history|24h average|7d average|30d average/);
   assert.doesNotMatch(server, /Look up recent BitJita sale pricing|recent BitJita sale prices/);
 });
-test("Deal Watch remains separate from Favorites and Browse", () => {
+test("Saved groups Deal Watch with Favorites while keeping Browse focused", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
+  const marketSaved = readFileSync(new URL("../src/pages/market/MarketSaved.tsx", import.meta.url), "utf8");
   const marketBrowse = readFileSync(new URL("../src/pages/market/MarketBrowse.tsx", import.meta.url), "utf8");
 
   assert.match(marketPage, /const FAVORITES_KEY = "bitcraft\.market\.favorites\.v1"/);
-  assert.match(marketPage, /<DealWatchlist/);
+  assert.match(marketPage, /<MarketSaved/);
+  assert.match(marketSaved, /<DealWatchlist/);
+  assert.match(marketSaved, /<MarketFavorites/);
   assert.match(marketBrowse, /onToggleFavorite/);
   assert.doesNotMatch(marketBrowse, /<DealWatchlist/);
 });

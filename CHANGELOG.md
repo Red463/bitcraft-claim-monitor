@@ -9,6 +9,19 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.61.0-beta.1] - 2026-08-23
+
+### Added
+
+- Added a decision-first global Market workspace with Overview, Browse, Opportunities, Saved, and Stalls views.
+- Added sortable price, spread, availability, and order-count signals to global market browsing.
+
+### Changed
+
+- Improved global market discovery with preserved search context, accessible price history, compact opportunity and depth summaries, and responsive navigation.
+- Combined saved items and deal watches with direct watch setup from item details.
+- Improved market freshness, warning visibility, large-price accuracy, and keyboard navigation.
+
 ## [0.60.1-beta.1] - 2026-08-23
 
 ### Fixed

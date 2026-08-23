@@ -45,8 +45,8 @@ export function CommandPalette({
       };
     }),
     { key: "price-finder", label: "Market Browse", description: "Find global listings and price history", icon: <CircleDollarSign size={15} />, allowed: marketViewAllowed("browse"), locked: false, run: () => onNavigate("market", "browse") },
-    { key: "deal-watchlist", label: "Deal Watch", description: "Manage watched market deals", icon: <Bell size={15} />, allowed: marketViewAllowed("deal-watch"), locked: false, run: () => onNavigate("market", "deal-watch") },
-    { key: "buy-order-finder", label: "Buy Orders", description: "Find active global buy orders", icon: <ShoppingBag size={15} />, allowed: marketViewAllowed("buy-orders"), locked: false, run: () => onNavigate("market", "buy-orders") },
+    { key: "market-saved", label: "Market Saved", description: "Manage favorite items and deal alerts", icon: <Bell size={15} />, allowed: marketViewAllowed("deal-watch"), locked: false, run: () => onNavigate("market", "saved") },
+    { key: "market-opportunities", label: "Market Opportunities", description: "Find arbitrage routes and active global demand", icon: <ShoppingBag size={15} />, allowed: marketViewAllowed("buy-orders"), locked: false, run: () => onNavigate("market", "opportunities") },
     { key: "craft-calculator", label: "Craft Calculator", description: "Calculate recipe chains", icon: <Calculator size={15} />, allowed: allowedPages.has("craftcalc"), locked: false, run: () => onNavigate("craftcalc") },
     ...(allowedPages.has("members") ? members : []).map((member) => ({
       key: `member-${member.playerEntityId}`,

@@ -2,7 +2,7 @@ import type { ActivePanel } from "../types/app";
 
 export type PageId = ActivePanel;
 export type NavigationMode = "push" | "replace";
-export type GlobalMarketViewId = "overview" | "browse" | "deals" | "buy-orders" | "deal-watch" | "stalls";
+export type GlobalMarketViewId = "overview" | "browse" | "opportunities" | "saved" | "stalls";
 export type SettlementMarketViewId = "live" | "analytics";
 
 const LEGACY_PAGE_ALIASES: Readonly<Record<string, PageId>> = {
@@ -69,15 +69,21 @@ export function marketViewLocation(tab: string | null): MarketViewLocation {
     return { page: "market", view: "browse", canonicalTab: "browse", shouldReplace: true };
   }
   if (tab === "deal-watchlist" || tab === "dealWatchlist") {
-    return { page: "market", view: "deal-watch", canonicalTab: "deal-watch", shouldReplace: true };
+    return { page: "market", view: "saved", canonicalTab: "saved", shouldReplace: true };
   }
   if (tab === "buyOrders") {
-    return { page: "market", view: "buy-orders", canonicalTab: "buy-orders", shouldReplace: true };
+    return { page: "market", view: "opportunities", canonicalTab: "opportunities", shouldReplace: true };
   }
-  if (tab === "overview" || tab === "browse" || tab === "deals" || tab === "buy-orders" || tab === "deal-watch" || tab === "stalls") {
+  if (tab === "deals" || tab === "buy-orders") {
+    return { page: "market", view: "opportunities", canonicalTab: "opportunities", shouldReplace: true };
+  }
+  if (tab === "deal-watch") {
+    return { page: "market", view: "saved", canonicalTab: "saved", shouldReplace: true };
+  }
+  if (tab === "overview" || tab === "browse" || tab === "opportunities" || tab === "saved" || tab === "stalls") {
     return { page: "market", view: tab, canonicalTab: tab, shouldReplace: false };
   }
-  return { page: "market", view: "browse", canonicalTab: "browse", shouldReplace: true };
+  return { page: "market", view: "overview", canonicalTab: "overview", shouldReplace: true };
 }
 
 export function settlementMarketViewLocation(tab: string | null): MarketViewLocation {
