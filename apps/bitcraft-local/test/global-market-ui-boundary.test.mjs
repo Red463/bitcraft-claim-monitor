@@ -100,6 +100,17 @@ test("Browse consolidates availability and preserves an explicit result return p
   assert.match(browse, /className="market-item-meta"/);
 });
 
+test("stall details trap focus and restore it to the opening control", () => {
+  const stalls = source("../src/pages/market/MarketStalls.tsx");
+
+  assert.match(stalls, /stallDialogRef/);
+  assert.match(stalls, /stallOpenerRef/);
+  assert.match(stalls, /querySelectorAll<HTMLElement>/);
+  assert.match(stalls, /event\.key === "Tab"/);
+  assert.match(stalls, /stallOpenerRef\.current\?\.focus\(\)/);
+  assert.match(stalls, /ref=\{stallDialogRef\}/);
+});
+
 test("Opportunities keeps trade depth compact and prioritises three demand metrics", () => {
   const deals = source("../src/pages/market/MarketDeals.tsx");
   const demand = source("../src/pages/market/BuyOrderFinder.tsx");
