@@ -17,9 +17,9 @@ test("global market map handoffs write the canonical region and coordinate param
 test("Deals shows available, wanted, and maximum tradable quantities", () => {
   const deals = source("../src/pages/market/MarketDeals.tsx");
 
-  assert.match(deals, /\["Available"/);
-  assert.match(deals, /\["Wanted"/);
-  assert.match(deals, /\["Max trade"/);
+  assert.match(deals, />Available<\/small>/);
+  assert.match(deals, />Wanted<\/small>/);
+  assert.match(deals, />Max trade<\/small>/);
   assert.match(deals, /formatNumber\(deal\.buyQuantity\)/);
   assert.match(deals, /formatNumber\(deal\.sellQuantity\)/);
 });
@@ -67,8 +67,7 @@ test("Deals sorts exact current-order values and omits unproven map data", () =>
   const deals = source("../src/pages/market/MarketDeals.tsx");
 
   assert.match(deals, /<DataTable[\s\S]*rows=\{rows\}[\s\S]*rowLimit=\{250\}/);
-  assert.match(deals, /\["Available",[\s\S]*\(deal\) => deal\.buyQuantity/);
-  assert.match(deals, /\["Wanted",[\s\S]*\(deal\) => deal\.sellQuantity/);
+  assert.match(deals, /\["Trade depth",[\s\S]*\(deal\) => deal\.maxQuantity/);
   assert.match(deals, /\["Distance",[\s\S]*deal\.distance == null/);
   assert.match(deals, /\["Gain",[\s\S]*profitPercent/);
   assert.doesNotMatch(deals, /Route distance and map coordinates will appear/);
@@ -99,6 +98,22 @@ test("Browse consolidates availability and preserves an explicit result return p
   assert.match(browse, /role="option"/);
   assert.match(browse, /className="market-item-identity"/);
   assert.match(browse, /className="market-item-meta"/);
+});
+
+test("Opportunities keeps trade depth compact and prioritises three demand metrics", () => {
+  const deals = source("../src/pages/market/MarketDeals.tsx");
+  const demand = source("../src/pages/market/BuyOrderFinder.tsx");
+
+  assert.match(deals, /\["Trade depth"/);
+  assert.match(deals, />Available<\/small>/);
+  assert.match(deals, />Wanted<\/small>/);
+  assert.match(deals, />Max trade<\/small>/);
+  assert.equal((demand.match(/<MiniStat/g) ?? []).length, 3);
+  assert.match(demand, /label="Current Buy Orders"/);
+  assert.match(demand, /label="Visible Demand"/);
+  assert.match(demand, /label="Visible Buy Value"/);
+  assert.doesNotMatch(demand, /label="Highest Visible Unit Price"/);
+  assert.doesNotMatch(demand, /label="Markets Visible"/);
 });
 
 test("Overview and Deals use generation-invalidated local Relay projections", () => {
