@@ -112,7 +112,7 @@ test("Overview and Deals use generation-invalidated local Relay projections", ()
   }
   assert.match(overview, /\/api\/local\/market\/overview/);
   assert.match(overview, /Current liquidity/);
-  assert.match(overview, /Recent open orders/);
+  assert.doesNotMatch(overview, /Recent open orders/);
   assert.match(deals, /\/api\/local\/market\/deals/);
   assert.match(deals, /search\.set\("regions", regions\.join\(","\)\)/);
   assert.match(deals, /marketFreshnessNotice/);
@@ -189,9 +189,28 @@ test("Deal Watch renders operational facts as labelled units", () => {
 });
 
 test("favorite order-book failures fail the active page cycle without clearing last-good rows", () => {
-  const overview = source("../src/pages/market/MarketOverview.tsx");
+  const favorites = source("../src/pages/market/MarketFavorites.tsx");
 
-  assert.match(overview, /if \(!response\.ok\) throw new Error\(`favorite order book HTTP \$\{response\.status\}`\)/);
-  assert.doesNotMatch(overview, /catch \{\s*return null;\s*\}/);
-  assert.match(overview, /trackRefresh\("global-market-favorites",[\s\S]*\.catch\(\(\) => \{\}\)/);
+  assert.match(favorites, /if \(!response\.ok\) throw new Error\(`favorite order book HTTP \$\{response\.status\}`\)/);
+  assert.doesNotMatch(favorites, /catch \{\s*return null;\s*\}/);
+  assert.match(favorites, /trackRefresh\("global-market-favorites",[\s\S]*\.catch\(\(\) => \{\}\)/);
+});
+
+test("Overview and Saved share live favorites without low-value overview feeds", () => {
+  const overview = source("../src/pages/market/MarketOverview.tsx");
+  const saved = source("../src/pages/market/MarketSaved.tsx");
+  const favorites = source("../src/pages/market/MarketFavorites.tsx");
+
+  assert.match(overview, /<MarketFavorites/);
+  assert.match(saved, /<MarketFavorites/);
+  assert.match(favorites, /global-market-favorites/);
+  assert.doesNotMatch(overview, /Recent open orders/);
+  assert.doesNotMatch(overview, /Active order hubs/);
+});
+
+test("signed-out Deal Watch presents one Discord sign-in action", () => {
+  const watch = source("../src/pages/market/DealWatchlist.tsx");
+  const prompts = watch.match(/Sign in with Discord to save watched items and receive deal alerts\./g) ?? [];
+
+  assert.equal(prompts.length, 1);
 });

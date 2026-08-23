@@ -31,7 +31,7 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
   const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
   const [regionChoice, setRegionChoice] = usePersistedState("market.dealWatch.region", defaultRegion);
   const [activeRegions, setActiveRegions] = React.useState<ActiveRegion[]>([]);
-  const [authState, setAuthState] = React.useState<AnyRecord>({ user: null, discordLoginEnabled: false });
+  const [authState, setAuthState] = React.useState<AnyRecord>({ loading: true, user: null, discordLoginEnabled: false });
   const [watchState, setWatchState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
   const [watchBusy, setWatchBusy] = React.useState("");
   const [thresholdDraft, setThresholdDraft] = React.useState("30");
@@ -97,9 +97,9 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
     const controller = new AbortController();
     trackRefresh("global-market-auth", fetch(`${LOCAL_API}/auth/me`, { headers: refreshHeaders, signal: controller.signal }))
       .then((response) => response.ok ? response.json() : { user: null, discordLoginEnabled: false })
-      .then((payload) => setAuthState(payload ?? { user: null, discordLoginEnabled: false }))
+      .then((payload) => setAuthState({ ...(payload ?? { user: null, discordLoginEnabled: false }), loading: false }))
       .catch(() => {
-        if (!controller.signal.aborted) setAuthState({ user: null, discordLoginEnabled: false });
+        if (!controller.signal.aborted) setAuthState({ loading: false, user: null, discordLoginEnabled: false });
       });
     return () => controller.abort();
   }, [refreshSequence]);
@@ -241,6 +241,9 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
     ? dealWatches.find((watch) => String(watch.regionId) === String(activeRegion) && String(watch.itemId) === String(selectedItem.id) && numericItemType(watch.itemType) === numericItemType(selectedItem.itemType))
     : null;
 
+  if (authState.loading) return <section className="deal-watchlist-page"><div className="market-loading-strip">Loading saved alerts…</div></section>;
+  if (!authState.user) return <section className="deal-watchlist-page"><div className="deal-watch-empty deal-watch-signed-out"><span><strong>Turn saved items into alerts</strong>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button primary" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div></section>;
+
   return (
     <section className="deal-watchlist-page">
       <section className="deal-watch-add-card">
@@ -279,24 +282,18 @@ export function DealWatchlist({ claimId, monitoredRegionId, refreshSequence, ref
             <div className="unit-input"><input type="number" min={1} max={95} step={1} value={thresholdDraft} onChange={(event) => setThresholdDraft(event.target.value)} /><em>% below live median</em></div>
           </label>
         </div>
-        {!authState.user ? (
-          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
-        ) : (
-          <div className="toolbar-row">
-            <button className="toolbar-button primary" type="button" onClick={addDealWatch} disabled={!selectedItem || Boolean(duplicateWatch) || watchBusy === "add" || dealWatches.length >= maxWatches}>
-              <Bell size={15} /> {watchBusy === "add" ? "Adding..." : "Watch item"}
-            </button>
-            <span className="legend">{duplicateWatch ? "This item is already watched in the selected region." : selectedItem ? `${selectedItem.name} in R${activeRegion}` : "Choose an item and region to add a watch."}</span>
-          </div>
-        )}
+        <div className="toolbar-row">
+          <button className="toolbar-button primary" type="button" onClick={addDealWatch} disabled={!selectedItem || Boolean(duplicateWatch) || watchBusy === "add" || dealWatches.length >= maxWatches}>
+            <Bell size={15} /> {watchBusy === "add" ? "Adding..." : "Watch item"}
+          </button>
+          <span className="legend">{duplicateWatch ? "This item is already watched in the selected region." : selectedItem ? `${selectedItem.name} in R${activeRegion}` : "Choose an item and region to add a watch."}</span>
+        </div>
       </section>
 
       <section className="deal-watchlist-section">
         <h3><Bell size={17} /> Deal Watchlist <small>{authState.user ? `${formatNumber(dealWatches.length)} watched items` : "Discord sign-in required"}</small></h3>
         {watchState.error ? <div className="error">Deal watchlist: {watchState.error}</div> : null}
-        {!authState.user ? (
-          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
-        ) : dealWatches.length ? (
+        {dealWatches.length ? (
           <div className="deal-watch-list">
             {dealWatches.map((watch) => (
               <article className="deal-watch-row" key={String(watch.id)}>

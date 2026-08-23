@@ -1,8 +1,8 @@
 import React from "react";
-import { Star } from "lucide-react";
-
+import type { AnyRecord } from "../../main-app-data";
 import type { MarketItemKey, MarketRefreshProps } from "./globalMarket";
 import { DealWatchlist } from "./DealWatchlist";
+import { MarketFavorites } from "./MarketFavorites";
 
 export function MarketSaved({
   claimId,
@@ -10,6 +10,7 @@ export function MarketSaved({
   favorites,
   canViewFavorites,
   canViewWatches,
+  onOpenItem,
   onDiscordLogin,
   ...refresh
 }: MarketRefreshProps & {
@@ -18,11 +19,12 @@ export function MarketSaved({
   favorites: MarketItemKey[];
   canViewFavorites: boolean;
   canViewWatches: boolean;
+  onOpenItem: (item: AnyRecord) => void;
   onDiscordLogin: (returnTo?: string) => void;
 }) {
   return (
     <section className="global-market-workspace market-saved" id="market-panel-saved" role="tabpanel" aria-labelledby="market-tab-saved">
-      {canViewFavorites ? <section className="market-overview-section market-saved-intro"><h3><Star size={16} /> Saved items <small>{favorites.length} browser-local</small></h3><p className="legend">Favorite items are stored in this browser. Their live prices and alert controls are collected here.</p></section> : null}
+      {canViewFavorites ? <MarketFavorites {...refresh} claimId={claimId} regionId={monitoredRegionId} favorites={favorites} onOpenItem={onOpenItem} /> : null}
       {canViewWatches ? <DealWatchlist {...refresh} claimId={claimId} monitoredRegionId={monitoredRegionId} onDiscordLogin={onDiscordLogin} /> : null}
     </section>
   );
