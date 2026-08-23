@@ -30,9 +30,9 @@ import { loadAdminConsoleSession } from "./api/adminSession";
 import { clearPreviousClaimGameData, gameDataScopeKey, useGameData } from "./api/gameDataLoader";
 import { useDealAlerts, useLocalHistory, useNotificationActivity } from "./api/localHistory";
 import {
-  gameDataQualitySummaries,
   groupDomainWarnings,
   pageGameDataWarnings,
+  publicGameDataQualitySummaries,
   staleDataWarning,
 } from "./api/pageGameDataWarnings";
 import { ApiErrorState, AppSkeleton, RefreshStatus, type ApiStatusDiagnostics } from "./components/main/AppChrome";
@@ -171,18 +171,16 @@ function GameDataQualityNotice({
   domainStatus: Partial<Record<DomainKey, DomainStatus>>;
   responseMeta: GameDataResponseMeta | null;
 }) {
-  const summaries = gameDataQualitySummaries(activePanel, domainStatus);
+  const summaries = publicGameDataQualitySummaries(
+    activePanel,
+    domainStatus,
+    responseMeta?.coherence ?? null,
+  );
   const warningDetails = groupDomainWarnings(domainStatus);
-  const coherenceIssue = responseMeta?.coherence === "mixed"
-    ? "Mixed local generations"
-    : responseMeta?.coherence === "unavailable" && summaries.length === 0
-      ? "Requested data unavailable"
-      : null;
-  const concise = [...(coherenceIssue ? [coherenceIssue] : []), ...summaries];
-  if (!concise.length) return null;
+  if (!summaries.length) return null;
   return (
     <section className="game-data-quality" aria-label="Game data quality">
-      <strong role="status">{concise.join("; ")}</strong>
+      <strong role="status">{summaries.join("; ")}</strong>
       <details>
         <summary>Warning and provenance details</summary>
         <p>
