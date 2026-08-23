@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -139,4 +139,16 @@ test("asset manifest rejects digest mismatches, duplicate identities, and path t
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("checked-in game assets cover every current huntable enemy identity", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../assets/game-icons-manifest.json", import.meta.url), "utf8"));
+  const expectedKeys = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "42"]
+    .map((enemyType) => `enemy:${enemyType}`)
+    .sort();
+  const enemyAssets = manifest.assets.filter((entry) => entry.catalogKeys?.some((key) => key.startsWith("enemy:")));
+  const actualKeys = enemyAssets.flatMap((entry) => entry.catalogKeys.filter((key) => key.startsWith("enemy:"))).sort();
+
+  assert.equal(expectedKeys.every((key) => actualKeys.includes(key)), true);
+  assert.equal(enemyAssets.every((entry) => existsSync(new URL(`../public/${entry.localPath}`, import.meta.url))), true);
 });

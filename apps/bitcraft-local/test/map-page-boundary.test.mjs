@@ -515,12 +515,12 @@ test("Native map uses event-driven snapshot loading without a snapshot polling t
   assert.doesNotMatch(snapshotEffect, /setInterval|setTimeout/);
 });
 
-test("configured-region resource and verified player tracking are enabled without enabling unverified enemy identities", () => {
+test("configured-region resource, player, and live-verified enemy tracking are enabled", () => {
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   assert.match(server, /const MAP_RESOURCE_COORDINATES_VERIFIED = true/);
   assert.match(server, /const MAP_SPATIAL_COLLECTION_VERIFIED = true/);
   assert.match(server, /const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = true/);
-  assert.match(server, /const MAP_ENEMY_IDENTITY_VERIFIED = false/);
+  assert.match(server, /const MAP_ENEMY_IDENTITY_VERIFIED = true/);
   assert.match(server, /RelayMapResourceRuntime/);
   assert.match(server, /resourceIds:\s*\[\]/);
   assert.match(server, /mapResourceLeaseInputs\(scope\)/);

@@ -717,11 +717,11 @@ const relayRegionClaimsRuntime = new RelayRegionClaimsRuntime({
 const terrainLiveRebuildEnabled = process.env.ENABLE_RELAY_TERRAIN_LIVE_REBUILD === "true";
 const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = true;
 const MAP_SPATIAL_INITIAL_WAIT_MS = 2_000;
-const MAP_ENEMY_IDENTITY_VERIFIED = false;
+const MAP_ENEMY_IDENTITY_VERIFIED = true;
 const MAP_RESOURCE_COORDINATES_VERIFIED = true;
 const MAP_WAYSTONE_COORDINATES_VERIFIED = false;
-// Resource/location joins are live-verified in configured region 19. Player,
-// enemy, and waystone identities remain independently gated below.
+// Resource/location, player/mobile, and enemy/catalog joins are live-verified
+// in configured region 19. Waystone identities remain independently gated.
 const MAP_SPATIAL_COLLECTION_VERIFIED = true;
 const relayTopologyDiscovery = createRelayTopologyDiscoveryCache({ discover: discoverRelayTopology });
 const relayMapSpatialScopeManager = new RelayMapSpatialScopeManager({

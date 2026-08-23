@@ -475,6 +475,25 @@ test("map snapshot keeps enemy positions unavailable until type mapping is verif
   assert.match(snapshot.warnings.join(" "), /enemy positions.*catalog mapping.*live-verified/i);
 });
 
+test("map snapshot exposes only selected enemy nodes after type mapping is verified", () => {
+  const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "enemies", enemyTypes: "8" }), { allowedRegionIds: ["19"] });
+  const snapshot = buildMapSnapshot({
+    scope,
+    enemyIdentityVerified: true,
+    spatial: {
+      data: { enemies: [
+        { entityId: "200", enemyType: "8", regionId: "19", locationX: 70_000, locationZ: 80_000, dimension: "1" },
+        { entityId: "201", enemyType: "11", regionId: "19", locationX: 90_000, locationZ: 100_000, dimension: "1" },
+      ] },
+      generation: 12,
+      provenance: { receivedAt: "2026-08-11T12:00:00.000Z" },
+    },
+  });
+
+  assert.equal(snapshot.layerAvailability.enemies.available, true);
+  assert.deepEqual(snapshot.layers.enemies.map(({ entityId, identity }) => [entityId, identity]), [["200", "enemy:8"]]);
+});
+
 test("map snapshot keeps resources unavailable until the live location join is verified", () => {
   const scope = parseMapScope(new URLSearchParams({ regions: "19", layers: "resources", resourceIds: "54" }), { allowedRegionIds: ["19"] });
   const snapshot = buildMapSnapshot({

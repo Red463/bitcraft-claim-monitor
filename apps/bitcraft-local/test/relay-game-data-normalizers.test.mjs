@@ -1297,6 +1297,17 @@ test("typed enemy descriptions retain map finder identity and huntable metadata"
   });
 });
 
+test("typed enemy descriptions collapse duplicated generated-icon prefixes", () => {
+  const normalized = normalizeCatalogDescription({
+    enemyType: 13,
+    name: "Ox",
+    iconAddress: "GeneratedIcons/Other/GeneratedIcons/Other/Animals/Bison",
+    huntable: true,
+  }, "enemy");
+
+  assert.equal(normalized.iconAssetName, "GeneratedIcons/Other/Animals/Bison");
+});
+
 test("global region rows join population, control, and player-facing names", () => {
   assert.deepEqual(normalizeGlobalRegions(
     [{

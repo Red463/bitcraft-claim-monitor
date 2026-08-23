@@ -4,7 +4,12 @@
   "source": {
     "relayDatabase": "bitcraft-live-global",
     "relaySchemaFingerprint": "5e44626f1c24e9f8392ebce8bdc9de135f76a58747b208d5e4aa455dd411036a",
-    "observedAt": "2026-08-15T21:41:51.289Z"
+    "observedAt": "2026-08-15T21:41:51.289Z",
+    "supplementalCatalog": {
+      "url": "https://bitjita.com/api/creatures",
+      "observedAt": "2026-08-23T13:22:26.269Z",
+      "scope": "huntable enemy icon identities"
+    }
   },
   "assets": [
     {
@@ -8858,8 +8863,20 @@
       "retrievedAt": "2026-08-15T21:41:48.827Z"
     },
     {
-      "catalogKey": "item:4220038",
+      "catalogKey": "enemy:13",
       "catalogKeys": [
+        "enemy:13",
+        "enemy:14"
+      ],
+      "originalUrl": "https://bitjita.com/GeneratedIcons/Other/Animals/Bison.webp",
+      "localPath": "game-icons/GeneratedIcons/Other/Animals/Bison.webp",
+      "sha256": "3dd566f2ef6a23dc72248d4108ad950744f7f423545b7a847431471549c6992f",
+      "retrievedAt": "2026-08-23T13:22:26.269Z"
+    },
+    {
+      "catalogKey": "enemy:12",
+      "catalogKeys": [
+        "enemy:12",
         "item:4220038"
       ],
       "originalUrl": "https://bitjita.com/GeneratedIcons/Other/Animals/BoarElder.webp",
@@ -8868,8 +8885,29 @@
       "retrievedAt": "2026-08-15T21:41:48.827Z"
     },
     {
-      "catalogKey": "item:1584350739",
+      "catalogKey": "enemy:10",
       "catalogKeys": [
+        "enemy:10"
+      ],
+      "originalUrl": "https://bitjita.com/GeneratedIcons/Other/Animals/BoarFemale.webp",
+      "localPath": "game-icons/GeneratedIcons/Other/Animals/BoarFemale.webp",
+      "sha256": "ee61774a829767a01bad4d062082895de3d314da0a8b069191024ff4ce86cf4f",
+      "retrievedAt": "2026-08-23T13:22:26.269Z"
+    },
+    {
+      "catalogKey": "enemy:11",
+      "catalogKeys": [
+        "enemy:11"
+      ],
+      "originalUrl": "https://bitjita.com/GeneratedIcons/Other/Animals/BoarMale.webp",
+      "localPath": "game-icons/GeneratedIcons/Other/Animals/BoarMale.webp",
+      "sha256": "3fc8f09723ef5b5e14b632561acba0f2cd0029330950b97ee563ffbddce1fecc",
+      "retrievedAt": "2026-08-23T13:22:26.269Z"
+    },
+    {
+      "catalogKey": "enemy:7",
+      "catalogKeys": [
+        "enemy:7",
         "item:1584350739",
         "item:994664235",
         "resource:1078671453"
@@ -8880,8 +8918,11 @@
       "retrievedAt": "2026-08-15T21:41:48.827Z"
     },
     {
-      "catalogKey": "item:127",
+      "catalogKey": "enemy:42",
       "catalogKeys": [
+        "enemy:42",
+        "enemy:8",
+        "enemy:9",
         "item:127",
         "item:4220036",
         "item:909660971"
@@ -8892,14 +8933,55 @@
       "retrievedAt": "2026-08-15T21:41:48.827Z"
     },
     {
-      "catalogKey": "item:4220037",
+      "catalogKey": "enemy:3",
       "catalogKeys": [
+        "enemy:3",
         "item:4220037"
       ],
       "originalUrl": "https://bitjita.com/GeneratedIcons/Other/Animals/DesertBird.webp",
       "localPath": "game-icons/GeneratedIcons/Other/Animals/DesertBird.webp",
       "sha256": "412233b55b453236055127ca993a12bed68f9ba17b89e93c63427dc49bbed3e8",
       "retrievedAt": "2026-08-15T21:41:48.827Z"
+    },
+    {
+      "catalogKey": "enemy:5",
+      "catalogKeys": [
+        "enemy:5"
+      ],
+      "originalUrl": "https://bitjita.com/GeneratedIcons/Other/Animals/Goat.webp",
+      "localPath": "game-icons/GeneratedIcons/Other/Animals/Goat.webp",
+      "sha256": "3f9229ac6d2eadd2cb65e4b4678e160316c3358475c807c8c4c655663c0b9b3e",
+      "retrievedAt": "2026-08-23T13:22:26.269Z"
+    },
+    {
+      "catalogKey": "enemy:2",
+      "catalogKeys": [
+        "enemy:2"
+      ],
+      "originalUrl": "https://bitjita.com/GeneratedIcons/Other/Animals/GrassBird.webp",
+      "localPath": "game-icons/GeneratedIcons/Other/Animals/GrassBird.webp",
+      "sha256": "412233b55b453236055127ca993a12bed68f9ba17b89e93c63427dc49bbed3e8",
+      "retrievedAt": "2026-08-23T13:22:26.269Z"
+    },
+    {
+      "catalogKey": "enemy:6",
+      "catalogKeys": [
+        "enemy:6"
+      ],
+      "originalUrl": "https://bitjita.com/GeneratedIcons/Other/Animals/MountainGoat.webp",
+      "localPath": "game-icons/GeneratedIcons/Other/Animals/MountainGoat.webp",
+      "sha256": "3f9229ac6d2eadd2cb65e4b4678e160316c3358475c807c8c4c655663c0b9b3e",
+      "retrievedAt": "2026-08-23T13:22:26.269Z"
+    },
+    {
+      "catalogKey": "enemy:4",
+      "catalogKeys": [
+        "enemy:4"
+      ],
+      "originalUrl": "https://bitjita.com/GeneratedIcons/Other/Animals/SwampBird.webp",
+      "localPath": "game-icons/GeneratedIcons/Other/Animals/SwampBird.webp",
+      "sha256": "412233b55b453236055127ca993a12bed68f9ba17b89e93c63427dc49bbed3e8",
+      "retrievedAt": "2026-08-23T13:22:26.269Z"
     },
     {
       "catalogKey": "resource:1110000",
@@ -9240,6 +9322,17 @@
       "localPath": "game-icons/GeneratedIcons/Other/Animals/T9 Ocean Fish.webp",
       "sha256": "6f70860fe538fab3acf2d4113ca7b2d28bc09869ec941c77dbac5755d1adfecf",
       "retrievedAt": "2026-08-15T21:41:48.827Z"
+    },
+    {
+      "catalogKey": "enemy:15",
+      "catalogKeys": [
+        "enemy:15",
+        "enemy:16"
+      ],
+      "originalUrl": "https://bitjita.com/GeneratedIcons/Other/Animals/Terrorbird.webp",
+      "localPath": "game-icons/GeneratedIcons/Other/Animals/Terrorbird.webp",
+      "sha256": "a2d5a253aa4cb311c6819d2f3f1f71f5e8014bcc834ca5db3ed6b5e1b0429a40",
+      "retrievedAt": "2026-08-23T13:22:26.269Z"
     },
     {
       "catalogKey": "resource:5110004",

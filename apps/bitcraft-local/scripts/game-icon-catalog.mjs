@@ -10,6 +10,7 @@ export function collectGameIconEntries(snapshot) {
   const rows = [
     ...(Array.isArray(snapshot?.entities) ? snapshot.entities : []),
     ...(Array.isArray(snapshot?.descriptions?.resource) ? snapshot.descriptions.resource : []),
+    ...(Array.isArray(snapshot?.descriptions?.enemy) ? snapshot.descriptions.enemy : []),
   ];
   const identitiesByIconUrl = new Map();
   for (const row of rows) {

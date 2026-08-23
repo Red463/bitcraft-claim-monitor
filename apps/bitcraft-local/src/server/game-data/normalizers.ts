@@ -1327,7 +1327,8 @@ export function normalizeCatalogDescription(value: unknown, kind: CatalogDescrip
       maxDamage: integer(row.maxDamage ?? row.max_damage ?? 0, "enemy maximum damage"),
       attackLevel: integer(row.attackLevel ?? row.attack_level ?? 0, "enemy attack level"),
       defenseLevel: integer(row.defenseLevel ?? row.defense_level ?? 0, "enemy defense level"),
-      iconAssetName: String(row.iconAddress ?? row.icon_address ?? ""),
+      iconAssetName: String(row.iconAddress ?? row.icon_address ?? "")
+        .replace(/^(?:GeneratedIcons\/Other\/)+/, "GeneratedIcons/Other/"),
       tier: integer(row.tier ?? 0, "enemy tier"),
       tag: String(row.tag ?? ""),
       rarity: enumLabel(row.rarity) ?? "Unknown",

@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.61.1-beta.1] - 2026-08-23
+
+### Fixed
+
+- Fixed huntable animals missing their images and live map nodes.
+
 ## [0.61.0-beta.1] - 2026-08-23
 
 ### Added
