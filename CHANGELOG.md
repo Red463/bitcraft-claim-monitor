@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.60.1-beta.1] - 2026-08-23
+
+### Fixed
+
+- Removed the internal mixed-generation provenance banner from ordinary pages while retaining meaningful stale, partial, and unavailable data warnings.
+
 ## [0.60.0-beta.1] - 2026-08-22
 
 ### Added

@@ -74,6 +74,18 @@ export function gameDataQualitySummaries(
   });
 }
 
+export function publicGameDataQualitySummaries(
+  activePanel: ActivePanel,
+  domainStatus: DomainStatusMap,
+  coherence: "coherent" | "mixed" | "unavailable" | null,
+): string[] {
+  const summaries = gameDataQualitySummaries(activePanel, domainStatus);
+  if (coherence === "unavailable" && summaries.length === 0) {
+    return ["Requested data unavailable"];
+  }
+  return summaries;
+}
+
 function stableWarningMessage(message: string): string {
   return message
     .replace(/\b(?=[A-Za-z0-9_-]*[A-Za-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]+\b/g, "#")

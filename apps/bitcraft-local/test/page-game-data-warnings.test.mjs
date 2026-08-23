@@ -8,7 +8,29 @@ const {
   gameDataQualitySummaries,
   groupDomainWarnings,
   pageGameDataWarnings,
+  publicGameDataQualitySummaries,
 } = warningModule;
+
+test("mixed local generations alone do not create a public warning", () => {
+  const freshStatus = {
+    generation: 8,
+    freshness: "fresh",
+    confidence: "authoritative",
+    ageMs: 1_000,
+    warnings: [],
+    provenance: null,
+    dependencies: {},
+  };
+
+  assert.deepEqual(publicGameDataQualitySummaries("map", {
+    claim: freshStatus,
+    members: freshStatus,
+    players: { ...freshStatus, generation: 9 },
+  }, "mixed"), []);
+  assert.deepEqual(publicGameDataQualitySummaries("map", {}, "unavailable"), [
+    "Requested data unavailable",
+  ]);
+});
 
 test("Dashboard ignores missing owner enrichment but preserves operational warnings", () => {
   const warnings = [
