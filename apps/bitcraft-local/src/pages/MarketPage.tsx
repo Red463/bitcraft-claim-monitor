@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, Bell, CircleDollarSign, Globe2, Search, ShoppingBag, Store, TrendingUp } from "lucide-react";
+import { Activity, Bookmark, Globe2, Search, Store, TrendingUp } from "lucide-react";
 
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
@@ -12,23 +12,21 @@ import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import "../styles/market.css";
 import type { ActivePanel } from "../types/app";
 import type { MapFocus } from "./map/mapUtils";
-import { BuyOrderFinder } from "./market/BuyOrderFinder";
-import { DealWatchlist } from "./market/DealWatchlist";
 import { MarketBrowse } from "./market/MarketBrowse";
-import { MarketDeals } from "./market/MarketDeals";
+import { MarketOpportunities } from "./market/MarketOpportunities";
 import { MarketOverview } from "./market/MarketOverview";
+import { MarketSaved } from "./market/MarketSaved";
 import { MarketStalls } from "./market/MarketStalls";
 import { marketFavoriteKeys, type MarketItemKey } from "./market/globalMarket";
 
 const FAVORITES_KEY = "bitcraft.market.favorites.v1";
 
 const MARKET_VIEWS = [
-  { id: "overview" as const, label: "Overview", icon: Activity },
-  { id: "browse" as const, label: "Search", icon: Search },
-  { id: "deals" as const, label: "Deals", icon: TrendingUp },
-  { id: "buy-orders" as const, label: "Buy Orders", icon: ShoppingBag },
-  { id: "deal-watch" as const, label: "Deal Watch", icon: Bell },
-  { id: "stalls" as const, label: "Stalls", icon: Store },
+  { id: "overview" as const, label: "Overview", icon: Activity, accessTabs: ["overview"] },
+  { id: "browse" as const, label: "Browse", icon: Search, accessTabs: ["browse"] },
+  { id: "opportunities" as const, label: "Opportunities", icon: TrendingUp, accessTabs: ["deals", "buy-orders"] },
+  { id: "saved" as const, label: "Saved", icon: Bookmark, accessTabs: ["browse", "deal-watch"] },
+  { id: "stalls" as const, label: "Stalls", icon: Store, accessTabs: ["stalls"] },
 ];
 
 export function Market({
@@ -54,7 +52,7 @@ export function Market({
 }) {
   const location = React.useMemo(() => marketViewLocation(new URLSearchParams(locationSearch).get("tab")), [locationSearch]);
   const { request, trackPromise } = useManualRefresh();
-  const [view, setView] = usePersistedState<GlobalMarketViewId>("globalMarket.view", "browse");
+  const [view, setView] = usePersistedState<GlobalMarketViewId>("globalMarket.view", "overview");
   const [regionChoice, setRegionChoice] = usePersistedState("globalMarket.region", "All");
   const [favorites, setFavorites] = React.useState<MarketItemKey[]>(() => {
     try {
@@ -66,7 +64,8 @@ export function Market({
   const activeRegions = useActiveRegions(undefined, claimId, activeRegionScopeKey);
   const activeRegionIds = React.useMemo(() => new Set(activeRegions.map((region) => region.regionId)), [activeRegions]);
   const regionId = regionChoice !== "All" && activeRegionIds.has(regionChoice) ? regionChoice : "";
-  const views = React.useMemo(() => MARKET_VIEWS.filter((entry) => effectiveTargetAllowed(access, targetIdForTab("market", entry.id))), [access]);
+  const tabAllowed = React.useCallback((tab: string) => effectiveTargetAllowed(access, targetIdForTab("market", tab)), [access]);
+  const views = React.useMemo(() => MARKET_VIEWS.filter((entry) => entry.accessTabs.some(tabAllowed)), [tabAllowed]);
   const allowedView = resolveAllowedView(location.page === "market" ? location.view as GlobalMarketViewId : view, views.map((entry) => entry.id));
   const currentView = allowedView ?? view;
   const marketRefresh = React.useMemo(() => ({
@@ -105,6 +104,18 @@ export function Market({
     onQueryStateChange();
   }
 
+  function onTabsKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (!buttons.length || current < 0) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+    const nextView = views[next]?.id;
+    if (nextView) selectView(nextView);
+    buttons[next]?.focus();
+  }
+
   function toggleFavorite(key: MarketItemKey) {
     setFavorites((current) => current.some((entry) => entry.itemType === key.itemType && entry.itemId === key.itemId)
       ? current.filter((entry) => entry.itemType !== key.itemType || entry.itemId !== key.itemId)
@@ -131,24 +142,21 @@ export function Market({
     <div className="panel market-page global-market-page">
       <header className="members-topbar market-topbar">
         <div><h2>Market</h2><p>Global listings, demand, price intelligence and barter offers across every active region.</p></div>
-        <div className="dashboard-top-meta"><div className="dashboard-settlement-pill"><Globe2 size={15} /><span>{regionId ? `Region ${regionId}` : "All active regions"}</span></div></div>
       </header>
       <section className="market-command-panel global-market-command" data-tour="market-tools">
-        <div className="global-market-tabs" role="tablist" aria-label="Global market workspaces">
+        <div className="global-market-tabs" role="tablist" aria-label="Global market workspaces" onKeyDown={onTabsKeyDown}>
           {views.map((entry) => {
             const Icon = entry.icon;
-            return <button role="tab" aria-selected={currentView === entry.id} className={currentView === entry.id ? "active" : ""} key={entry.id} onClick={() => selectView(entry.id)}><Icon size={15} />{entry.label}</button>;
+            return <button id={`market-tab-${entry.id}`} role="tab" aria-selected={currentView === entry.id} aria-controls={`market-panel-${entry.id}`} tabIndex={currentView === entry.id ? 0 : -1} className={currentView === entry.id ? "active" : ""} key={entry.id} onClick={() => selectView(entry.id)}><Icon size={15} />{entry.label}</button>;
           })}
         </div>
         <label className="field global-market-region"><span>Market region</span><select value={regionId || "All"} onChange={(event) => setRegionChoice(event.target.value)}><option value="All">All active regions</option>{activeRegions.map((region) => <option value={region.regionId} key={region.regionId}>{activeRegionLabel(region, fallbackRegionId)}</option>)}</select></label>
       </section>
-      {currentView === "overview" ? <MarketOverview {...marketRefresh} claimId={claimId} regionId={regionId} favorites={favorites} onOpenItem={openItem} /> : null}
-      {currentView === "browse" ? <MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
-      {currentView === "deals" ? <MarketDeals {...marketRefresh} claimId={claimId} sharedRegionId={regionId} activeRegions={activeRegions} /> : null}
-      {currentView === "buy-orders" ? <BuyOrderFinder {...marketRefresh} claimId={claimId} regionId={regionId} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
-      {currentView === "deal-watch" ? <DealWatchlist {...marketRefresh} claimId={claimId} monitoredRegionId={regionId || fallbackRegionId} onDiscordLogin={onDiscordLogin} /> : null}
-      {currentView === "stalls" ? <MarketStalls {...marketRefresh} claimId={claimId} regionId={regionId} onShowMap={onShowMap} /> : null}
-      <footer className="global-market-source"><CircleDollarSign size={14} /><span>Search, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data. Confirmed-sale charts contain only authoritative closures observed locally and mature progressively.</span></footer>
+      {currentView === "overview" ? <div id="market-panel-overview" role="tabpanel" aria-labelledby="market-tab-overview"><MarketOverview {...marketRefresh} claimId={claimId} regionId={regionId} favorites={favorites} onOpenItem={openItem} /></div> : null}
+      {currentView === "browse" ? <div id="market-panel-browse" role="tabpanel" aria-labelledby="market-tab-browse"><MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /></div> : null}
+      {currentView === "opportunities" ? <MarketOpportunities {...marketRefresh} claimId={claimId} regionId={regionId} activeRegions={activeRegions} canViewRoutes={tabAllowed("deals")} canViewDemand={tabAllowed("buy-orders")} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}
+      {currentView === "saved" ? <MarketSaved {...marketRefresh} claimId={claimId} monitoredRegionId={regionId || fallbackRegionId} favorites={favorites} canViewFavorites={tabAllowed("browse")} canViewWatches={tabAllowed("deal-watch")} onDiscordLogin={onDiscordLogin} /> : null}
+      {currentView === "stalls" ? <div id="market-panel-stalls" role="tabpanel" aria-labelledby="market-tab-stalls"><MarketStalls {...marketRefresh} claimId={claimId} regionId={regionId} onShowMap={onShowMap} /></div> : null}
     </div>
   );
 }

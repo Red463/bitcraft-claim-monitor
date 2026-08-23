@@ -15,11 +15,11 @@ import {
 } from "../src/access/accessControl.mjs";
 
 test("global Market canonicalizes current and legacy tool tabs", () => {
-  assert.equal(panelHref("market"), "/?page=market&tab=browse");
+  assert.equal(panelHref("market"), "/?page=market&tab=overview");
   assert.deepEqual(marketViewLocation(null), {
     page: "market",
-    view: "browse",
-    canonicalTab: "browse",
+    view: "overview",
+    canonicalTab: "overview",
     shouldReplace: true,
   });
   assert.deepEqual(marketViewLocation("pricing"), {
@@ -30,14 +30,20 @@ test("global Market canonicalizes current and legacy tool tabs", () => {
   });
   assert.deepEqual(marketViewLocation("buyOrders"), {
     page: "market",
-    view: "buy-orders",
-    canonicalTab: "buy-orders",
+    view: "opportunities",
+    canonicalTab: "opportunities",
+    shouldReplace: true,
+  });
+  assert.deepEqual(marketViewLocation("deals"), {
+    page: "market",
+    view: "opportunities",
+    canonicalTab: "opportunities",
     shouldReplace: true,
   });
   assert.deepEqual(marketViewLocation("deal-watchlist"), {
     page: "market",
-    view: "deal-watch",
-    canonicalTab: "deal-watch",
+    view: "saved",
+    canonicalTab: "saved",
     shouldReplace: true,
   });
 });

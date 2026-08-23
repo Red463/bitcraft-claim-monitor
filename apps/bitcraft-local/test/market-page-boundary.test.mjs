@@ -27,22 +27,23 @@ test("Market page replaces the legacy MainPages bundle", () => {
   assert.match(marketPage, /export function Market\b/);
   assert.match(marketPage, /from "\.\/market\/MarketBrowse"/);
   assert.match(marketPage, /from "\.\/market\/MarketOverview"/);
-  assert.match(marketPage, /from "\.\/market\/MarketDeals"/);
+  assert.match(marketPage, /from "\.\/market\/MarketOpportunities"/);
+  assert.match(marketPage, /from "\.\/market\/MarketSaved"/);
   assert.match(marketPage, /from "\.\/market\/MarketStalls"/);
-  assert.match(marketPage, /from "\.\/market\/DealWatchlist"/);
   assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/MarketPage"\)/);
   assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/SettlementMarketPage"\)/);
   assert.doesNotMatch(appShell, /from "\.\/pages\/MainPages"/);
 });
-test("Market page exposes a dedicated deal watchlist tool tab", () => {
+test("Market page groups alerts and opportunities into canonical workspaces", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
   const commandPalette = readFileSync(new URL("../src/components/main/CommandPalette.tsx", import.meta.url), "utf8");
 
-  assert.match(marketPage, /id: "deal-watch"/);
-  assert.match(marketPage, /label: "Deal Watch"/);
-  assert.match(marketPage, /<DealWatchlist[^>]*monitoredRegionId=\{regionId \|\| fallbackRegionId\}[^>]*onDiscordLogin=\{onDiscordLogin\}/);
-  assert.match(commandPalette, /deal-watch/);
-  assert.match(commandPalette, /Deal Watch/);
+  assert.match(marketPage, /id: "saved"/);
+  assert.match(marketPage, /label: "Saved"/);
+  assert.match(marketPage, /id: "opportunities"/);
+  assert.match(marketPage, /<MarketSaved[^>]*monitoredRegionId=\{regionId \|\| fallbackRegionId\}[^>]*onDiscordLogin=\{onDiscordLogin\}/);
+  assert.match(commandPalette, /onNavigate\("market", "saved"\)/);
+  assert.match(commandPalette, /onNavigate\("market", "opportunities"\)/);
 });
 test("Market mini-stat values leave room for descenders", () => {
   const marketCss = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
