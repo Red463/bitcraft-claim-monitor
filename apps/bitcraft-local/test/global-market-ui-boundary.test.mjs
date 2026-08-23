@@ -89,10 +89,14 @@ test("Browse sorts the complete filtered order book before pagination", () => {
   assert.doesNotMatch(orderWorkspace, /<span>Sort<\/span>/);
 });
 
-test("Browse groups availability controls and separates item identity metadata", () => {
+test("Browse consolidates availability and preserves an explicit result return path", () => {
   const browse = source("../src/pages/market/MarketBrowse.tsx");
 
-  assert.match(browse, /className="market-toggle-group"/);
+  assert.match(browse, /className="field market-availability-field"/);
+  assert.match(browse, /Back to results<\/button>/);
+  assert.match(browse, /Clear filters<\/button>/);
+  assert.match(browse, /aria-activedescendant=/);
+  assert.match(browse, /role="option"/);
   assert.match(browse, /className="market-item-identity"/);
   assert.match(browse, /className="market-item-meta"/);
 });
@@ -155,20 +159,19 @@ test("Browse labels progressive locally observed history without blocking live o
   assert.doesNotMatch(browse, /not yet authoritative from Relay/);
 });
 
-test("Market source copy identifies every migrated live Relay workspace", () => {
+test("Market removes the permanent technical source footer", () => {
   const marketPage = source("../src/pages/MarketPage.tsx");
 
-  assert.match(marketPage, /Search, order books, Overview, Deals, Barter Stalls, and Deal Watch use live Relay data/);
-  assert.doesNotMatch(marketPage, /Deal Watch remains on its legacy source/);
-  assert.doesNotMatch(marketPage, /Live market data is provided by BitJita/);
+  assert.doesNotMatch(marketPage, /global-market-source/);
+  assert.doesNotMatch(marketPage, /Confirmed-sale charts contain only authoritative closures/);
 });
 
-test("global Market opens on a search-first alphabetical catalog", () => {
+test("global Market opens on Overview while Browse keeps its scannable catalog", () => {
   const marketPage = source("../src/pages/MarketPage.tsx");
   const browse = source("../src/pages/market/MarketBrowse.tsx");
 
-  assert.match(marketPage, /id: "browse" as const, label: "Search"/);
-  assert.match(marketPage, /usePersistedState<GlobalMarketViewId>\("globalMarket\.view", "browse"\)/);
+  assert.match(marketPage, /id: "overview" as const, label: "Overview"/);
+  assert.match(marketPage, /usePersistedState<GlobalMarketViewId>\("globalMarket\.view", "overview"\)/);
   assert.match(browse, /sort: catalogSort/);
   assert.match(browse, /catalogItems\.map/);
   assert.match(browse, /lowestSellPrice/);

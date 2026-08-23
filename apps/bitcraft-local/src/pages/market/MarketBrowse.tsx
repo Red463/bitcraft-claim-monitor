@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowDownUp, BarChart3, MapPin, Search, ShoppingBag, Star } from "lucide-react";
+import { ArrowDownUp, ArrowLeft, BarChart3, MapPin, Search, ShoppingBag, Star, X } from "lucide-react";
 
 import { DataTable } from "../../components/main/DataTable";
 import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
@@ -19,6 +19,7 @@ import {
   marketItemType,
   normalizeMarketOrders,
 } from "./globalMarket";
+import { availabilityFlags, nextOptionIndex, type MarketAvailability } from "./marketUi";
 
 type Props = MarketRefreshProps & {
   claimId: string;
@@ -58,6 +59,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const params = React.useMemo(() => new URLSearchParams(locationSearch), [locationSearch]);
   const [query, setQuery] = React.useState(mode === "browse" ? params.get("q") ?? "" : params.get("buyQ") ?? "");
   const [suggestions, setSuggestions] = React.useState<AnyRecord[]>([]);
+  const [activeSuggestion, setActiveSuggestion] = React.useState(-1);
   const [catalogItems, setCatalogItems] = React.useState<AnyRecord[]>([]);
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(() => {
     const id = params.get(mode === "browse" ? "item" : "buyItem");
@@ -68,9 +70,12 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const [catalogState, setCatalogState] = React.useState<{ loading: boolean; error: string; categories: string[] }>({ loading: false, error: "", categories: [] });
   const [detailState, setDetailState] = React.useState<{ loading: boolean; error: string; historyError: string; detail: AnyRecord | null; history: AnyRecord | null }>({ loading: false, error: "", historyError: "", detail: null, history: null });
   const [category, setCategory] = React.useState(params.get("category") ?? "");
-  const [availableOnly, setAvailableOnly] = React.useState(params.get("available") === "true");
-  const [hasSell, setHasSell] = React.useState(params.get("sell") === "true");
-  const [hasBuy, setHasBuy] = React.useState(mode === "buy" || params.get("buy") === "true");
+  const [availability, setAvailability] = React.useState<MarketAvailability>(() => {
+    if (mode === "buy") return "buy";
+    const sell = params.get("sell") === "true";
+    const buy = params.get("buy") === "true";
+    return sell && buy ? "both" : sell ? "sell" : buy ? "buy" : "any";
+  });
   const [catalogSort, setCatalogSort] = React.useState<"relevance" | "name" | "orders">(() => {
     const saved = params.get("sort");
     return saved === "relevance" || saved === "orders" ? saved : "name";
@@ -84,6 +89,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const [range, setRange] = React.useState<"24h" | "7d" | "30d" | "all">("30d");
   const [page, setPage] = React.useState(1);
   const generationSequence = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
+  const availabilityFilter = availabilityFlags(availability);
 
   React.useEffect(() => {
     if (mode === "buy" && query.trim().length < 2) {
@@ -95,9 +101,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       const catalogUrl = marketBrowseSearchUrl({
         query,
         regionId: regionId || "all",
-        availableOnly,
-        hasSell,
-        hasBuy,
+        ...availabilityFilter,
         category,
         sort: catalogSort,
       });
@@ -111,6 +115,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
         const categories = Array.isArray(payload.categories) ? payload.categories.map(String) : [];
         setCatalogItems(items);
         setSuggestions(query.trim().length >= 2 && selectedItem?.name !== query.trim() ? items.slice(0, 12) : []);
+        setActiveSuggestion(-1);
         setCatalogState({ loading: false, error: "", categories });
       })
       .catch((error) => {
@@ -120,16 +125,16 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       refresh.cancel();
       controller.abort();
     };
-  }, [availableOnly, catalogSort, category, generationSequence, hasBuy, hasSell, query, refreshSequence, regionId, selectedItem?.name]);
+  }, [availability, catalogSort, category, generationSequence, query, refreshSequence, regionId, selectedItem?.name]);
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
       updateQueryState(mode === "browse" ? {
         q: query || null,
         category: category || null,
-        available: availableOnly ? "true" : null,
-        sell: hasSell ? "true" : null,
-        buy: hasBuy ? "true" : null,
+        available: availabilityFilter.availableOnly ? "true" : null,
+        sell: availabilityFilter.hasSell ? "true" : null,
+        buy: availabilityFilter.hasBuy ? "true" : null,
         sort: catalogSort === "name" ? null : catalogSort,
       } : {
         buyQ: query || null,
@@ -137,7 +142,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       onQueryStateChange();
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [availableOnly, catalogSort, category, hasBuy, hasSell, mode, onQueryStateChange, query]);
+  }, [availability, catalogSort, category, mode, onQueryStateChange, query]);
 
   React.useEffect(() => {
     if (!selectedItem) {
@@ -209,6 +214,39 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
     onQueryStateChange();
   }
 
+  function showResults() {
+    setSelectedItem(null);
+    setDetailState((current) => ({ ...current, detail: null, history: null, error: "", historyError: "" }));
+    setSuggestions([]);
+    updateQueryState(mode === "browse" ? { item: null, itemName: null, itemType: null } : { buyItem: null, buyItemName: null, buyItemType: null }, "replace");
+    onQueryStateChange();
+  }
+
+  function clearCatalogFilters() {
+    setQuery("");
+    setCategory("");
+    setAvailability(mode === "buy" ? "buy" : "any");
+    setCatalogSort("name");
+    showResults();
+  }
+
+  function onSuggestionKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key) && suggestions.length) {
+      event.preventDefault();
+      setActiveSuggestion((current) => nextOptionIndex(current, suggestions.length, event.key));
+      return;
+    }
+    if (event.key === "Enter" && activeSuggestion >= 0 && suggestions[activeSuggestion]) {
+      event.preventDefault();
+      chooseItem(suggestions[activeSuggestion]);
+      return;
+    }
+    if (event.key === "Escape") {
+      setSuggestions([]);
+      setActiveSuggestion(-1);
+    }
+  }
+
   const selectedKey = selectedItem ? itemKey(selectedItem) : null;
   const itemMetadata = { ...selectedItem, ...(detailState.detail?.item ?? {}) };
   const freshnessNotice = marketFreshnessNotice(detailState.detail);
@@ -254,6 +292,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const priceData: AnyRecord[] = Array.isArray(detailState.history?.priceData) ? detailState.history.priceData : [];
   const chartMax = Math.max(1, ...priceData.map((row) => toNumber(row.vwap ?? row.avgPrice ?? row.price)));
   const recentTrades: AnyRecord[] = Array.isArray(detailState.history?.recentTrades) ? detailState.history.recentTrades : [];
+  const hasCatalogFilters = Boolean(query || category || availability !== (mode === "buy" ? "buy" : "any") || catalogSort !== "name");
 
   return (
     <section className="global-market-workspace market-browse">
@@ -262,9 +301,9 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
           <span>{mode === "buy" ? "Find an item with buy orders" : "Search global catalog"}</span>
           <div className="suggestion-anchor">
             <Search size={16} />
-            <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); }} placeholder="Item or cargo name" role="combobox" aria-expanded={suggestions.length > 0} aria-controls={`${mode}-market-suggestions`} />
-            {suggestions.length ? <div className="suggestion-menu" id={`${mode}-market-suggestions`} role="listbox">{suggestions.map((item) => (
-              <button key={`${item.itemType}-${item.id}`} type="button" onClick={() => chooseItem(item)}>
+            <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); setActiveSuggestion(-1); }} onKeyDown={onSuggestionKeyDown} placeholder="Item or cargo name" role="combobox" aria-autocomplete="list" aria-expanded={suggestions.length > 0} aria-controls={`${mode}-market-suggestions`} aria-activedescendant={activeSuggestion >= 0 ? `${mode}-market-option-${activeSuggestion}` : undefined} />
+            {suggestions.length ? <div className="suggestion-menu" id={`${mode}-market-suggestions`} role="listbox">{suggestions.map((item, index) => (
+              <button id={`${mode}-market-option-${index}`} role="option" aria-selected={activeSuggestion === index} key={`${item.itemType}-${item.id}`} type="button" onMouseEnter={() => setActiveSuggestion(index)} onClick={() => chooseItem(item)}>
                 <ItemIcon item={item} /><strong>{item.name}</strong>{item.tier ? <TierBadge tier={item.tier} /> : null}<small>{item.rarityStr ? <RarityBadge rarity={item.rarityStr} /> : null}{item.tag ?? ""}</small>
               </button>
             ))}</div> : null}
@@ -273,11 +312,8 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
         {mode === "browse" ? <>
           <label className="field"><span>Category</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">All categories</option>{catalogState.categories.map((entry) => <option key={entry}>{entry}</option>)}</select></label>
           <label className="field"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)}><option value="relevance">Relevance</option><option value="name">Item name</option><option value="orders">Order count</option></select></label>
-          <div className="market-toggle-group">
-            <label className="toggle-line"><input type="checkbox" checked={availableOnly} onChange={(event) => setAvailableOnly(event.target.checked)} /><span>Available only</span></label>
-            <label className="toggle-line"><input type="checkbox" checked={hasSell} onChange={(event) => setHasSell(event.target.checked)} /><span>Has sell</span></label>
-            <label className="toggle-line"><input type="checkbox" checked={hasBuy} onChange={(event) => setHasBuy(event.target.checked)} /><span>Has buy</span></label>
-          </div>
+          <label className="field market-availability-field"><span>Availability</span><select value={availability} onChange={(event) => setAvailability(event.target.value as MarketAvailability)}><option value="any">Any item</option><option value="sell">For sale</option><option value="buy">Wanted</option><option value="both">Buy and sell</option></select></label>
+          <div className="market-filter-actions"><button className="toolbar-button" type="button" disabled={!hasCatalogFilters} onClick={clearCatalogFilters}><X size={14} /> Clear filters</button></div>
         </> : null}
       </div>
       {catalogState.error ? <div className="error">Market search unavailable: {catalogState.error}</div> : null}
@@ -297,7 +333,9 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       ) : <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>Choose an item to inspect live demand</strong><span>Buy orders are loaded live after item selection; no monitored-settlement cache is used.</span></div> : (
         <div className="market-item-detail">
           <header>
-            <div className="market-item-identity">
+            <div className="market-item-heading">
+              <button className="toolbar-button market-back-results" type="button" onClick={showResults}><ArrowLeft size={15} /> Back to results</button>
+              <div className="market-item-identity">
               <ItemIcon item={itemMetadata} />
               <div>
                 <h2>{itemMetadata.name}</h2>
@@ -308,6 +346,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
                   <span>{itemMetadata.rarityStr ?? itemMetadata.rarity ?? "Rarity unavailable"}</span>
                   <span>{itemMetadata.category ?? itemMetadata.tag ?? "Category unavailable"}</span>
                 </div>
+              </div>
               </div>
             </div>
             <button className={`toolbar-button ${favorite ? "active" : ""}`} type="button" onClick={() => selectedKey && onToggleFavorite(selectedKey)} aria-pressed={favorite}><Star size={15} fill={favorite ? "currentColor" : "none"} /> {favorite ? "Favorited" : "Favorite"}</button>
