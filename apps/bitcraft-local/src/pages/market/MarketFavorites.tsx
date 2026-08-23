@@ -102,7 +102,7 @@ export function MarketFavorites({
           ? (exactMarketInteger(row.bestSell) - exactMarketInteger(row.bestBuy)).toString()
           : null;
         return <button key={`${row.itemType}:${row.itemId}`} onClick={() => onOpenItem(itemShape(row))}><ItemLabel item={itemShape(row)} /><span>Sell <b>{row.bestSell == null ? "—" : formatGoldAmount(row.bestSell)}</b></span><span>Buy <b>{row.bestBuy == null ? "—" : formatGoldAmount(row.bestBuy)}</b></span><span>Spread <b>{spread == null ? "—" : formatGoldAmount(spread)}</b></span><small>{formatNumber(row.currentQuantity)} units in current orders</small></button>;
-      })}</div> : !loading && !error ? <div className="empty-state compact"><Star size={22} /><span>Save items in Browse to track their current order books here.</span></div> : null}
+      })}</div> : !loading && !error ? <div className="empty-state compact"><Star size={22} /><span>Save items in Browse to track live prices here, then configure deal alerts from Saved.</span></div> : null}
     </section>
   );
 }

@@ -1,3 +1,5 @@
+import type React from "react";
+
 export type MarketAvailability = "any" | "sell" | "buy" | "both";
 
 export function availabilityFlags(value: MarketAvailability) {
@@ -26,6 +28,18 @@ export function nextTabIndex(current: number, count: number, key: string): numbe
   return current;
 }
 
+export function handleTablistKeyDown(event: React.KeyboardEvent<HTMLDivElement>, onActivate: (index: number, button: HTMLButtonElement) => void): void {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+  const next = nextTabIndex(current, buttons.length, event.key);
+  const button = buttons[next];
+  if (!button) return;
+  event.preventDefault();
+  button.focus();
+  onActivate(next, button);
+}
+
 export type MarketChartPoint = {
   x: number;
   y: number;
@@ -52,9 +66,9 @@ export function marketChartPoints(rows: Array<Record<string, unknown>>, width: n
     const relative = exactMarketInteger(row.price) - low;
     const scaledY = spread === 0n ? height / 2 : height - Number((relative * BigInt(Math.round(height * 1_000))) / spread) / 1_000;
     return {
-    ...row,
-    x: values.length === 1 ? width / 2 : (index / (values.length - 1)) * width,
-    y: scaledY,
+      ...row,
+      x: values.length === 1 ? width / 2 : (index / (values.length - 1)) * width,
+      y: scaledY,
     };
   });
 }

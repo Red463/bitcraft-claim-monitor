@@ -20,7 +20,7 @@ import { MarketOverview } from "./market/MarketOverview";
 import { MarketSaved } from "./market/MarketSaved";
 import { MarketStalls } from "./market/MarketStalls";
 import { marketFavoriteKeys, type MarketItemKey } from "./market/globalMarket";
-import { nextTabIndex } from "./market/marketUi";
+import { handleTablistKeyDown } from "./market/marketUi";
 
 const FAVORITES_KEY = "bitcraft.market.favorites.v1";
 
@@ -67,7 +67,7 @@ export function Market({
   const [pendingWatchItem, setPendingWatchItem] = React.useState<AnyRecord | null>(null);
   const activeRegions = useActiveRegions(undefined, claimId, activeRegionScopeKey);
   const marketGeneration = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
-  const [freshnessAt, setFreshnessAt] = React.useState(() => new Date().toISOString());
+  const [marketStatus, setMarketStatus] = React.useState<{ loading: boolean; error: string; generatedAt: string; freshness: string; warnings: string[] }>({ loading: true, error: "", generatedAt: "", freshness: "unavailable", warnings: [] });
   const [, setFreshnessTick] = React.useState(0);
   const activeRegionIds = React.useMemo(() => new Set(activeRegions.map((region) => region.regionId)), [activeRegions]);
   const regionId = regionChoice !== "All" && activeRegionIds.has(regionChoice) ? regionChoice : "";
@@ -81,7 +81,24 @@ export function Market({
     trackRefresh: trackPromise,
   }), [request?.id, request?.sequence, trackPromise]);
 
-  React.useEffect(() => setFreshnessAt(new Date().toISOString()), [marketGeneration, request?.sequence]);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const search = new URLSearchParams({ claimId, regionId: regionId || "all" });
+    setMarketStatus((current) => ({ ...current, loading: true, error: "" }));
+    trackPromise("global-market-toolbar", fetch(`/api/local/market/overview?${search}`, { headers: marketRefresh.refreshHeaders, signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market status HTTP ${response.status}`))))
+      .then((payload) => setMarketStatus({
+        loading: false,
+        error: "",
+        generatedAt: String(payload.generatedAt ?? ""),
+        freshness: String(payload.freshness ?? "unavailable"),
+        warnings: Array.isArray(payload.warnings) ? payload.warnings.map(String).filter(Boolean) : [],
+      }))
+      .catch((error) => {
+        if (!controller.signal.aborted) setMarketStatus((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : String(error) }));
+      });
+    return () => controller.abort();
+  }, [claimId, marketGeneration, marketRefresh.refreshHeaders, regionId, request?.sequence, trackPromise]);
   React.useEffect(() => {
     const timer = window.setInterval(() => setFreshnessTick((value) => value + 1), 30_000);
     return () => window.clearInterval(timer);
@@ -118,15 +135,10 @@ export function Market({
   }
 
   function onTabsKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
-    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    if (!buttons.length || current < 0) return;
-    event.preventDefault();
-    const next = nextTabIndex(current, buttons.length, event.key);
-    const nextView = views[next]?.id;
-    if (nextView) selectView(nextView);
-    buttons[next]?.focus();
+    handleTablistKeyDown(event, (next) => {
+      const nextView = views[next]?.id;
+      if (nextView) selectView(nextView);
+    });
   }
 
   function toggleFavorite(key: MarketItemKey) {
@@ -168,7 +180,7 @@ export function Market({
             return <button id={`market-tab-${entry.id}`} role="tab" aria-selected={currentView === entry.id} aria-controls={`market-panel-${entry.id}`} tabIndex={currentView === entry.id ? 0 : -1} className={currentView === entry.id ? "active" : ""} key={entry.id} onClick={() => selectView(entry.id)}><Icon size={15} />{entry.label}</button>;
           })}
         </div>
-        <div className="global-market-toolbar-meta"><span className="global-market-freshness"><Clock3 size={13} /> Updated {timeAgo(freshnessAt)}</span><label className="field global-market-region"><span>Market region</span><select value={regionId || "All"} onChange={(event) => setRegionChoice(event.target.value)}><option value="All">All active regions</option>{activeRegions.map((region) => <option value={region.regionId} key={region.regionId}>{activeRegionLabel(region, fallbackRegionId)}</option>)}</select></label></div>
+        <div className="global-market-toolbar-meta"><span className={`global-market-freshness ${marketStatus.freshness !== "fresh" || marketStatus.error ? "warning" : ""}`} title={[marketStatus.error, ...marketStatus.warnings].filter(Boolean).join(" ") || undefined}><Clock3 size={13} /> {marketStatus.generatedAt ? `Updated ${timeAgo(marketStatus.generatedAt)}` : marketStatus.loading ? "Checking freshness…" : "Freshness unavailable"}</span><label className="field global-market-region"><span>Market region</span><select value={regionId || "All"} onChange={(event) => setRegionChoice(event.target.value)}><option value="All">All active regions</option>{activeRegions.map((region) => <option value={region.regionId} key={region.regionId}>{activeRegionLabel(region, fallbackRegionId)}</option>)}</select></label></div>
       </section>
       {currentView === "overview" ? <div id="market-panel-overview" role="tabpanel" aria-labelledby="market-tab-overview"><MarketOverview {...marketRefresh} claimId={claimId} regionId={regionId} favorites={favorites} onOpenItem={openItem} /></div> : null}
       {currentView === "browse" ? <div id="market-panel-browse" role="tabpanel" aria-labelledby="market-tab-browse"><MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} canWatch={tabAllowed("deal-watch")} onWatchItem={watchItem} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /></div> : null}

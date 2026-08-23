@@ -6,7 +6,7 @@ import type { ActiveRegion } from "../../hooks/useActiveRegions";
 import { BuyOrderFinder } from "./BuyOrderFinder";
 import { MarketDeals } from "./MarketDeals";
 import type { MarketRefreshProps } from "./globalMarket";
-import { nextTabIndex } from "./marketUi";
+import { handleTablistKeyDown } from "./marketUi";
 
 type OpportunityMode = "routes" | "demand";
 
@@ -40,14 +40,7 @@ export function MarketOpportunities({
   }, [activeMode, preferredMode, setPreferredMode]);
 
   function onTabsKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
-    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    if (!buttons.length || current < 0) return;
-    event.preventDefault();
-    const next = nextTabIndex(current, buttons.length, event.key);
-    buttons[next]?.focus();
-    buttons[next]?.click();
+    handleTablistKeyDown(event, (_next, button) => button.click());
   }
 
   if (!activeMode) return null;

@@ -596,6 +596,11 @@
   color: #8fd7b0;
 }
 
+.global-market-freshness.warning,
+.global-market-freshness.warning svg {
+  color: #ffd27a;
+}
+
 .global-market-workspace {
   display: grid;
   gap: 14px;
