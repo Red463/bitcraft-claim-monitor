@@ -63,6 +63,15 @@ export function resourceFeatureColour(feature, resourceColours) {
     : RESOURCE_NODE_FALLBACK_COLOUR;
 }
 
+export function enemyFeatureColour(feature, enemyColours) {
+  const identity = typeof feature?.identity === "string" ? feature.identity : "";
+  if (!identity.startsWith("enemy:")) return RESOURCE_NODE_FALLBACK_COLOUR;
+  const enemyType = canonicalDecimal(identity.slice("enemy:".length));
+  return enemyType
+    ? enemyColours?.[enemyType] ?? RESOURCE_NODE_FALLBACK_COLOUR
+    : RESOURCE_NODE_FALLBACK_COLOUR;
+}
+
 export function selectedResourceColourMap(resourceIds, catalogByToken) {
   const tierlessIds = new Set();
   const catalogEntries = typeof catalogByToken?.entries === "function"
@@ -92,6 +101,19 @@ export function selectedResourceColourMap(resourceIds, catalogByToken) {
     colours[resourceId] = Number.isInteger(tier) && tier >= 1 && tier <= 10
       ? resourceNodeColour(resourceId, tier)
       : tierlessColours.get(resourceId) ?? RESOURCE_NODE_FALLBACK_COLOUR;
+  }
+  return colours;
+}
+
+export function selectedEnemyColourMap(enemyTypes, catalogByToken) {
+  const selectedTypes = [...new Set((enemyTypes ?? [])
+    .map(canonicalDecimal)
+    .filter(Boolean))]
+    .sort(compareCanonicalDecimal);
+  const colours = {};
+  for (const enemyType of selectedTypes) {
+    const row = catalogByToken?.get?.(`enemy:${enemyType}`);
+    colours[enemyType] = resourceNodeColour(enemyType, row?.tier);
   }
   return colours;
 }

@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
+import * as mapNodeColours from "../src/pages/map/resourceNodeColours.mjs";
+
+const {
   RESOURCE_NODE_FALLBACK_COLOUR,
   resourceFeatureColour,
   resourceNodeColour,
   selectedResourceColourMap,
-} from "../src/pages/map/resourceNodeColours.mjs";
+} = mapNodeColours;
 
 test("resource node colours stay stable within the selected tier family", () => {
   assert.equal(resourceNodeColour("28", 3), "rgba(38, 207, 70, 0.92)");
@@ -61,4 +63,23 @@ test("selected resource colours distinguish catalogued tierless resources indepe
     "700": forward["700"],
     "702": forward["702"],
   });
+});
+
+test("selected huntable animals use their catalog tiers for map node colours", () => {
+  assert.equal(typeof mapNodeColours.selectedEnemyColourMap, "function");
+  assert.equal(typeof mapNodeColours.enemyFeatureColour, "function");
+
+  const catalog = new Map([
+    ["enemy:3", { name: "Bison", tier: 3 }],
+    ["enemy:4", { name: "Boar", tier: 4 }],
+  ]);
+  const colours = mapNodeColours.selectedEnemyColourMap(["4", "3"], catalog);
+
+  assert.deepEqual(colours, {
+    "3": resourceNodeColour("3", 3),
+    "4": resourceNodeColour("4", 4),
+  });
+  assert.equal(mapNodeColours.enemyFeatureColour({ identity: "enemy:3" }, colours), colours["3"]);
+  assert.equal(mapNodeColours.enemyFeatureColour({ identity: "resource:3" }, colours), RESOURCE_NODE_FALLBACK_COLOUR);
+  assert.notEqual(colours["3"], colours["4"]);
 });

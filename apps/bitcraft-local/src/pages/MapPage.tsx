@@ -20,7 +20,7 @@ import { MapRegionSelect } from "./map/MapRegionSelect";
 import { MapResourceFinderPanel } from "./map/MapResourceFinderPanel";
 import { boundedNativeMapRegions, nativeMapPreferredResourceRegion, nativeMapResourceRegions, nativeMapResourceSelectionLimit, normalizeNativeMapRegionSelection } from "./map/nativeMapRequest.mjs";
 import { newlyAddedResourceIds } from "./map/resourceViewport.mjs";
-import { selectedResourceColourMap } from "./map/resourceNodeColours.mjs";
+import { selectedEnemyColourMap, selectedResourceColourMap } from "./map/resourceNodeColours.mjs";
 import { RESOURCE_FINDER_BATCH_SIZE, nextResourceLimit, visibleResourceMatches } from "./map/resourceFinderWindow.mjs";
 
 const LOCAL_API = "/api/local";
@@ -191,6 +191,10 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, dedi
     [selectedResourceIds.join(","), resourceByToken],
   );
   const selectedEnemyIds = React.useMemo(() => normalizedSelectedResources.filter((token) => token.startsWith("enemy:")).map((token) => token.slice("enemy:".length)), [normalizedSelectedResources]);
+  const selectedEnemyColours = React.useMemo(
+    () => selectedEnemyColourMap(selectedEnemyIds, resourceByToken),
+    [selectedEnemyIds.join(","), resourceByToken],
+  );
   const currentPlayerIds = React.useMemo(() => [...current].sort(), [current]);
   const focusKey = focus ? `${focus.name}:${focus.locationX}:${focus.locationZ}` : "";
   React.useEffect(() => {
@@ -329,6 +333,7 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, dedi
             resourceIds={selectedResourceIds}
             resourceColours={selectedResourceColours}
             enemyTypes={selectedEnemyIds}
+            enemyColours={selectedEnemyColours}
             focus={mapMarker}
             playerTool={{ label: "Players", count: trackedPlayerCount, content: playerPanel, primaryFocusSelector: "input[placeholder='Find settlement members']" }}
             resourceTool={{ label: "Resources", count: normalizedSelectedResources.length, content: resourceFinder, primaryFocusSelector: ".map-resource-finder-search input" }}

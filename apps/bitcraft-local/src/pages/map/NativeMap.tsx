@@ -17,6 +17,7 @@ import { mapFeatureInRegionScope, mapFeaturesInRegionScope } from "./mapRegionVi
 import { nativeMapRequest } from "./nativeMapRequest.mjs";
 import { isCurrentUserPlayerMarker } from "../../map/playerMarkerIdentity.mjs";
 import { resolvePlayerMarkerColours } from "../../map/playerMarkerColours.mjs";
+import { enemyFeatureColour } from "./resourceNodeColours.mjs";
 import { applyResourceLocate, resourceLayerStatus, scheduleResourceLocateVisible, type ResourceLocateActivation, type ResourceLocatePoint } from "./resourceViewport.mjs";
 import { createMapResourceBinaryLoader } from "./mapResourceBinaryLoader.mjs";
 import type { BrowserResourcePartition } from "./mapResourceBinaryState.mjs";
@@ -276,6 +277,7 @@ export function NativeMap({
   resourceIds,
   resourceColours,
   enemyTypes,
+  enemyColours,
   focus,
   playerTool,
   resourceTool,
@@ -293,6 +295,7 @@ export function NativeMap({
   resourceIds: string[];
   resourceColours: Readonly<Record<string, string>>;
   enemyTypes: string[];
+  enemyColours: Readonly<Record<string, string>>;
   focus: MapFocus;
   playerTool?: NativeMapToolContent;
   resourceTool?: NativeMapToolContent;
@@ -826,8 +829,12 @@ export function NativeMap({
         marker.addTo(markerGroup);
       }
     }
+  }, [snapshot, playerColourOverrides, verifiedCharacterPlayerId, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
+
+  React.useEffect(() => {
+    enemiesRef.current?.setPointColour((feature) => enemyFeatureColour(feature, enemyColours));
     enemiesRef.current?.setPoints(visibleEnemyPoints);
-  }, [snapshot, visibleEnemyPoints, playerColourOverrides, verifiedCharacterPlayerId, visibleRegionIds.join(","), focus?.name, focus?.locationX, focus?.locationZ]);
+  }, [visibleEnemyPoints, enemyColours]);
 
   const accessibleResourceFeatures: MapFeature[] = debugInformationVisible && layerVisibility.resources ? resourceSamples.map((sample) => ({
     kind: "resource",

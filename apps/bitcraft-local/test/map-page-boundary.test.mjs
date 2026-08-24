@@ -315,14 +315,15 @@ test("Map resource clicks pass transient locate intent and validated request pri
 test("ordinary marker synchronization owns group clearing and excludes resource publication inputs", () => {
   const nativeMap = readFileSync(new URL("../src/pages/map/NativeMap.tsx", import.meta.url), "utf8");
   const markerEffectStart = nativeMap.indexOf("const markerGroups = markerGroupsRef.current");
-  const markerEffectEnd = nativeMap.indexOf("  const accessibleResourceFeatures", markerEffectStart);
+  const markerEffectEnd = nativeMap.lastIndexOf("  React.useEffect(() => {", nativeMap.indexOf("enemiesRef.current?.setPointColour", markerEffectStart));
   const markerEffect = nativeMap.slice(markerEffectStart, markerEffectEnd);
 
   assert.ok(markerEffectStart >= 0);
   assert.match(markerEffect, /group\.clearLayers\(\)/);
   assert.match(markerEffect, /focusGroup\.clearLayers\(\)/);
   assert.doesNotMatch(markerEffect, /resourcePartitions|resourceSelectionKey|resourceColours|resourceLayerLoading/);
-  assert.match(nativeMap, /\}, \[snapshot, visibleEnemyPoints, playerColourOverrides, verifiedCharacterPlayerId, visibleRegionIds\.join\(","\), focus\?\.name, focus\?\.locationX, focus\?\.locationZ\]\);/);
+  assert.doesNotMatch(markerEffect, /visibleEnemyPoints|enemyColours/);
+  assert.match(nativeMap, /\}, \[snapshot, playerColourOverrides, verifiedCharacterPlayerId, visibleRegionIds\.join\(","\), focus\?\.name, focus\?\.locationX, focus\?\.locationZ\]\);/);
 });
 
 test("resource publication only synchronizes packed Canvas and plans locating", () => {
