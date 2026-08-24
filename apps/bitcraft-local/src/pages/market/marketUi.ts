@@ -69,7 +69,7 @@ export function regionalMarketQuotes(orders: Array<Record<string, unknown>>): Re
   const grouped = new Map<string, RegionalMarketQuote>();
   for (const order of orders) {
     const regionId = String(order.regionId ?? "").trim();
-    const regionName = String(order.regionName ?? "Unknown region").trim() || "Unknown region";
+    const regionName = String(order.regionName ?? "").trim() || (regionId ? `R${regionId}` : "Unknown region");
     const regionKey = regionId || `unknown:${regionName}`;
     const current = grouped.get(regionKey) ?? {
       regionKey, regionId, regionName, bestSell: null, bestBuy: null,

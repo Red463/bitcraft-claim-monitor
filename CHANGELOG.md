@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.2] - 2026-08-24
+
+### Fixed
+
+- Fixed regional price comparisons showing “Unknown region” when live orders supplied a region ID without an optional region name.
+
 ## [0.62.0-beta.1] - 2026-08-24
 
 ### Added
