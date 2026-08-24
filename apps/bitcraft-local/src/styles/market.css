@@ -1536,7 +1536,7 @@
   .market-item-identity { width: 100%; }
   .market-item-actions { width: 100%; justify-content: flex-start; }
   .market-regional-book { overflow: visible; border: 0; background: transparent; }
-  .market-regional-book table, .market-regional-book tbody { display: block; width: 100%; }
+  .market-regional-book table, .market-regional-book tbody { display: block; width: 100%; min-width: 0; }
   .market-regional-book thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .market-regional-book .market-region-card { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin-bottom: 8px; padding: 12px; border: 1px solid var(--line-subtle); border-radius: var(--radius-panel); background: var(--surface-1); }
   .market-regional-book .market-region-card > * { display: grid; gap: 2px; padding: 0; border: 0; text-align: left; white-space: normal; }

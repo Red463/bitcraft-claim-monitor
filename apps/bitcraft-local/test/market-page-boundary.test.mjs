@@ -130,4 +130,5 @@ test("Market selection and regional comparison remain explicit on desktop and ph
   assert.match(css, /\.market-item-detail > \*\s*\{[^}]*min-width:\s*0/s);
   assert.match(css, /@media \(max-width:\s*720px\)[\s\S]*\.market-item-heading\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
   assert.match(css, /@media \(max-width:\s*720px\)[\s\S]*\.market-back-results\s*\{[^}]*white-space:\s*nowrap/s);
+  assert.match(css, /@media \(max-width:\s*720px\)[\s\S]*\.market-regional-book table,\s*\.market-regional-book tbody\s*\{[^}]*min-width:\s*0/s);
 });
