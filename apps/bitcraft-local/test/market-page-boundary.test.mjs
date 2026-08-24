@@ -106,12 +106,23 @@ test("Market header metadata wraps under text scaling on phones", () => {
   assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.market-page \.dashboard-top-meta\s*\{[^}]*flex-wrap:\s*wrap/s);
 });
 
-test("Market exposes source-backed warnings and a mobile navigation cue", () => {
+test("Market exposes source-backed warnings and a compact mobile workspace picker", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
 
   assert.match(marketPage, /marketStatus\.generatedAt/);
   assert.match(marketPage, /className="global-market-warning" role="status"/);
-  assert.match(marketPage, /global-market-tabs-hint/);
-  assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*\.global-market-tabs-hint\s*\{[^}]*display:\s*flex/s);
+  assert.match(marketPage, /className="global-market-mobile-nav"/);
+  assert.match(marketPage, /aria-label="Choose Global Market workspace"/);
+  assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*\.global-market-mobile-nav\s*\{[^}]*display:\s*grid/s);
+});
+
+test("Market selection and regional comparison remain explicit on desktop and phone", () => {
+  const browse = readFileSync(new URL("../src/pages/market/MarketBrowse.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
+  assert.match(browse, /className=\{`market-catalog-result[^`]*active/);
+  assert.match(browse, /aria-pressed=\{/);
+  assert.doesNotMatch(browse, /market-region-summaries/);
+  assert.match(css, /@media \(max-width:\s*720px\)[\s\S]*\.market-regional-book \.market-region-card\s*\{[^}]*display:\s*grid/s);
+  assert.doesNotMatch(css, /\.market-regional-book table\s*\{[^}]*min-width:\s*610px/s);
 });

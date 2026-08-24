@@ -933,12 +933,12 @@ export function NativeMap({
     },
   ];
   return (
-    <section className="native-map-shell" aria-label="Native BitCraft map">
+    <section className="native-map-shell map-viewport" aria-label="Native BitCraft map">
       <div ref={hostRef} className="native-map-canvas" role="application" aria-label="Interactive BitCraft coordinate map" tabIndex={0} />
-      <div className="native-map-controls">
+      <div className="native-map-controls map-chrome">
         <MapToolDock tools={mapTools} trailingControl={regionControl} />
       </div>
-      {debugInformationVisible ? <div className="native-map-status" aria-live="polite">
+      {debugInformationVisible ? <div className="native-map-status map-status-chip map-chrome" aria-live="polite">
         <strong>{loading && !snapshot ? "Loading native map…" : snapshot ? `${snapshot.freshness} · generation ${snapshot.generation}` : "Native map unavailable"}</strong>
         {snapshot?.ageMs != null ? <span>{Math.round(snapshot.ageMs / 1000)}s old</span> : null}
         {error ? <span className="error">{error}</span> : null}

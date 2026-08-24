@@ -168,7 +168,7 @@ export function Market({
   return (
     <div className="panel market-page global-market-page">
       <header className="members-topbar market-topbar">
-        <div><h2>Market</h2><p>Global listings, demand, price intelligence and barter offers across every active region.</p></div>
+        <div><h2>Global Market</h2><p>Find an item and compare the best live prices across every active region.</p></div>
       </header>
       <section className="market-command-panel global-market-command" data-tour="market-tools">
         <div className="global-market-nav"><div className="global-market-tabs" role="tablist" aria-label="Global market workspaces" onKeyDown={onTabsKeyDown}>
@@ -176,7 +176,8 @@ export function Market({
             const Icon = entry.icon;
             return <button id={`market-tab-${entry.id}`} role="tab" aria-selected={currentView === entry.id} aria-controls={`market-panel-${entry.id}`} tabIndex={currentView === entry.id ? 0 : -1} className={currentView === entry.id ? "active" : ""} key={entry.id} onClick={() => selectView(entry.id)}><Icon size={15} />{entry.label}</button>;
           })}
-        </div><span className="global-market-tabs-hint" aria-hidden="true">More →</span></div>
+        </div></div>
+        <label className="global-market-mobile-nav"><span>Workspace</span><select aria-label="Choose Global Market workspace" value={currentView} onChange={(event) => selectView(event.target.value as GlobalMarketViewId)}>{views.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}</select></label>
         <div className="global-market-toolbar-meta"><span className={`global-market-freshness ${marketStatus.freshness !== "fresh" || overviewState.error ? "warning" : ""}`}><Clock3 size={13} /> {marketStatus.generatedAt ? `Updated ${timeAgo(marketStatus.generatedAt)}` : overviewState.loading ? "Checking freshness…" : "Freshness unavailable"}</span><label className="field global-market-region"><span>Market region</span><select value={regionId || "All"} onChange={(event) => setRegionChoice(event.target.value)}><option value="All">All active regions</option>{activeRegions.map((region) => <option value={region.regionId} key={region.regionId}>{activeRegionLabel(region, fallbackRegionId)}</option>)}</select></label>{marketStatusMessage ? <small className="global-market-warning" role="status">{marketStatusMessage}</small> : null}</div>
       </section>
       {currentView === "overview" ? <div id="market-panel-overview" role="tabpanel" aria-labelledby="market-tab-overview"><MarketOverview {...marketRefresh} claimId={claimId} regionId={regionId} overviewState={overviewState} favorites={favorites} onOpenItem={openItem} /></div> : null}

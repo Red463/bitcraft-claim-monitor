@@ -52,6 +52,58 @@ export function exactMarketInteger(value: unknown): bigint {
   return /^\d+$/.test(normalized) ? BigInt(normalized) : 0n;
 }
 
+export type RegionalMarketQuote = {
+  regionKey: string;
+  regionId: string;
+  regionName: string;
+  bestSell: string | null;
+  bestBuy: string | null;
+  sellQuantity: string;
+  buyQuantity: string;
+  sellOrders: number;
+  buyOrders: number;
+  lastSeen: string | null;
+};
+
+export function regionalMarketQuotes(orders: Array<Record<string, unknown>>): RegionalMarketQuote[] {
+  const grouped = new Map<string, RegionalMarketQuote>();
+  for (const order of orders) {
+    const regionId = String(order.regionId ?? "").trim();
+    const regionName = String(order.regionName ?? "Unknown region").trim() || "Unknown region";
+    const regionKey = regionId || `unknown:${regionName}`;
+    const current = grouped.get(regionKey) ?? {
+      regionKey, regionId, regionName, bestSell: null, bestBuy: null,
+      sellQuantity: "0", buyQuantity: "0", sellOrders: 0, buyOrders: 0, lastSeen: null,
+    };
+    const side = order.side === "buy" ? "buy" : order.side === "sell" ? "sell" : null;
+    const price = String(order.unitPrice ?? "").trim();
+    const quantity = exactMarketInteger(order.quantity);
+    if (side === "sell") {
+      current.sellOrders += 1;
+      current.sellQuantity = (exactMarketInteger(current.sellQuantity) + quantity).toString();
+      if (/^\d+$/.test(price) && (current.bestSell == null || exactMarketInteger(price) < exactMarketInteger(current.bestSell))) current.bestSell = price;
+    } else if (side === "buy") {
+      current.buyOrders += 1;
+      current.buyQuantity = (exactMarketInteger(current.buyQuantity) + quantity).toString();
+      if (/^\d+$/.test(price) && (current.bestBuy == null || exactMarketInteger(price) > exactMarketInteger(current.bestBuy))) current.bestBuy = price;
+    }
+    const seen = String(order.lastSeen ?? order.updatedAt ?? order.createdAt ?? "").trim() || null;
+    if (seen && (!current.lastSeen || seen > current.lastSeen)) current.lastSeen = seen;
+    grouped.set(regionKey, current);
+  }
+  return [...grouped.values()].sort((left, right) => {
+    if (left.bestSell != null && right.bestSell == null) return -1;
+    if (left.bestSell == null && right.bestSell != null) return 1;
+    if (left.bestSell != null && right.bestSell != null) {
+      const ask = exactMarketInteger(left.bestSell) - exactMarketInteger(right.bestSell);
+      if (ask !== 0n) return ask < 0n ? -1 : 1;
+    }
+    const bid = exactMarketInteger(right.bestBuy) - exactMarketInteger(left.bestBuy);
+    if (bid !== 0n) return bid < 0n ? -1 : 1;
+    return left.regionName.localeCompare(right.regionName);
+  });
+}
+
 export function marketChartPoints(rows: Array<Record<string, unknown>>, width: number, height: number): MarketChartPoint[] {
   const values = rows.map((row) => ({
     price: String(row.vwap ?? row.avgPrice ?? row.price ?? "").trim(),

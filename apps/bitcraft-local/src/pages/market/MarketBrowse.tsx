@@ -9,7 +9,7 @@ import { MiniStat } from "../../components/main/Stats";
 import { toNumber, type AnyRecord } from "../../main-app-data";
 import { updateQueryState } from "../../navigation";
 import { createDelayedRefreshTask } from "../../refresh/pageRefresh.mjs";
-import { formatCompactNumber, formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
+import { formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
 import type { MapFocus } from "../map/mapUtils";
 import type { MarketItemKey, MarketRefreshProps } from "./globalMarket";
 import {
@@ -19,7 +19,7 @@ import {
   marketItemType,
   normalizeMarketOrders,
 } from "./globalMarket";
-import { availabilityFlags, exactMarketInteger, nextOptionIndex, type MarketAvailability } from "./marketUi";
+import { availabilityFlags, exactMarketInteger, nextOptionIndex, regionalMarketQuotes, type MarketAvailability } from "./marketUi";
 import { MarketPriceChart } from "./MarketPriceChart";
 
 type Props = MarketRefreshProps & {
@@ -268,17 +268,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const pageCount = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
   const sells = orders.filter((order) => order.side === "sell");
   const buys = orders.filter((order) => order.side === "buy");
-  const regionSummaries = React.useMemo(() => {
-    const byRegion = new Map<string, { name: string; sells: number; buys: number; quantity: bigint }>();
-    for (const order of orders) {
-      const key = String(order.regionId ?? "unknown");
-      const current = byRegion.get(key) ?? { name: order.regionName || (order.regionId ? `R${order.regionId}` : "Unknown region"), sells: 0, buys: 0, quantity: 0n };
-      current[order.side === "sell" ? "sells" : "buys"] += 1;
-      current.quantity += exactMarketInteger(order.quantity);
-      byRegion.set(key, current);
-    }
-    return [...byRegion.entries()].sort(([left], [right]) => toNumber(left) - toNumber(right));
-  }, [orders]);
+  const regionalQuotes = React.useMemo(() => regionalMarketQuotes(orders), [orders]);
   const bestSellOrder = sells.reduce<AnyRecord | null>((best, order) => (
     best == null || compareDecimal(order.unitPrice, best.unitPrice) < 0 ? order : best
   ), null);
@@ -296,7 +286,9 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const hasCatalogFilters = Boolean(query || category || availability !== (mode === "buy" ? "buy" : "any") || catalogSort !== "name");
 
   return (
-    <section className="global-market-workspace market-browse">
+    <section className={`global-market-workspace market-workspace market-browse ${selectedItem ? "has-selection" : ""}`}>
+      <div className="market-split-exchange">
+      <section className="market-catalog-pane" aria-label="Market item catalogue">
       <div className="global-market-searchbar">
         <label className="field market-catalog-search">
           <span>{mode === "buy" ? "Find an item with buy orders" : "Search global catalog"}</span>
@@ -318,21 +310,24 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
         </> : null}
       </div>
       {catalogState.error ? <div className="error">Market search unavailable: {catalogState.error}</div> : null}
-      {!selectedItem ? mode === "browse" ? (
+      {mode === "browse" ? (
         <div className="market-catalog-results" aria-label="Market item catalog">
           {catalogState.loading && !catalogItems.length ? <div className="market-loading-strip">Loading market catalog…</div> : null}
           {catalogItems.map((item) => (
-            <button className="market-catalog-result" type="button" key={`${item.itemType}-${item.id}`} onClick={() => chooseItem(item)}>
+            <button className={`market-catalog-result ${selectedKey?.itemType === item.itemType && selectedKey?.itemId === item.id ? "active" : ""}`} aria-pressed={selectedKey?.itemType === item.itemType && selectedKey?.itemId === item.id} type="button" key={`${item.itemType}-${item.id}`} onClick={() => chooseItem(item)}>
               <ItemIcon item={item} />
               <span className="market-catalog-result-name"><strong>{item.name}</strong><small>{item.category || "Uncategorised"}</small></span>
-              <span><small>Lowest sell</small><strong>{item.lowestSellPrice == null ? "Unavailable" : formatGoldAmount(item.lowestSellPrice)}</strong><small>{item.lowestSellLocation || "No seller location"}</small></span>
-              <span><small>Highest buy</small><strong>{item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount(item.highestBuyPrice)}</strong><small>{item.highestBuyLocation || "No buyer location"}</small></span>
-              <span><small>Spread</small><strong>{item.lowestSellPrice == null || item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount((exactMarketInteger(item.lowestSellPrice) - exactMarketInteger(item.highestBuyPrice)).toString())}</strong><small>{formatNumber(item.orderCount)} current orders</small></span>
+              <span className="market-catalog-quote market-catalog-quote-primary"><small>Lowest sell</small><strong>{item.lowestSellPrice == null ? "Unavailable" : formatGoldAmount(item.lowestSellPrice)}</strong><small>{item.lowestSellLocation || "No seller location"}</small></span>
+              <span className="market-catalog-quote market-catalog-quote-secondary"><small>Highest buy</small><strong>{item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount(item.highestBuyPrice)}</strong><small>{item.highestBuyLocation || "No buyer location"}</small></span>
+              <span className="market-catalog-quote market-catalog-quote-secondary"><small>Spread</small><strong>{item.lowestSellPrice == null || item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount((exactMarketInteger(item.lowestSellPrice) - exactMarketInteger(item.highestBuyPrice)).toString())}</strong><small>{formatNumber(item.orderCount)} current orders</small></span>
             </button>
           ))}
           {!catalogState.loading && !catalogItems.length ? <div className="empty-state"><ShoppingBag size={28} /><strong>No catalog items match these filters</strong><span>Clear a filter or search for another item or cargo name.</span></div> : null}
         </div>
-      ) : <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>Choose an item to inspect live demand</strong><span>Buy orders are loaded live after item selection; no monitored-settlement cache is used.</span></div> : (
+      ) : null}
+      </section>
+      <section className="market-instrument-pane" aria-label="Selected item regional market">
+      {!selectedItem ? <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>Choose an item to compare regions</strong><span>Select an item to compare the best live sell and buy prices across active regions.</span></div> : (
         <div className="market-item-detail">
           <header>
             <div className="market-item-heading">
@@ -362,7 +357,16 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
             <MiniStat icon={<ArrowDownUp />} label="Spread" value={spread == null ? "—" : `${formatNumber(spread)}g`} />
           </div>
           <div className="market-depth-summary" aria-label="Current market depth"><span><small>Liquidity</small><strong>{formatNumber(orders.reduce((sum, order) => sum + exactMarketInteger(order.quantity), 0n))} units</strong></span><span><small>Orders</small><strong>{formatNumber(sells.length)} sell · {formatNumber(buys.length)} buy</strong></span><span><small>Best sell location</small><strong>{bestSellOrder?.claimName || bestSellOrder?.regionName || "Unavailable"}</strong></span><span><small>Best buy location</small><strong>{bestBuyOrder?.claimName || bestBuyOrder?.regionName || "Unavailable"}</strong></span></div>
-          {regionSummaries.length ? <div className="market-region-summaries" aria-label="Regional order summaries">{regionSummaries.map(([key, summary]) => <span key={key}><b>{summary.name}</b>{formatNumber(summary.sells)} sell · {formatNumber(summary.buys)} buy · {formatCompactNumber(summary.quantity)} units</span>)}</div> : null}
+          {regionalQuotes.length ? <div className="market-regional-book table-wrap" role="region" aria-label="Regional order comparison" tabIndex={0}>
+            <table><thead><tr><th>Region</th><th>Best ask</th><th>Sell qty</th><th>Best bid</th><th>Buy qty</th><th>Orders</th><th>Seen</th></tr></thead><tbody>
+              {regionalQuotes.map((quote, index) => <tr className="market-region-card" key={quote.regionKey}>
+                <th scope="row"><span>{index === 0 && quote.bestSell != null ? "Best price" : "Region"}</span>{quote.regionName}</th>
+                <td>{quote.bestSell == null ? "—" : formatGoldAmount(quote.bestSell)}</td><td>{formatNumber(quote.sellQuantity)}</td>
+                <td>{quote.bestBuy == null ? "—" : formatGoldAmount(quote.bestBuy)}</td><td>{formatNumber(quote.buyQuantity)}</td>
+                <td>{formatNumber(quote.sellOrders + quote.buyOrders)}</td><td>{quote.lastSeen ? timeAgo(quote.lastSeen) : "—"}</td>
+              </tr>)}
+            </tbody></table>
+          </div> : null}
           <div className="tabs market-order-tabs">
             <button className={detailTab === "orders" ? "active" : ""} onClick={() => setDetailTab("orders")}>Orders</button>
             <button className={detailTab === "stats" ? "active" : ""} onClick={() => setDetailTab("stats")}>Stats</button>
@@ -405,6 +409,8 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
           )}
         </div>
       )}
+      </section>
+      </div>
     </section>
   );
 }

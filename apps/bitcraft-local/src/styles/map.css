@@ -432,6 +432,22 @@ body:has(.floating-actions:not(.floating-actions-collapsed)) .map-dedicated-tab-
 .map-resource-copy { min-width: 0; display: grid; gap: 2px; }
 .native-map-tool-panel--resources .map-resource-list { flex: 1 1 auto; min-height: 0; max-height: none; overflow-x: hidden; overflow-y: auto; }
 
+/* Obsidian Ledger immersive map chrome */
+.map-surface { --map-chrome-bg: color-mix(in srgb, var(--surface-1) 88%, transparent); --map-chrome-border: color-mix(in srgb, var(--line-strong) 76%, transparent); --map-chrome-shadow: 0 12px 32px rgb(0 0 0 / 34%); background: var(--canvas); }
+.map-viewport { background: var(--canvas); }
+.map-chrome { border: 1px solid var(--map-chrome-border); background: var(--map-chrome-bg); box-shadow: var(--map-chrome-shadow); backdrop-filter: blur(10px); }
+.map-status-chip { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.map-selection-banner { max-width: min(540px, calc(100vw - 32px)); }
+.native-map-tool-trigger { border-radius: var(--radius-control); }
+.native-map-tool-panel { width: min(360px, calc(100vw - 32px)); max-height: calc(100dvh - 96px); overflow: hidden; border-color: var(--map-chrome-border); background: var(--map-chrome-bg); box-shadow: var(--map-chrome-shadow); }
+.native-map-tool-panel > :last-child { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.native-map-layers-popover, .native-map-biome-key-popover { max-width: min(360px, calc(100vw - 32px)); max-height: min(620px, calc(100dvh - 96px)); overflow: auto; border-color: var(--map-chrome-border); background: var(--map-chrome-bg); }
+@media (max-width: 700px) {
+  .native-map-tool-panel { width: calc(100vw - 24px); max-height: min(62dvh, 540px); }
+  .native-map-layer-row { min-height: 44px; }
+  .map-selection-banner { max-width: calc(100vw - 24px); }
+}
+
 .map-player-panel { min-height: 0; display: grid; gap: 0.65rem; }
 .map-player-summary { margin: 0; color: var(--muted); font-size: 0.72rem; }
 .map-player-primary-tabs,

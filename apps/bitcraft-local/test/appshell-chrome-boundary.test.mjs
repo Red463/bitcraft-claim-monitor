@@ -2,21 +2,25 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
-test("floating action rail can be collapsed with persisted state and accessible toggle", () => {
+test("application shell exposes contextual Obsidian Ledger surface modes", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  assert.match(appShell, /surfaceModeForPanel\(active\)/);
+  assert.match(appShell, /surface-mode-\$\{surfaceMode\}/);
+  assert.match(appShell, /surface-mode-bot/);
+});
 
-  assert.match(appShell, /usePersistedState\("layout\.floatingActionsCollapsed", false\)/);
-  assert.match(appShell, /useState\(false\).*mobileFloatingActionsOpen|mobileFloatingActionsOpen.*useState\(false\)/s);
-  assert.match(appShell, /isNarrowViewport\s*\?\s*!mobileFloatingActionsOpen\s*:\s*floatingActionsCollapsed/);
-  assert.match(appShell, /isNarrowViewport\s*\?\s*setMobileFloatingActionsOpen/);
-  assert.match(appShell, /floating-actions-collapsed/);
-  assert.match(appShell, /aria-expanded=\{!narrowAwareFloatingActionsCollapsed\}/);
-  assert.match(appShell, /Hide tools/);
-  assert.match(appShell, /Show tools/);
+test("application tools use one anchored utility bar", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const utility = readFileSync(new URL("../src/components/main/AppUtilityBar.tsx", import.meta.url), "utf8");
+  assert.match(appShell, /<AppUtilityBar/);
+  assert.doesNotMatch(appShell, /layout\.floatingActionsCollapsed|mobileFloatingActionsOpen|floating-actions/);
+  assert.match(utility, /aria-label="Application tools"/);
+  assert.match(utility, /Search commands/);
 });
 
 test("global refresh uses the page-cycle lifecycle with consistent manual feedback", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const utility = readFileSync(new URL("../src/components/main/AppUtilityBar.tsx", import.meta.url), "utf8");
 
   assert.match(appShell, /createPageRefreshController/);
   assert.match(appShell, /createPageRefreshTaskCoordinator/);
@@ -25,15 +29,14 @@ test("global refresh uses the page-cycle lifecycle with consistent manual feedba
   assert.match(appShell, /requestManualRefresh/);
   assert.match(appShell, /pageRefreshCycle/);
   assert.match(appShell, /pageRefreshCoordinator/);
-  assert.match(appShell, /aria-busy=\{manualRefreshIsRefreshing\}/);
-  assert.match(appShell, /aria-disabled=\{manualRefreshButtonDisabled\}/);
+  assert.match(utility, /aria-busy=\{refreshing\}/);
+  assert.match(utility, /aria-disabled=\{refreshDisabled\}/);
   assert.match(appShell, /manualRefreshButtonLabel/);
-  assert.match(appShell, /is-refreshing/);
+  assert.match(utility, /is-refreshing/);
   assert.match(appShell, /const manualRefreshIsCoolingDown = !manualRefreshIsRefreshing && manualRefreshCooldownMs > 0/);
-  assert.match(appShell, /manualRefreshIsCoolingDown \? "is-cooldown"/);
-  assert.match(appShell, /className="refresh-cooldown-countdown"/);
-  assert.match(appShell, /\{manualRefreshCooldownSeconds\}s/);
-  assert.match(appShell, /manualRefreshIsCoolingDown\s*\?\s*\(\s*<span[\s\S]*:\s*\(\s*<RefreshCw size=\{18\}/);
+  assert.match(utility, /coolingDownSeconds > 0 \? "is-cooldown"/);
+  assert.match(utility, /className="refresh-cooldown-countdown"/);
+  assert.match(utility, /\{coolingDownSeconds\}s/);
   assert.match(appShell, /role="status"[^>]*aria-live="polite"/s);
   assert.match(appShell, /Data refreshed/);
   assert.match(appShell, /Refresh available in/);
@@ -82,7 +85,8 @@ test("dedicated map mode keeps the map route while omitting optional application
   assert.match(appShell, /!dedicatedMapView \? \([\s\S]*className="mobile-shell-bar"/);
   assert.match(appShell, /\{!dedicatedMapView && active !== "admin" \? <footer className="app-footer">/);
   assert.match(appShell, /app-shell[^`]*\$\{dedicatedMapView \? "map-dedicated-shell" : ""\}/);
-  assert.match(appShell, /\{!dedicatedMapView \? \([\s\S]*release-update-banner[\s\S]*floating-actions/);
+  assert.match(appShell, /!dedicatedMapView \? <AppUtilityBar/);
+  assert.match(appShell, /\{!dedicatedMapView \? \([\s\S]*release-update-banner/);
   assert.match(appShell, /LegalAcceptanceDialog/);
 });
 test("shared refresh chrome is provider-neutral during the Relay migration", () => {

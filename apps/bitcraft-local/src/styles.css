@@ -1,9 +1,27 @@
 :root {
   color-scheme: dark;
-  --bg: #0c0d10;
+  --canvas: #030506;
+  --surface-1: #080d10;
+  --surface-2: #0c1216;
+  --surface-3: #11191e;
+  --line-subtle: rgba(126,145,155,.20);
+  --line-strong: rgba(139,159,169,.38);
+  --signal-info: #6aafff;
+  --signal-discord: #9aa4ff;
+  --font-data: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --radius-panel: 8px;
+  --radius-dialog: 12px;
+  --bg: var(--canvas);
   --sidebar: #06070a;
-  --panel: #181b21;
-  --panel-2: #11141a;
+  --panel: var(--surface-2);
+  --panel-2: var(--surface-1);
   --border: #353b46;
   --card-top: #111923;
   --card-bottom: #080d14;
@@ -56,6 +74,13 @@
   font-family: Outfit, system-ui, sans-serif;
   background: var(--bg);
 }
+
+.surface-mode-operations { --workspace-density: 16px; --workspace-accent: var(--active-color); }
+.surface-mode-market { --workspace-density: 14px; --workspace-accent: var(--active-color); }
+.surface-mode-map { --workspace-density: 12px; --workspace-accent: var(--signal-info); }
+.surface-mode-public { --workspace-density: 18px; --workspace-accent: var(--good); }
+.surface-mode-admin { --workspace-density: 16px; --workspace-accent: var(--copper); }
+.surface-mode-bot { --workspace-density: 14px; --workspace-accent: var(--signal-discord); --service-accent: var(--signal-discord); }
 
 * { box-sizing: border-box; }
 body { margin: 0; color: var(--text); background: var(--bg); }
@@ -297,7 +322,7 @@ main { position: relative; min-width: 0; height: 100vh; max-height: 100vh; overf
   opacity: 1;
 }
 .page-view { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; animation: page-enter .17s ease-out both; }
-.panel { padding: var(--shell-page-gutter); display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.panel { padding: var(--shell-page-gutter); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--workspace-density, var(--space-5)); }
 .app-footer { margin-top: auto; border-top: 1px solid rgba(108,123,145,.24); padding: 11px 16px; color: var(--muted); font-size: 12px; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 100% 0, rgba(72,91,116,.1), transparent 34%), linear-gradient(180deg, rgba(8,12,18,.96), rgba(3,5,8,.98)); box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 -12px 28px rgba(0,0,0,.24); }
 .app-footer .footer-links { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .app-footer .footer-copy { color: #d9e0ec; font-weight: 600; flex: 1; min-width: 220px; }
@@ -1032,6 +1057,28 @@ tbody tr:hover { background: rgba(255,255,255,.025); }
 .field input::placeholder, .field textarea::placeholder, input::placeholder, textarea::placeholder { color: var(--placeholder); opacity: 1; }
 .field input:focus, .field select:focus, .field textarea:focus, .select-control:focus { border-color: var(--focus-border); box-shadow: 0 0 0 3px var(--focus-ring); }
 .field input:disabled, .field select:disabled, .field textarea:disabled, .select-control:disabled { opacity: .65; cursor: not-allowed; background: rgba(255,255,255,.025); }
+
+/* Obsidian Ledger shared page anatomy */
+.page-header { gap: var(--space-6); padding-bottom: var(--space-3); border-bottom: 1px solid var(--line-subtle); }
+.page-header h2 { font-size: clamp(26px, 2.2vw, 34px); font-weight: 750; letter-spacing: -.015em; }
+.page-header p { margin-top: var(--space-2); color: color-mix(in srgb, var(--muted) 94%, var(--text)); }
+.page-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--line-subtle); border-radius: var(--radius-panel); background: var(--surface-1); }
+.page-workspace { min-width: 0; border: 1px solid var(--line-subtle); border-radius: var(--radius-panel); background: var(--surface-1); }
+.page-view > .panel { border-top: 1px solid color-mix(in srgb, var(--workspace-accent, var(--active-color)) 18%, transparent); }
+.panel > section, .panel > article { min-width: 0; }
+.form-card, .table-wrap, .empty-state { border-color: var(--line-subtle); border-radius: var(--radius-panel); background: var(--surface-1); box-shadow: inset 0 1px 0 rgb(255 255 255 / 2.5%); }
+.toolbar-button { border-radius: var(--radius-control); }
+.toolbar-button.primary { box-shadow: inset 0 1px 0 rgb(255 255 255 / 8%); }
+.field > span { color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.field input, .field select, .field textarea { border-color: var(--line-subtle); background: var(--surface-1); }
+.info, .error, .loading { border-radius: var(--radius-control); }
+table :is(td, th) { font-variant-numeric: tabular-nums; }
+table td[data-sort-value], table td.numeric, .metric-grid strong { font-family: var(--font-data); }
+@media (max-width: 720px) {
+  .page-header { grid-template-columns: 1fr; align-items: start; gap: var(--space-3); }
+  .page-header-aside { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .panel { --shell-page-gutter: 12px; }
+}
 input[type="checkbox"] { appearance: none; -webkit-appearance: none; flex: 0 0 auto; width: 38px; height: 22px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; background: rgba(255,255,255,.08); cursor: pointer; position: relative; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease; }
 input[type="checkbox"]::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%; background: var(--muted); box-shadow: 0 2px 8px rgba(0,0,0,.35); transition: transform .18s ease, background .18s ease; }
 input[type="checkbox"]:checked { border-color: rgba(240,198,79,.65); background: rgba(240,198,79,.24); box-shadow: 0 0 0 3px rgba(240,198,79,.08); }

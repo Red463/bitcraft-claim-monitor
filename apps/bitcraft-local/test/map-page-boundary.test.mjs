@@ -419,7 +419,7 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   assert.match(preferences, /key: "debug", label: "Debug information", defaultVisible: false/);
   assert.match(nativeMap, /const debugInformationVisible = layerVisibility\.debug === true/);
   assert.match(nativeMap, /const accessibleFeatures = debugInformationVisible\s*\?/);
-  assert.match(nativeMap, /\{debugInformationVisible \? <div className="native-map-status"/);
+  assert.match(nativeMap, /\{debugInformationVisible \? <div className="native-map-status map-status-chip map-chrome"/);
   assert.match(nativeMap, /\{debugInformationVisible && accessibleFeatures\.length \? <details className="native-map-accessible-points"/);
   assert.doesNotMatch(control, /setResourceIds|setEnemyTypes|resourceIds\s*=|enemyTypes\s*=/);
   assert.match(control, /aria-describedby/);

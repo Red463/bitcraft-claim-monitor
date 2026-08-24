@@ -310,9 +310,9 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, dedi
   />;
   const regionControl = <MapRegionSelect value={resourceRegionValue} options={resourceRegionOptions} onChange={setResourceRegion} />;
   return (
-    <div className={`panel map-panel full-height has-native-tools ${focus && !dedicated ? "has-focus" : ""} ${dedicated ? "is-dedicated" : ""}`}>
+    <div className={`panel map-panel map-surface full-height has-native-tools ${focus && !dedicated ? "has-focus" : ""} ${dedicated ? "is-dedicated" : ""}`}>
       {!dedicated && focus ? (
-        <div className="map-focus">
+        <div className="map-focus map-selection-banner map-chrome">
           <MapPin size={17} />
           <div><strong>{focus.name}</strong><span>{focus.locationX}, {focus.locationZ}</span></div>
           <button className="mini-action" onClick={onClearFocus}>Clear</button>

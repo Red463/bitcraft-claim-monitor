@@ -6,13 +6,9 @@ import "./styles/app-popups.css";
 import "./styles/first-run-tour.css";
 import {
   ArrowDown,
-  Bell,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   ExternalLink,
   FileText,
-  KeyRound,
   LockKeyhole,
   MessageCircle,
   Menu,
@@ -46,6 +42,7 @@ import { CookieBanner, DedicatedLegalPage, DiscordSignInPrompt, HelpCenter, Priv
 import { LegalAcceptanceDialog, type PublicLegalPolicy } from "./components/main/LegalAcceptanceDialog";
 import { AccountDeletionDialog } from "./components/main/AccountDeletionDialog";
 import { FirstRunTourManager } from "./components/main/FirstRunTourManager";
+import { AppUtilityBar } from "./components/main/AppUtilityBar";
 import { useBrowserNotificationSmoke } from "./notifications/useBrowserNotificationSmoke";
 import { useBrowserNotificationSources } from "./notifications/useBrowserNotificationSources";
 import { useToastNotifications } from "./notifications/useToastNotifications";
@@ -74,6 +71,7 @@ import { verifiedCharacterPlayerId } from "./map/playerMarkerIdentity.mjs";
 import { applyTheme, DEFAULT_THEME, normalizeThemeCandidate, type ThemeSettings } from "./theme";
 import { ACCESS_CONTROL_TARGETS, effectiveTargetAllowed, targetIdForPage, type EffectiveAccess } from "./access/accessControl.mjs";
 import { restrictedAccessGuidance } from "./access/restrictedAccess";
+import { surfaceModeForPanel } from "./ui/surfaceMode";
 import { PageRefreshProvider } from "./refresh/ManualRefreshContext";
 import { cooldownRemainingMs } from "./refresh/manualRefresh.mjs";
 import { createPageGameDataGenerationWatcher } from "./refresh/generationWatcher.mjs";
@@ -287,7 +285,6 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
   const mobileNavigationTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const mobileNavigationWasOpenRef = React.useRef(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = React.useState(false);
-  const [mobileFloatingActionsOpen, setMobileFloatingActionsOpen] = React.useState(false);
   const [routeStatus, setRouteStatus] = React.useState("");
   const [isNarrowViewport, setIsNarrowViewport] = React.useState(() => window.matchMedia("(max-width: 920px)").matches);
   const [collapsedNavTooltip, setCollapsedNavTooltip] = React.useState<{ label: string; left: number; top: number } | null>(null);
@@ -295,7 +292,6 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
     const narrowViewport = window.matchMedia("(max-width: 920px)");
     const updateNarrowViewport = () => {
       setIsNarrowViewport(narrowViewport.matches);
-      if (narrowViewport.matches) setMobileFloatingActionsOpen(false);
     };
     narrowViewport.addEventListener("change", updateNarrowViewport);
     return () => narrowViewport.removeEventListener("change", updateNarrowViewport);
@@ -369,7 +365,6 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
   const [density, setDensity] = usePersistedState<"comfortable" | "compact">("layout.density", "comfortable");
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistedState("layout.sidebarCollapsed", false);
   const [sidebarGroups, setSidebarGroups] = usePersistedState<Record<string, boolean>>("layout.sidebarGroups", DEFAULT_SIDEBAR_GROUPS);
-  const [floatingActionsCollapsed, setFloatingActionsCollapsed] = usePersistedState("layout.floatingActionsCollapsed", false);
   const [discordPromptDismissed, setDiscordPromptDismissed] = usePersistedState("auth.discordPromptDismissed", false);
   const [helpOpen, setHelpOpen] = React.useState(false);
   const [tourVisible, setTourVisible] = React.useState(false);
@@ -999,9 +994,9 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
   const sidebarAccountStatus = accountCharacterStatusLabel(userAuth.user);
   const sidebarAccountInitial = sidebarAccountName.slice(0, 1).toUpperCase();
   const mobileNavigationUnavailable = isNarrowViewport && !mobileNavigationOpen;
-  const narrowAwareFloatingActionsCollapsed = isNarrowViewport ? !mobileFloatingActionsOpen : floatingActionsCollapsed;
+  const surfaceMode = surfaceModeForPanel(active);
   return (
-    <div className={`app-shell density-${density} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${dedicatedMapView ? "map-dedicated-shell" : ""} ${active === "admin" ? "admin-focused-shell" : ""}`}>
+    <div className={`app-shell density-${density} surface-mode-${surfaceMode} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${dedicatedMapView ? "map-dedicated-shell" : ""} ${active === "admin" ? "admin-focused-shell" : ""}`}>
       {!dedicatedMapView ? (<>
         <header className="mobile-shell-bar">
         <span><strong className="mobile-shell-brand">Claim Monitor</strong><small className="mobile-shell-route">{activePageLabel}</small></span>
@@ -1108,6 +1103,27 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
       <main ref={mainRef} tabIndex={-1}>
         <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{routeStatus}</p>
         <p role="status" aria-live="polite" aria-atomic="true" style={VISUALLY_HIDDEN_STYLE}>{manualRefreshStatusText}</p>
+        {!dedicatedMapView ? <AppUtilityBar
+          pageLabel={activePageLabel}
+          adminHref={panelHref("admin")}
+          adminActive={active === "admin"}
+          adminVisible={Boolean(adminAuth.authenticated)}
+          unreadCount={notificationLog.filter((notice) => !notice.read).length}
+          refreshing={manualRefreshIsRefreshing}
+          coolingDownSeconds={manualRefreshCooldownSeconds}
+          refreshDisabled={manualRefreshButtonDisabled}
+          refreshLabel={manualRefreshButtonLabel}
+          onAdminNavigate={(event) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            navigate("admin");
+          }}
+          onOpenCommand={() => setCommandOpen(true)}
+          onRefresh={requestManualRefresh}
+          onOpenSettings={() => setUserSettingsOpen(true)}
+          onOpenNotifications={() => { setNoticeOpen(true); markNotificationLogRead(); }}
+          onOpenHelp={() => setHelpOpen(true)}
+        /> : null}
         <div className={`page-refresh-line ${visibleRefreshProgress ? "is-visible" : ""}`} aria-hidden="true" />
         <GameDataQualityNotice
           activePanel={active}
@@ -1173,52 +1189,6 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
           </div>
         </div>
       ) : null}
-      <div className={`floating-actions ${narrowAwareFloatingActionsCollapsed ? "floating-actions-collapsed" : ""}`} aria-label="Application tools" data-tour="floating-actions">
-        <button
-          className="floating-actions-toggle"
-          onClick={() => isNarrowViewport ? setMobileFloatingActionsOpen((current) => !current) : setFloatingActionsCollapsed((current) => !current)}
-          aria-expanded={!narrowAwareFloatingActionsCollapsed}
-          aria-label={narrowAwareFloatingActionsCollapsed ? "Show tools" : "Hide tools"}
-          title={narrowAwareFloatingActionsCollapsed ? "Show tools" : "Hide tools"}
-        >
-          {narrowAwareFloatingActionsCollapsed ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
-        </button>
-        {adminAuth.authenticated ? <a
-          className={`floating-action-item ${active === "admin" ? "active" : ""}`}
-          href={panelHref("admin")}
-          aria-label="Admin console"
-          title="Admin console"
-          onClick={(event) => {
-            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-            event.preventDefault();
-            navigate("admin");
-          }}
-        >
-          <KeyRound size={18} />
-        </a> : null}
-        <button
-          className={`floating-action-item ${
-            manualRefreshIsRefreshing ? "is-refreshing" : manualRefreshIsCoolingDown ? "is-cooldown" : ""
-          }`}
-          onClick={requestManualRefresh}
-          aria-label={manualRefreshButtonLabel}
-          title={manualRefreshButtonLabel}
-          aria-busy={manualRefreshIsRefreshing}
-          aria-disabled={manualRefreshButtonDisabled}
-          disabled={manualRefreshButtonDisabled}
-        >
-          {manualRefreshIsCoolingDown ? (
-            <span className="refresh-cooldown-countdown" aria-hidden="true">
-              {manualRefreshCooldownSeconds}s
-            </span>
-          ) : (
-            <RefreshCw size={18} />
-          )}
-        </button>
-        <button className="floating-action-item" onClick={() => setUserSettingsOpen(true)} aria-label="Browser settings" title="Browser settings"><Settings size={18} /></button>
-        <button className="floating-action-item notification-button" onClick={() => { setNoticeOpen(true); markNotificationLogRead(); }} aria-label="Updates" title="Updates"><Bell size={18} />{notificationLog.some((notice) => !notice.read) ? <b>{notificationLog.filter((notice) => !notice.read).length}</b> : null}</button>
-        <button className="floating-action-item floating-help" onClick={() => setHelpOpen(true)} aria-label="Help and application information" title="Help and application information">?</button>
-      </div>
       {!tourVisible ? <ToastStack notices={toasts} onDismiss={dismissToast} /> : null}
       {noticeOpen ? <NotificationDrawer notices={notificationLog} onClose={() => setNoticeOpen(false)} onOpenNotice={(notice) => { setNoticeOpen(false); navigate(notice.destination ?? "activity"); }} /> : null}
       {commandOpen ? <CommandPalette adminAuthenticated={Boolean(adminAuth.authenticated)} access={effectiveAccess} members={data.members} onClose={() => setCommandOpen(false)} onNavigate={(panel, tab) => navigate(panel, tab)} onSelectMember={setSelectedMemberId} /> : null}
@@ -1317,7 +1287,7 @@ export function BotControlApp({
   }, [initialConfig, initialPublicSettings, reloadSequence]);
   if (state.status === "loading") return <main><AppSkeleton /></main>;
   if (state.status === "error") return (
-    <main className="bot-control-page route-entry-state">
+    <main className="bot-control-page route-entry-state surface-mode-bot">
       <section className="empty-state panel" role="alert">
         <strong>Discord Bot Control could not be loaded safely.</strong>
         <span>{state.error}</span>
@@ -1339,7 +1309,7 @@ export function BotControlApp({
     },
   };
   return (
-    <main className="bot-control-page">
+    <main className="bot-control-page surface-mode-bot">
       {renderConsole
         ? renderConsole(consoleProps)
         : <AdminPanel key={state.status} {...consoleProps} botOnly headingLevel={1} />}

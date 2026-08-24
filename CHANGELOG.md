@@ -9,6 +9,21 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.1] - 2026-08-24
+
+### Added
+
+- Added contextual workspace modes and an anchored application utility bar across the maintained app.
+- Added a regional best-price comparison book to Global Market item browsing.
+- Added a health-and-exceptions summary to the Discord Bot and Admin console.
+
+### Changed
+
+- Refreshed the whole application with the Obsidian Ledger visual system for denser, clearer settlement operations.
+- Reworked Dashboard into a settlement command centre that prioritises current health and exceptions.
+- Reworked Global Market into a search-first split exchange with persistent catalogue context and a mobile drill-in flow.
+- Improved Map immersion, mobile regional-price scanning, responsive page density, and selected-item clarity.
+
 ## [0.61.1-beta.1] - 2026-08-23
 
 ### Fixed

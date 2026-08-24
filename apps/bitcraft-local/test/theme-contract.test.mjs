@@ -144,7 +144,7 @@ test("PageHeader is shared by exactly the first seven canonical routes", () => {
   assert.match(component, /actions\?:\s*React\.ReactNode/);
 
   const routes = [
-    ["DashboardPage.tsx", "Dashboard"],
+    ["DashboardPage.tsx", "Settlement command centre"],
     ["MembersPage.tsx", "Members"],
     ["SkillsPage.tsx", "Professions"],
     ["ProductionPage.tsx", "Craft Monitor"],
