@@ -1529,7 +1529,10 @@
   .market-browse:not(.has-selection) .market-instrument-pane { display: none; }
   .market-browse.has-selection .market-catalog-pane { display: none; }
   .market-instrument-pane { padding: var(--space-3); }
-  .market-back-results { display: inline-flex; min-height: 42px; }
+  .market-item-heading { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .market-back-results { display: inline-flex; justify-self: start; min-height: 42px; white-space: nowrap; }
+  .market-item-identity { width: 100%; }
+  .market-item-actions { width: 100%; justify-content: flex-start; }
   .market-regional-book { overflow: visible; border: 0; background: transparent; }
   .market-regional-book table, .market-regional-book tbody { display: block; width: 100%; }
   .market-regional-book thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

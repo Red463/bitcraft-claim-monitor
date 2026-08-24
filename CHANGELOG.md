@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.4] - 2026-08-24
+
+### Fixed
+
+- Improved the selected Global Market item header on phones so navigation, identity, and actions no longer compete for one cramped row.
+
 ## [0.62.0-beta.3] - 2026-08-24
 
 ### Fixed
