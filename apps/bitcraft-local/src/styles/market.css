@@ -1484,7 +1484,7 @@
 /* Obsidian Ledger: search-first Split Exchange */
 .global-market-page,
 .market-page { --market-grid-line: color-mix(in srgb, var(--line-subtle) 80%, transparent); }
-.global-market-workspace.market-workspace { min-width: 0; }
+.global-market-workspace.market-workspace { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .market-split-exchange {
   display: grid;
   grid-template-columns: minmax(300px, .78fr) minmax(520px, 1.22fr);

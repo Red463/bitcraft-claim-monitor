@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.3] - 2026-08-24
+
+### Fixed
+
+- Fixed the selected Global Market instrument being clipped on phones when live order data widened its implicit grid track.
+
 ## [0.62.0-beta.2] - 2026-08-24
 
 ### Fixed

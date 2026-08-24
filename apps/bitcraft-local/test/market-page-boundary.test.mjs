@@ -125,4 +125,5 @@ test("Market selection and regional comparison remain explicit on desktop and ph
   assert.doesNotMatch(browse, /market-region-summaries/);
   assert.match(css, /@media \(max-width:\s*720px\)[\s\S]*\.market-regional-book \.market-region-card\s*\{[^}]*display:\s*grid/s);
   assert.doesNotMatch(css, /\.market-regional-book table\s*\{[^}]*min-width:\s*610px/s);
+  assert.match(css, /\.global-market-workspace\.market-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
 });
