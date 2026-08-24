@@ -956,8 +956,10 @@
 .market-item-detail {
   padding: 14px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
+.market-item-detail > * { min-width: 0; }
 
 .market-item-detail > header {
   display: flex;
