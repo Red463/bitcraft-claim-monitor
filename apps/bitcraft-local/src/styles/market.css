@@ -471,6 +471,18 @@
   }
 }
 
+@media (max-width: 520px) {
+  .market-command-panel .command-filter-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .market-command-panel .market-command-note {
+    line-height: 1.45;
+  }
+}
+
 /* Global market command centre */
 .global-market-page {
   gap: 14px;

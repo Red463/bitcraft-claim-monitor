@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.7] - 2026-08-25
+
+### Fixed
+
+- Improved the Local Market command panel on phones so its section label and explainer remain easy to scan.
+
 ## [0.62.0-beta.6] - 2026-08-24
 
 ### Fixed
