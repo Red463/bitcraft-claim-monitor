@@ -1,11 +1,15 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { FeaturebaseProvider } from "featurebase-js/react";
-import { loadBootstrap, type BootstrapPayload } from "./api/bootstrap";
+import { loadHostProfile, rootForProfile, type FrontendProfile } from "./api/profile";
 import { RouteLoadingState } from "./components/main/RouteLoadingState";
 import "./styles.css";
 
-const App = React.lazy(() => import("./AppShell"));
+const TimbersteelRoot = React.lazy(() => import("./TimbersteelRoot"));
+const PublicRoot = React.lazy(() => import("./public/PublicRoot"));
+
+function EntryLoadingState() {
+  return <main className="route-entry-state"><RouteLoadingState /></main>;
+}
 
 class RouteErrorBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -29,54 +33,28 @@ class RouteErrorBoundary extends React.Component<{ children: React.ReactNode }, 
 }
 
 function Root() {
-  const [bootstrap, setBootstrap] = React.useState<BootstrapPayload | null>(null);
-  const [bootstrapError, setBootstrapError] = React.useState("");
-  const [bootstrapAttempt, setBootstrapAttempt] = React.useState(0);
+  const [profile, setProfile] = React.useState<FrontendProfile | null>(null);
+  const [error, setError] = React.useState("");
 
   React.useEffect(() => {
     const controller = new AbortController();
-    setBootstrap(null);
-    setBootstrapError("");
-    loadBootstrap(fetch, controller.signal)
-      .then((payload) => {
-        if (!controller.signal.aborted) setBootstrap(payload);
+    loadHostProfile(fetch, controller.signal)
+      .then((nextProfile) => {
+        if (!controller.signal.aborted) setProfile(nextProfile);
       })
-      .catch((error) => {
-        if (!controller.signal.aborted) setBootstrapError(error instanceof Error ? error.message : "Unable to start the app.");
+      .catch((reason) => {
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to load the application profile.");
       });
     return () => controller.abort();
-  }, [bootstrapAttempt]);
+  }, []);
 
-  const entry = bootstrap ? (
-    <React.Suspense fallback={<main className="route-entry-state"><RouteLoadingState /></main>}>
-      <App initialBootstrap={bootstrap} />
-    </React.Suspense>
-  ) : bootstrapError ? (
-    <main className="route-entry-state">
-      <section className="empty-state panel" role="alert">
-        <strong>The application could not be started.</strong>
-        <span>{bootstrapError}</span>
-        <button className="toolbar-button primary" onClick={() => setBootstrapAttempt((attempt) => attempt + 1)}>Try again</button>
-      </section>
-    </main>
-  ) : <main className="route-entry-state"><RouteLoadingState label="Starting application" /></main>;
+  if (error) return <main className="route-entry-state" role="alert">{error}</main>;
+  if (!profile) return <EntryLoadingState />;
 
-  return (
-    <FeaturebaseProvider
-      appId="6a78ff10ace030d1aa7582f2"
-      featurebaseJwt={bootstrap?.auth.featurebaseJwt ?? undefined}
-      theme="dark"
-      language="en"
-      alignment="right"
-    >
-      <RouteErrorBoundary>
-        {entry}
-      </RouteErrorBoundary>
-    </FeaturebaseProvider>
-  );
+  // The server validates the host for every request. This response only picks
+  // an isolated frontend entrypoint; it never grants client-side authority.
+  const entry = rootForProfile(profile) === "public" ? <PublicRoot /> : <TimbersteelRoot />;
+  return <RouteErrorBoundary><React.Suspense fallback={<EntryLoadingState />}>{entry}</React.Suspense></RouteErrorBoundary>;
 }
 
-// Keep this file as the React bootstrapping boundary only. App-level routing,
-// settings, and data coordination live in AppShell so future maintainers do not
-// have to trace startup behaviour through multiple entrypoints.
 createRoot(document.getElementById("root")!).render(<Root />);

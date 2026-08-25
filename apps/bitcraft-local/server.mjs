@@ -10,6 +10,8 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseMemberPermissions } from "./shared/member-permissions.mjs";
+import { resolveRequestHostProfile } from "./src/server/public/hostProfiles.mjs";
+import { publicFeatureFlags, routeHostProfileRequest } from "./src/server/public/router.mjs";
 import { mimeType, routeGroup, securityHeaders, shouldFallbackToFrontend, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
 import { createGameIconFallbackService, serveGameIconRequest } from "./src/server/gameIconFallback.mjs";
@@ -7828,7 +7830,20 @@ const server = createServer(async (req, res) => {
     // Route order matters: public health/proxy/config endpoints are handled
     // before authenticated admin routes, while static frontend fallback stays at
     // the end so API typos do not accidentally return index.html.
-    const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    const hostProfile = resolveRequestHostProfile(req, {
+      isProduction,
+      allowDevelopmentHosts: !isProduction || isTestRuntime,
+    });
+    if (!hostProfile) return send(res, 421, { error: "Unknown host" });
+    const url = new URL(req.url ?? "/", "http://localhost");
+    if (routeHostProfileRequest({
+      profile: hostProfile,
+      method: req.method,
+      url,
+      res,
+      send,
+      features: publicFeatureFlags(),
+    })) return;
     const routeMeasurement = measuredRoutePaths.has(url.pathname)
       ? routePerformanceTelemetry.observe(req, res, { path: url.pathname })
       : null;
