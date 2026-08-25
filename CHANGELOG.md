@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.17] - 2026-08-25
+
+### Fixed
+
+- Prevented the web process from reporting healthy worker-owned Market subscriptions as stale or disconnected.
+
 ## [0.62.0-beta.16] - 2026-08-25
 
 ### Changed

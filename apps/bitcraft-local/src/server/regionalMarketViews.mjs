@@ -197,6 +197,12 @@ export function regionalMarketStatus(snapshot, options = {}) {
   const knownAges = ages.filter((age) => age != null);
   const ageMs = knownAges.length ? Math.max(...knownAges) : null;
   const runtime = record(options.runtimeHealth);
+  const persistedSubscription = record(runtime.subscription);
+  const persistedConnectedAndApplied = runtime.persisted === true
+    && persistedSubscription.connected === true
+    && persistedSubscription.applied === true
+    && !persistedSubscription.lastError
+    && !runtime.lastError;
   const pool = record(runtime.pool);
   const sessions = Array.isArray(pool.sessions) ? pool.sessions.map(record) : [];
   const sessionHealth = (regionId) => {
@@ -208,10 +214,12 @@ export function regionalMarketStatus(snapshot, options = {}) {
     const regionId = String(region.regionId);
     const age = ages[index];
     const health = sessionHealth(regionId);
-    const connectedAndApplied = runtime.running === true
+    const connectedAndApplied = persistedConnectedAndApplied || (
+      runtime.running === true
       && health?.connected === true
       && health.applied === true
-      && !health.lastError;
+      && !health.lastError
+    );
     if (age == null) {
       freshness = "stale";
       warnings.push(`Relay regional market region ${regionId} has no valid receive time.`);

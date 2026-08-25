@@ -197,6 +197,9 @@ test("Global Market keeps enough live regional sessions for the complete Relay t
   assert.match(server, /RELAY_MARKET_REGION_MAX_CLOSED_LISTINGS \?\? 25_000/);
   assert.match(server, /RELAY_MARKET_REGION_MAX_STALLS \?\? 5_000/);
   assert.match(server, /RELAY_MARKET_REGION_MAX_APPLY_ROWS \?\? 50_000/);
+  assert.match(server, /persistRelayRuntimeDomainHeartbeats\([\s\S]*regionalMarketRuntimeHeartbeat\(\)[\s\S]*\["regional-market"\]/);
+  assert.match(server, /runtimeHealth:\s*gameDataProviderHealth\(\)\.regionalMarket/);
+  assert.match(server, /runtimeHealth:\s*gameDataProviderHealth\(\)\.globalCatalog/);
 });
 
 test("Browse follows the central page cycle and keeps history non-blocking", () => {

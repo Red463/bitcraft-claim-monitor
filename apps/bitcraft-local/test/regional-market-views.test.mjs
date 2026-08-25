@@ -620,6 +620,35 @@ test("market response freshness includes the older global catalog dependency", (
   });
 });
 
+test("regional market status trusts a fresh persisted worker heartbeat in the split web process", () => {
+  const status = views.regionalMarketStatus({
+    data: {
+      activeRegionIds: ["3"],
+      regions: [{ regionId: "3", receivedAt: "2026-07-30T11:55:00.000Z" }],
+    },
+    confidence: "authoritative",
+    warnings: [],
+  }, {
+    allowedRegionIds: ["3"],
+    nowMs: Date.parse("2026-07-30T12:00:00.000Z"),
+    staleAfterMs: 60_000,
+    runtimeHealth: {
+      running: false,
+      persisted: true,
+      lastError: null,
+      subscription: {
+        connected: true,
+        applied: true,
+        lastError: null,
+      },
+    },
+  });
+
+  assert.equal(status.freshness, "fresh");
+  assert.deepEqual(status.warnings, []);
+  assert.deepEqual(status.errors, []);
+});
+
 test("connected global catalog remains live when its data has not changed", () => {
   assert.deepEqual(views.globalCatalogStatus({
     receivedAt: "2026-07-30T11:58:00.000Z",
