@@ -31,6 +31,14 @@ test("public name and exact-ID search hints select their server claim IDs", () =
   assert.equal(publicSettlementPath({ entityId: "42" }), null, "legacy entityId must not become a public URL authority");
 });
 
+test("public route declarations include every runtime route helper used by the shell", () => {
+  const declarations = readFileSync(new URL("../src/public/routes.d.mts", import.meta.url), "utf8");
+  assert.match(declarations, /export function publicSettlementPath\(/);
+  for (const routeId of ["members", "inventory", "crafts", "calculator", "account", "settings", "help", "terms", "privacy"]) {
+    assert.match(declarations, new RegExp(`"${routeId}"`), `${routeId} must remain represented in the public route declaration`);
+  }
+});
+
 test("recent settlements and view preferences stay in the public claim namespace", () => {
   const storage = new Map();
   const localStorage = {

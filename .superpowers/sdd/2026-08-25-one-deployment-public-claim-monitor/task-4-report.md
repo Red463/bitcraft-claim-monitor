@@ -142,3 +142,60 @@ corepack pnpm --filter @workspace/bitcraft-local run build
 ```
 
 Output: passed, including frontend TypeScript validation and Vite build.
+
+## Fix round 2/5 — route declaration parity
+
+### Finding and fix
+
+`PublicAppShell.tsx` imports the runtime `publicSettlementPath()` helper, but the TypeScript declaration for `routes.mjs` did not export it. The declaration also lagged the public runtime route matrix.
+
+- Declared `publicSettlementPath()` with its public hint input and nullable route result.
+- Expanded `PublicRouteId` to include the existing public settlement views, calculator, account/settings, and help/legal paths while retaining every approved Plans/collaboration skeleton route.
+- Added a focused declaration parity test for the helper and public route IDs used by the shell.
+
+### RED
+
+```sh
+node --experimental-strip-types --test test/public-shell.test.mjs test/public-router.test.mjs
+```
+
+Output: `7 passed, 1 failed`. Expected declaration mismatch:
+
+```txt
+The input did not match the regular expression /export function publicSettlementPath\(/.
+```
+
+### GREEN
+
+```sh
+node --experimental-strip-types --test test/public-shell.test.mjs test/public-router.test.mjs
+```
+
+Output: `8 passed, 0 failed`.
+
+```sh
+corepack pnpm --filter @workspace/bitcraft-local run typecheck
+```
+
+Output:
+
+```txt
+$ tsc -p tsconfig.json --noEmit
+```
+
+Result: passed.
+
+```sh
+corepack pnpm --filter @workspace/bitcraft-local run build
+```
+
+Output:
+
+```txt
+$ corepack pnpm run build:server && corepack pnpm run verify:assets && tsc -p tsconfig.json --noEmit && vite build && node scripts/verify-relay-runtime-boundaries.mjs
+$ corepack pnpm run build:provider && corepack pnpm run build:bindings
+$ tsc -p tsconfig.server.json
+$ tsc -p tsconfig.bindings.json && vite build --config vite.bindings.config.ts
+```
+
+Result: passed.
