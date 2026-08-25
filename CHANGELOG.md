@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.15] - 2026-08-25
+
+### Changed
+
+- Clarified Global Market pricing with in-game sell-order and buy-order terminology.
+- Renamed trading route columns to “Buy from” and “Sell to” so each step describes the action to take.
+
 ## [0.62.0-beta.14] - 2026-08-25
 
 ### Changed

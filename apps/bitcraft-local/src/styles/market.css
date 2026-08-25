@@ -1654,10 +1654,10 @@
   .market-regional-book .market-region-card > * { display: grid; gap: 2px; padding: 0; border: 0; text-align: left; white-space: normal; }
   .market-regional-book .market-region-card > th { grid-column: 1 / -1; padding-bottom: 8px; border-bottom: 1px solid var(--line-subtle); box-shadow: none; }
   .market-regional-book .market-region-card td::before { color: var(--muted); font: 700 9px/1.2 var(--font-data); letter-spacing: .08em; text-transform: uppercase; }
-  .market-regional-book .market-region-card td:nth-child(2)::before { content: "Best ask"; }
-  .market-regional-book .market-region-card td:nth-child(3)::before { content: "Sell qty"; }
-  .market-regional-book .market-region-card td:nth-child(4)::before { content: "Best bid"; }
-  .market-regional-book .market-region-card td:nth-child(5)::before { content: "Buy qty"; }
+  .market-regional-book .market-region-card td:nth-child(2)::before { content: "Lowest sell order"; }
+  .market-regional-book .market-region-card td:nth-child(3)::before { content: "Sell quantity"; }
+  .market-regional-book .market-region-card td:nth-child(4)::before { content: "Highest buy order"; }
+  .market-regional-book .market-region-card td:nth-child(5)::before { content: "Buy quantity"; }
   .market-regional-book .market-region-card td:nth-child(6)::before { content: "Orders"; }
   .market-regional-book .market-region-card td:nth-child(7)::before { content: "Seen"; }
 }

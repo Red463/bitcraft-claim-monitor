@@ -56,8 +56,8 @@ export function MarketOverview({
             rows={deals.slice(0, 8)}
             columns={[
               ["Item", (deal) => <button className="market-item-link" onClick={() => onOpenItem(itemShape(deal))}><ItemLabel item={itemShape({ ...deal, iconAssetName: deal.itemIconAssetName })} /></button>, (deal) => String(deal.itemName ?? "")],
-              ["Buy at", (deal) => <span className="market-price-location"><strong className={marketPriceClass("ask")}>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span>, (deal) => deal.buyPrice],
-              ["Sell at", (deal) => <span className="market-price-location"><strong className={marketPriceClass("bid")}>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span>, (deal) => deal.sellPrice],
+              ["Buy from", (deal) => <span className="market-price-location"><strong className={marketPriceClass("ask")}>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span>, (deal) => deal.buyPrice],
+              ["Sell to", (deal) => <span className="market-price-location"><strong className={marketPriceClass("bid")}>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span>, (deal) => deal.sellPrice],
               ["Profit", (deal) => <span className={marketPriceClass("profit", deal.profit)}>{formatGoldAmount(deal.profit)}</span>, (deal) => deal.profit],
               ["Qty", (deal) => formatNumber(deal.maxQuantity), (deal) => deal.maxQuantity],
             ]}

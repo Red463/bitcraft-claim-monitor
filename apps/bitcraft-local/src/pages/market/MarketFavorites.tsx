@@ -80,7 +80,7 @@ export function MarketFavorites({
         const spread = row.bestSell != null && row.bestBuy != null
           ? (exactMarketInteger(row.bestSell) - exactMarketInteger(row.bestBuy)).toString()
           : null;
-        return <button key={`${row.itemType}:${row.itemId}`} onClick={() => onOpenItem(itemShape(row))}><ItemLabel item={itemShape(row)} /><span>Sell <b className={marketPriceClass(row.bestSell == null ? "neutral" : "ask")}>{row.bestSell == null ? "—" : formatGoldAmount(row.bestSell)}</b></span><span>Buy <b className={marketPriceClass(row.bestBuy == null ? "neutral" : "bid")}>{row.bestBuy == null ? "—" : formatGoldAmount(row.bestBuy)}</b></span><span>Spread <b className={marketPriceClass("profit", spread)}>{spread == null ? "—" : formatGoldAmount(spread)}</b></span><small>{formatNumber(row.currentOrderCount)} current orders</small></button>;
+        return <button key={`${row.itemType}:${row.itemId}`} onClick={() => onOpenItem(itemShape(row))}><ItemLabel item={itemShape(row)} /><span>Lowest sell <b className={marketPriceClass(row.bestSell == null ? "neutral" : "ask")}>{row.bestSell == null ? "—" : formatGoldAmount(row.bestSell)}</b></span><span>Highest buy <b className={marketPriceClass(row.bestBuy == null ? "neutral" : "bid")}>{row.bestBuy == null ? "—" : formatGoldAmount(row.bestBuy)}</b></span><span>Spread <b className={marketPriceClass("profit", spread)}>{spread == null ? "—" : formatGoldAmount(spread)}</b></span><small>{formatNumber(row.currentOrderCount)} current orders</small></button>;
       })}</div> : !loading && !error ? <div className="empty-state compact"><Star size={22} /><span>Save items in Browse to track live prices here, then configure deal alerts from Saved.</span></div> : null}
     </section>
   );

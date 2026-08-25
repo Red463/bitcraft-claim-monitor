@@ -133,8 +133,8 @@ export function MarketDeals({
         rowLimit={250}
         columns={[
           ["Item", (deal) => <ItemLabel item={{ ...deal, name: deal.itemName, iconAssetName: deal.itemIconAssetName }} />, (deal) => String(deal.itemName ?? "")],
-          ["Buy at", (deal) => <span className="market-price-location"><strong className={marketPriceClass("ask")}>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span>, (deal) => deal.buyPrice],
-          ["Sell at", (deal) => <span className="market-price-location"><strong className={marketPriceClass("bid")}>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span>, (deal) => deal.sellPrice],
+          ["Buy from", (deal) => <span className="market-price-location"><strong className={marketPriceClass("ask")}>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span>, (deal) => deal.buyPrice],
+          ["Sell to", (deal) => <span className="market-price-location"><strong className={marketPriceClass("bid")}>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span>, (deal) => deal.sellPrice],
           ["Trade depth", (deal) => <span className="market-trade-depth"><span><small>Available</small>{formatNumber(deal.buyQuantity)}</span><span><small>Wanted</small>{formatNumber(deal.sellQuantity)}</span><span><small>Max trade</small><strong>{formatNumber(deal.maxQuantity)}</strong></span></span>, (deal) => deal.maxQuantity],
           ["Distance", (deal) => deal.distance == null ? "—" : `${formatNumber(deal.distance)} tiles`, (deal) => deal.distance ?? Number.MAX_SAFE_INTEGER],
           ["Unit profit", (deal) => <span className={marketPriceClass("profit", deal.profit)}>{formatGoldAmount(deal.profit)}</span>, (deal) => deal.profit],

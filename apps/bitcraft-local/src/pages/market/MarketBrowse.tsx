@@ -308,7 +308,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
         </label>
         {mode === "browse" ? <>
           <label className="field"><span>Category</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">All categories</option>{catalogState.categories.map((entry) => <option key={entry}>{entry}</option>)}</select></label>
-          <label className="field"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)}><option value="relevance">Relevance</option><option value="name">Item name</option><option value="orders">Order count</option><option value="lowest-sell">Lowest sell</option><option value="highest-buy">Highest buy</option><option value="spread">Smallest spread</option></select></label>
+          <label className="field"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)}><option value="relevance">Relevance</option><option value="name">Item name</option><option value="orders">Order count</option><option value="lowest-sell">Lowest sell order</option><option value="highest-buy">Highest buy order</option><option value="spread">Smallest spread</option></select></label>
           <label className="field market-availability-field"><span>Availability</span><select value={availability} onChange={(event) => setAvailability(event.target.value as MarketAvailability)}><option value="any">Any</option><option value="sell">For sale</option><option value="buy">Wanted</option><option value="both">Both</option></select></label>
           <div className="market-filter-actions"><button className="toolbar-button" type="button" disabled={!hasCatalogFilters} onClick={clearCatalogFilters}><X size={14} /> Clear filters</button></div>
         </> : null}
@@ -321,8 +321,8 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
             <button className={`market-catalog-result ${selectedKey?.itemType === item.itemType && selectedKey?.itemId === item.id ? "active" : ""}`} aria-pressed={selectedKey?.itemType === item.itemType && selectedKey?.itemId === item.id} type="button" key={`${item.itemType}-${item.id}`} onClick={() => chooseItem(item)}>
               <ItemIcon item={item} />
               <span className="market-catalog-result-name"><strong>{item.name}</strong><small>{item.category || "Uncategorised"}</small></span>
-              <span className="market-catalog-quote market-catalog-quote-primary"><small>Lowest sell</small><strong className={marketPriceClass(item.lowestSellPrice == null ? "neutral" : "ask")}>{item.lowestSellPrice == null ? "Unavailable" : formatGoldAmount(item.lowestSellPrice)}</strong><small>{item.lowestSellLocation || "No seller location"}</small></span>
-              <span className="market-catalog-quote market-catalog-quote-secondary"><small>Highest buy</small><strong className={marketPriceClass(item.highestBuyPrice == null ? "neutral" : "bid")}>{item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount(item.highestBuyPrice)}</strong><small>{item.highestBuyLocation || "No buyer location"}</small></span>
+              <span className="market-catalog-quote market-catalog-quote-primary"><small>Lowest sell order</small><strong className={marketPriceClass(item.lowestSellPrice == null ? "neutral" : "ask")}>{item.lowestSellPrice == null ? "Unavailable" : formatGoldAmount(item.lowestSellPrice)}</strong><small>{item.lowestSellLocation || "No seller location"}</small></span>
+              <span className="market-catalog-quote market-catalog-quote-secondary"><small>Highest buy order</small><strong className={marketPriceClass(item.highestBuyPrice == null ? "neutral" : "bid")}>{item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount(item.highestBuyPrice)}</strong><small>{item.highestBuyLocation || "No buyer location"}</small></span>
               <span className="market-catalog-quote market-catalog-quote-secondary"><small>Spread</small><strong className={marketPriceClass("profit", item.lowestSellPrice == null || item.highestBuyPrice == null ? null : (exactMarketInteger(item.lowestSellPrice) - exactMarketInteger(item.highestBuyPrice)).toString())}>{item.lowestSellPrice == null || item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount((exactMarketInteger(item.lowestSellPrice) - exactMarketInteger(item.highestBuyPrice)).toString())}</strong><small>{formatNumber(item.orderCount)} current orders</small></span>
             </button>
           ))}
@@ -331,7 +331,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       ) : null}
       </section>
       <section className="market-instrument-pane" aria-label="Selected item regional market">
-      {!selectedItem ? <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>Choose an item to compare regions</strong><span>Select an item to compare the best live sell and buy prices across active regions.</span></div> : (
+      {!selectedItem ? <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>Choose an item to compare regions</strong><span>Select an item to compare the lowest sell orders and highest buy orders across active regions.</span></div> : (
         <div className="market-item-detail">
           <header>
             <div className="market-item-heading">
@@ -356,13 +356,13 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
           {freshnessNotice ? <div className="info">{freshnessNotice}</div> : null}
           {detailState.loading && !detailState.detail ? <div className="market-loading-strip">Loading live orders and locally observed history…</div> : null}
           <div className="metric-grid market-order-summary">
-            <MiniStat icon={<ArrowDownUp />} label="Best Sell" value={<span className={marketPriceClass(bestSell == null ? "neutral" : "ask")}>{bestSell == null ? "—" : `${formatNumber(bestSell)}g`}</span>} />
-            <MiniStat icon={<ArrowDownUp />} label="Best Buy" value={<span className={marketPriceClass(bestBuy == null ? "neutral" : "bid")}>{bestBuy == null ? "—" : `${formatNumber(bestBuy)}g`}</span>} />
+            <MiniStat icon={<ArrowDownUp />} label="Lowest Sell Order" value={<span className={marketPriceClass(bestSell == null ? "neutral" : "ask")}>{bestSell == null ? "—" : `${formatNumber(bestSell)}g`}</span>} />
+            <MiniStat icon={<ArrowDownUp />} label="Highest Buy Order" value={<span className={marketPriceClass(bestBuy == null ? "neutral" : "bid")}>{bestBuy == null ? "—" : `${formatNumber(bestBuy)}g`}</span>} />
             <MiniStat icon={<ArrowDownUp />} label="Spread" value={<span className={marketPriceClass("profit", spread)}>{spread == null ? "—" : `${formatNumber(spread)}g`}</span>} />
           </div>
-          <div className="market-depth-summary" aria-label="Current market depth"><span><small>Liquidity</small><strong>{formatNumber(orders.reduce((sum, order) => sum + exactMarketInteger(order.quantity), 0n))} units</strong></span><span><small>Orders</small><strong>{formatNumber(sells.length)} sell · {formatNumber(buys.length)} buy</strong></span><span><small>Best sell location</small><strong>{bestSellOrder?.claimName || bestSellOrder?.regionName || "Unavailable"}</strong></span><span><small>Best buy location</small><strong>{bestBuyOrder?.claimName || bestBuyOrder?.regionName || "Unavailable"}</strong></span></div>
+          <div className="market-depth-summary" aria-label="Current market depth"><span><small>Liquidity</small><strong>{formatNumber(orders.reduce((sum, order) => sum + exactMarketInteger(order.quantity), 0n))} units</strong></span><span><small>Orders</small><strong>{formatNumber(sells.length)} sell orders · {formatNumber(buys.length)} buy orders</strong></span><span><small>Lowest sell location</small><strong>{bestSellOrder?.claimName || bestSellOrder?.regionName || "Unavailable"}</strong></span><span><small>Highest buy location</small><strong>{bestBuyOrder?.claimName || bestBuyOrder?.regionName || "Unavailable"}</strong></span></div>
           {regionalQuotes.length ? <div className="market-regional-book table-wrap" role="region" aria-label="Regional order comparison" tabIndex={0}>
-            <table><thead><tr><th>Region</th><th>Best ask</th><th>Sell qty</th><th>Best bid</th><th>Buy qty</th><th>Orders</th><th>Seen</th></tr></thead><tbody>
+            <table><thead><tr><th>Region</th><th>Lowest sell order</th><th>Sell quantity</th><th>Highest buy order</th><th>Buy quantity</th><th>Orders</th><th>Seen</th></tr></thead><tbody>
               {regionalQuotes.map((quote, index) => <tr className="market-region-card" key={quote.regionKey}>
                 <th scope="row"><span>{index === 0 && quote.bestSell != null ? "Best price" : "Region"}</span>{quote.regionName}</th>
                 <td><span className={marketPriceClass(quote.bestSell == null ? "neutral" : "ask")}>{quote.bestSell == null ? "—" : formatGoldAmount(quote.bestSell)}</span></td><td>{formatNumber(quote.sellQuantity)}</td>
@@ -377,7 +377,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
           </div>
           {detailTab === "orders" ? <>
             <div className="market-order-filters">
-              <div className="tabs market-order-tabs"><button className={orderTab === "sell" ? "active" : ""} onClick={() => { setOrderTab("sell"); setPage(1); }}>Sell ({sells.length})</button><button className={orderTab === "buy" ? "active" : ""} onClick={() => { setOrderTab("buy"); setPage(1); }}>Buy ({buys.length})</button></div>
+              <div className="tabs market-order-tabs"><button className={orderTab === "sell" ? "active" : ""} onClick={() => { setOrderTab("sell"); setPage(1); }}>Sell orders ({sells.length})</button><button className={orderTab === "buy" ? "active" : ""} onClick={() => { setOrderTab("buy"); setPage(1); }}>Buy orders ({buys.length})</button></div>
               <label className="field"><span>Minimum quantity</span><input type="number" min="0" value={minimumQuantity} onChange={(event) => setMinimumQuantity(event.target.value)} /></label>
               {orderTab === "buy" ? <label className="field"><span>Minimum price</span><input type="number" min="0" value={minimumPrice} onChange={(event) => setMinimumPrice(event.target.value)} /></label> : null}
               <label className="field"><span>Settlement or region</span><input value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)} /></label>

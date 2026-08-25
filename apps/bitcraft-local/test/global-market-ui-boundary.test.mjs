@@ -59,9 +59,31 @@ test("Overview top deals uses exact sortable values and omits unproven map data"
 
   assert.match(overview, /<DataTable[\s\S]*scrollLabel="Top global market deals"/);
   assert.match(overview, /\["Item",[\s\S]*deal\.itemName/);
-  assert.match(overview, /\["Buy at",[\s\S]*\(deal\) => deal\.buyPrice/);
+  assert.match(overview, /\["Buy from",[\s\S]*\(deal\) => deal\.buyPrice/);
   assert.match(overview, /\["Profit",[\s\S]*\(deal\) => deal\.profit/);
   assert.doesNotMatch(overview, /\["Map"/);
+});
+
+test("Global Market describes game orders without ask and bid jargon", () => {
+  const overview = source("../src/pages/market/MarketOverview.tsx");
+  const deals = source("../src/pages/market/MarketDeals.tsx");
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+  const favorites = source("../src/pages/market/MarketFavorites.tsx");
+  const css = source("../src/styles/market.css");
+
+  for (const routes of [overview, deals]) {
+    assert.match(routes, /\["Buy from"/);
+    assert.match(routes, /\["Sell to"/);
+  }
+  assert.match(browse, /label="Lowest Sell Order"/);
+  assert.match(browse, /label="Highest Buy Order"/);
+  assert.match(browse, /<th>Lowest sell order<\/th><th>Sell quantity<\/th><th>Highest buy order<\/th><th>Buy quantity<\/th>/);
+  assert.match(browse, />Sell orders \(\{sells\.length\}\)<\/button>/);
+  assert.match(browse, />Buy orders \(\{buys\.length\}\)<\/button>/);
+  assert.match(favorites, /<span>Lowest sell /);
+  assert.match(favorites, /<span>Highest buy /);
+  assert.match(css, /content: "Lowest sell order"/);
+  assert.match(css, /content: "Highest buy order"/);
 });
 
 test("Deals sorts exact current-order values and omits unproven map data", () => {
