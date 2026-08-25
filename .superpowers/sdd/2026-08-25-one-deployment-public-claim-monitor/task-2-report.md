@@ -51,3 +51,29 @@
 ## Concerns
 
 None for Task 2. The smoke launcher remains running at `http://127.0.0.1:18449/` as the normal local verification process.
+
+## Fix round 1 — public API catch-all and production localhost gate
+
+### Findings addressed
+
+- Public hosts now deny every `/api/**` path other than the already-handled `GET /api/profile` and `/api/public/**` namespace. This happens in the host-profile router before the existing downstream routes can inspect sessions.
+- Server startup now permits development host aliases only when `NODE_ENV` is not production. `BITCRAFT_TEST=true` no longer relaxes the production host boundary.
+
+### TDD evidence
+
+1. RED: `node --experimental-strip-types --test test/host-profiles.test.mjs` failed `public host router handles every non-public API path before downstream routing` because the router returned `false` for `/api/future/internal-status`.
+   GREEN: the same test passed after the public `/api/**` catch-all denial was added.
+2. RED: `node --experimental-strip-types --test test/host-profile-boundaries.test.mjs` failed `production rejects public.localhost even in the test runtime` because `/api/profile` returned `200`, not `421`.
+   GREEN: the same test passed after removing the `isTestRuntime` production override.
+
+### Fix verification
+
+Command:
+
+```sh
+node --experimental-strip-types --test test/host-profiles.test.mjs
+node --experimental-strip-types --test test/host-profile-boundaries.test.mjs
+node --experimental-strip-types --test test/public-router.test.mjs
+```
+
+Output: 6 tests passed, 0 failed.

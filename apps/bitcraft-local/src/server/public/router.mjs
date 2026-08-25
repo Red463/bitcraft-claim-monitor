@@ -55,5 +55,7 @@ export function routeHostProfileRequest({ profile, method, url, res, send, featu
     return deny(res, send);
   }
 
+  if (pathname.startsWith("/api/")) return deny(res, send);
+
   return false;
 }

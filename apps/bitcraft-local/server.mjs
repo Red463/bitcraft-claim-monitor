@@ -7832,7 +7832,7 @@ const server = createServer(async (req, res) => {
     // the end so API typos do not accidentally return index.html.
     const hostProfile = resolveRequestHostProfile(req, {
       isProduction,
-      allowDevelopmentHosts: !isProduction || isTestRuntime,
+      allowDevelopmentHosts: !isProduction,
     });
     if (!hostProfile) return send(res, 421, { error: "Unknown host" });
     const url = new URL(req.url ?? "/", "http://localhost");

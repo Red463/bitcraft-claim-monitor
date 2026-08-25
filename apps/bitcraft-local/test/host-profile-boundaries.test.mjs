@@ -16,7 +16,7 @@ async function availablePort() {
   return port;
 }
 
-async function startTestServer(t) {
+async function startTestServer(t, { nodeEnv = "development" } = {}) {
   const port = await availablePort();
   const dataDir = path.join(appDir, `.test-host-profiles-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   await mkdir(dataDir, { recursive: true });
@@ -24,7 +24,7 @@ async function startTestServer(t) {
     cwd: appDir,
     env: {
       ...process.env,
-      NODE_ENV: "development",
+      NODE_ENV: nodeEnv,
       BITCRAFT_TEST: "true",
       LEGAL_CONFIGURATION_CONFIRMED: "true",
       ENABLE_SERVER_POLLING: "false",
@@ -53,7 +53,10 @@ async function startTestServer(t) {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     try {
-      if ((await fetch(`${origin}/api/local/health`)).ok) return origin;
+      const health = nodeEnv === "production"
+        ? await requestAsHost(origin, "/api/local/health", { host: "app.timbersteeltrade.com" })
+        : await fetch(`${origin}/api/local/health`);
+      if (health.status === 200 || health.ok) return origin;
     } catch {
       // Server is still starting.
     }
@@ -113,4 +116,9 @@ test("public hosts receive only the public profile and public API namespace", as
   assert.equal((await requestAsPublicHost(origin, "/bot")).status, 404);
   assert.equal((await requestAsPublicHost(origin, "/?page=admin")).status, 404);
   assert.equal((await requestAsHost(origin, "/api/public/settlements/search?q=oak", { host: "127.0.0.1" })).status, 404);
+});
+
+test("production rejects public.localhost even in the test runtime", async (t) => {
+  const origin = await startTestServer(t, { nodeEnv: "production" });
+  assert.equal((await requestAsPublicHost(origin, "/api/profile")).status, 421);
 });
