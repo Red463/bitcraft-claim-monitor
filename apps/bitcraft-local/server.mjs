@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { parseMemberPermissions } from "./shared/member-permissions.mjs";
 import { resolveRequestHostProfile } from "./src/server/public/hostProfiles.mjs";
 import { publicFeatureFlags, routeHostProfileRequest } from "./src/server/public/router.mjs";
+import { createPublicApiRouter, createPublicCatalogService, createPublicDataService } from "./src/server/public/publicData.mjs";
 import { mimeType, routeGroup, securityHeaders, shouldFallbackToFrontend, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
 import { createGameIconFallbackService, serveGameIconRequest } from "./src/server/gameIconFallback.mjs";
@@ -189,8 +190,13 @@ import {
   mapSnapshotStatusCode,
   publicGenerationEvent,
   mergeClaimInventoryWithBanks,
+  normalizeClaimCraftPayloads,
   normalizeClaimInventory,
+  normalizeClaimPayload,
+  normalizeCitizensPayload,
+  normalizeMembersPayload,
   parseDomainKeys,
+  relayTopologyFromPayloads,
   RelayHttpClient,
   RelayBitCraftProvider,
   RelayClaimMarketRuntime,
@@ -7808,6 +7814,31 @@ async function serveBuiltFrontend(url, method, res) {
   return true;
 }
 
+const publicDataService = createPublicDataService({
+  http: new RelayHttpClient({ baseUrl: relayBaseUrl }),
+  normalizers: {
+    normalizeClaimPayload,
+    normalizeMembersPayload,
+    normalizeCitizensPayload,
+    normalizeClaimInventory,
+    normalizeClaimCraftPayloads,
+  },
+  topologyFromPayloads: relayTopologyFromPayloads,
+});
+const publicCatalogService = createPublicCatalogService({
+  searchEntities: (query, limit) => gameCatalogRepository.searchEntities(query, limit),
+  recipeDetail: recipeDetailFromLocalCatalog,
+});
+const publicApiRequest = createPublicApiRouter({
+  data: publicDataService,
+  catalog: publicCatalogService,
+  serveIcon: (pathname, res) => serveGameIconRequest(
+    pathname.replace("/api/public/game-icon/", "/api/local/game-icon/"),
+    res,
+    gameIconFallbackService,
+  ),
+});
+
 function manualRefreshAccess(req, res) {
   const rawHeader = req.headers[MANUAL_REFRESH_HEADER];
   const refreshId = String(Array.isArray(rawHeader) ? rawHeader[0] ?? "" : rawHeader ?? "").trim();
@@ -7836,13 +7867,14 @@ const server = createServer(async (req, res) => {
     });
     if (!hostProfile) return send(res, 421, { error: "Unknown host" });
     const url = new URL(req.url ?? "/", "http://localhost");
-    if (routeHostProfileRequest({
+    if (await routeHostProfileRequest({
       profile: hostProfile,
       method: req.method,
       url,
       res,
       send,
       features: publicFeatureFlags(),
+      publicRequest: (request) => publicApiRequest({ ...request, address: clientAddress(req) }),
     })) return;
     const routeMeasurement = measuredRoutePaths.has(url.pathname)
       ? routePerformanceTelemetry.observe(req, res, { path: url.pathname })

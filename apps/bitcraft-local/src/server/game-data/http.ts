@@ -37,6 +37,11 @@ export class RelayHttpClient {
     return this.#request(`/claim/${encodeURIComponent(claimId)}`);
   }
 
+  searchClaims(name: string) {
+    const parameters = new URLSearchParams({ name });
+    return this.#request(`/claim?${parameters}`);
+  }
+
   members(claimId: string) {
     return this.#request(`/claim/${encodeURIComponent(claimId)}/members`);
   }

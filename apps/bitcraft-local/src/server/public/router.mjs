@@ -27,7 +27,7 @@ function deny(res, send) {
   return true;
 }
 
-export function routeHostProfileRequest({ profile, method, url, res, send, features = publicFeatureFlags() }) {
+export function routeHostProfileRequest({ profile, method, url, res, send, features = publicFeatureFlags(), publicRequest = null }) {
   const { pathname, searchParams } = url;
 
   if (pathname === "/api/profile") {
@@ -50,8 +50,13 @@ export function routeHostProfileRequest({ profile, method, url, res, send, featu
   ) return deny(res, send);
 
   if (isNamedPath(pathname, "/api/public")) {
-    // Task 3 owns concrete public API handlers. This skeleton intentionally
-    // contains no configured-settlement fallback while the feature is off.
+    if (features.publicProfileEnabled && typeof publicRequest === "function") {
+      const handled = publicRequest({ profile, method, url, res, send });
+      if (handled && typeof handled.then === "function") {
+        return handled.then((resolved) => resolved || deny(res, send));
+      }
+      if (handled) return true;
+    }
     return deny(res, send);
   }
 

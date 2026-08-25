@@ -472,6 +472,23 @@ test("Relay HTTP retries one transient response but never retries a permanent 4x
   assert.equal(permanentCalls, 1);
 });
 
+test("Relay HTTP claim search sends a case-insensitive substring through the documented name query", async () => {
+  const requested = [];
+  const client = new RelayHttpClient({
+    baseUrl: "https://relay.example",
+    fetcher: async (input) => {
+      requested.push(String(input));
+      return Response.json([{ entity_id: "42", name: "Oak Haven", region: 19 }]);
+    },
+    retryDelayMs: 0,
+  });
+
+  assert.deepEqual(await client.searchClaims("Oak & Stone"), [
+    { entity_id: "42", name: "Oak Haven", region: 19 },
+  ]);
+  assert.deepEqual(requested, ["https://relay.example/claim?name=Oak+%26+Stone"]);
+});
+
 test("Relay HTTP requests bounded player detail, inventory, and housing by encoded player ID", async () => {
   const requested = [];
   const client = new RelayHttpClient({

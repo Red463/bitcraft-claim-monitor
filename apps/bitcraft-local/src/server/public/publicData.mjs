@@ -1,0 +1,601 @@
+import { sendJson } from "../httpResponses.mjs";
+
+const UINT64_MAX = 18_446_744_073_709_551_615n;
+
+export class PublicDataError extends Error {
+  constructor(message, status, options = {}) {
+    super(message, options);
+    this.name = "PublicDataError";
+    this.status = status;
+    this.retryAfter = options.retryAfter ?? null;
+  }
+}
+
+export function canonicalUnsigned64(value) {
+  const text = String(value ?? "").trim();
+  if (!/^(?:0|[1-9]\d*)$/.test(text)) return null;
+  try {
+    return BigInt(text) <= UINT64_MAX ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+export function normalizePublicSearchQuery(value) {
+  const normalized = String(value ?? "").normalize("NFKC").trim();
+  if (/^\d+$/.test(normalized)) {
+    const id = canonicalUnsigned64(normalized);
+    if (!id) throw new PublicDataError("Claim ID must be a canonical unsigned 64-bit decimal string.", 400);
+    return { kind: "id", value: id };
+  }
+  const length = [...normalized].length;
+  if (length < 3 || length > 64 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(normalized)) {
+    throw new PublicDataError("Settlement search requires 3-64 visible Unicode characters.", 400);
+  }
+  return { kind: "name", value: normalized };
+}
+
+function wireRecord(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new PublicDataError(`${label} is malformed.`, 502);
+  }
+  return value;
+}
+
+export function publicSettlementHints(value, query) {
+  if (!Array.isArray(value)) throw new PublicDataError("Relay claim search is malformed.", 502);
+  const needle = String(query).normalize("NFKC").toLocaleLowerCase();
+  return value.map((value, index) => {
+    const row = wireRecord(value, `Relay claim search row ${index}`);
+    const claimId = canonicalUnsigned64(row.entity_id);
+    const regionId = canonicalUnsigned64(row.region);
+    const name = String(row.name ?? "").normalize("NFKC").trim();
+    if (!claimId || !regionId || !name || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(name)) {
+      throw new PublicDataError(`Relay claim search row ${index} is malformed.`, 502);
+    }
+    const comparable = name.toLocaleLowerCase();
+    const rank = comparable === needle ? 0 : comparable.startsWith(needle) ? 1 : comparable.includes(needle) ? 2 : 3;
+    const tier = Number(row.tier);
+    return {
+      rank,
+      hint: {
+        claimId,
+        name,
+        regionId,
+        ...(Number.isInteger(tier) && tier >= 0 ? { tier } : {}),
+        ...(String(row.owner_player_username ?? "").trim() ? { ownerName: String(row.owner_player_username).trim() } : {}),
+      },
+    };
+  }).filter(({ rank }) => rank < 3)
+    .sort((left, right) => left.rank - right.rank
+      || left.hint.name.toLocaleLowerCase().localeCompare(right.hint.name.toLocaleLowerCase())
+      || (BigInt(left.hint.claimId) < BigInt(right.hint.claimId) ? -1 : 1))
+    .slice(0, 20)
+    .map(({ hint }) => hint);
+}
+
+export function createBoundedStaleCache({ freshMs, staleMs, maxEntries, maxBytes, maxEntryBytes = maxBytes, now = Date.now, canServeStale = () => true }) {
+  const entries = new Map();
+  const inflight = new Map();
+  let totalBytes = 0;
+
+  function touch(key, entry) {
+    entries.delete(key);
+    entries.set(key, entry);
+  }
+
+  async function load(key, loader) {
+    const cached = entries.get(key);
+    const at = now();
+    if (cached && at - cached.storedAt < freshMs) {
+      touch(key, cached);
+      return { value: cached.value, stale: false, ageMs: at - cached.storedAt };
+    }
+    if (inflight.has(key)) return inflight.get(key);
+    const pending = (async () => {
+      try {
+        const value = await loader();
+        const bytes = Buffer.byteLength(JSON.stringify(value));
+        if (bytes > maxEntryBytes) throw new PublicDataError("Public Relay response exceeds the allowed byte limit.", 503, { retryAfter: 1 });
+        if (bytes <= maxBytes) {
+          const previous = entries.get(key);
+          if (previous) totalBytes -= previous.bytes;
+          const entry = { value, bytes, storedAt: now() };
+          touch(key, entry);
+          totalBytes += bytes;
+          while (entries.size > maxEntries || totalBytes > maxBytes) {
+            const oldestKey = entries.keys().next().value;
+            const oldest = entries.get(oldestKey);
+            entries.delete(oldestKey);
+            totalBytes -= oldest.bytes;
+          }
+        }
+        return { value, stale: false, ageMs: 0 };
+      } catch (error) {
+        const ageMs = cached ? now() - cached.storedAt : Number.POSITIVE_INFINITY;
+        if (cached && ageMs <= staleMs && canServeStale(error)) {
+          touch(key, cached);
+          return {
+            value: cached.value,
+            stale: true,
+            ageMs,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+        throw error;
+      }
+    })();
+    inflight.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      inflight.delete(key);
+    }
+  }
+
+  return {
+    load,
+    stats: () => ({ entries: entries.size, bytes: totalBytes, inflight: inflight.size }),
+  };
+}
+
+export function createPublicRelayGate({ maxActive = 4, maxQueued = 12 } = {}) {
+  let active = 0;
+  const queued = [];
+
+  function start(entry) {
+    active += 1;
+    Promise.resolve().then(entry.work).then(entry.resolve, entry.reject).finally(() => {
+      active -= 1;
+      const next = queued.shift();
+      if (next) start(next);
+    });
+  }
+
+  function run(work) {
+    if (active >= maxActive && queued.length >= maxQueued) {
+      return Promise.reject(new PublicDataError("Public Relay request queue is full.", 503, { retryAfter: 1 }));
+    }
+    return new Promise((resolve, reject) => {
+      const entry = { work, resolve, reject };
+      if (active < maxActive) start(entry);
+      else queued.push(entry);
+    });
+  }
+
+  return { run, stats: () => ({ active, queued: queued.length }) };
+}
+
+const PUBLIC_IP_LIMITS = Object.freeze({
+  search: { burst: 6, burstMs: 30_000, sustained: 30, sustainedMs: 600_000 },
+  snapshot: { burst: 4, burstMs: 30_000, sustained: 20, sustainedMs: 600_000 },
+});
+
+export function createPublicIpRateLimiter({ now = Date.now } = {}) {
+  const buckets = new Map();
+  function take(ip, kind) {
+    const policy = PUBLIC_IP_LIMITS[kind];
+    if (!policy) throw new TypeError(`Unknown public rate-limit kind ${kind}`);
+    const at = now();
+    const key = `${kind}:${String(ip)}`;
+    const bucket = buckets.get(key) ?? [];
+    while (bucket.length && bucket[0] <= at - policy.sustainedMs) bucket.shift();
+    const burst = bucket.filter((entry) => entry > at - policy.burstMs);
+    if (burst.length >= policy.burst || bucket.length >= policy.sustained) {
+      const waits = [];
+      if (burst.length >= policy.burst) waits.push(burst[0] + policy.burstMs - at);
+      if (bucket.length >= policy.sustained) waits.push(bucket[0] + policy.sustainedMs - at);
+      buckets.set(key, bucket);
+      return { allowed: false, retryAfter: Math.max(1, Math.ceil(Math.max(...waits) / 1000)) };
+    }
+    bucket.push(at);
+    buckets.set(key, bucket);
+    return { allowed: true, retryAfter: 0 };
+  }
+  return { take };
+}
+
+function relayStatus(error) {
+  const status = Number(error?.status);
+  return Number.isInteger(status) ? status : null;
+}
+
+function unavailableRelayError(error) {
+  return new PublicDataError("Public Relay data is temporarily unavailable.", 503, {
+    cause: error,
+    retryAfter: 1,
+  });
+}
+
+function exactClaimHint(value, expectedId, normalizers) {
+  let claim;
+  try {
+    claim = normalizers.normalizeClaimPayload(value).data;
+  } catch (error) {
+    throw new PublicDataError("Relay claim response is malformed.", 502, { cause: error });
+  }
+  if (claim.entityId !== expectedId) {
+    throw new PublicDataError("Relay claim identity does not match the requested claim.", 502);
+  }
+  return {
+    claimId: claim.entityId,
+    name: claim.name,
+    regionId: claim.regionId,
+    ...(Number.isInteger(claim.tier) ? { tier: claim.tier } : {}),
+  };
+}
+
+const PUBLIC_SNAPSHOT_DOMAINS = Object.freeze(["claim", "members", "citizens", "inventories", "crafts"]);
+
+export function parsePublicSnapshotDomains(value) {
+  const requested = String(value ?? "").trim()
+    ? String(value).split(",").map((entry) => entry.trim()).filter(Boolean)
+    : PUBLIC_SNAPSHOT_DOMAINS;
+  const unique = [...new Set(requested)];
+  if (!unique.length || unique.some((domain) => !PUBLIC_SNAPSHOT_DOMAINS.includes(domain))) {
+    throw new PublicDataError("Snapshot domains must contain only claim, members, citizens, inventories, or crafts.", 400);
+  }
+  return unique.sort((left, right) => PUBLIC_SNAPSHOT_DOMAINS.indexOf(left) - PUBLIC_SNAPSHOT_DOMAINS.indexOf(right));
+}
+
+async function concurrentMapLimit(values, limit, worker) {
+  const results = new Array(values.length);
+  let cursor = 0;
+  async function run() {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(values[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, run));
+  return results;
+}
+
+export function createPublicDataService({ http, normalizers, topologyFromPayloads, now = Date.now, gate = createPublicRelayGate() }) {
+  if (!http || !normalizers) throw new TypeError("Public data service requires Relay HTTP and normalizers.");
+  const searchCache = createBoundedStaleCache({
+    freshMs: 60_000,
+    staleMs: 300_000,
+    maxEntries: 256,
+    maxBytes: 2 * 1024 * 1024,
+    now,
+    canServeStale: (error) => error?.status === 503 || !(error instanceof PublicDataError),
+  });
+  const snapshotCache = createBoundedStaleCache({
+    freshMs: 20_000,
+    staleMs: 120_000,
+    maxEntries: 128,
+    maxBytes: 32 * 1024 * 1024,
+    maxEntryBytes: 4 * 1024 * 1024,
+    now,
+    canServeStale: (error) => error?.status === 503 || !(error instanceof PublicDataError),
+  });
+  let topologyCache = null;
+
+  async function topology() {
+    if (topologyCache && (!topologyCache.settled || topologyCache.expiresAt > now())) return topologyCache.promise;
+    const entry = { promise: null, settled: false, expiresAt: Number.POSITIVE_INFINITY };
+    entry.promise = Promise.all([
+      gate.run(() => http.health()),
+      gate.run(() => http.cacheHealth()),
+    ]).then(([health, cache]) => {
+      if (typeof topologyFromPayloads !== "function") throw new TypeError("Public topology normalizer is unavailable.");
+      return topologyFromPayloads(health, cache, new Date(now()).toISOString());
+    });
+    topologyCache = entry;
+    void entry.promise.then(() => {
+      entry.settled = true;
+      entry.expiresAt = now() + 60_000;
+    }, () => {
+      if (topologyCache === entry) topologyCache = null;
+    });
+    return entry.promise;
+  }
+
+  async function searchSettlements(input) {
+    const query = normalizePublicSearchQuery(input);
+    const result = await searchCache.load(`${query.kind}:${query.value.toLocaleLowerCase()}`, async () => {
+      if (query.kind === "id") {
+        try {
+          const wire = await gate.run(() => http.claim(query.value));
+          return { query: query.value, hints: [exactClaimHint(wire, query.value, normalizers)] };
+        } catch (error) {
+          if (error instanceof PublicDataError) throw error;
+          if (relayStatus(error) === 404) throw new PublicDataError("Settlement was not found.", 404, { cause: error });
+          throw unavailableRelayError(error);
+        }
+      }
+      try {
+        const wire = await gate.run(() => http.searchClaims(query.value));
+        return { query: query.value, hints: publicSettlementHints(wire, query.value) };
+      } catch (error) {
+        if (error instanceof PublicDataError) throw error;
+        throw unavailableRelayError(error);
+      }
+    });
+    return {
+      ...result.value,
+      stale: result.stale,
+      ageMs: result.ageMs,
+      warnings: result.stale ? [`Serving stale settlement search results because ${result.error}`] : [],
+    };
+  }
+
+  function domainEnvelope(data, warnings = []) {
+    return { data, warnings };
+  }
+
+  function mismatch(message) {
+    throw new PublicDataError(message, 502);
+  }
+
+  function addTypedCatalogKey(stack) {
+    return {
+      ...stack,
+      catalogKey: `${stack.itemType === "cargo" ? "cargo" : "items"}:${stack.itemId}`,
+    };
+  }
+
+  function verifyEmbeddedClaim(value, label, claimId, regionId) {
+    const payload = wireRecord(value, label);
+    let embedded;
+    try {
+      embedded = normalizers.normalizeClaimPayload(payload.claim).data;
+    } catch (error) {
+      throw new PublicDataError(`${label} claim metadata is malformed.`, 502, { cause: error });
+    }
+    if (embedded.entityId !== claimId || embedded.regionId !== regionId) {
+      mismatch(`${label} claim identity or region does not match the requested claim.`);
+    }
+  }
+
+  async function loadSnapshot(claimId, requested) {
+    let claimWire;
+    let relayTopology;
+    try {
+      [claimWire, relayTopology] = await Promise.all([
+        gate.run(() => http.claim(claimId)),
+        topology(),
+      ]);
+    } catch (error) {
+      if (error instanceof PublicDataError) throw error;
+      if (relayStatus(error) === 404) throw new PublicDataError("Settlement was not found.", 404, { cause: error });
+      throw unavailableRelayError(error);
+    }
+
+    let normalizedClaim;
+    try {
+      normalizedClaim = normalizers.normalizeClaimPayload(claimWire);
+    } catch (error) {
+      throw new PublicDataError("Relay claim response is malformed.", 502, { cause: error });
+    }
+    if (normalizedClaim.data.entityId !== claimId) mismatch("Relay claim identity does not match the requested claim.");
+    const regionId = normalizedClaim.data.regionId;
+    if (!relayTopology?.cacheReady || !relayTopology.regions?.get(regionId)?.ready) {
+      throw new PublicDataError(`Claim region ${regionId} is unavailable from Relay.`, 503, { retryAfter: 1 });
+    }
+
+    const output = {};
+    const warnings = [];
+    if (requested.includes("claim")) output.claim = domainEnvelope(normalizedClaim.data, normalizedClaim.warnings);
+    const needsRoster = requested.includes("members") || requested.includes("citizens");
+    const reads = [];
+    if (needsRoster) reads.push({ key: "roster", load: () => http.members(claimId) });
+    if (requested.includes("inventories")) reads.push({ key: "inventories", load: () => http.inventory(claimId) });
+    if (requested.includes("crafts")) {
+      reads.push({ key: "crafts-current", load: () => http.crafts(claimId, false) });
+      reads.push({ key: "crafts-completed", load: () => http.crafts(claimId, true) });
+    }
+    const results = await concurrentMapLimit(reads, 2, async ({ key, load }) => {
+      try {
+        return { key, value: await gate.run(load) };
+      } catch (error) {
+        return { key, error };
+      }
+    });
+    const byKey = new Map(results.map((result) => [result.key, result]));
+
+    if (needsRoster) {
+      const result = byKey.get("roster");
+      if (result?.error) warnings.push(`Roster unavailable: ${result.error instanceof Error ? result.error.message : String(result.error)}`);
+      else {
+        try {
+          verifyEmbeddedClaim(result.value, "Relay roster", claimId, regionId);
+          const members = normalizers.normalizeMembersPayload(result.value);
+          if (members.data.some((member) => member.claimEntityId !== claimId)) mismatch("Relay roster contains a member from another claim.");
+          if (requested.includes("members")) output.members = domainEnvelope(members.data, members.warnings);
+          if (requested.includes("citizens")) {
+            const citizens = normalizers.normalizeCitizensPayload(result.value);
+            output.citizens = domainEnvelope(citizens.data, citizens.warnings);
+          }
+        } catch (error) {
+          if (error instanceof PublicDataError) throw error;
+          throw new PublicDataError("Relay roster response is malformed.", 502, { cause: error });
+        }
+      }
+    }
+
+    if (requested.includes("inventories")) {
+      const result = byKey.get("inventories");
+      if (result?.error) warnings.push(`Inventories unavailable: ${result.error instanceof Error ? result.error.message : String(result.error)}`);
+      else {
+        try {
+          const inventories = normalizers.normalizeClaimInventory(result.value);
+          if (inventories.claim.entityId !== claimId || inventories.claim.regionId !== regionId) mismatch("Relay inventory claim identity or region does not match the requested claim.");
+          for (const building of inventories.buildings) {
+            building.items = building.items.map(addTypedCatalogKey);
+            building.inventory = building.items.map((contents) => ({ contents }));
+          }
+          output.inventories = domainEnvelope(inventories);
+        } catch (error) {
+          if (error instanceof PublicDataError) throw error;
+          throw new PublicDataError("Relay inventory response is malformed.", 502, { cause: error });
+        }
+      }
+    }
+
+    if (requested.includes("crafts")) {
+      const craftResults = [byKey.get("crafts-current"), byKey.get("crafts-completed")];
+      const successful = craftResults.filter((result) => result && !result.error).map((result) => result.value);
+      for (const result of craftResults.filter((entry) => entry?.error)) {
+        warnings.push(`Crafts unavailable: ${result.error instanceof Error ? result.error.message : String(result.error)}`);
+      }
+      if (successful.length) {
+        try {
+          for (const value of successful) verifyEmbeddedClaim(value, "Relay crafts", claimId, regionId);
+          const crafts = normalizers.normalizeClaimCraftPayloads(successful);
+          if (crafts.craftResults.some((craft) => craft.claimEntityId !== claimId)) mismatch("Relay crafts contain work from another claim.");
+          crafts.craftResults = crafts.craftResults.map((craft) => ({
+            ...craft,
+            craftedItem: craft.craftedItem.map(addTypedCatalogKey),
+          }));
+          output.crafts = domainEnvelope(crafts, successful.length === 2 ? [] : ["One craft projection is unavailable."]);
+        } catch (error) {
+          if (error instanceof PublicDataError) throw error;
+          throw new PublicDataError("Relay crafts response is malformed.", 502, { cause: error });
+        }
+      }
+    }
+
+    return {
+      claimId,
+      regionId,
+      receivedAt: new Date(now()).toISOString(),
+      domains: output,
+      warnings,
+    };
+  }
+
+  async function snapshot(claimIdValue, domainsValue) {
+    const claimId = canonicalUnsigned64(claimIdValue);
+    if (!claimId || String(claimIdValue) !== claimId) throw new PublicDataError("Claim ID must be a canonical unsigned 64-bit decimal string.", 400);
+    const domains = parsePublicSnapshotDomains(domainsValue);
+    const result = await snapshotCache.load(`${claimId}:${domains.join(",")}`, () => loadSnapshot(claimId, domains));
+    return {
+      ...result.value,
+      stale: result.stale,
+      ageMs: result.ageMs,
+      warnings: [
+        ...result.value.warnings,
+        ...(result.stale ? [`Serving stale settlement data because ${result.error}`] : []),
+      ],
+    };
+  }
+
+  return {
+    searchSettlements,
+    snapshot,
+    health: () => ({ searchCache: searchCache.stats(), snapshotCache: snapshotCache.stats(), relayGate: gate.stats() }),
+  };
+}
+
+function safeCatalogValue(value) {
+  if (Array.isArray(value)) return value.map(safeCatalogValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !/(?:url|origin|config|token|secret)/i.test(key))
+    .map(([key, child]) => [key, safeCatalogValue(child)]));
+}
+
+export function createPublicCatalogService({ searchEntities, recipeDetail }) {
+  if (typeof searchEntities !== "function" || typeof recipeDetail !== "function") {
+    throw new TypeError("Public catalog service requires safe catalog readers.");
+  }
+  function search(input) {
+    const query = String(input ?? "").normalize("NFKC").trim();
+    if ([...query].length < 2 || [...query].length > 64 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(query)) {
+      throw new PublicDataError("Catalog search requires 2-64 visible Unicode characters.", 400);
+    }
+    const rows = searchEntities(query, 20);
+    if (!Array.isArray(rows)) throw new PublicDataError("Public catalog search is malformed.", 502);
+    const items = [];
+    const cargos = [];
+    for (const row of rows.slice(0, 20)) {
+      const id = canonicalUnsigned64(row?.targetId);
+      const kind = row?.kind === "cargo" ? "cargo" : row?.kind === "items" ? "items" : null;
+      if (!id || !kind) throw new PublicDataError("Public catalog search row is malformed.", 502);
+      const item = {
+        id,
+        kind,
+        itemType: kind === "cargo" ? 1 : 0,
+        name: String(row.name ?? ""),
+        tag: row.tag,
+        tier: row.tier,
+        rarityStr: row.rarity,
+        iconAssetName: row.iconAssetName,
+        catalogKey: `${kind}:${id}`,
+      };
+      (kind === "cargo" ? cargos : items).push(item);
+    }
+    return { query, items, cargos };
+  }
+  function recipe(kindValue, idValue) {
+    const kind = String(kindValue ?? "");
+    const id = canonicalUnsigned64(idValue);
+    if ((kind !== "item" && kind !== "cargo") || !id || String(idValue) !== id) {
+      throw new PublicDataError("Recipe kind must be item or cargo and id must be canonical decimal.", 400);
+    }
+    try {
+      return safeCatalogValue(recipeDetail({ id, kind: kind === "cargo" ? "cargo" : "items", itemType: kind === "cargo" ? 1 : 0 }));
+    } catch (error) {
+      if (error instanceof PublicDataError) throw error;
+      const status = error?.statusCode === 404 ? 404 : 503;
+      throw new PublicDataError(status === 404 ? "Catalog recipe was not found." : "Catalog recipe is temporarily unavailable.", status, {
+        cause: error,
+        retryAfter: status === 503 ? 1 : null,
+      });
+    }
+  }
+  return { search, recipe };
+}
+
+function publicErrorBody(error) {
+  if (error.status === 400) return { error: error.message };
+  if (error.status === 404) return { error: "Public resource was not found." };
+  if (error.status === 429) return { error: "Public request limit reached." };
+  if (error.status === 502) return { error: "Relay returned malformed public data." };
+  return { error: "Public data is temporarily unavailable." };
+}
+
+export function createPublicApiRouter({ data, catalog, serveIcon, rateLimiter = createPublicIpRateLimiter() }) {
+  function requireRate(address, kind) {
+    const decision = rateLimiter.take(address, kind);
+    if (!decision.allowed) throw new PublicDataError("Public request limit reached.", 429, { retryAfter: decision.retryAfter });
+  }
+  return async function route({ method, url, res, address = "unknown" }) {
+    if (method !== "GET") return false;
+    const { pathname, searchParams } = url;
+    try {
+      if (pathname === "/api/public/settlements/search") {
+        requireRate(address, "search");
+        sendJson(res, 200, await data.searchSettlements(searchParams.get("q") ?? ""));
+        return true;
+      }
+      const settlement = pathname.match(/^\/api\/public\/settlements\/([^/]+)$/);
+      if (settlement) {
+        requireRate(address, "snapshot");
+        sendJson(res, 200, await data.snapshot(settlement[1], searchParams.get("domains")));
+        return true;
+      }
+      if (pathname === "/api/public/catalog/search") {
+        sendJson(res, 200, catalog.search(searchParams.get("q") ?? ""));
+        return true;
+      }
+      if (pathname === "/api/public/catalog/recipe-detail") {
+        sendJson(res, 200, catalog.recipe(searchParams.get("kind"), searchParams.get("id")));
+        return true;
+      }
+      if (pathname.startsWith("/api/public/game-icon/")) {
+        await serveIcon(pathname, res);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      const mapped = error instanceof PublicDataError ? error : new PublicDataError("Public data is temporarily unavailable.", 503, { cause: error, retryAfter: 1 });
+      const headers = mapped.retryAfter ? { "retry-after": String(mapped.retryAfter) } : {};
+      sendJson(res, mapped.status, publicErrorBody(mapped), headers);
+      return true;
+    }
+  };
+}

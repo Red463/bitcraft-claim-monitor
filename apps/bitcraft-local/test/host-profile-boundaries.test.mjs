@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import { createServer, request } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +17,7 @@ async function availablePort() {
   return port;
 }
 
-async function startTestServer(t, { nodeEnv = "development" } = {}) {
+async function startTestServer(t, { nodeEnv = "development", environment = {} } = {}) {
   const port = await availablePort();
   const dataDir = path.join(appDir, `.test-host-profiles-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   await mkdir(dataDir, { recursive: true });
@@ -35,6 +36,7 @@ async function startTestServer(t, { nodeEnv = "development" } = {}) {
       APP_HOST: "127.0.0.1",
       APP_PORT: String(port),
       BITCRAFT_LOCAL_DATA_DIR: dataDir,
+      ...environment,
     },
     stdio: ["ignore", "ignore", "pipe"],
   });
@@ -56,7 +58,7 @@ async function startTestServer(t, { nodeEnv = "development" } = {}) {
       const health = nodeEnv === "production"
         ? await requestAsHost(origin, "/api/local/health", { host: "app.timbersteeltrade.com" })
         : await fetch(`${origin}/api/local/health`);
-      if (health.status === 200 || health.ok) return origin;
+      if (health.status === 200 || health.ok) return { origin, dataDir };
     } catch {
       // Server is still starting.
     }
@@ -90,7 +92,7 @@ function requestAsPublicHost(origin, pathname, options = {}) {
 }
 
 test("public hosts receive only the public profile and public API namespace", async (t) => {
-  const origin = await startTestServer(t);
+  const { origin } = await startTestServer(t);
 
   const profile = await requestAsPublicHost(origin, "/api/profile");
   assert.equal(profile.status, 200);
@@ -119,6 +121,52 @@ test("public hosts receive only the public profile and public API namespace", as
 });
 
 test("production rejects public.localhost even in the test runtime", async (t) => {
-  const origin = await startTestServer(t, { nodeEnv: "production" });
+  const { origin } = await startTestServer(t, { nodeEnv: "production" });
   assert.equal((await requestAsPublicHost(origin, "/api/profile")).status, 421);
+});
+
+test("enabled public settlement reads leave Timbersteel settings, repositories, history, and outboxes byte-identical", async (t) => {
+  const relayPort = await availablePort();
+  const relay = createServer((req, res) => {
+    const url = new URL(req.url, `http://127.0.0.1:${relayPort}`);
+    res.setHeader("content-type", "application/json");
+    if (url.pathname === "/health") return res.end(JSON.stringify({ sources: {
+      "bitcraft-live-19": { database: "bitcraft-live-19", port: 3019, schema_cached: true, connectivity: "live", tables_live: 274, tables_total: 274 },
+    } }));
+    if (url.pathname === "/cache-health") return res.end(JSON.stringify({ ready: true, regions: [{ region: 19, ready: true }] }));
+    if (url.pathname === "/claim" && url.searchParams.get("name") === "oak") {
+      return res.end(JSON.stringify([{ entity_id: "42", name: "Oak Haven", region: 19, tier: 4 }]));
+    }
+    if (url.pathname === "/claim/42") return res.end(JSON.stringify({ entity_id: "42", name: "Oak Haven", region: 19, tier: 4 }));
+    res.statusCode = 404;
+    return res.end(JSON.stringify({ error: "missing" }));
+  });
+  await new Promise((resolve) => relay.listen(relayPort, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => relay.close(resolve)));
+  const { origin, dataDir } = await startTestServer(t, { environment: {
+    PUBLIC_PROFILE_ENABLED: "true",
+    BITCRAFT_RELAY_ORIGIN: `http://127.0.0.1:${relayPort}`,
+  } });
+  const db = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"));
+  const protectedTables = [
+    "app_settings", "craft_plan_settings", "domain_payload_current", "settlement_state_current",
+    "market_events", "market_trades", "activity_events", "provider_transition_outbox", "discord_notification_outbox",
+  ];
+  const fingerprint = () => JSON.stringify(Object.fromEntries(protectedTables.map((table) => [
+    table,
+    db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
+  ])));
+  try {
+    const before = fingerprint();
+
+    const search = await requestAsPublicHost(origin, "/api/public/settlements/search?q=oak");
+    const snapshot = await requestAsPublicHost(origin, "/api/public/settlements/42?domains=claim");
+
+    assert.equal(search.status, 200);
+    assert.equal(snapshot.status, 200);
+    assert.equal(fingerprint(), before);
+    assert.equal(JSON.parse(snapshot.body).claimId, "42");
+  } finally {
+    db.close();
+  }
 });
