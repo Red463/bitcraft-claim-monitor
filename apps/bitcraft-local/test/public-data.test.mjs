@@ -20,6 +20,33 @@ test("public settlement search validates NFKC visible text and canonical unsigne
   }
 });
 
+test("canonical unsigned-64 conversion rejects unsafe numbers and preserves exact strings and BigInts", () => {
+  assert.equal(publicData.canonicalUnsigned64(Number.MAX_SAFE_INTEGER), "9007199254740991");
+  assert.equal(publicData.canonicalUnsigned64(Number.MAX_SAFE_INTEGER + 1), null);
+  assert.equal(publicData.canonicalUnsigned64(42.5), null);
+  assert.equal(publicData.canonicalUnsigned64(-1), null);
+  assert.equal(publicData.canonicalUnsigned64("18446744073709551615"), "18446744073709551615");
+  assert.equal(publicData.canonicalUnsigned64(18_446_744_073_709_551_615n), "18446744073709551615");
+});
+
+test("public settlement and catalog boundaries reject rounded numeric identifiers", async () => {
+  const unsafeId = Number.MAX_SAFE_INTEGER + 1;
+  assert.throws(
+    () => publicData.publicSettlementHints([{ entity_id: unsafeId, name: "Oak", region: 19 }], "oak"),
+    { name: "PublicDataError", status: 502 },
+  );
+
+  const service = publicData.createPublicDataService({ http: {}, normalizers });
+  await assert.rejects(service.snapshot(unsafeId, "claim"), { name: "PublicDataError", status: 400 });
+
+  const catalog = publicData.createPublicCatalogService({
+    searchEntities: () => [{ targetId: unsafeId, kind: "items", name: "Rounded" }],
+    recipeDetail: () => ({ detail: {} }),
+  });
+  assert.throws(() => catalog.search("rounded"), { name: "PublicDataError", status: 502 });
+  assert.throws(() => catalog.recipe("item", unsafeId), { name: "PublicDataError", status: 400 });
+});
+
 test("public settlement hints rank exact, prefix, then substring matches and expose only safe fields", () => {
   const rows = [
     { entity_id: "4", name: "West Oak", region: 19, owner_player_username: "D", secret: "no" },
@@ -150,6 +177,20 @@ test("public per-IP limiter enforces burst and sustained settlement budgets lazi
   assert.equal(limiter.take("203.0.113.3", "snapshot").allowed, false);
 });
 
+test("public per-IP limiter bounds unique-key churn and admits new keys after opportunistic expiry pruning", () => {
+  let now = 0;
+  const limiter = publicData.createPublicIpRateLimiter({ now: () => now, maxBuckets: 3 });
+  assert.equal(limiter.take("203.0.113.1", "search").allowed, true);
+  assert.equal(limiter.take("203.0.113.2", "snapshot").allowed, true);
+  assert.equal(limiter.take("203.0.113.3", "search").allowed, true);
+
+  assert.deepEqual(limiter.take("203.0.113.4", "search"), { allowed: false, retryAfter: 600 });
+  assert.equal(limiter.take("203.0.113.1", "search").allowed, true);
+
+  now = 600_001;
+  assert.equal(limiter.take("203.0.113.4", "search").allowed, true);
+});
+
 test("public settlement service searches names and revalidates exact IDs without repository access", async () => {
   const calls = [];
   const service = publicData.createPublicDataService({
@@ -176,6 +217,66 @@ test("public settlement service searches names and revalidates exact IDs without
   assert.deepEqual(byId.hints, [{ claimId: "42", name: "Exact ID", regionId: "19" }]);
   assert.deepEqual(calls, [["search", "oak"], ["claim", "42"]]);
   assert.equal("configuredClaimId" in byId, false);
+});
+
+test("public settlement search classifies malformed Relay JSON as malformed data", async () => {
+  const malformed = Object.assign(new Error("Unexpected token at https://relay.secret/api?token=hidden"), {
+    name: "RelayHttpMalformedResponseError",
+    code: "RELAY_MALFORMED_JSON",
+    status: 502,
+  });
+  const service = publicData.createPublicDataService({
+    http: { searchClaims: async () => { throw malformed; } },
+    normalizers,
+  });
+
+  await assert.rejects(service.searchSettlements("oak"), {
+    name: "PublicDataError",
+    status: 502,
+    message: "Relay claim search response is malformed.",
+  });
+});
+
+test("public settlement search uses a fixed stale warning without exception details", async () => {
+  let now = 0;
+  let calls = 0;
+  const service = publicData.createPublicDataService({
+    http: {
+      searchClaims: async () => {
+        calls += 1;
+        if (calls === 1) return [{ entity_id: "42", name: "Oak", region: 19 }];
+        throw new Error("GET https://relay.secret/claim?token=hidden failed");
+      },
+    },
+    normalizers,
+    now: () => now,
+  });
+  await service.searchSettlements("oak");
+  now = 60_001;
+
+  const stale = await service.searchSettlements("oak");
+  assert.deepEqual(stale.warnings, [{
+    code: "relay_search_stale",
+    message: "Settlement search results are stale while Relay recovers.",
+  }]);
+  assert.doesNotMatch(JSON.stringify(stale), /relay\.secret|token|hidden|GET/);
+});
+
+test("public exact-ID search classifies malformed Relay JSON as malformed data", async () => {
+  const malformed = Object.assign(new Error("Unexpected token in private Relay response"), {
+    code: "RELAY_MALFORMED_JSON",
+    status: 502,
+  });
+  const service = publicData.createPublicDataService({
+    http: { claim: async () => { throw malformed; } },
+    normalizers,
+  });
+
+  await assert.rejects(service.searchSettlements("42"), {
+    name: "PublicDataError",
+    status: 502,
+    message: "Relay claim response is malformed.",
+  });
 });
 
 test("public settlement snapshot validates topology, coalesces roster reads, and preserves typed decimal identities", async () => {
@@ -245,6 +346,188 @@ test("public settlement snapshot validates topology, coalesces roster reads, and
   assert.deepEqual(snapshot.domains.crafts.data.craftResults.map(({ entityId, craftedItem }) => [entityId, craftedItem[0].catalogKey]), [["11", "items:42"], ["12", "cargo:42"]]);
 });
 
+test("public settlement snapshot classifies malformed required Relay JSON as malformed data", async () => {
+  const malformed = Object.assign(new Error("Malformed body from https://relay.secret/config"), {
+    code: "RELAY_MALFORMED_JSON",
+    status: 502,
+  });
+  const service = publicData.createPublicDataService({
+    http: {
+      claim: async () => { throw malformed; },
+      health: async () => ({}),
+      cacheHealth: async () => ({}),
+    },
+    normalizers,
+    topologyFromPayloads: relayTopologyFromPayloads,
+  });
+
+  await assert.rejects(service.snapshot("42", "claim"), {
+    name: "PublicDataError",
+    status: 502,
+    message: "Relay required snapshot data is malformed.",
+  });
+});
+
+test("public settlement snapshot uses a fixed stale warning without exception details", async () => {
+  let now = 0;
+  let claimCalls = 0;
+  const claim = { entity_id: "42", name: "Oak", region: 19 };
+  const service = publicData.createPublicDataService({
+    http: {
+      claim: async () => {
+        claimCalls += 1;
+        if (claimCalls === 1) return claim;
+        throw new Error("Authorization failed at https://relay.secret/config?password=hidden");
+      },
+      health: async () => ({ sources: {
+        "bitcraft-live-19": { database: "bitcraft-live-19", port: 3019, schema_cached: true, connectivity: "live", tables_live: 274, tables_total: 274 },
+      } }),
+      cacheHealth: async () => ({ ready: true, regions: [{ region: 19, ready: true }] }),
+    },
+    normalizers,
+    topologyFromPayloads: relayTopologyFromPayloads,
+    now: () => now,
+  });
+  await service.snapshot("42", "claim");
+  now = 20_001;
+
+  const stale = await service.snapshot("42", "claim");
+  assert.deepEqual(stale.warnings, [{
+    code: "relay_snapshot_stale",
+    message: "Settlement snapshot data is stale while Relay recovers.",
+  }]);
+  assert.doesNotMatch(JSON.stringify(stale), /relay\.secret|config|password|hidden|Authorization/);
+});
+
+test("public settlement snapshot marks malformed optional Relay JSON with a fixed domain warning", async () => {
+  const claim = { entity_id: "42", name: "Oak", region: 19 };
+  const malformed = Object.assign(new Error("Unexpected token from https://relay.secret/members?apiKey=hidden"), {
+    code: "RELAY_MALFORMED_JSON",
+    status: 502,
+  });
+  const service = publicData.createPublicDataService({
+    http: {
+      claim: async () => claim,
+      health: async () => ({ sources: {
+        "bitcraft-live-19": { database: "bitcraft-live-19", port: 3019, schema_cached: true, connectivity: "live", tables_live: 274, tables_total: 274 },
+      } }),
+      cacheHealth: async () => ({ ready: true, regions: [{ region: 19, ready: true }] }),
+      members: async () => { throw malformed; },
+    },
+    normalizers,
+    topologyFromPayloads: relayTopologyFromPayloads,
+  });
+
+  const snapshot = await service.snapshot("42", "members,citizens");
+  const warning = {
+    code: "relay_roster_malformed",
+    message: "Roster data is unavailable because Relay returned malformed data.",
+  };
+  assert.deepEqual(snapshot.domains.members, { data: null, warnings: [warning] });
+  assert.deepEqual(snapshot.domains.citizens, { data: null, warnings: [warning] });
+  assert.deepEqual(snapshot.warnings, []);
+  assert.doesNotMatch(JSON.stringify(snapshot), /relay\.secret|apiKey|hidden|Unexpected token/);
+});
+
+test("public settlement snapshot uses fixed domain warnings for unavailable optional sources", async () => {
+  const claim = { entity_id: "42", name: "Oak", region: 19 };
+  const unavailable = () => { throw new Error("Bearer secret-token failed at https://relay.secret/private"); };
+  const service = publicData.createPublicDataService({
+    http: {
+      claim: async () => claim,
+      health: async () => ({ sources: {
+        "bitcraft-live-19": { database: "bitcraft-live-19", port: 3019, schema_cached: true, connectivity: "live", tables_live: 274, tables_total: 274 },
+      } }),
+      cacheHealth: async () => ({ ready: true, regions: [{ region: 19, ready: true }] }),
+      members: async () => unavailable(),
+      inventory: async () => unavailable(),
+      crafts: async () => unavailable(),
+    },
+    normalizers,
+    topologyFromPayloads: relayTopologyFromPayloads,
+  });
+
+  const snapshot = await service.snapshot("42", "members,citizens,inventories,crafts");
+  assert.deepEqual(snapshot.domains.members, { data: null, warnings: [{
+    code: "relay_roster_unavailable",
+    message: "Roster data is temporarily unavailable.",
+  }] });
+  assert.deepEqual(snapshot.domains.citizens, snapshot.domains.members);
+  assert.deepEqual(snapshot.domains.inventories, { data: null, warnings: [{
+    code: "relay_inventories_unavailable",
+    message: "Inventory data is temporarily unavailable.",
+  }] });
+  assert.deepEqual(snapshot.domains.crafts, { data: null, warnings: [{
+    code: "relay_crafts_unavailable",
+    message: "Craft data is temporarily unavailable.",
+  }] });
+  assert.deepEqual(snapshot.warnings, []);
+  assert.doesNotMatch(JSON.stringify(snapshot), /relay\.secret|secret-token|Bearer|private/);
+});
+
+test("public settlement snapshot distinguishes malformed inventory and craft domains", async () => {
+  const claim = { entity_id: "42", name: "Oak", region: 19 };
+  const malformed = () => {
+    throw Object.assign(new Error("Malformed https://relay.secret/domain?token=hidden"), {
+      code: "RELAY_MALFORMED_JSON",
+      status: 502,
+    });
+  };
+  const service = publicData.createPublicDataService({
+    http: {
+      claim: async () => claim,
+      health: async () => ({ sources: {
+        "bitcraft-live-19": { database: "bitcraft-live-19", port: 3019, schema_cached: true, connectivity: "live", tables_live: 274, tables_total: 274 },
+      } }),
+      cacheHealth: async () => ({ ready: true, regions: [{ region: 19, ready: true }] }),
+      inventory: async () => malformed(),
+      crafts: async () => malformed(),
+    },
+    normalizers,
+    topologyFromPayloads: relayTopologyFromPayloads,
+  });
+
+  const snapshot = await service.snapshot("42", "inventories,crafts");
+  assert.deepEqual(snapshot.domains.inventories, { data: null, warnings: [{
+    code: "relay_inventories_malformed",
+    message: "Inventory data is unavailable because Relay returned malformed data.",
+  }] });
+  assert.deepEqual(snapshot.domains.crafts, { data: null, warnings: [{
+    code: "relay_crafts_malformed",
+    message: "Craft data is unavailable because Relay returned malformed data.",
+  }] });
+  assert.doesNotMatch(JSON.stringify(snapshot), /relay\.secret|token|hidden|Malformed/);
+});
+
+test("public settlement snapshot marks a malformed craft projection without discarding the valid projection", async () => {
+  const claim = { entity_id: "42", name: "Oak", region: 19 };
+  let craftCalls = 0;
+  const service = publicData.createPublicDataService({
+    http: {
+      claim: async () => claim,
+      health: async () => ({ sources: {
+        "bitcraft-live-19": { database: "bitcraft-live-19", port: 3019, schema_cached: true, connectivity: "live", tables_live: 274, tables_total: 274 },
+      } }),
+      cacheHealth: async () => ({ ready: true, regions: [{ region: 19, ready: true }] }),
+      crafts: async () => {
+        craftCalls += 1;
+        if (craftCalls === 1) return { claim, crafts: [] };
+        throw Object.assign(new Error("private endpoint malformed"), { code: "RELAY_MALFORMED_JSON", status: 502 });
+      },
+    },
+    normalizers,
+    topologyFromPayloads: relayTopologyFromPayloads,
+  });
+
+  const snapshot = await service.snapshot("42", "crafts");
+  assert.deepEqual(snapshot.domains.crafts.data.craftResults, []);
+  assert.deepEqual(snapshot.domains.crafts.warnings, [{
+    code: "relay_crafts_partial_malformed",
+    message: "One craft projection is unavailable because Relay returned malformed data.",
+  }]);
+  assert.doesNotMatch(JSON.stringify(snapshot), /private endpoint/);
+});
+
 test("public catalog wrapper exposes typed display fields and strips upstream metadata from recipe detail", () => {
   const catalog = publicData.createPublicCatalogService({
     searchEntities: () => [{
@@ -252,9 +535,26 @@ test("public catalog wrapper exposes typed display fields and strips upstream me
       rarity: "Common", iconAssetName: "Items/Oak", upstreamUrl: "https://secret.example",
     }],
     recipeDetail: (target) => ({
-      detail: { item: { id: target.id, name: "Oak Log", iconAssetName: "Items/Oak", sourceUrl: "https://secret.example" }, craftingRecipes: [] },
+      detail: {
+        item: {
+          id: target.id, name: "Oak Log", iconAssetName: "Items/Oak",
+          sourceUrl: "https://secret.example", authHeader: "Bearer hidden", privateMetadata: "hidden",
+        },
+        craftingRecipes: [{
+          id: "7", name: "Saw Oak", actionsRequired: 2,
+          craftedItemStacks: [{ item_id: "42", item_type: "item", quantity: 1, endpoint: "https://secret.example" }],
+          endpoint: "https://secret.example/recipe", errorDetails: "token hidden",
+        }],
+        internalCatalogState: { password: "hidden" },
+      },
       provider: "relay",
       upstreamOrigin: "https://secret.example",
+      endpoint: "https://secret.example/private",
+      headers: { authorization: "Bearer hidden" },
+      password: "hidden",
+      apiKey: "hidden",
+      errorDetails: "private failure",
+      diagnostic: "internal-only",
     }),
   });
 
@@ -264,7 +564,13 @@ test("public catalog wrapper exposes typed display fields and strips upstream me
     cargos: [],
   });
   assert.deepEqual(catalog.recipe("item", "42"), {
-    detail: { item: { id: "42", name: "Oak Log", iconAssetName: "Items/Oak" }, craftingRecipes: [] },
+    detail: {
+      item: { id: "42", name: "Oak Log", iconAssetName: "Items/Oak" },
+      craftingRecipes: [{
+        id: "7", name: "Saw Oak", actionsRequired: 2,
+        craftedItemStacks: [{ item_id: "42", item_type: "item", quantity: 1 }],
+      }],
+    },
     provider: "relay",
   });
   assert.throws(() => catalog.recipe("items", "42"), { name: "PublicDataError", status: 400 });

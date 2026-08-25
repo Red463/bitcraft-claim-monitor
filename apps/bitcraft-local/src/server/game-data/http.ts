@@ -8,6 +8,16 @@ export type RelayHttpClientOptions = {
   now?: () => number;
 };
 
+export class RelayHttpMalformedResponseError extends Error {
+  readonly code = "RELAY_MALFORMED_JSON";
+  readonly status = 502;
+
+  constructor(options?: ErrorOptions) {
+    super("Relay HTTP returned malformed JSON.", options);
+    this.name = "RelayHttpMalformedResponseError";
+  }
+}
+
 export class RelayHttpClient {
   readonly #baseUrl: string;
   readonly #fetcher: Fetcher;
@@ -124,13 +134,19 @@ export class RelayHttpClient {
         error.status = response.status;
         throw error;
       }
-      return response.json();
+      try {
+        return await response.json();
+      } catch (error) {
+        if (error instanceof SyntaxError) throw new RelayHttpMalformedResponseError({ cause: error });
+        throw error;
+      }
     } finally {
       clearTimeout(timer);
     }
   }
 
   #retryable(error: unknown) {
+    if ((error as { code?: unknown })?.code === "RELAY_MALFORMED_JSON") return false;
     const status = (error as { status?: unknown })?.status;
     return status == null || status === 429 || (typeof status === "number" && status >= 500);
   }

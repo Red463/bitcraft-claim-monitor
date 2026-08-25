@@ -489,6 +489,40 @@ test("Relay HTTP claim search sends a case-insensitive substring through the doc
   assert.deepEqual(requested, ["https://relay.example/claim?name=Oak+%26+Stone"]);
 });
 
+test("Relay HTTP classifies malformed JSON without retrying it as source unavailability", async () => {
+  let calls = 0;
+  const client = new RelayHttpClient({
+    baseUrl: "https://relay.example",
+    fetcher: async () => {
+      calls += 1;
+      return new Response('{"claims":', { status: 200, headers: { "content-type": "application/json" } });
+    },
+    retryDelayMs: 0,
+  });
+
+  await assert.rejects(client.searchClaims("Oak"), {
+    name: "RelayHttpMalformedResponseError",
+    code: "RELAY_MALFORMED_JSON",
+    status: 502,
+  });
+  assert.equal(calls, 1);
+});
+
+test("Relay HTTP keeps response-body transport failures retryable", async () => {
+  let calls = 0;
+  const client = new RelayHttpClient({
+    baseUrl: "https://relay.example",
+    fetcher: async () => {
+      calls += 1;
+      return { ok: true, json: async () => { throw new Error("body stream reset"); } };
+    },
+    retryDelayMs: 0,
+  });
+
+  await assert.rejects(client.claim("42"), { name: "Error", message: "body stream reset" });
+  assert.equal(calls, 2);
+});
+
 test("Relay HTTP requests bounded player detail, inventory, and housing by encoded player ID", async () => {
   const requested = [];
   const client = new RelayHttpClient({

@@ -1,6 +1,22 @@
 import { sendJson } from "../httpResponses.mjs";
 
 const UINT64_MAX = 18_446_744_073_709_551_615n;
+const PUBLIC_WARNING_MESSAGES = Object.freeze({
+  relay_search_stale: "Settlement search results are stale while Relay recovers.",
+  relay_snapshot_stale: "Settlement snapshot data is stale while Relay recovers.",
+  relay_roster_malformed: "Roster data is unavailable because Relay returned malformed data.",
+  relay_roster_unavailable: "Roster data is temporarily unavailable.",
+  relay_inventories_malformed: "Inventory data is unavailable because Relay returned malformed data.",
+  relay_inventories_unavailable: "Inventory data is temporarily unavailable.",
+  relay_crafts_malformed: "Craft data is unavailable because Relay returned malformed data.",
+  relay_crafts_unavailable: "Craft data is temporarily unavailable.",
+  relay_crafts_partial_malformed: "One craft projection is unavailable because Relay returned malformed data.",
+  relay_crafts_partial: "One craft projection is temporarily unavailable.",
+});
+
+function publicWarning(code) {
+  return { code, message: PUBLIC_WARNING_MESSAGES[code] };
+}
 
 export class PublicDataError extends Error {
   constructor(message, status, options = {}) {
@@ -12,7 +28,14 @@ export class PublicDataError extends Error {
 }
 
 export function canonicalUnsigned64(value) {
-  const text = String(value ?? "").trim();
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? String(value) : null;
+  }
+  if (typeof value === "bigint") {
+    return value >= 0n && value <= UINT64_MAX ? value.toString() : null;
+  }
+  if (typeof value !== "string") return null;
+  const text = value.trim();
   if (!/^(?:0|[1-9]\d*)$/.test(text)) return null;
   try {
     return BigInt(text) <= UINT64_MAX ? text : null;
@@ -171,24 +194,57 @@ const PUBLIC_IP_LIMITS = Object.freeze({
   snapshot: { burst: 4, burstMs: 30_000, sustained: 20, sustainedMs: 600_000 },
 });
 
-export function createPublicIpRateLimiter({ now = Date.now } = {}) {
+export function createPublicIpRateLimiter({ now = Date.now, maxBuckets = 4096 } = {}) {
   const buckets = new Map();
+  const bucketCapacity = Number.isInteger(maxBuckets) && maxBuckets > 0 ? maxBuckets : 4096;
+  let operations = 0;
+
+  function expireBucket(bucket, at) {
+    const policy = PUBLIC_IP_LIMITS[bucket.kind];
+    while (bucket.timestamps.length && bucket.timestamps[0] <= at - policy.sustainedMs) bucket.timestamps.shift();
+  }
+
+  function pruneExpired(at) {
+    for (const [key, bucket] of buckets) {
+      expireBucket(bucket, at);
+      if (!bucket.timestamps.length) buckets.delete(key);
+    }
+  }
+
+  function capacityRetryAfter(at) {
+    let earliestExpiry = Number.POSITIVE_INFINITY;
+    for (const bucket of buckets.values()) {
+      const policy = PUBLIC_IP_LIMITS[bucket.kind];
+      earliestExpiry = Math.min(earliestExpiry, bucket.timestamps[0] + policy.sustainedMs);
+    }
+    return Math.max(1, Math.ceil((earliestExpiry - at) / 1000));
+  }
+
   function take(ip, kind) {
     const policy = PUBLIC_IP_LIMITS[kind];
     if (!policy) throw new TypeError(`Unknown public rate-limit kind ${kind}`);
     const at = now();
     const key = `${kind}:${String(ip)}`;
-    const bucket = buckets.get(key) ?? [];
-    while (bucket.length && bucket[0] <= at - policy.sustainedMs) bucket.shift();
-    const burst = bucket.filter((entry) => entry > at - policy.burstMs);
-    if (burst.length >= policy.burst || bucket.length >= policy.sustained) {
+    operations += 1;
+    if (operations % 64 === 0) pruneExpired(at);
+    let bucket = buckets.get(key);
+    if (!bucket && buckets.size >= bucketCapacity) {
+      pruneExpired(at);
+      if (buckets.size >= bucketCapacity) {
+        return { allowed: false, retryAfter: capacityRetryAfter(at) };
+      }
+    }
+    bucket ??= { kind, timestamps: [] };
+    expireBucket(bucket, at);
+    const burst = bucket.timestamps.filter((entry) => entry > at - policy.burstMs);
+    if (burst.length >= policy.burst || bucket.timestamps.length >= policy.sustained) {
       const waits = [];
       if (burst.length >= policy.burst) waits.push(burst[0] + policy.burstMs - at);
-      if (bucket.length >= policy.sustained) waits.push(bucket[0] + policy.sustainedMs - at);
+      if (bucket.timestamps.length >= policy.sustained) waits.push(bucket.timestamps[0] + policy.sustainedMs - at);
       buckets.set(key, bucket);
       return { allowed: false, retryAfter: Math.max(1, Math.ceil(Math.max(...waits) / 1000)) };
     }
-    bucket.push(at);
+    bucket.timestamps.push(at);
     buckets.set(key, bucket);
     return { allowed: true, retryAfter: 0 };
   }
@@ -198,6 +254,10 @@ export function createPublicIpRateLimiter({ now = Date.now } = {}) {
 function relayStatus(error) {
   const status = Number(error?.status);
   return Number.isInteger(status) ? status : null;
+}
+
+function isMalformedRelayError(error) {
+  return error?.code === "RELAY_MALFORMED_JSON";
 }
 
 function unavailableRelayError(error) {
@@ -303,6 +363,9 @@ export function createPublicDataService({ http, normalizers, topologyFromPayload
         } catch (error) {
           if (error instanceof PublicDataError) throw error;
           if (relayStatus(error) === 404) throw new PublicDataError("Settlement was not found.", 404, { cause: error });
+          if (isMalformedRelayError(error)) {
+            throw new PublicDataError("Relay claim response is malformed.", 502, { cause: error });
+          }
           throw unavailableRelayError(error);
         }
       }
@@ -311,6 +374,9 @@ export function createPublicDataService({ http, normalizers, topologyFromPayload
         return { query: query.value, hints: publicSettlementHints(wire, query.value) };
       } catch (error) {
         if (error instanceof PublicDataError) throw error;
+        if (isMalformedRelayError(error)) {
+          throw new PublicDataError("Relay claim search response is malformed.", 502, { cause: error });
+        }
         throw unavailableRelayError(error);
       }
     });
@@ -318,7 +384,7 @@ export function createPublicDataService({ http, normalizers, topologyFromPayload
       ...result.value,
       stale: result.stale,
       ageMs: result.ageMs,
-      warnings: result.stale ? [`Serving stale settlement search results because ${result.error}`] : [],
+      warnings: result.stale ? [publicWarning("relay_search_stale")] : [],
     };
   }
 
@@ -361,6 +427,9 @@ export function createPublicDataService({ http, normalizers, topologyFromPayload
     } catch (error) {
       if (error instanceof PublicDataError) throw error;
       if (relayStatus(error) === 404) throw new PublicDataError("Settlement was not found.", 404, { cause: error });
+      if (isMalformedRelayError(error)) {
+        throw new PublicDataError("Relay required snapshot data is malformed.", 502, { cause: error });
+      }
       throw unavailableRelayError(error);
     }
 
@@ -398,7 +467,15 @@ export function createPublicDataService({ http, normalizers, topologyFromPayload
 
     if (needsRoster) {
       const result = byKey.get("roster");
-      if (result?.error) warnings.push(`Roster unavailable: ${result.error instanceof Error ? result.error.message : String(result.error)}`);
+      if (result?.error && isMalformedRelayError(result.error)) {
+        const domainWarning = publicWarning("relay_roster_malformed");
+        if (requested.includes("members")) output.members = domainEnvelope(null, [domainWarning]);
+        if (requested.includes("citizens")) output.citizens = domainEnvelope(null, [domainWarning]);
+      } else if (result?.error) {
+        const domainWarning = publicWarning("relay_roster_unavailable");
+        if (requested.includes("members")) output.members = domainEnvelope(null, [domainWarning]);
+        if (requested.includes("citizens")) output.citizens = domainEnvelope(null, [domainWarning]);
+      }
       else {
         try {
           verifyEmbeddedClaim(result.value, "Relay roster", claimId, regionId);
@@ -418,7 +495,11 @@ export function createPublicDataService({ http, normalizers, topologyFromPayload
 
     if (requested.includes("inventories")) {
       const result = byKey.get("inventories");
-      if (result?.error) warnings.push(`Inventories unavailable: ${result.error instanceof Error ? result.error.message : String(result.error)}`);
+      if (result?.error) {
+        output.inventories = domainEnvelope(null, [publicWarning(
+          isMalformedRelayError(result.error) ? "relay_inventories_malformed" : "relay_inventories_unavailable",
+        )]);
+      }
       else {
         try {
           const inventories = normalizers.normalizeClaimInventory(result.value);
@@ -438,9 +519,7 @@ export function createPublicDataService({ http, normalizers, topologyFromPayload
     if (requested.includes("crafts")) {
       const craftResults = [byKey.get("crafts-current"), byKey.get("crafts-completed")];
       const successful = craftResults.filter((result) => result && !result.error).map((result) => result.value);
-      for (const result of craftResults.filter((entry) => entry?.error)) {
-        warnings.push(`Crafts unavailable: ${result.error instanceof Error ? result.error.message : String(result.error)}`);
-      }
+      const craftErrors = craftResults.filter((result) => result?.error).map((result) => result.error);
       if (successful.length) {
         try {
           for (const value of successful) verifyEmbeddedClaim(value, "Relay crafts", claimId, regionId);
@@ -450,11 +529,17 @@ export function createPublicDataService({ http, normalizers, topologyFromPayload
             ...craft,
             craftedItem: craft.craftedItem.map(addTypedCatalogKey),
           }));
-          output.crafts = domainEnvelope(crafts, successful.length === 2 ? [] : ["One craft projection is unavailable."]);
+          output.crafts = domainEnvelope(crafts, successful.length === 2 ? [] : [publicWarning(
+            craftErrors.some(isMalformedRelayError) ? "relay_crafts_partial_malformed" : "relay_crafts_partial",
+          )]);
         } catch (error) {
           if (error instanceof PublicDataError) throw error;
           throw new PublicDataError("Relay crafts response is malformed.", 502, { cause: error });
         }
+      } else {
+        output.crafts = domainEnvelope(null, [publicWarning(
+          craftErrors.some(isMalformedRelayError) ? "relay_crafts_malformed" : "relay_crafts_unavailable",
+        )]);
       }
     }
 
@@ -478,7 +563,7 @@ export function createPublicDataService({ http, normalizers, topologyFromPayload
       ageMs: result.ageMs,
       warnings: [
         ...result.value.warnings,
-        ...(result.stale ? [`Serving stale settlement data because ${result.error}`] : []),
+        ...(result.stale ? [publicWarning("relay_snapshot_stale")] : []),
       ],
     };
   }
@@ -490,12 +575,30 @@ export function createPublicDataService({ http, normalizers, topologyFromPayload
   };
 }
 
-function safeCatalogValue(value) {
-  if (Array.isArray(value)) return value.map(safeCatalogValue);
+const PUBLIC_RECIPE_FIELDS = new Set([
+  "item", "cargo", "craftingRecipes", "extractionRecipes",
+  "id", "kind", "itemType", "name", "tag", "tier", "rarity", "rarityStr", "iconAssetName",
+  "recipeKey", "catalogRecipeKey", "activityKind", "actionsRequired", "buildingName", "skillName",
+  "isPassive", "isExpectedYield", "isProbabilistic", "probabilityStatus", "routeType", "gatheringSkill",
+  "expectedYield", "expectedPerProgress", "expectedPerResource", "resourceHealth", "dropChance", "dropQuantity",
+  "guaranteedYield", "outputQuantity", "craftedItemStacks", "consumedItemStacks", "craftedItems", "consumedItems",
+  "item_id", "item_type", "quantity", "guaranteedQuantity", "quantityMin", "quantityMax",
+  "levelRequirements", "toolRequirements", "experiencePerProgress", "skill", "level", "tool", "amount",
+  "sourceOutputKey", "sourceOutput", "producer", "producerRecipe", "gatheringSource", "label",
+]);
+
+function allowlistedRecipeValue(value) {
+  if (Array.isArray(value)) return value.map(allowlistedRecipeValue);
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => !/(?:url|origin|config|token|secret)/i.test(key))
-    .map(([key, child]) => [key, safeCatalogValue(child)]));
+    .filter(([key]) => PUBLIC_RECIPE_FIELDS.has(key))
+    .map(([key, child]) => [key, allowlistedRecipeValue(child)]));
+}
+
+function publicRecipeProjection(value) {
+  const source = wireRecord(value, "Catalog recipe response");
+  const detail = wireRecord(source.detail, "Catalog recipe detail");
+  return { detail: allowlistedRecipeValue(detail), provider: "relay" };
 }
 
 export function createPublicCatalogService({ searchEntities, recipeDetail }) {
@@ -537,7 +640,7 @@ export function createPublicCatalogService({ searchEntities, recipeDetail }) {
       throw new PublicDataError("Recipe kind must be item or cargo and id must be canonical decimal.", 400);
     }
     try {
-      return safeCatalogValue(recipeDetail({ id, kind: kind === "cargo" ? "cargo" : "items", itemType: kind === "cargo" ? 1 : 0 }));
+      return publicRecipeProjection(recipeDetail({ id, kind: kind === "cargo" ? "cargo" : "items", itemType: kind === "cargo" ? 1 : 0 }));
     } catch (error) {
       if (error instanceof PublicDataError) throw error;
       const status = error?.statusCode === 404 ? 404 : 503;

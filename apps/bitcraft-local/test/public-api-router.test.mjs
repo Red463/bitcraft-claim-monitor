@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPublicApiRouter, PublicDataError } from "../src/server/public/publicData.mjs";
+import { createPublicApiRouter, createPublicDataService, PublicDataError } from "../src/server/public/publicData.mjs";
 import { routeHostProfileRequest } from "../src/server/public/router.mjs";
+
+const normalizers = await import("../src/server/game-data/normalizers.ts");
 
 function recorder() {
   return {
@@ -76,4 +78,35 @@ test("public API maps validation, rate, source, and queue errors without leaking
     if (expected.retryAfter) assert.equal(res.headers["retry-after"], String(expected.retryAfter));
     assert.doesNotMatch(String(res.body), /upstream secret/);
   }
+});
+
+test("public API maps malformed Relay JSON to a sanitized 502 response", async () => {
+  const data = createPublicDataService({
+    http: {
+      searchClaims: async () => {
+        throw Object.assign(new Error("Unexpected token at https://relay.secret/claim?apiKey=hidden"), {
+          code: "RELAY_MALFORMED_JSON",
+          status: 502,
+        });
+      },
+    },
+    normalizers,
+  });
+  const api = createPublicApiRouter({
+    data,
+    catalog: {},
+    serveIcon: async () => {},
+    rateLimiter: { take: () => ({ allowed: true, retryAfter: 0 }) },
+  });
+  const res = recorder();
+
+  assert.equal(await api({
+    method: "GET",
+    url: new URL("https://claim-monitor.com/api/public/settlements/search?q=oak"),
+    res,
+    address: "203.0.113.10",
+  }), true);
+  assert.equal(res.status, 502);
+  assert.deepEqual(JSON.parse(res.body), { error: "Relay returned malformed public data." });
+  assert.doesNotMatch(res.body, /relay\.secret|apiKey|hidden|Unexpected token/);
 });

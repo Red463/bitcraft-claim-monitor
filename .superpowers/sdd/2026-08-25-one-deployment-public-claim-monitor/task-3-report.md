@@ -193,3 +193,72 @@ corepack pnpm --filter @workspace/bitcraft-local run build
 ```
 
 Result: passed, including server/bindings compilation, asset verification, frontend typecheck/build, and Relay runtime-boundary verification.
+
+## Fix round 1/5: public boundary hardening
+
+### Implementation
+
+- Added `RelayHttpMalformedResponseError` at the Relay HTTP seam. JSON `SyntaxError` responses are typed as malformed (`502`) and are not retried; response-body transport failures remain retryable source failures.
+- Required claim/search/topology reads translate malformed Relay JSON to sanitized `PublicDataError` responses with status `502`.
+- Optional roster, inventory, and craft failures now remain `200` but return explicit domain envelopes with fixed public warning codes/messages. Malformed and temporarily unavailable sources are distinguished, including one-of-two craft projection failures.
+- Replaced interpolated stale and optional exception messages with fixed warnings. No exception message, URL, endpoint, header, configuration, password, API key, token, secret, or error detail is returned.
+- Replaced recipe key blacklisting with an explicit recursive allowlist and a fixed `provider: "relay"` projection.
+- Tightened unsigned-64 conversion: numeric inputs must be non-negative safe integers; canonical decimal strings and in-range BigInts remain exact.
+- Added visitor-driven, no-timer limiter pruning. The limiter prunes expired buckets opportunistically, caps active `(kind, IP)` buckets at 4,096, and deterministically fails closed for a new key until the earliest active bucket expires.
+- The deferred exact-ID whitespace Minor was intentionally not changed.
+
+Production files changed:
+
+- `apps/bitcraft-local/src/server/game-data/http.ts`
+- `apps/bitcraft-local/src/server/public/publicData.mjs`
+
+Focused tests changed:
+
+- `apps/bitcraft-local/test/relay-topology-http.test.mjs`
+- `apps/bitcraft-local/test/public-data.test.mjs`
+- `apps/bitcraft-local/test/public-api-router.test.mjs`
+
+### TDD RED/GREEN evidence
+
+1. Malformed JSON seam RED returned raw `SyntaxError` and retried; GREEN returns `RelayHttpMalformedResponseError` with code `RELAY_MALFORMED_JSON`, status `502`, and one attempt. A separate RED proved body-stream transport errors were incorrectly classified; GREEN retains their retryable source semantics.
+2. Required/search mapping RED returned `503 Public Relay data is temporarily unavailable`; GREEN returns sanitized `502` for name search, exact-ID search, and required snapshot inputs.
+3. Optional malformed-domain RED omitted the requested domains and exposed exception details in root warnings; GREEN returns `data: null` with fixed `relay_*_malformed` domain warnings. Partial crafts retain the valid projection and use `relay_crafts_partial_malformed`.
+4. Warning/recipe boundary RED returned interpolated stale strings and passed `endpoint`, `headers`, `password`, `apiKey`, `errorDetails`, `diagnostic`, and nested private fields; GREEN returns fixed warning objects and only explicitly allowlisted recipe/display fields.
+5. Identifier RED converted the unsafe Number `9007199254740992` to a rounded decimal ID; GREEN rejects unsafe, fractional, and negative Numbers while preserving exact string/BigInt u64 values. Settlement hints, snapshot IDs, catalog search IDs, and recipe IDs are covered.
+6. Limiter RED admitted a fourth unique key despite a configured capacity of three; GREEN fails closed with deterministic `Retry-After`, preserves existing-key rate state, and admits the new key after lazy expiry pruning.
+
+### Verification
+
+Complete Task 3 focused plus host/isolation command:
+
+```sh
+node --experimental-strip-types --test test/public-data.test.mjs test/public-api-router.test.mjs test/relay-topology-http.test.mjs test/host-profile-boundaries.test.mjs test/host-profiles.test.mjs
+```
+
+Result: 48 passed, 0 failed. The enabled-public-host SQLite fingerprint test again proved settings, current repositories, history, and outboxes remain byte-identical.
+
+Production build:
+
+```sh
+corepack pnpm --filter @workspace/bitcraft-local run build
+```
+
+Result: passed, including server/bindings compilation, asset verification, frontend typecheck/build, and Relay runtime-boundary verification.
+
+Complete package test:
+
+```sh
+corepack pnpm --filter @workspace/bitcraft-local test
+```
+
+Result: 2,665 tests; 2,662 passed, 0 failed, 3 skipped. The skips are the existing Windows symlink-permission skips.
+
+The first in-sandbox host/isolation attempt was invalidated by Windows denying the sandbox identity access to the already-installed `jsonwebtoken` package. The exact command was rerun outside the sandbox and passed 5/5; no dependency or manifest was changed.
+
+### Fix-round self-review and concerns
+
+- The Relay seam distinguishes malformed JSON from transport interruption and does not expose parser details.
+- All public exception-derived warnings are fixed projections; the recipe response is allowlist-only at every depth.
+- Limiter memory is bounded to 4,096 buckets and at most each policy's sustained event count per bucket; pruning creates no timer or visitor-absent work.
+- The production HostProfile rule, configured claim/runtime/repositories, services, dependencies, version, and changelog remain unchanged.
+- Public caches and rate limits remain process-local by design for the current single-process deployment.
