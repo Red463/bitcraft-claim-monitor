@@ -21,7 +21,6 @@ export function MapResourceFinderPanel({
   catalogCount,
   catalogLoaded,
   error,
-  notice,
   onSearchChange,
   onTierChange,
   onCategoryChange,
@@ -43,7 +42,6 @@ export function MapResourceFinderPanel({
   catalogCount: number;
   catalogLoaded: boolean;
   error: string;
-  notice: string;
   onSearchChange: (value: string) => void;
   onTierChange: (value: string) => void;
   onCategoryChange: (value: string) => void;
@@ -79,7 +77,6 @@ export function MapResourceFinderPanel({
         </div>
       ) : null}
       {error ? <div className="error">Resources unavailable: {error}</div> : null}
-      {notice ? <p className="legend">{notice}</p> : null}
       <div className="map-resource-list">
         {resources.map((resource) => {
           const token = mapResourceToken(resource);

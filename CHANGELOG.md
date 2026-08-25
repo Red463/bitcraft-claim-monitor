@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.10] - 2026-08-25
+
+### Changed
+
+- Consolidated Map freshness messaging into its health/status surface instead of repeating stale-catalog warnings inside the Resource Finder.
+
+### Fixed
+
+- Removed the continuous backing strip behind the Map filter controls and made Map tool windows fully opaque on desktop and mobile.
+
 ## [0.62.0-beta.9] - 2026-08-25
 
 ### Changed

@@ -92,6 +92,26 @@ test("Native map tool panels keep close controls compact and resource results as
   assert.match(mapCss, /\.map-resource-filters\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s);
 });
 
+test("Map chrome keeps independent controls and floating windows opaque", () => {
+  const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+  const chromeStart = mapCss.indexOf("/* Obsidian Ledger immersive map chrome */");
+  const immersiveChrome = mapCss.slice(chromeStart, mapCss.indexOf("@media (max-width: 700px)", chromeStart));
+
+  assert.match(immersiveChrome, /--map-chrome-bg:\s*var\(--surface-1\)/);
+  assert.match(immersiveChrome, /\.map-chrome\s*\{[^}]*backdrop-filter:\s*none;/s);
+  assert.match(immersiveChrome, /\.native-map-controls\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s);
+  assert.match(immersiveChrome, /\.native-map-tool-trigger,\s*\.native-map-region-select\s*\{[^}]*background:\s*var\(--map-chrome-bg\);[^}]*box-shadow:\s*none;/s);
+  assert.match(immersiveChrome, /\.native-map-tool-panel\s*\{[^}]*border-color:\s*var\(--map-chrome-border,\s*var\(--line-strong\)\);[^}]*background:\s*var\(--map-chrome-bg,\s*var\(--surface-1\)\);[^}]*box-shadow:\s*var\(--map-chrome-shadow,\s*0 12px 32px rgb\(0 0 0 \/ 34%\)\);/s);
+});
+
+test("Map freshness warnings live in the health surface instead of repeating inside resource tools", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+  const finder = readFileSync(new URL("../src/pages/map/MapResourceFinderPanel.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(mapPage, /resourceNotice|setResourceNotice/);
+  assert.doesNotMatch(finder, /\bnotice\b/);
+});
+
 test("Map Resource Finder uses the shared icon fallback for compound item identities", () => {
   const finder = readFileSync(new URL("../src/pages/map/MapResourceFinderPanel.tsx", import.meta.url), "utf8");
 
