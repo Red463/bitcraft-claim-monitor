@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.19] - 2026-08-25
+
+### Changed
+
+- Tightened the Global Market command bar and aligned its region and freshness controls.
+- Restyled Global Market map actions to match the application control system.
+
+### Fixed
+
+- Kept the configured settlement name visible in the sidebar when navigating to pages that do not load settlement data.
+
 ## [0.62.0-beta.18] - 2026-08-25
 
 ### Fixed

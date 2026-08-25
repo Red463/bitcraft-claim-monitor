@@ -1674,6 +1674,7 @@ function publicBootstrapConfig() {
   const settings = getSettings();
   return {
     claimId: settings.claimId,
+    claimName: String(currentStateRepository.read(settings.claimId, "claim")?.data?.name ?? "").trim(),
     syncUrl: settings.syncUrl,
     excludedMemberIds: settings.excludedMemberIds,
     theme: settings.theme,

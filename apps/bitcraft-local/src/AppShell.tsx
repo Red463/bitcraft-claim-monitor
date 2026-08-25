@@ -314,6 +314,10 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
   const [effectiveAccess, setEffectiveAccess] = React.useState<EffectiveAccess | null>(null);
   const [adminAuth, setAdminAuth] = React.useState<AnyRecord>({ authenticated: false });
   const [claimId, setClaimId] = React.useState(initialBootstrap.config.claimId);
+  const [settlementNamesByClaim, setSettlementNamesByClaim] = React.useState<Record<string, string>>(() => {
+    const initialName = String(initialBootstrap.config.claimName ?? "").trim();
+    return initialName ? { [initialBootstrap.config.claimId]: initialName } : {};
+  });
   const claimIdRef = React.useRef(claimId);
   const [syncUrl, setSyncUrl] = React.useState(() => normalizeAppSettings(initialBootstrap.config).syncUrl ?? DEFAULT_SYNC_URL);
   const [browserTheme, setBrowserTheme] = usePersistedState<ThemeSettings>("theme.local", DEFAULT_THEME);
@@ -428,6 +432,14 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
     const normalized = normalizeData(state.data);
     return applyMemberTrackingFilter({ ...normalized, raw: state.data }, excludedMemberIds);
   }, [state.data, excludedMemberIds]);
+  const pageSettlementName = String(data.claim.name ?? "").trim();
+  const settlementName = pageSettlementName || settlementNamesByClaim[claimId] || "";
+  React.useEffect(() => {
+    if (!pageSettlementName) return;
+    setSettlementNamesByClaim((current) => current[claimId] === pageSettlementName
+      ? current
+      : { ...current, [claimId]: pageSettlementName });
+  }, [claimId, pageSettlementName]);
   const localHistory = useLocalHistory(claimId, active, pageRefreshCycle, trackPageRefreshPromise);
   const notificationActivity = useNotificationActivity(notificationRefreshToken, claimId);
   const dealAlerts = useDealAlerts(dealRefreshToken);
@@ -1019,7 +1031,7 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
               event.currentTarget.src = DEFAULT_APP_LOGO_URL;
             }} />
             : <img src={DEFAULT_APP_LOGO_URL} alt="" />}
-          <div title={data.claim.name ?? "Settlement"}><h1>{data.claim.name ?? "Settlement"}</h1><span>Claim Monitor</span></div>
+          <div title={settlementNavigationLabel(settlementName)}><h1>{settlementNavigationLabel(settlementName)}</h1><span>Claim Monitor</span></div>
           <button className="sidebar-toggle" type="button" onClick={() => setSidebarCollapsed((current) => !current)} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
@@ -1056,7 +1068,7 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
                   aria-expanded={showItems}
                   onClick={() => setSidebarGroups((current) => ({ ...current, [group.id]: !(current[group.id] ?? true) }))}
                 >
-                  <span>{group.id === "settlement" ? settlementNavigationLabel(data.claim.name) : group.label}</span>
+                  <span>{group.id === "settlement" ? settlementNavigationLabel(settlementName) : group.label}</span>
                   <ArrowDown size={12} aria-hidden="true" />
                 </button>
                 <div className="sidebar-section-items">

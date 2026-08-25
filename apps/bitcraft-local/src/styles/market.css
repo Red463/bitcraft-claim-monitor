@@ -489,9 +489,11 @@
   z-index: 8;
   top: 8px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(210px, 260px);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
+  min-height: 56px;
+  gap: 10px;
+  padding: 8px 10px;
   border-color: var(--line-subtle);
   background: var(--surface-2);
   box-shadow: none;
@@ -500,7 +502,7 @@
 .global-market-tabs {
   display: flex;
   min-width: 0;
-  gap: 4px;
+  gap: 2px;
   overflow-x: auto;
   padding-bottom: 1px;
   scrollbar-width: thin;
@@ -509,12 +511,12 @@
 .global-market-tabs button,
 .market-region-pills button,
 .market-range-tabs button {
-  min-height: 34px;
+  min-height: 36px;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: transparent;
   color: #98a5b7;
-  padding: 0 12px;
+  padding: 0 11px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -549,7 +551,7 @@
 }
 
 .global-market-tabs button.active {
-  box-shadow: inset 0 -2px 0 #f3c532;
+  box-shadow: inset 0 -2px 0 var(--gold);
 }
 
 .market-subnav {
@@ -593,10 +595,33 @@
   min-width: 0;
 }
 
-.global-market-toolbar-meta {
+.global-market-toolbar-controls {
   min-width: 0;
-  display: grid;
-  gap: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line-subtle);
+}
+
+.global-market-command .global-market-region {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.global-market-command .global-market-region > span {
+  color: var(--muted);
+  font: 750 10px/1 var(--font-data);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.global-market-command .global-market-region select {
+  width: 220px;
+  min-height: 36px;
 }
 
 .global-market-freshness {
@@ -606,6 +631,33 @@
   justify-content: flex-end;
   gap: 5px;
   font-size: 11px;
+  white-space: nowrap;
+}
+
+.market-map-button {
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.market-map-button:hover,
+.market-map-button:focus-visible {
+  border-color: color-mix(in srgb, var(--gold) 54%, var(--line-strong));
+  background: var(--gold-dim);
+  color: var(--gold);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 16%, transparent);
+}
+
+.app-shell .global-market-page .market-map-button {
+  border-radius: 4px;
 }
 
 .global-market-freshness svg {
@@ -1561,7 +1613,21 @@
   .global-market-command {
     top: 4px;
   }
+  .global-market-toolbar-controls {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+    padding: 8px 0 0;
+    border-top: 1px solid var(--line-subtle);
+    border-left: 0;
+  }
+  .global-market-freshness {
+    justify-content: flex-start;
+  }
   .global-market-region {
+    width: 100%;
+  }
+  .global-market-command .global-market-region select {
     width: 100%;
   }
   .global-market-data-alert summary {

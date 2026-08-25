@@ -1580,6 +1580,7 @@ test("server collection paginates listings and protects production mutations", a
   const bootstrap = await bootstrapResponse.json();
   assert.deepEqual(Object.keys(bootstrap).sort(), ["auth", "build", "config", "legal"]);
   assert.equal(bootstrap.config.claimId, claimId);
+  assert.equal(typeof bootstrap.config.claimName, "string");
   assert.equal(bootstrap.config.refreshSeconds, initialConfig.refreshSeconds);
   assert.equal(bootstrap.auth.authenticated, false);
   assert.equal(bootstrap.auth.featurebaseJwt, null);

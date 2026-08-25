@@ -1,7 +1,9 @@
 import type { PublicLegalPolicy } from "../components/main/LegalAcceptanceDialog";
 import type { AppSettings, UserAuthState } from "../types/settings";
 
-export type BootstrapConfig = Partial<AppSettings> & Pick<AppSettings, "claimId" | "refreshSeconds">;
+export type BootstrapConfig = Partial<AppSettings> & Pick<AppSettings, "claimId" | "refreshSeconds"> & {
+  claimName?: string;
+};
 export type BootstrapAuth = Omit<UserAuthState, "featurebaseJwt"> & { authenticated: boolean; featurebaseJwt: string | null };
 export type BootstrapLegal = PublicLegalPolicy & {
   acceptanceRequired: boolean;
@@ -36,6 +38,7 @@ export function normalizeBootstrap(value: unknown): BootstrapPayload {
     config: {
       ...config,
       claimId,
+      claimName: String(config.claimName ?? "").trim(),
       refreshSeconds: Number.isFinite(refreshSeconds) ? refreshSeconds : 30,
     } as BootstrapConfig,
     auth: {

@@ -111,6 +111,20 @@ test("Browse sorts the complete filtered order book before pagination", () => {
   assert.doesNotMatch(orderWorkspace, /<span>Sort<\/span>/);
 });
 
+test("Market command bar and map actions use the compact Obsidian control treatment", () => {
+  const marketPage = source("../src/pages/MarketPage.tsx");
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+  const css = source("../src/styles/market.css");
+
+  assert.match(marketPage, /className="global-market-toolbar-controls"/);
+  assert.match(browse, /className="market-map-button"/);
+  assert.match(browse, /aria-label="Show order on map"/);
+  assert.match(css, /\.global-market-command\s*\{[^}]*min-height:\s*56px;[^}]*padding:\s*8px 10px;/s);
+  assert.match(css, /\.global-market-command\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto;/s);
+  assert.match(css, /\.market-map-button\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;[^}]*background:\s*var\(--surface-1\);/s);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.global-market-toolbar-controls\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*1fr;/s);
+});
+
 test("Browse consolidates availability and preserves an explicit result return path", () => {
   const browse = source("../src/pages/market/MarketBrowse.tsx");
 

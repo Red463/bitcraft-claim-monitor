@@ -396,7 +396,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
                 ["Region", (order) => order.regionName || (order.regionId ? `R${order.regionId}` : "—"), (order) => order.regionName || String(order.regionId ?? "")],
                 ["Settlement", (order) => order.claimName || "Unknown settlement", (order) => order.claimName],
                 [orderTab === "buy" ? "Buyer" : "Seller", (order) => order.ownerName || "—", (order) => order.ownerName],
-                ["Map", (order) => order.locationX != null && order.locationZ != null ? <button className="icon-button" title="Show on map" onClick={() => onShowMap({ name: order.claimName || selectedItem.name, locationX: order.locationX, locationZ: order.locationZ }, String(order.regionId ?? ""))}><MapPin size={15} /></button> : "—", undefined, false],
+                ["Map", (order) => order.locationX != null && order.locationZ != null ? <button className="market-map-button" type="button" title="Show on map" aria-label="Show order on map" onClick={() => onShowMap({ name: order.claimName || selectedItem.name, locationX: order.locationX, locationZ: order.locationZ }, String(order.regionId ?? ""))}><MapPin size={15} /></button> : "—", undefined, false],
               ]}
             />
             <div className="pagination-row"><span>Page {Math.min(page, pageCount)} of {pageCount} · {formatNumber(filteredOrders.length)} orders</span><div><button className="toolbar-button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button><button className="toolbar-button" disabled={page >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Next</button></div></div>
