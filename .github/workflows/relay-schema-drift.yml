@@ -113,13 +113,13 @@ jobs:
           if [[ -z "$pr" ]]; then
             pr="$(gh pr create --base main --head "$branch" --title 'chore(relay): refresh generated schema bindings' --body "Closes #$ISSUE_NUMBER
 
-Automated guarded refresh after exact Relay schema drift detection.
+          Automated guarded refresh after exact Relay schema drift detection.
 
-- Generated with pinned SpacetimeDB CLI 2.7.0 commit d220349adb7af7eefa810eb08a185609356b83f6
-- Application tests passed
-- Production build passed
-- Live fingerprints rechecked after generation
+          - Generated with pinned SpacetimeDB CLI 2.7.0 commit d220349adb7af7eefa810eb08a185609356b83f6
+          - Application tests passed
+          - Production build passed
+          - Live fingerprints rechecked after generation
 
-This PR is intentionally not auto-merged or auto-deployed.")"
+          This PR is intentionally not auto-merged or auto-deployed.")"
           fi
           gh issue comment "$ISSUE_NUMBER" --body "Prepared and verified bindings update: $pr"

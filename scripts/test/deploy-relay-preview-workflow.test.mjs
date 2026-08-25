@@ -60,6 +60,7 @@ test("Relay schema drift is scheduled, regenerates with the pinned CLI, and prep
   assert.match(schemaWorkflow, /verify-relay-primary-region-live\.mjs/);
   assert.match(schemaWorkflow, /gh pr create/);
   assert.doesNotMatch(schemaWorkflow, /gh pr merge|workflow_run:/);
+  assert.doesNotMatch(schemaWorkflow, /^(?:Automated guarded refresh|- (?:Generated|Application|Production|Live)|This PR is intentionally)/m);
 });
 
 test("verification validates only Relay units and the coexistence Caddy example", () => {

@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.12] - 2026-08-25
+
+### Fixed
+
+- Fixed GitHub registration of the scheduled Relay schema-drift workflow so its manual and scheduled triggers run correctly.
+
 ## [0.62.0-beta.11] - 2026-08-25
 
 ### Added
