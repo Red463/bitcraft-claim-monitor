@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { publicStorageKey, resolvePublicRoute } from "../src/public/routes.mjs";
+import { publicSettlementPath, publicStorageKey, resolvePublicRoute } from "../src/public/routes.mjs";
 import { addRecentSettlement, readRecentSettlements, settlementPreferenceKey } from "../src/public/preferences.mjs";
 import { createVisibleRefreshController } from "../src/public/visibleRefresh.mjs";
 
@@ -15,6 +15,20 @@ test("public routes expose only the public claim-monitor feature matrix", () => 
   assert.deepEqual(resolvePublicRoute("/leaderboard"), { id: "not-found", params: {} });
   assert.deepEqual(resolvePublicRoute("/map"), { id: "not-found", params: {} });
   assert.deepEqual(resolvePublicRoute("/admin"), { id: "not-found", params: {} });
+});
+
+test("public name and exact-ID search hints select their server claim IDs", () => {
+  assert.equal(
+    publicSettlementPath({ claimId: "42", name: "Northwatch", regionId: "7" }),
+    "/settlements/42",
+    "name-search hints must select the server claimId",
+  );
+  assert.equal(
+    publicSettlementPath({ claimId: "18446744073709551615", name: "Exact match", regionId: "7" }),
+    "/settlements/18446744073709551615",
+    "exact-ID search hints must preserve the complete canonical claimId",
+  );
+  assert.equal(publicSettlementPath({ entityId: "42" }), null, "legacy entityId must not become a public URL authority");
 });
 
 test("recent settlements and view preferences stay in the public claim namespace", () => {

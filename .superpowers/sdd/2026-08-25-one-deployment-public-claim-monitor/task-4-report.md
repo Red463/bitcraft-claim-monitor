@@ -105,3 +105,40 @@ The public-root and shell test reads the public root, shell, and public API clie
 ## Concerns
 
 - The public production host must set `PUBLIC_PROFILE_ENABLED=true` before live public API content can be observed in a local browser. This implementation deliberately does not change that deployment flag.
+
+## Fix round 1/5 — search-hint contract alignment
+
+### Finding and fix
+
+The public settlement API returns safe hint records keyed by `claimId`, but the initial client type and search-result links read `entityId`. A name or exact-ID result could therefore create `/settlements/undefined`.
+
+- Added `publicSettlementPath()` as the single validated conversion from a public search hint to a claim route.
+- Updated the public client `PublicHint` contract and search results to use `claimId` consistently.
+- Covered both normal name-search and max unsigned-64 exact-ID selection, plus rejection of an `entityId`-only legacy-shaped hint.
+- Preserved all approved Plans/collaboration skeleton paths (`/plans/new`, `/plans/:id`, `/shared-plans/:id`, and `/invites/:id`).
+
+### RED
+
+```sh
+node --experimental-strip-types --test test/public-shell.test.mjs
+```
+
+Output: failed at module load as expected:
+
+```txt
+SyntaxError: The requested module '../src/public/routes.mjs' does not provide an export named 'publicSettlementPath'
+```
+
+### GREEN
+
+```sh
+node --experimental-strip-types --test test/public-shell.test.mjs test/public-router.test.mjs
+```
+
+Output: `7 passed, 0 failed`.
+
+```sh
+corepack pnpm --filter @workspace/bitcraft-local run build
+```
+
+Output: passed, including frontend TypeScript validation and Vite build.

@@ -1,6 +1,6 @@
 type PublicResponse<T> = T & { error?: string };
 
-export type PublicHint = { entityId: string; name: string; regionId?: string; tier?: number };
+export type PublicHint = { claimId: string; name: string; regionId?: string; tier?: number };
 export type PublicDomain<T> = { data: T | null; warnings: unknown[] };
 export type PublicSnapshot = {
   claimId: string;

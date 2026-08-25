@@ -2,6 +2,7 @@ import React from "react";
 import { Boxes, ChevronRight, Hammer, Home, RefreshCw, Search, Users } from "lucide-react";
 import { loadPublicSnapshot, searchPublicCatalog, searchPublicSettlements, type PublicHint, type PublicSnapshot } from "./api";
 import { addRecentSettlement, readRecentSettlements } from "./preferences.mjs";
+import { publicSettlementPath } from "./routes.mjs";
 import { createVisibleRefreshController } from "./visibleRefresh.mjs";
 
 type Route = { id: string; params: Record<string, string> };
@@ -67,8 +68,8 @@ function SnapshotPage({ route }: { route: Route }) {
 function SearchPanel() {
   const [query, setQuery] = React.useState(""); const [results, setResults] = React.useState<PublicHint[]>([]); const [message, setMessage] = React.useState(""); const [recent] = React.useState(() => readRecentSettlements(window.localStorage));
   async function search(event: React.FormEvent) { event.preventDefault(); setMessage(""); try { const result = await searchPublicSettlements(query); setResults(result.hints); if (!result.hints.length) setMessage("No matching settlements found."); } catch (reason) { setMessage(reason instanceof Error ? reason.message : "Search is unavailable."); } }
-  const entries = results.length ? results : recent.map((value) => ({ entityId: value.claimId, name: value.name, regionId: value.regionId }));
-  return <section className="public-search-panel"><form onSubmit={search}><label htmlFor="public-settlement-search">Find a settlement</label><div><input id="public-settlement-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name or exact claim ID" /><button className="toolbar-button primary" type="submit"><Search size={16} /> Search</button></div></form>{message && <p role="status">{message}</p>}{entries.length > 0 && <div className="public-search-results"><span>{results.length ? "Matches" : "Recent settlements"}</span>{entries.map((entry) => <a key={entry.entityId} href={`/settlements/${entry.entityId}`}><strong>{entry.name}</strong><small>#{entry.entityId} · region {entry.regionId ?? "—"}</small><ChevronRight size={16} /></a>)}</div>}</section>;
+  const entries: PublicHint[] = results.length ? results : recent.map((value) => ({ claimId: value.claimId, name: value.name, regionId: value.regionId }));
+  return <section className="public-search-panel"><form onSubmit={search}><label htmlFor="public-settlement-search">Find a settlement</label><div><input id="public-settlement-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name or exact claim ID" /><button className="toolbar-button primary" type="submit"><Search size={16} /> Search</button></div></form>{message && <p role="status">{message}</p>}{entries.length > 0 && <div className="public-search-results"><span>{results.length ? "Matches" : "Recent settlements"}</span>{entries.map((entry) => { const href = publicSettlementPath(entry); return href && <a key={entry.claimId} href={href}><strong>{entry.name}</strong><small>#{entry.claimId} · region {entry.regionId ?? "—"}</small><ChevronRight size={16} /></a>; })}</div>}</section>;
 }
 
 function Calculator() {

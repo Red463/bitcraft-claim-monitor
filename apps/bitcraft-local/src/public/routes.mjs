@@ -19,6 +19,11 @@ function isCanonicalClaimId(value) {
   return /^(0|[1-9]\d*)$/.test(value) && BigInt(value) <= 18_446_744_073_709_551_615n;
 }
 
+export function publicSettlementPath(hint) {
+  const claimId = String(hint?.claimId ?? "");
+  return isCanonicalClaimId(claimId) ? `/settlements/${claimId}` : null;
+}
+
 export function resolvePublicRoute(pathname) {
   const segments = pathSegments(pathname);
   if (!segments) return NOT_FOUND;
