@@ -24,7 +24,7 @@ function json(res) { return res.body ? JSON.parse(res.body) : null; }
 function cookieValues(res) { return Array.isArray(res.headers["set-cookie"]) ? res.headers["set-cookie"] : res.headers["set-cookie"] ? [res.headers["set-cookie"]] : []; }
 function cookiePair(res, name) { return cookieValues(res).find((value) => value.startsWith(`${name}=`))?.split(";", 1)[0] ?? ""; }
 function request({ cookie = "", origin = "https://claim-monitor.com", csrf = "", body = null } = {}) {
-  return { headers: { cookie, host: "claim-monitor.com", origin, ...(csrf ? { "x-csrf-token": csrf } : {}) }, body };
+  return { headers: { cookie, host: "claim-monitor.com", ...(origin === null ? {} : { origin }), ...(csrf ? { "x-csrf-token": csrf } : {}) }, body };
 }
 
 function fixture({ fetchImpl } = {}) {
@@ -146,6 +146,56 @@ test("public session, legal acceptance, export, CSRF logout, and disabled integr
   assert.equal(loggedOut.res.status, 200);
   assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM public_user_sessions").get().count, 0);
   assert.match(cookiePair(loggedOut.res, "__Host-cm_user_session"), /^__Host-cm_user_session=$/);
+  f.db.close();
+});
+
+test("public mutations require the exact configured HTTPS Origin even with a valid session and CSRF token", async () => {
+  const f = fixture({ fetchImpl: discordFetch().fetchImpl });
+  const login = await oauthLogin(f);
+  const me = await call(f.router, "GET", "/api/public/auth/session", request({ cookie: login.sessionCookie, origin: null }));
+  const csrfToken = json(me.res).csrfToken;
+
+  for (const origin of [
+    null,
+    "http://claim-monitor.com",
+    "https://claim-monitor.com:444",
+    "https://user@claim-monitor.com",
+    "https://other.example",
+  ]) {
+    const rejected = await call(f.router, "POST", "/api/public/auth/logout", request({
+      cookie: login.sessionCookie,
+      csrf: csrfToken,
+      origin,
+    }));
+    assert.equal(rejected.res.status, 403, `Origin ${String(origin)} must be rejected`);
+    assert.equal(json(rejected.res).error, "Cross-origin public account request rejected");
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM public_user_sessions").get().count, 1);
+  }
+
+  const accepted = await call(f.router, "POST", "/api/public/auth/logout", request({
+    cookie: login.sessionCookie,
+    csrf: csrfToken,
+    origin: "https://claim-monitor.com",
+  }));
+  assert.equal(accepted.res.status, 200);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM public_user_sessions").get().count, 0);
+  f.db.close();
+});
+
+test("public OAuth start applies the same mandatory exact-Origin boundary", async () => {
+  const f = fixture({ fetchImpl: discordFetch().fetchImpl });
+  const body = { acceptedTerms: true, ageConfirmed: true, returnTo: "/settings" };
+
+  const rejected = await call(f.router, "POST", "/api/public/auth/discord/start", request({ origin: null, body }));
+  assert.equal(rejected.res.status, 403);
+  assert.equal(json(rejected.res).error, "Cross-origin Discord sign-in rejected");
+
+  const accepted = await call(f.router, "POST", "/api/public/auth/discord/start", request({
+    origin: "https://claim-monitor.com",
+    body,
+  }));
+  assert.equal(accepted.res.status, 200);
+  assert.equal(new URL(json(accepted.res).authorizeUrl).origin, "https://discord.com");
   f.db.close();
 });
 

@@ -9,7 +9,6 @@ import {
 import { BODY_LIMITS, readJson } from "../httpBodies.mjs";
 import { csrfTokenForCookie, validCsrfHeader } from "../httpCsrf.mjs";
 import { sendJson } from "../httpResponses.mjs";
-import { sameOriginRequest } from "../httpRequests.mjs";
 import {
   isCurrentLegalAcceptance,
   isCurrentOAuthLegalAcceptance,
@@ -17,6 +16,7 @@ import {
 } from "../legalAcceptance.mjs";
 import { sessionTokenFromRequest, sessionTokenHash } from "../serverSessions.mjs";
 import {
+  PUBLIC_ORIGIN,
   PUBLIC_USER_SESSION_COOKIE_NAME,
   buildPublicDiscordAuthorizeUrl,
   clearPublicOAuthStateCookie,
@@ -29,6 +29,22 @@ import {
   readPublicPrivacyReauthCookie,
 } from "./auth.mjs";
 import { publicAccountView } from "./identity.mjs";
+
+function exactPublicOriginRequest(req) {
+  const value = String(req.headers.origin ?? "").trim();
+  if (!value) return false;
+  try {
+    const origin = new URL(value);
+    return origin.origin === PUBLIC_ORIGIN
+      && !origin.username
+      && !origin.password
+      && origin.pathname === "/"
+      && !origin.search
+      && !origin.hash;
+  } catch {
+    return false;
+  }
+}
 
 function redirect(res, location, setCookie) {
   res.writeHead(302, { location, ...(setCookie ? { "set-cookie": setCookie } : {}) });
@@ -87,7 +103,7 @@ export function createPublicAuthRouter({
       return null;
     }
     if (mutation) {
-      if (!sameOriginRequest(req, { isProduction: true })) {
+      if (!exactPublicOriginRequest(req)) {
         send(res, 403, { error: "Cross-origin public account request rejected" });
         return null;
       }
@@ -125,7 +141,7 @@ export function createPublicAuthRouter({
   }
 
   async function handleStart(req, res) {
-    if (!sameOriginRequest(req, { isProduction: true })) return send(res, 403, { error: "Cross-origin Discord sign-in rejected" });
+    if (!exactPublicOriginRequest(req)) return send(res, 403, { error: "Cross-origin Discord sign-in rejected" });
     const body = await readRequestJson(req);
     if (body.acceptedTerms !== true || body.ageConfirmed !== true) {
       return send(res, 400, { error: "Accept the Terms and Privacy Policy and confirm that you are at least 18" });

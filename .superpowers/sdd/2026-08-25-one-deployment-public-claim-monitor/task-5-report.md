@@ -120,3 +120,144 @@ Browser OAuth was not exercised because Task 5 deliberately requires the real fi
 ## Concern / Task 7 handoff
 
 Task 5 does not write a deletion receipt, so the existing privacy ledger does not block this preflight-only implementation. Task 7 must not reuse the current `discord:<id>` subject unchanged: the ledger HMAC subject and replay path currently assume Timbersteel `user_accounts`. Final public plan-aware deletion needs a new public-profile-scoped HMAC subject and public-account replay/delete path while preserving the existing Timbersteel `discord:` semantics and cutover compatibility.
+
+## Fix round 1 — mandatory exact public mutation Origin
+
+Security review found that the initial public router used the shared Timbersteel `sameOriginRequest` behavior, which intentionally accepts a missing Origin and compares an otherwise present Origin by host. Public mutations now use a private exact-origin decision instead. It requires a present, parseable Origin whose normalized origin is exactly `https://claim-monitor.com`, including HTTPS and the effective port, and rejects credentials, path, query, or fragment components. The shared helper and every Timbersteel call site remain unchanged.
+
+The authenticated route test uses a valid public session and valid CSRF token. It verifies rejection of a missing Origin, `http://claim-monitor.com`, `https://claim-monitor.com:444`, `https://user@claim-monitor.com`, and `https://other.example`, preserves the session after every rejection, and verifies that exact `https://claim-monitor.com` succeeds. A separate OAuth-start test proves the same mandatory boundary applies to the only public mutation outside the authenticated `requireSession` path.
+
+### RED 1 — authenticated public mutation
+
+Command:
+
+```text
+node --test test/public-auth-routes.test.mjs
+```
+
+Output:
+
+```text
+✖ public mutations require the exact configured HTTPS Origin even with a valid session and CSRF token
+AssertionError [ERR_ASSERTION]: Origin null must be rejected
+200 !== 403
+tests 6
+pass 5
+fail 1
+```
+
+The failure was the expected vulnerable behavior: a missing Origin reached logout and returned 200.
+
+### GREEN 1 — authenticated public mutation
+
+Command:
+
+```text
+node --test test/public-auth-routes.test.mjs
+```
+
+Output:
+
+```text
+✔ public mutations require the exact configured HTTPS Origin even with a valid session and CSRF token
+tests 6
+pass 6
+fail 0
+```
+
+### RED 2 — public OAuth start call site
+
+Command:
+
+```text
+node --test test/public-auth-routes.test.mjs
+```
+
+Output:
+
+```text
+✖ public OAuth start applies the same mandatory exact-Origin boundary
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+200 !== 403
+tests 7
+pass 6
+fail 1
+```
+
+The failure proved OAuth start still accepted a missing Origin when its public-only guard was deliberately absent.
+
+### GREEN 2 — every public mutation call site
+
+Command:
+
+```text
+node --test test/public-auth-routes.test.mjs
+```
+
+Output:
+
+```text
+✔ public OAuth persists only a public account/session and never promotes a matching Timbersteel administrator
+✔ public session, legal acceptance, export, CSRF logout, and disabled integrations stay isolated
+✔ public mutations require the exact configured HTTPS Origin even with a valid session and CSRF token
+✔ public OAuth start applies the same mandatory exact-Origin boundary
+✔ existing public sessions accept only the current Claim Monitor legal snapshot with CSRF
+✔ public deletion preflight requires same-account recent reauthentication and never deletes
+✔ public reauthentication rejects a different Discord profile without modifying the session
+tests 7
+pass 7
+fail 0
+```
+
+### Focused verification
+
+Command:
+
+```text
+node --test test/public-auth-contract.test.mjs test/public-auth-routes.test.mjs test/server-http-requests.test.mjs
+```
+
+Output:
+
+```text
+tests 16
+pass 16
+fail 0
+```
+
+This includes the unchanged shared `sameOriginRequest` tests, confirming the Timbersteel origin contract still passes.
+
+### Build and full suite
+
+Command:
+
+```text
+corepack pnpm --filter @workspace/bitcraft-local run build
+```
+
+Output: passed server/provider/bindings TypeScript, asset verification, frontend TypeScript, Vite production build, and Relay runtime-boundary verification (`{"ok":true}`).
+
+The first full-suite run completed 2,692 passes but one spawned-server host-profile test ended with `ECONNRESET`. Direct reproduction exposed the environmental cause: the sandbox denied the child server access to `node_modules/.pnpm/jsonwebtoken/.../index.js` with `EPERM`. No source was changed. Running the exact affected file with the required filesystem access produced:
+
+```text
+node --test test/host-profile-boundaries.test.mjs
+tests 3
+pass 3
+fail 0
+```
+
+Final full-suite command:
+
+```text
+corepack pnpm --filter @workspace/bitcraft-local test
+```
+
+Final output:
+
+```text
+tests 2696
+pass 2693
+fail 0
+skipped 3
+duration_ms 138525.2755
+```
