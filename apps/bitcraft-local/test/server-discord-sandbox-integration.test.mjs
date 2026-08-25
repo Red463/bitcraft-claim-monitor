@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
@@ -54,6 +55,24 @@ async function stop(child) {
     child.once("exit", resolve);
     setTimeout(resolve, 3000);
   });
+}
+
+function createTestAdminSession(dbPath, { username, role }) {
+  const token = createHash("sha256").update(`${username}:${role}:${Date.now()}:${Math.random()}`).digest("base64url");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const csrfToken = createHash("sha256").update(`csrf:${token}`).digest("base64url");
+  const db = new DatabaseSync(dbPath, { timeout: 5_000 });
+  const now = new Date().toISOString();
+  const result = db.prepare(`
+    INSERT INTO admin_users (username, password_hash, role, active, created_at)
+    VALUES (?, 'discord-oauth-admin', ?, 1, ?)
+  `).run(username, role, now);
+  db.prepare(`
+    INSERT INTO admin_sessions (token_hash, user_id, expires_at, created_at)
+    VALUES (?, ?, ?, ?)
+  `).run(tokenHash, result.lastInsertRowid, new Date(Date.now() + 60 * 60 * 1000).toISOString(), now);
+  db.close();
+  return { cookie: `bitcraft_admin_session=${token}`, csrfToken };
 }
 
 test("record-mode Admin manual tests post only to the local fake sandbox channel", async (t) => {
@@ -114,18 +133,8 @@ test("record-mode Admin manual tests post only to the local fake sandbox channel
 
   const origin = `http://127.0.0.1:${appPort}`;
   await waitForHealth(origin, child);
-  const setup = await fetch(`${origin}/api/local/admin/setup`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify({
-      username: "admin",
-      password: "correct horse battery",
-      setupKey: "sandbox-setup-key",
-    }),
-  });
-  assert.equal(setup.status, 200);
-  const auth = await setup.json();
-  const cookie = setup.headers.get("set-cookie").split(";")[0];
+  const auth = createTestAdminSession(path.join(dataDir, "bitcraft-local.sqlite"), { username: "admin", role: "owner" });
+  const cookie = auth.cookie;
   const adminHeaders = {
     cookie,
     origin,
@@ -370,18 +379,8 @@ test("maintenance hold blocks Discord network and leaves pre-start outbox rows u
   seedDb.close();
 
   const maintenance = await startServer("all");
-  const setup = await fetch(`${maintenance.origin}/api/local/admin/setup`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: maintenance.origin },
-    body: JSON.stringify({
-      username: "admin",
-      password: "correct horse battery",
-      setupKey: "maintenance-setup-key",
-    }),
-  });
-  assert.equal(setup.status, 200);
-  const auth = await setup.json();
-  const cookie = setup.headers.get("set-cookie").split(";")[0];
+  const auth = createTestAdminSession(dbPath, { username: "admin", role: "owner" });
+  const cookie = auth.cookie;
   const settingsDb = new DatabaseSync(dbPath, { timeout: 5000 });
   settingsDb.prepare(`
     INSERT INTO app_settings (key, value, updated_at)

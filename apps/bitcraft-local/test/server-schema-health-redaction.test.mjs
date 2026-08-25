@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
@@ -41,6 +42,23 @@ async function stop(child) {
   });
 }
 
+function createTestAdminSession(dbPath) {
+  const token = createHash("sha256").update(`owner:${Date.now()}:${Math.random()}`).digest("base64url");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const db = new DatabaseSync(dbPath, { timeout: 5_000 });
+  const now = new Date().toISOString();
+  const result = db.prepare(`
+    INSERT INTO admin_users (username, password_hash, role, active, created_at)
+    VALUES ('admin', 'discord-oauth-admin', 'owner', 1, ?)
+  `).run(now);
+  db.prepare(`
+    INSERT INTO admin_sessions (token_hash, user_id, expires_at, created_at)
+    VALUES (?, ?, ?, ?)
+  `).run(tokenHash, result.lastInsertRowid, new Date(Date.now() + 60 * 60 * 1000).toISOString(), now);
+  db.close();
+  return `bitcraft_admin_session=${token}`;
+}
+
 test("public and Admin health redact persisted schema errors from every diagnostic path", async (t) => {
   const appPort = await availablePort();
   const dataDir = path.join(appDir, `.test-schema-health-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -72,17 +90,7 @@ test("public and Admin health redact persisted schema errors from every diagnost
 
   const origin = `http://127.0.0.1:${appPort}`;
   await waitForHealth(origin, child);
-  const setup = await fetch(`${origin}/api/local/admin/setup`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify({
-      username: "admin",
-      password: "correct horse battery",
-      setupKey: "schema-health-setup-key",
-    }),
-  });
-  assert.equal(setup.status, 200);
-  const cookie = setup.headers.get("set-cookie").split(";")[0];
+  const cookie = createTestAdminSession(path.join(dataDir, "bitcraft-local.sqlite"));
   const db = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { timeout: 5_000 });
   const recordedAt = "2026-08-22T10:10:00.000Z";
   db.prepare(`

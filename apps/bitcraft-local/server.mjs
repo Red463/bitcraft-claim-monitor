@@ -145,8 +145,7 @@ import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/p
 import { createFeaturebaseJwt } from "./src/server/featurebaseJwt.mjs";
 import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
 import { discordProfileDisplayName, validAdminUsername, validDiscordId } from "./src/server/authIdentity.mjs";
-import { createAdminLoginAttemptStore, loginAttemptKey } from "./src/server/adminLoginAttempts.mjs";
-import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/server/passwordAuth.mjs";
+import { hashPassword, validLegacyAdminPassword } from "./src/server/passwordAuth.mjs";
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
@@ -443,7 +442,6 @@ const legalPolicy = legalPolicyForEnvironment(process.env);
 const legalDigests = legalPolicyDigests(legalPolicy);
 const legalSnapshot = currentLegalSnapshot(legalPolicy, legalDigests);
 const serveFrontend = isProduction || process.env.SERVE_STATIC === "true";
-const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const featurebaseJwtSecret = process.env.FEATUREBASE_JWT_SECRET ?? "";
 const legacyAdminPasswordAuth = process.env.ENABLE_LEGACY_ADMIN_PASSWORD_AUTH === "true";
 const processRole = resolveProcessRole(process.env, { isProduction });
@@ -1741,7 +1739,6 @@ function audit(user, action, details = {}) {
   statements.insertAudit.run(user?.id ?? null, user?.username ?? "system", action, JSON.stringify(details), new Date().toISOString());
 }
 
-const adminLoginAttempts = createAdminLoginAttemptStore();
 const SLOW_REQUEST_LOG_MS = Math.max(1000, Number(process.env.SLOW_REQUEST_LOG_MS ?? 8000));
 
 const CRAFT_PLAN_KEY = "active";
@@ -3147,7 +3144,7 @@ function requireAdminMutation(req, res, user) {
   return Boolean(user);
 }
 
-function createSession(userId) {
+function createAdminSessionFromTimbersteelOAuth(userId) {
   const session = createHttpSession({
     cookieName: ADMIN_SESSION_COOKIE_NAME,
     maxAgeSeconds: ADMIN_SESSION_MAX_AGE_SECONDS,
@@ -3281,7 +3278,7 @@ function createAdminSessionForDiscordProfile(profile, loginAt) {
   );
   statements.insertLoginEvent.run(username, 1, loginAt, "discord-oauth");
   audit({ id: admin.id, username }, "admin.discord_login", { discordId });
-  return createSession(admin.id);
+  return createAdminSessionFromTimbersteelOAuth(admin.id);
 }
 
 function oauthStateSecret() {
@@ -7284,6 +7281,12 @@ async function handleDiscordInteraction(req) {
   }
   const interaction = JSON.parse(rawBody.toString("utf8") || "{}");
   if (interaction.type === 1) return { status: 200, body: { type: 1 } };
+  if (!settings.guildId || String(interaction.guild_id ?? "") !== settings.guildId) {
+    return {
+      status: 200,
+      body: discordResponse("This interaction is only available in the configured Timbersteel Discord server.", { ephemeral: true }),
+    };
+  }
   if (interaction.type === 4) return { status: 200, body: await discordAutocomplete(interaction) };
   if (interaction.type === 3) return { status: 200, body: await handleDiscordComponent(interaction) };
   if (interaction.type !== 2) return { status: 200, body: discordResponse("Unsupported Discord interaction.", { ephemeral: true }) };
@@ -8951,44 +8954,10 @@ const server = createServer(async (req, res) => {
     if (smokeReviewRejection) return send(res, 403, { error: smokeReviewRejection });
     if (req.method === "GET" && url.pathname === "/api/local/admin/me") return send(res, 200, adminStatus(req));
     if (req.method === "POST" && url.pathname === "/api/local/admin/setup") {
-      if (!legacyAdminPasswordAuth) return send(res, 410, { error: "Password administrator setup has been replaced by Discord administrator access" });
-      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
-      if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator setup rejected" });
-      if (toNumber(statements.adminCount.get()?.count) > 0) return send(res, 409, { error: "Admin user already exists" });
-      const body = await readJson(req, BODY_LIMITS.auth);
-      if (isProduction && !adminSetupKey) return send(res, 503, { error: "Admin setup is disabled until ADMIN_SETUP_KEY is configured on the server" });
-      if (isProduction && String(body.setupKey ?? "") !== adminSetupKey) return send(res, 403, { error: "Invalid server setup key" });
-      const username = String(body.username ?? "admin").trim();
-      if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
-      const password = String(body.password ?? "");
-      if (!validLegacyAdminPassword(password)) return send(res, 400, { error: "Password must be at least 12 characters" });
-      const createdAt = new Date().toISOString();
-      const result = statements.insertAdmin.run(username, await hashPassword(password), "owner", createdAt);
-      statements.updateLastLogin.run(createdAt, result.lastInsertRowid);
-      audit({ id: result.lastInsertRowid, username }, "admin.setup", { username });
-      const session = createSession(result.lastInsertRowid);
-      return send(res, 200, adminStatus({ headers: { cookie: session.cookie } }), { "set-cookie": session.cookie });
+      return send(res, 410, { error: "Administrator sign-in now uses Discord. Sign in with an approved Discord admin account." });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/login") {
-      if (!legacyAdminPasswordAuth) return send(res, 410, { error: "Administrator sign-in now uses Discord. Sign in with an approved Discord admin account." });
-      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
-      if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator sign-in rejected" });
-      const body = await readJson(req, BODY_LIMITS.auth);
-      const username = String(body.username ?? "admin").trim();
-      const attemptKey = loginAttemptKey(clientAddress(req), username);
-      if (adminLoginAttempts.blocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
-      const user = statements.adminByUsername.get(username);
-      const successful = Boolean(user && await verifyPassword(String(body.password ?? ""), user.password_hash));
-      statements.insertLoginEvent.run(username, successful ? 1 : 0, new Date().toISOString(), clientAddress(req));
-      if (!successful) {
-        adminLoginAttempts.recordFailure(attemptKey);
-        return send(res, 401, { error: "Invalid username or password" });
-      }
-      adminLoginAttempts.clear(attemptKey);
-      statements.updateLastLogin.run(new Date().toISOString(), user.id);
-      audit(user, "admin.login");
-      const session = createSession(user.id);
-      return send(res, 200, adminStatus({ headers: { cookie: session.cookie } }), { "set-cookie": session.cookie });
+      return send(res, 410, { error: "Administrator sign-in now uses Discord. Sign in with an approved Discord admin account." });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/logout") {
       const user = requireAdmin(req, res);
@@ -9713,9 +9682,14 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req);
         const userId = Number(body.userId);
         const active = Boolean(body.active);
-        if (userId === user.id && !active) return send(res, 400, { error: "You cannot disable your current account" });
-        const target = db.prepare("SELECT id, username FROM admin_users WHERE id = ?").get(userId);
+        const target = db.prepare("SELECT id, username, role, active FROM admin_users WHERE id = ?").get(userId);
         if (!target) return send(res, 404, { error: "Admin user not found" });
+        const targetIsActiveOwner = normalizeAdminRole(target.role) === "owner" && Boolean(target.active);
+        if (targetIsActiveOwner && !active) {
+          if (normalizeAdminRole(user.role) !== "owner") return send(res, 403, { error: "Only active owners can revoke owner access" });
+          if (toNumber(statements.activeOwnerCount.get()?.count) <= 1) return send(res, 409, { error: "At least one active owner must remain" });
+        }
+        if (userId === user.id && !active) return send(res, 400, { error: "You cannot disable your current account" });
         statements.updateAdminActive.run(active ? 1 : 0, userId);
         if (!active) statements.deleteUserSessions.run(userId);
         audit(user, "user.status", { id: target.id, username: target.username, active });
@@ -9726,9 +9700,16 @@ const server = createServer(async (req, res) => {
         const userId = Number(body.userId);
         const role = normalizeAdminRole(body.role);
         if (!userId) return send(res, 400, { error: "Select an administrator and role" });
-        if (userId === user.id && role !== "owner") return send(res, 400, { error: "You cannot remove owner access from your current account" });
-        const target = db.prepare("SELECT id, username, role FROM admin_users WHERE id = ?").get(userId);
+        const target = db.prepare("SELECT id, username, role, active FROM admin_users WHERE id = ?").get(userId);
         if (!target) return send(res, 404, { error: "Admin user not found" });
+        const targetIsOwner = normalizeAdminRole(target.role) === "owner";
+        if ((role === "owner" || targetIsOwner) && normalizeAdminRole(user.role) !== "owner") {
+          return send(res, 403, { error: "Only active owners can grant or revoke owner access" });
+        }
+        if (targetIsOwner && role !== "owner" && Boolean(target.active) && toNumber(statements.activeOwnerCount.get()?.count) <= 1) {
+          return send(res, 409, { error: "At least one active owner must remain" });
+        }
+        if (userId === user.id && role !== "owner") return send(res, 400, { error: "You cannot remove owner access from your current account" });
         statements.updateAdminRole.run(role, userId);
         statements.deleteUserSessions.run(userId);
         audit(user, "user.role", { id: target.id, username: target.username, previousRole: normalizeAdminRole(target.role), role });

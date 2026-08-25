@@ -114,6 +114,33 @@ async function writeDatabaseWithRetry(dbPath, mutate, timeoutMs = 5000) {
   throw lastError ?? new Error(`Timed out writing ${dbPath}`);
 }
 
+async function createTestAdminSession(dbPath, { username, role }) {
+  const token = createHash("sha256").update(`${username}:${role}:${Date.now()}:${Math.random()}`).digest("base64url");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const csrfToken = createHash("sha256").update(`csrf:${token}`).digest("base64url");
+  const user = await writeDatabaseWithRetry(dbPath, (db) => {
+    const now = new Date().toISOString();
+    let existing = db.prepare("SELECT id, role FROM admin_users WHERE username = ?").get(username);
+    if (!existing) {
+      const result = db.prepare(`
+        INSERT INTO admin_users (username, password_hash, role, active, created_at)
+        VALUES (?, 'discord-oauth-admin', ?, 1, ?)
+      `).run(username, role, now);
+      existing = { id: result.lastInsertRowid, role };
+    }
+    db.prepare(`
+      INSERT INTO admin_sessions (token_hash, user_id, expires_at, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(tokenHash, existing.id, new Date(Date.now() + 60 * 60 * 1000).toISOString(), now);
+    return existing;
+  });
+  return {
+    cookie: `bitcraft_admin_session=${token}`,
+    csrfToken,
+    user: { role: user.role },
+  };
+}
+
 async function stop(child) {
   if (child.exitCode != null) return;
   child.kill();
@@ -1032,14 +1059,8 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(passiveCraftRequests, 0);
   assert.equal(playerCraftRequests, 0);
 
-  const setup = await fetch(`${origin}/api/local/admin/setup`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify({ username: "admin", password: "correct horse battery", setupKey: "test-setup-key" }),
-  });
-  assert.equal(setup.status, 200);
-  const auth = await setup.json();
-  const cookie = setup.headers.get("set-cookie").split(";")[0];
+  const auth = await createTestAdminSession(path.join(dataDir, "bitcraft-local.sqlite"), { username: "admin", role: "owner" });
+  const cookie = auth.cookie;
   assert.ok(auth.csrfToken);
   assert.equal(auth.user.role, "owner");
   const initialCollect = await fetch(`${origin}/api/local/admin/collect-now`, {
@@ -2263,14 +2284,8 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({ username: "viewer", password: "viewer password ok", role: "viewer" }),
   });
   assert.equal(createViewer.status, 201);
-  const viewerLogin = await fetch(`${origin}/api/local/admin/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify({ username: "viewer", password: "viewer password ok" }),
-  });
-  assert.equal(viewerLogin.status, 200);
-  const viewerAuth = await viewerLogin.json();
-  const viewerCookie = viewerLogin.headers.get("set-cookie").split(";")[0];
+  const viewerAuth = await createTestAdminSession(path.join(dataDir, "bitcraft-local.sqlite"), { username: "viewer", role: "viewer" });
+  const viewerCookie = viewerAuth.cookie;
   assert.equal(viewerAuth.user.role, "viewer");
   const viewerStatus = await fetch(`${origin}/api/local/admin/status`, { headers: { cookie: viewerCookie, origin } });
   assert.equal(viewerStatus.status, 200);
@@ -2301,14 +2316,8 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({ username: "manager", password: "manager password ok", role: "admin" }),
   });
   assert.equal(createAdmin.status, 201);
-  const adminLogin = await fetch(`${origin}/api/local/admin/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify({ username: "manager", password: "manager password ok" }),
-  });
-  assert.equal(adminLogin.status, 200);
-  const adminAuth = await adminLogin.json();
-  const adminCookie = adminLogin.headers.get("set-cookie").split(";")[0];
+  const adminAuth = await createTestAdminSession(path.join(dataDir, "bitcraft-local.sqlite"), { username: "manager", role: "admin" });
+  const adminCookie = adminAuth.cookie;
   assert.equal(adminAuth.user.role, "admin");
   const adminUserList = await fetch(`${origin}/api/local/admin/users`, { headers: { cookie: adminCookie, origin } });
   assert.equal(adminUserList.status, 200);
@@ -2839,14 +2848,8 @@ test("retired recipe catalog refresh route, scheduler key, and tables are absent
 
   const origin = `http://127.0.0.1:${appPort}`;
   await waitForHealth(origin, child);
-  const setup = await fetch(`${origin}/api/local/admin/setup`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify({ username: "admin", password: "correct horse battery", setupKey: "test-setup-key" }),
-  });
-  assert.equal(setup.status, 200);
-  const auth = await setup.json();
-  const cookie = setup.headers.get("set-cookie").split(";")[0];
+  const auth = await createTestAdminSession(path.join(dataDir, "bitcraft-local.sqlite"), { username: "admin", role: "owner" });
+  const cookie = auth.cookie;
   const headers = { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken };
 
   assert.equal((await fetch(`${origin}/api/local/admin/craft-plan/catalog-refresh`, { headers })).status, 404);

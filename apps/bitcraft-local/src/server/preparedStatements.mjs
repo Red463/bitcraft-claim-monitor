@@ -210,6 +210,7 @@ export function createPreparedStatements(db) {
   updateScheduledJobMetadata: db.prepare("UPDATE scheduled_jobs SET metadata_json = ?, updated_at = ? WHERE job_key = ?"),
   resetStaleScheduledJobs: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE running = 1 AND (last_run_at IS NULL OR last_run_at < ?)"),
   adminCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users"),
+  activeOwnerCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users WHERE role = 'owner' AND active = 1"),
   adminByUsername: db.prepare("SELECT * FROM admin_users WHERE username = ? AND active = 1"),
   adminByDiscordId: db.prepare("SELECT * FROM admin_users WHERE discord_id = ? AND active = 1"),
   adminBySession: db.prepare(`
