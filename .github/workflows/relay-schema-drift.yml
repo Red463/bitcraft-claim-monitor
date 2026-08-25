@@ -1,0 +1,125 @@
+name: Relay schema drift
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7,37 * * * *"
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: relay-schema-drift
+  cancel-in-progress: false
+
+jobs:
+  detect-and-prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+      - name: Detect exact schema drift
+        id: drift
+        shell: bash
+        run: |
+          set +e
+          node apps/bitcraft-local/scripts/check-relay-schema-drift.mjs > "$RUNNER_TEMP/schema-report.json"
+          status=$?
+          set -e
+          if [[ "$status" -eq 0 ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$status" -eq 2 ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            exit "$status"
+          fi
+      - name: Close resolved drift issue
+        if: steps.drift.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          issue="$(gh issue list --state open --search 'Relay schema drift detected in:title' --json number --jq '.[0].number // empty')"
+          if [[ -n "$issue" ]]; then
+            gh issue close "$issue" --comment "The checked-in bindings now match both live Relay schemas."
+          fi
+          pr="$(gh pr list --head 'automation/relay-schema-bindings' --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$pr" ]]; then
+            gh pr close "$pr" --comment "Live Relay schemas match main; this generated update is no longer current."
+          fi
+      - name: Open or update drift issue
+        if: steps.drift.outputs.changed == 'true'
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title='Relay schema drift detected'
+          issue="$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')"
+          if [[ -z "$issue" ]]; then
+            issue="$(gh issue create --title "$title" --body 'The scheduled guard detected a live Relay schema change. A pinned regeneration and full verification run is preparing a review PR; production remains fail-closed until that PR is reviewed and deployed.' | sed 's#.*/##')"
+          else
+            gh issue comment "$issue" --body 'Schema drift is still present. A new guarded regeneration and verification run has started.'
+          fi
+          echo "number=$issue" >> "$GITHUB_OUTPUT"
+      - name: Install pinned SpacetimeDB generator
+        if: steps.drift.outputs.changed == 'true'
+        run: |
+          archive="$RUNNER_TEMP/spacetime.tar.gz"
+          curl --fail --location --silent --show-error \
+            https://github.com/clockworklabs/SpacetimeDB/releases/download/v2.7.0-hotfix3/spacetime-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$archive"
+          echo 'd25c6c9e4ec5d52fe43cd7d37aaf43b9f4d4fa2d228b6ecd241ba75bdae99831  '"$archive" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/spacetime"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/spacetime"
+          "$RUNNER_TEMP/spacetime/spacetimedb-cli" --version | grep -F 'd220349adb7af7eefa810eb08a185609356b83f6'
+      - name: Regenerate guarded bindings
+        if: steps.drift.outputs.changed == 'true'
+        run: node apps/bitcraft-local/scripts/refresh-relay-schema-bindings.mjs --cli "$RUNNER_TEMP/spacetime/spacetimedb-cli"
+      - name: Test regenerated bindings
+        if: steps.drift.outputs.changed == 'true'
+        run: |
+          corepack pnpm --filter @workspace/bitcraft-local test
+          corepack pnpm --filter @workspace/bitcraft-local run build
+          node apps/bitcraft-local/scripts/check-relay-schema-drift.mjs
+          node apps/bitcraft-local/scripts/verify-relay-global-catalog-live.mjs
+          node apps/bitcraft-local/scripts/verify-relay-primary-region-live.mjs
+      - name: Publish review PR
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
+        run: |
+          branch='automation/relay-schema-bindings'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -B "$branch"
+          git add apps/bitcraft-local/src/server/game-data/bindings
+          git commit -m 'chore(relay): refresh generated schema bindings'
+          git push --force-with-lease origin "$branch"
+          pr="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
+          if [[ -z "$pr" ]]; then
+            pr="$(gh pr create --base main --head "$branch" --title 'chore(relay): refresh generated schema bindings' --body "Closes #$ISSUE_NUMBER
+
+Automated guarded refresh after exact Relay schema drift detection.
+
+- Generated with pinned SpacetimeDB CLI 2.7.0 commit d220349adb7af7eefa810eb08a185609356b83f6
+- Application tests passed
+- Production build passed
+- Live fingerprints rechecked after generation
+
+This PR is intentionally not auto-merged or auto-deployed.")"
+          fi
+          gh issue comment "$ISSUE_NUMBER" --body "Prepared and verified bindings update: $pr"

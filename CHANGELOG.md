@@ -9,6 +9,17 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.11] - 2026-08-25
+
+### Added
+
+- Added scheduled Relay schema-drift detection that prepares a pinned, tested bindings update for review without auto-merging or auto-deploying it.
+
+### Fixed
+
+- Restored live global region data after validating the current Relay global schema against regenerated bindings.
+- Prevented deployments from publishing bindings that no longer match either live Relay schema.
+
 ## [0.62.0-beta.10] - 2026-08-25
 
 ### Changed

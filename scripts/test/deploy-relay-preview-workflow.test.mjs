@@ -6,12 +6,14 @@ import { fileURLToPath } from "node:url";
 
 const workflowUrl = new URL("../../.github/workflows/deploy-relay-preview.yml", import.meta.url);
 const generationWorkflowUrl = new URL("../../.github/workflows/generate-native-map.yml", import.meta.url);
+const schemaWorkflowUrl = new URL("../../.github/workflows/relay-schema-drift.yml", import.meta.url);
 const deploymentUrl = new URL("../../DEPLOYMENT.md", import.meta.url);
 const deployClassifierUrl = new URL("../classify-relay-deploy-failure.mjs", import.meta.url);
 const deployClassifierPath = fileURLToPath(deployClassifierUrl);
 
 const workflow = readFileSync(workflowUrl, "utf8");
 const generationWorkflow = readFileSync(generationWorkflowUrl, "utf8");
+const schemaWorkflow = readFileSync(schemaWorkflowUrl, "utf8");
 const deployment = readFileSync(deploymentUrl, "utf8");
 
 const maintainedTargets = [
@@ -35,9 +37,29 @@ test("Relay deployment credentials are gated behind verification and preview app
   assert.match(workflow, /verify:/);
   assert.match(workflow, /pnpm --filter @workspace\/bitcraft-local test/);
   assert.match(workflow, /pnpm --filter @workspace\/bitcraft-local run build/);
+  assert.match(workflow, /check-relay-schema-drift\.mjs/);
   assert.match(workflow, /sudo "\$\(command -v node\)" --test scripts\/test\/deploy-\*\.test\.mjs/);
   assert.match(workflow, /deploy:[\s\S]*needs: verify/);
   assert.match(workflow, /environment: relay-preview/);
+  const deployJob = workflow.slice(workflow.indexOf("  deploy:"));
+  const postApprovalGuard = deployJob.indexOf("check-relay-schema-drift.mjs");
+  const credentialSetup = deployJob.indexOf("Configure pinned SSH identity");
+  assert.ok(postApprovalGuard >= 0, "approved deploy job must recheck live schema drift");
+  assert.ok(credentialSetup > postApprovalGuard, "post-approval schema guard must run before credentials and deployment");
+});
+
+test("Relay schema drift is scheduled, regenerates with the pinned CLI, and prepares a tested review PR", () => {
+  assert.match(schemaWorkflow, /schedule:/);
+  assert.match(schemaWorkflow, /check-relay-schema-drift\.mjs/);
+  assert.match(schemaWorkflow, /refresh-relay-schema-bindings\.mjs/);
+  assert.match(schemaWorkflow, /d220349adb7af7eefa810eb08a185609356b83f6/);
+  assert.match(schemaWorkflow, /d25c6c9e4ec5d52fe43cd7d37aaf43b9f4d4fa2d228b6ecd241ba75bdae99831/);
+  assert.match(schemaWorkflow, /pnpm --filter @workspace\/bitcraft-local test/);
+  assert.match(schemaWorkflow, /pnpm --filter @workspace\/bitcraft-local run build/);
+  assert.match(schemaWorkflow, /verify-relay-global-catalog-live\.mjs/);
+  assert.match(schemaWorkflow, /verify-relay-primary-region-live\.mjs/);
+  assert.match(schemaWorkflow, /gh pr create/);
+  assert.doesNotMatch(schemaWorkflow, /gh pr merge|workflow_run:/);
 });
 
 test("verification validates only Relay units and the coexistence Caddy example", () => {

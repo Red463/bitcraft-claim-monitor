@@ -12,14 +12,12 @@ const manifest = JSON.parse(readFileSync(
 ));
 
 test("Relay schema manifest records independent global and regional fingerprints", () => {
-  assert.equal(
-    assertSchemaFingerprint(manifest, "global", "f538457640d0bb0d0dfa85577c4dfd71760854ba0fa9bb681c7b5de0e6e7f4db"),
-    "f538457640d0bb0d0dfa85577c4dfd71760854ba0fa9bb681c7b5de0e6e7f4db",
-  );
-  assert.equal(
-    assertSchemaFingerprint(manifest, "regional", "3d0b4c9bba59f7b1daad5122369599ea557e333124c4f778079a45af1683f65b"),
-    "3d0b4c9bba59f7b1daad5122369599ea557e333124c4f778079a45af1683f65b",
-  );
+  for (const kind of ["global", "regional"]) {
+    const schema = manifest.schemas[kind];
+    assert.match(schema.fingerprint, /^[0-9a-f]{64}$/);
+    assert.equal(schema.fingerprint, schema.schemaSha256);
+    assert.equal(assertSchemaFingerprint(manifest, kind, schema.fingerprint), schema.fingerprint);
+  }
   assert.equal(schemaBindingsReady(manifest, "global"), true);
   assert.equal(schemaBindingsReady(manifest, "regional"), true);
   assert.equal(manifest.codegen.mode, "pinned-cli-module-def-v9");
