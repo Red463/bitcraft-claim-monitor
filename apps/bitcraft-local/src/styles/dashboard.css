@@ -80,7 +80,7 @@
 .dashboard-card-attention { grid-area: attention; }
 
 /* Obsidian Ledger command-centre hierarchy */
-.dashboard-command-state { padding-bottom: var(--space-2); border-bottom: 1px solid var(--line-subtle); }
+.dashboard-command-state { padding-bottom: var(--space-2); }
 .dashboard-command-state .page-header { padding: 0; }
 .dashboard-command-metrics { gap: var(--space-3); }
 .dashboard-command-metrics .dashboard-metric { min-height: 102px; padding: 14px; border-color: var(--line-subtle); border-radius: var(--radius-panel); background: var(--surface-1); }

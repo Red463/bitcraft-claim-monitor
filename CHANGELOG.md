@@ -9,6 +9,13 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.13] - 2026-08-25
+
+### Fixed
+
+- Removed the duplicate divider beneath the Dashboard settlement status.
+- Fixed overlapping titles and descriptions in the command search popup.
+
 ## [0.62.0-beta.12] - 2026-08-25
 
 ### Fixed
