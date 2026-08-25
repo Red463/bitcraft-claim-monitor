@@ -279,16 +279,17 @@ export function globalCatalogStatus(catalogSource, options = {}) {
   const subscription = record(options.runtimeHealth?.subscription);
   const runtimeError = subscription.lastError ?? runtime.lastError;
   const runtimeExpected = options.runtimeExpected === true;
-  const runtimeHealthy = runtime.running === true
+  const runtimeAvailable = runtime.running === true || runtime.persisted === true;
+  const runtimeHealthy = runtimeAvailable
     && subscription.connected === true
     && subscription.applied === true
     && !runtimeError;
   const runtimeUnhealthy = runtimeError
-    || (runtime.running === true && (
+    || (runtimeAvailable && (
       subscription.connected !== true
       || subscription.applied !== true
     ))
-    || (runtimeExpected && runtime.running !== true);
+    || (runtimeExpected && !runtimeAvailable);
   const catalogStale = Boolean(runtimeUnhealthy)
     || catalogAgeMs == null
     || (catalogAgeMs > staleAfterMs && !runtimeHealthy);
@@ -297,11 +298,11 @@ export function globalCatalogStatus(catalogSource, options = {}) {
   if (catalogStale) {
     if (runtimeError) {
       errors.push(`Relay global catalog error: ${String(runtimeError)}`);
-    } else if ((runtime.running === true || runtimeExpected) && subscription.connected !== true) {
+    } else if ((runtimeAvailable || runtimeExpected) && subscription.connected !== true) {
       warnings.push("Relay global catalog subscription is disconnected.");
-    } else if ((runtime.running === true || runtimeExpected) && subscription.applied !== true) {
+    } else if ((runtimeAvailable || runtimeExpected) && subscription.applied !== true) {
       warnings.push("Relay global catalog subscription has not applied yet.");
-    } else if (runtimeExpected && runtime.running !== true) {
+    } else if (runtimeExpected && !runtimeAvailable) {
       warnings.push("Relay global catalog runtime is not running.");
     } else if (catalogAgeMs == null) {
       warnings.push("Relay global catalog has no valid receive time.");

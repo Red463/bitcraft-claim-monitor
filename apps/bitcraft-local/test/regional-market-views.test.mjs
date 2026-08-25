@@ -729,6 +729,32 @@ test("global catalog status allows a split web process to use fresh worker data"
   });
 });
 
+test("global catalog status trusts a persisted worker heartbeat when the web runtime is expected", () => {
+  assert.deepEqual(views.globalCatalogStatus({
+    receivedAt: "2026-07-30T11:55:00.000Z",
+  }, {
+    nowMs: Date.parse("2026-07-30T12:00:00.000Z"),
+    staleAfterMs: 60_000,
+    runtimeExpected: true,
+    runtimeHealth: {
+      running: false,
+      persisted: true,
+      lastError: null,
+      subscription: {
+        connected: true,
+        applied: true,
+        lastError: null,
+      },
+    },
+  }), {
+    freshness: "fresh",
+    confidence: "authoritative",
+    ageMs: 300_000,
+    warnings: [],
+    errors: [],
+  });
+});
+
 test("regional market order-book view preserves exact prices and scopes regions", () => {
   assert.equal(
     typeof views.regionalMarketOrderBookView,

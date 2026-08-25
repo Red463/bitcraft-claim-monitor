@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.18] - 2026-08-25
+
+### Fixed
+
+- Prevented the Global Market from warning that the catalog runtime is stopped when a healthy worker heartbeat is available.
+
 ## [0.62.0-beta.17] - 2026-08-25
 
 ### Fixed
