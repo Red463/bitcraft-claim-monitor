@@ -26,8 +26,11 @@ test("Obsidian Ledger uses sharp shared geometry and excludes legacy blue-steel 
   ]) assert.match(styles, new RegExp(`${token}:\\s*${value.replace(".", "\\.")}`), token);
   const root = styles.match(/:root\s*\{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
   assert.doesNotMatch(root, /#111923|#080d14|#353b46/i);
-  assert.match(root, /--surface-1:\s*#070907/);
-  assert.match(root, /--surface-2:\s*#0b0e0b/);
+  assert.match(root, /--canvas:\s*#050506/);
+  assert.match(root, /--surface-1:\s*#090a0c/);
+  assert.match(root, /--surface-2:\s*#0e1012/);
+  assert.match(root, /--surface-3:\s*#15181b/);
+  assert.doesNotMatch(root, /#030403|#070907|#0b0e0b|#111510/i);
   assert.match(root, /--active-color:\s*#d9af3d/);
   const enforcementControls = styles.slice(styles.indexOf("/* Obsidian Ledger enforcement"), styles.indexOf(".app-shell :where(.dialog-surface"));
   assert.match(enforcementControls, /input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\)/);

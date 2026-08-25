@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.9] - 2026-08-25
+
+### Changed
+
+- Rebalanced the Obsidian Ledger palette to neutral graphite blacks, removing the unintended green-gold cast while retaining gold for deliberate accents.
+
+### Fixed
+
+- Migrated Market and Bot/Admin views using either earlier built-in palette to the corrected neutral default without replacing custom themes.
+
 ## [0.62.0-beta.8] - 2026-08-25
 
 ### Changed
