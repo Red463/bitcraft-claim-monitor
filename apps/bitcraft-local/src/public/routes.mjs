@@ -15,11 +15,24 @@ function pathSegments(pathname) {
   }
 }
 
+function isCanonicalClaimId(value) {
+  return /^(0|[1-9]\d*)$/.test(value) && BigInt(value) <= 18_446_744_073_709_551_615n;
+}
+
 export function resolvePublicRoute(pathname) {
   const segments = pathSegments(pathname);
   if (!segments) return NOT_FOUND;
   if (segments.length === 0) return route("overview");
-  if (segments.length === 2 && segments[0] === "settlements" && segments[1]) return route("settlement", { claimId: segments[1] });
+  if (segments.some((segment) => segment.includes("/"))) return NOT_FOUND;
+  if (segments.length >= 2 && segments[0] === "settlements" && isCanonicalClaimId(segments[1])) {
+    if (segments.length === 2) return route("settlement", { claimId: segments[1] });
+    if (segments.length === 3 && ["members", "inventory", "crafts"].includes(segments[2])) {
+      return route(segments[2], { claimId: segments[1] });
+    }
+    return NOT_FOUND;
+  }
+  if (segments.length === 1 && segments[0] === "calculator") return route("calculator");
+  if (segments.length === 1 && ["account", "settings", "help", "terms", "privacy"].includes(segments[0])) return route(segments[0]);
   if (segments.length === 1 && segments[0] === "plans") return route("plans");
   if (segments.length === 2 && segments[0] === "plans" && segments[1] === "new") return route("plan-new");
   if (segments.length === 2 && segments[0] === "plans" && segments[1]) return route("plan", { id: segments[1] });

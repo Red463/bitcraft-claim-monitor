@@ -1284,3 +1284,5 @@ body .market-page tbody tr:hover td {
 .restricted-access-state { max-width: 520px; text-align: center; }
 .restricted-access-state small { color: var(--muted); }
 
+@import url("./styles/public-shell.css");
+
