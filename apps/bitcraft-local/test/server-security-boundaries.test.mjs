@@ -111,7 +111,7 @@ function adminHeaders(session, origin) {
   };
 }
 
-test("non-owners cannot grant owner access or remove the final active owner", async (t) => {
+test("non-owners cannot grant or revoke owner access, and the final active owner remains enabled", async (t) => {
   const { origin, dbPath } = await startTestServer(t);
   const finalOwner = seedAdminSession(dbPath, { id: 1, username: "owner", role: "owner" });
   const administrator = seedAdminSession(dbPath, { id: 2, username: "administrator", role: "admin" });
@@ -124,12 +124,26 @@ test("non-owners cannot grant owner access or remove the final active owner", as
   });
   assert.equal(promotion.status, 403);
 
+  const nonOwnerDemotion = await fetch(`${origin}/api/local/admin/user/role`, {
+    method: "PUT",
+    headers: adminHeaders(administrator, origin),
+    body: JSON.stringify({ userId: finalOwner.userId, role: "viewer" }),
+  });
+  assert.equal(nonOwnerDemotion.status, 403);
+
   const demotion = await fetch(`${origin}/api/local/admin/user/role`, {
     method: "PUT",
     headers: adminHeaders(finalOwner, origin),
     body: JSON.stringify({ userId: finalOwner.userId, role: "admin" }),
   });
   assert.equal(demotion.status, 409);
+
+  const disable = await fetch(`${origin}/api/local/admin/user/status`, {
+    method: "PUT",
+    headers: adminHeaders(finalOwner, origin),
+    body: JSON.stringify({ userId: finalOwner.userId, active: false }),
+  });
+  assert.equal(disable.status, 409);
 });
 
 test("owner role changes revoke affected sessions and leave an audit record", async (t) => {

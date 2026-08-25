@@ -72,3 +72,14 @@ corepack pnpm --filter @workspace/bitcraft-local test
 ## Concerns
 
 - The direct fallback that attempted to pass every discovered test file as individual Windows command-line arguments could not start because the command line exceeded Windows' filename-length limit. The required package-manager full test command completed successfully, and the affected integration tests were also run directly.
+
+## Fix round 1 — owner-boundary coverage
+
+- Extended `non-owners cannot grant or revoke owner access, and the final active owner remains enabled` to cover a non-owner attempting to demote an existing owner and an active owner attempting to disable the final active owner.
+- Mutation evidence: changing the role guard to protect only owner *grants* made the test fail with `409 !== 403` at the non-owner owner-demotion assertion. Restoring that guard and temporarily bypassing the active-owner status guard made the test fail with `400 !== 409` at the final-owner disable assertion. Both temporary mutations were reverted before the final run.
+- Final focused integration command:
+
+```text
+node --experimental-strip-types --test test/server-security-boundaries.test.mjs
+4 passed, 0 failed
+```
