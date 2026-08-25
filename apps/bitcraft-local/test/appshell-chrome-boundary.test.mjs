@@ -57,24 +57,26 @@ test("page cadence is centralized while notification and deal timers stay indepe
   assert.doesNotMatch(appShell, /schedule\(setRefreshToken|schedule\(setHistoryAutoRefreshToken/);
 });
 
-test("floating action rail CSS slides collapsed rail offscreen with reduced motion support", () => {
+test("obsolete floating action rail CSS is removed after tools move to the utility bar", () => {
   const css = readFileSync(new URL("../src/styles/app-chrome.css", import.meta.url), "utf8");
 
-  assert.match(css, /\.floating-actions\.floating-actions-collapsed\s*\{[^}]*translateX\(calc\(100% - 24px\)\)/s);
-  assert.match(css, /\.floating-actions\.floating-actions-collapsed\s+\.floating-action-item\s*\{[^}]*pointer-events:\s*none/s);
-  assert.match(css, /\.floating-actions-toggle/);
-  assert.match(css, /\.floating-actions\.floating-actions-collapsed\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s);
-  assert.match(css, /\.floating-actions\s+\.floating-actions-toggle\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
+  assert.doesNotMatch(css, /\.floating-actions|\.floating-action-item|\.floating-actions-toggle/);
+  assert.match(css, /\.app-utility-refresh\.is-refreshing\s+svg/);
 });
-test("footer shows the app version and build id", () => {
+test("footer presents build provenance and secondary actions in a flat two-part layout", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
   assert.match(appShell, /fetch\(`\$\{LOCAL_API\}\/health`, \{ cache: "no-store" \}\)/);
   assert.match(appShell, /setAppBuildId/);
   assert.match(appShell, /appBuildIdRef/);
   assert.match(appShell, /footer-build/);
+  assert.match(appShell, /className="footer-primary"/);
+  assert.match(appShell, /className="footer-secondary"/);
   assert.match(appShell, /APP_VERSION/);
+  assert.match(css, /\.app-footer\s*\{[^}]*border-top:\s*1px solid var\(--line-subtle\)[^}]*background:\s*var\(--canvas\)[^}]*box-shadow:\s*none/s);
+  const buildRule = css.match(/\.app-footer \.footer-build\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  assert.doesNotMatch(buildRule, /border|border-radius|background|padding/);
 });
 
 test("dedicated map mode keeps the map route while omitting optional application chrome", () => {

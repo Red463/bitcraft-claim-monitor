@@ -68,7 +68,7 @@ import type { AppSettings, AppUser, UserAuthState, UserToastSettings } from "./t
 import type { MapFocus } from "./pages/map/mapUtils";
 import { accountPlayerMarkerColourOverrides, normalizePlayerMarkerColourOverrides, withPlayerMarkerColourOverride } from "./map/playerMarkerColours.mjs";
 import { verifiedCharacterPlayerId } from "./map/playerMarkerIdentity.mjs";
-import { applyTheme, DEFAULT_THEME, normalizeThemeCandidate, type ThemeSettings } from "./theme";
+import { applyTheme, DEFAULT_THEME, migrateLegacyDefaultTheme, normalizeThemeCandidate, type ThemeSettings } from "./theme";
 import { ACCESS_CONTROL_TARGETS, effectiveTargetAllowed, targetIdForPage, type EffectiveAccess } from "./access/accessControl.mjs";
 import { restrictedAccessGuidance } from "./access/restrictedAccess";
 import { surfaceModeForPanel } from "./ui/surfaceMode";
@@ -768,8 +768,13 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
     refreshAdminAuth().catch(() => undefined);
   }, [refreshAdminAuth]);
   React.useEffect(() => {
-    applyTheme(browserTheme);
-  }, [browserTheme]);
+    const migratedTheme = migrateLegacyDefaultTheme(browserTheme);
+    if (migratedTheme !== browserTheme) {
+      setBrowserTheme(migratedTheme);
+      return;
+    }
+    applyTheme(migratedTheme);
+  }, [browserTheme, setBrowserTheme]);
   React.useEffect(() => {
     if (consent !== "accepted") return;
     // Analytics are first-party and consent-gated. Duration is sent on page exit
@@ -1151,18 +1156,22 @@ function DashboardApp({ initialBootstrap }: { initialBootstrap: BootstrapPayload
         )}
       {!dedicatedMapView && active !== "admin" ? <footer className="app-footer">
           <div className="footer-links">
-            <span className="footer-copy">
-              &copy; {new Date().getFullYear()} Timbersteel Claim Monitor - unofficial fan-made tool.
-            </span>
-            <span className="footer-build" title={appBuildId ? `Version ${APP_VERSION}, commit ${appBuildId}` : `Version ${APP_VERSION}`}>
-              {appBuildLabel}
-            </span>
-            <a href="https://relay.bitcraftsync.app/" target="_blank" rel="noreferrer">Data: BitCraft Relay</a>
-            <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>
-            <a href={`${GITHUB_REPOSITORY}/issues`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Feature Requests</a>
-            <BuyMeCoffeeButton />
-            <button className="footer-link" onClick={() => setPrivacyOpen(true)}><Shield size={13} /> Privacy & Analytics</button>
-            <button className="footer-link" onClick={() => setTermsOpen(true)}><FileText size={13} /> Terms & Bot Use</button>
+            <div className="footer-primary">
+              <span className="footer-copy">
+                &copy; {new Date().getFullYear()} Timbersteel Claim Monitor - unofficial fan-made tool.
+              </span>
+              <span className="footer-build" title={appBuildId ? `Version ${APP_VERSION}, commit ${appBuildId}` : `Version ${APP_VERSION}`}>
+                {appBuildLabel}
+              </span>
+              <a href="https://relay.bitcraftsync.app/" target="_blank" rel="noreferrer">Data: BitCraft Relay</a>
+            </div>
+            <div className="footer-secondary">
+              <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={13} /> GitHub</a>
+              <a href={`${GITHUB_REPOSITORY}/issues`} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Feature Requests</a>
+              <BuyMeCoffeeButton />
+              <button className="footer-link" onClick={() => setPrivacyOpen(true)}><Shield size={13} /> Privacy & Analytics</button>
+              <button className="footer-link" onClick={() => setTermsOpen(true)}><FileText size={13} /> Terms & Bot Use</button>
+            </div>
           </div>
         </footer> : null}
       </main>

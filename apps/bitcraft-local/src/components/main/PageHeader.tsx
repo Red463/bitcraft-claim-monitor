@@ -10,7 +10,7 @@ export type PageHeaderProps = {
 export function PageHeader({ title, description, meta, actions }: PageHeaderProps) {
   return (
     <header className="page-header">
-      <div className="page-header-copy">
+      <div className="page-header-copy route-title-copy">
         <h2>{title}</h2>
         {description ? <p>{description}</p> : null}
       </div>

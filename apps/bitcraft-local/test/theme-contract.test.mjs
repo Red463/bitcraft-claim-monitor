@@ -10,6 +10,65 @@ async function loadThemeModule() {
   return import("../src/theme.ts");
 }
 
+test("the default browser theme is the neutral Obsidian Ledger palette", async () => {
+  const { DEFAULT_THEME } = await loadThemeModule();
+  assert.deepEqual({
+    bg: DEFAULT_THEME.bg,
+    sidebar: DEFAULT_THEME.sidebar,
+    panel: DEFAULT_THEME.panel,
+    panel2: DEFAULT_THEME.panel2,
+    border: DEFAULT_THEME.border,
+    cardTop: DEFAULT_THEME.cardTop,
+    cardBottom: DEFAULT_THEME.cardBottom,
+    activeColor: DEFAULT_THEME.activeColor,
+    muted: DEFAULT_THEME.muted,
+    text: DEFAULT_THEME.text,
+  }, {
+    bg: "#030403",
+    sidebar: "#050605",
+    panel: "#0b0e0b",
+    panel2: "#070907",
+    border: "#34382f",
+    cardTop: "#111510",
+    cardBottom: "#070907",
+    activeColor: "#d9af3d",
+    muted: "#a8ada3",
+    text: "#f0ede4",
+  });
+  assert.match(indexHtml, /<meta name="theme-color" content="#030403"/);
+});
+
+test("the previous built-in default migrates to Obsidian without replacing custom themes", async () => {
+  const { DEFAULT_THEME, migrateLegacyDefaultTheme } = await loadThemeModule();
+  const legacyDefault = {
+    bg: "#0c0d10", sidebar: "#06070a", panel: "#181b21", panel2: "#11141a", border: "#353b46",
+    cardTop: "#111923", cardBottom: "#080d14", cardTitle: "#b8c2cf", cardValue: "#ffffff", iconBg: "#12181f",
+    activeColor: "#f0c64f", activeBg: "#3a3118", activeBorder: "#7a6428", hoverBorder: "#5f5127", muted: "#a8adba",
+    text: "#f6f3ea", gold: "#f0c64f", good: "#4ee28a", danger: "#ef6461", gradientTop: "#1f1f1f",
+    gradientMid: "#080808", gradientBase: "#030303", gradientTopStop: "0", gradientMidStop: "58", gradientFadeStop: "100", gradientHeight: "32",
+  };
+  assert.deepEqual(migrateLegacyDefaultTheme(legacyDefault), DEFAULT_THEME);
+  const custom = { ...legacyDefault, activeColor: "#65b7fa" };
+  assert.equal(migrateLegacyDefaultTheme(custom), custom);
+});
+
+test("applying a custom theme updates the semantic surfaces used by Obsidian workspaces", async () => {
+  const { DEFAULT_THEME, applyTheme } = await loadThemeModule();
+  const properties = new Map();
+  const previousDocument = globalThis.document;
+  globalThis.document = { documentElement: { style: { setProperty: (name, value) => properties.set(name, value) } } };
+  try {
+    applyTheme({ ...DEFAULT_THEME, bg: "#010203", panel: "#101112", panel2: "#070809", cardTop: "#161718", border: "#303132" });
+  } finally {
+    globalThis.document = previousDocument;
+  }
+  assert.equal(properties.get("--canvas"), "#010203");
+  assert.equal(properties.get("--surface-1"), "#070809");
+  assert.equal(properties.get("--surface-2"), "#101112");
+  assert.equal(properties.get("--surface-3"), "#161718");
+  assert.match(properties.get("--line-subtle"), /#303132/);
+});
+
 test("default and deliberately extreme dark themes meet the public contrast contract", async () => {
   const { DEFAULT_THEME, THEME_PRESETS, validateThemeContrast } = await loadThemeModule();
   const validThemes = [

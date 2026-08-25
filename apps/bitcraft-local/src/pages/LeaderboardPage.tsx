@@ -223,7 +223,7 @@ export function Leaderboard({
   return (
     <div className="panel leaderboard-page" data-tour="leaderboard-page">
       <header className="members-topbar leaderboard-topbar">
-        <div>
+        <div className="route-title-copy">
           <h2>Leaderboard</h2>
           <p>Compare settlement members across contribution, professions, market history, activity, and online status.</p>
         </div>

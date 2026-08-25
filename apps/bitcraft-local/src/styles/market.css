@@ -22,11 +22,9 @@
 .market-page .mini-stat {
   min-height: 112px;
   border: 1px solid rgba(108,123,145,.24);
-  border-radius: 7px;
-  background:
-    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  box-shadow: none;
   padding: 18px;
   grid-template-columns: 44px minmax(0, 1fr);
   gap: 4px 14px;
@@ -35,7 +33,7 @@
   width: 42px;
   height: 42px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--radius-dialog);
   background: rgba(255,255,255,.035);
   color: #f3c532;
 }
@@ -60,11 +58,9 @@
 .market-analytics section,
 .market-page .price-finder {
   border: 1px solid rgba(108,123,145,.24);
-  border-radius: 7px;
-  background:
-    radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  box-shadow: none;
 }
 .market-command-panel,
 .market-filter-panel,
@@ -118,7 +114,7 @@
 .market-page .field select,
 .market-page .search {
   border-color: rgba(154,168,190,.28);
-  background: #080d14;
+  background: var(--surface-1);
 }
 .market-tabs {
   border-bottom: 0;
@@ -128,7 +124,7 @@
 .market-tabs button,
 .market-order-tabs button {
   border: 1px solid rgba(154,168,190,.18);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(5,8,12,.65);
   color: #aeb8c6;
 }
@@ -140,7 +136,7 @@
 }
 .market-highlights div {
   border-color: rgba(154,168,190,.16);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(5,8,12,.78);
 }
 .market-highlights span { color: #a6afbd; }
@@ -161,31 +157,31 @@
 }
 .market-legend {
   border: 1px solid rgba(108,123,145,.18);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(5,8,12,.54);
   padding: 10px 12px;
 }
 .market-page .table-wrap {
   border-color: rgba(108,123,145,.24);
-  border-radius: 7px;
-  background-color: #090e15;
+  border-radius: var(--radius-control);
+  background-color: var(--surface-2);
   background-image: none;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 12px 28px rgba(0,0,0,.2);
 }
 .market-page th {
-  background: linear-gradient(180deg, rgba(15,22,31,.98), rgba(9,14,21,.99));
+  background: var(--surface-3);
   color: #aeb8c6;
   font-size: 11px;
   letter-spacing: .07em;
 }
 .market-page td {
-  background: rgba(6,10,15,.78);
+  background: var(--surface-1);
 }
 .market-page tbody tr:nth-child(even) td {
-  background: rgba(8,13,20,.82);
+  background: var(--surface-2);
 }
 .market-page tbody tr:hover td {
-  background: rgba(240,198,79,.045);
+  background: color-mix(in srgb, var(--active-bg) 28%, var(--surface-2));
 }
 .market-analytics {
   gap: 12px;
@@ -231,7 +227,7 @@
   flex-wrap: wrap;
   padding: 10px;
   border: 1px solid rgba(154,168,190,.14);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(5,8,12,.58);
 }
 
@@ -287,7 +283,7 @@
   gap: 10px;
   min-width: 0;
   border: 1px solid rgba(154,168,190,.16);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background:
     radial-gradient(circle at 100% 0%, rgba(240,198,79,.075), transparent 34%),
     linear-gradient(180deg, rgba(12,18,27,.94), rgba(5,8,13,.98));
@@ -311,7 +307,7 @@
   justify-content: center;
   width: 38px;
   height: 38px;
-  border-radius: 12px;
+  border-radius: var(--radius-dialog);
   border: 1px solid rgba(154,168,190,.14);
   background: rgba(255,255,255,.035);
   color: #c8d2df;
@@ -335,14 +331,14 @@
 .market-best-row .item-thumb {
   width: 40px;
   height: 40px;
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   flex: 0 0 auto;
 }
 
 .market-best-row.compact .item-thumb {
   width: 34px;
   height: 34px;
-  border-radius: 9px;
+  border-radius: var(--radius-panel);
 }
 
 .market-best-name {
@@ -390,7 +386,7 @@
 .market-best-stats span {
   min-width: 0;
   border: 1px solid rgba(154,168,190,.1);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(0,0,0,.18);
   padding: 7px 8px;
 }
@@ -425,7 +421,7 @@
   align-content: center;
   gap: 8px;
   border: 1px dashed rgba(154,168,190,.18);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: rgba(5,8,12,.58);
   color: #aeb8c6;
   text-align: center;
@@ -494,12 +490,11 @@
   top: 8px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(210px, 260px);
-  align-items: end;
+  align-items: center;
   gap: 14px;
-  border-color: rgba(129, 145, 167, .3);
-  background: rgba(7, 11, 16, .94);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, .26), inset 0 1px 0 rgba(255, 255, 255, .035);
-  backdrop-filter: blur(12px);
+  border-color: var(--line-subtle);
+  background: var(--surface-2);
+  box-shadow: none;
 }
 
 .global-market-tabs {
@@ -516,7 +511,7 @@
 .market-range-tabs button {
   min-height: 34px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: #98a5b7;
   padding: 0 12px;
@@ -564,7 +559,7 @@
   gap: 3px;
   overflow-x: auto;
   border: 1px solid rgba(108, 123, 145, .22);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(5, 8, 12, .68);
   padding: 4px;
 }
@@ -626,6 +621,11 @@
   color: #ffd27a;
   line-height: 1.35;
   text-align: right;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .global-market-workspace {
@@ -644,7 +644,7 @@
 .global-market-page .mini-stat div {
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
 }
 
 .global-market-page .mini-stat strong {
@@ -654,7 +654,7 @@
 .global-market-source,
 .market-overview-status {
   border: 1px solid rgba(108, 123, 145, .2);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(5, 8, 12, .68);
 }
 
@@ -712,10 +712,10 @@
 .market-overview-section,
 .market-item-detail,
 .market-stall-list {
-  border: 1px solid rgba(108, 123, 145, .22);
-  border-radius: 7px;
-  background: linear-gradient(180deg, rgba(11, 16, 22, .97), rgba(6, 9, 14, .99));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-panel);
+  background: var(--surface-2);
+  box-shadow: none;
 }
 
 .market-overview-section {
@@ -781,7 +781,7 @@
 
 .market-favorite-strip > button {
   border: 1px solid rgba(108, 123, 145, .18);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: rgba(3, 6, 10, .6);
   padding: 10px;
   display: grid;
@@ -865,7 +865,7 @@
 .market-specialized-filters,
 .market-order-filters {
   border: 1px solid rgba(108, 123, 145, .22);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(7, 11, 16, .92);
   padding: 12px;
   display: grid;
@@ -936,7 +936,7 @@
   max-height: 360px;
   overflow-y: auto;
   border: 1px solid rgba(154, 168, 190, .28);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: #0b1017;
   box-shadow: 0 18px 42px rgba(0, 0, 0, .5);
   padding: 5px;
@@ -1057,7 +1057,7 @@
 
 .market-loading-strip {
   border: 1px solid rgba(243, 197, 50, .22);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: rgba(243, 197, 50, .06);
   color: #d8c278;
   padding: 9px 11px;
@@ -1109,7 +1109,7 @@
   position: relative;
   min-height: 220px;
   border: 1px solid rgba(108, 123, 145, .2);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     linear-gradient(rgba(154, 168, 190, .055) 1px, transparent 1px),
     rgba(3, 6, 10, .62);
@@ -1201,7 +1201,7 @@
 .deal-watch-signed-out {
   min-height: 150px;
   border: 1px dashed rgba(243, 197, 50, .26);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(243, 197, 50, .035);
   padding: 20px;
 }
@@ -1256,7 +1256,7 @@
 .market-stall-icon {
   width: 36px;
   height: 36px;
-  border-radius: 9px;
+  border-radius: var(--radius-panel);
   background: rgba(243, 197, 50, .09);
   color: #f3c532;
   display: grid;
@@ -1296,7 +1296,7 @@
   max-height: calc(100vh - 56px);
   overflow: hidden;
   border: 1px solid rgba(154, 168, 190, .3);
-  border-radius: 9px;
+  border-radius: var(--radius-panel);
   background: #090e14;
   box-shadow: 0 30px 90px rgba(0, 0, 0, .62);
   display: grid;
@@ -1334,7 +1334,7 @@
 
 .market-stall-offer {
   border: 1px solid rgba(108, 123, 145, .2);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(3, 6, 10, .52);
   padding: 12px;
   display: grid;
@@ -1576,7 +1576,7 @@
 }
 .market-page .daily-sales {
   border-color: rgba(154,168,190,.16);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(5,8,12,.78);
 }
 .market-page .daily-sale-row > span,
@@ -1619,8 +1619,8 @@
   width: 100%;
   min-height: 38px;
   border: 1px solid rgba(154,168,190,.28);
-  border-radius: 7px;
-  background: #080d14;
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
   color: #f7f8fb;
   padding: 0 11px;
   font: inherit;
@@ -1637,12 +1637,12 @@
 }
 .market-page .suggestion-menu {
   border-color: rgba(108,123,145,.36);
-  background: #090e15;
+  background: var(--surface-2);
   box-shadow: 0 18px 34px rgba(0,0,0,.44);
 }
 .market-page .suggestion-menu button {
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
 }
 .market-page .suggestion-menu button:hover {
   border-color: rgba(240,198,79,.3);
@@ -1652,10 +1652,8 @@
 .market-page .loading,
 .market-page .error {
   border-color: rgba(108,123,145,.24);
-  border-radius: 7px;
-  background:
-    radial-gradient(circle at 50% 0%, rgba(22,32,43,.12), transparent 48%),
-    linear-gradient(180deg, rgba(11,16,22,.9), rgba(6,9,14,.96));
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
   color: #aab5c4;
 }
 .market-page .price-empty {
@@ -1676,7 +1674,7 @@
 
 .buy-order-opportunities {
   border: 1px solid rgba(108, 123, 145, .24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 100% 0%, rgba(240, 198, 79, .08), transparent 35%),
     linear-gradient(180deg, rgba(11, 16, 22, .97), rgba(6, 9, 14, .99));
@@ -1694,7 +1692,7 @@
   gap: 10px;
   min-width: 0;
   border: 1px solid rgba(240, 198, 79, .2);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(240, 198, 79, .055);
   padding: 10px;
 }
@@ -1785,7 +1783,7 @@
 
 .deal-watch-add-card {
   border: 1px solid rgba(154, 168, 190, .2);
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   background: linear-gradient(180deg, rgba(17, 24, 36, .95), rgba(7, 10, 15, .95));
   padding: 16px;
   display: grid;
@@ -1805,7 +1803,7 @@
 }
 .deal-watchlist-section {
   border: 1px solid rgba(154, 168, 190, .2);
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   background: linear-gradient(180deg, rgba(17, 24, 36, .95), rgba(7, 10, 15, .95));
   padding: 16px;
   display: grid;
@@ -1819,7 +1817,7 @@
 
 .deal-watch-row {
   border: 1px solid rgba(154, 168, 190, .18);
-  border-radius: 9px;
+  border-radius: var(--radius-panel);
   background: rgba(3, 6, 10, .46);
   padding: 12px;
   display: grid;
@@ -1875,7 +1873,7 @@
   width: 58px;
   height: 28px;
   border: 1px solid rgba(154, 168, 190, .24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(3, 6, 10, .72);
   color: var(--text);
   padding: 0 8px;
@@ -1906,7 +1904,7 @@
   gap: 12px;
   padding: 10px 12px;
   border: 1px solid rgba(154, 168, 190, .18);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: rgba(10, 14, 20, .76);
   color: var(--text);
   text-align: left;
@@ -1935,7 +1933,7 @@
 
 .deal-watch-empty {
   border: 1px dashed rgba(154, 168, 190, .22);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   padding: 14px;
   color: var(--muted);
   display: flex;

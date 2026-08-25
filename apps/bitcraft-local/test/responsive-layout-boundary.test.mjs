@@ -11,16 +11,14 @@ const craftcalcCss = readFileSync(new URL("../src/styles/craftcalc.css", import.
 const researchCss = readFileSync(new URL("../src/styles/research.css", import.meta.url), "utf8");
 const botCss = readFileSync(new URL("../src/styles/bot-dashboard.css", import.meta.url), "utf8");
 
-test("narrow shell separates brand from route and reserves no expanded tool rail", () => {
+test("narrow shell separates brand from route and compacts the anchored utility bar", () => {
   assert.match(appShell, /className="mobile-shell-brand"/);
   assert.match(appShell, /className="mobile-shell-route"/);
   assert.match(shellCss, /\.mobile-shell-bar\s*>\s*span\s*\{[^}]*display:\s*grid[^}]*margin-right:\s*44px/s);
   assert.match(shellCss, /\.mobile-shell-route\s*\{[^}]*text-overflow:\s*ellipsis/s);
-  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*\.floating-actions/s);
-  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*env\(safe-area-inset-right\)/s);
-  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*env\(safe-area-inset-bottom\)/s);
-  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*\.floating-actions\.floating-actions-collapsed\s*\{[^}]*pointer-events:\s*none[^}]*width:\s*44px[^}]*height:\s*42px[^}]*top:\s*5px[^}]*bottom:\s*auto[^}]*transform:\s*none/s);
-  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*\.floating-actions\.floating-actions-collapsed\s+\.floating-actions-toggle\s*\{[^}]*pointer-events:\s*auto[^}]*width:\s*44px[^}]*height:\s*42px/s);
+  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*\.app-utility-bar\s*\{[^}]*min-height:\s*42px/s);
+  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*\.app-utility-context\s*\{[^}]*display:\s*none/s);
+  assert.match(chromeCss, /@media \(max-width:\s*540px\)[\s\S]*\.app-utility-command span,\s*\.app-utility-command kbd\s*\{[^}]*display:\s*none/s);
 });
 
 test("Dashboard reduces five KPI columns before the expanded sidebar causes collisions", () => {

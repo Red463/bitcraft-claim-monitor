@@ -54,7 +54,7 @@
   gap: 7px;
   min-height: 38px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: linear-gradient(180deg, var(--card-top), var(--card-bottom));
   color: var(--muted);
   padding: 0 13px;
@@ -338,7 +338,7 @@
   display: inline-grid;
   place-items: center;
   border: 1px solid rgba(154, 168, 190, .24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   color: var(--muted);
   background: rgba(3, 6, 10, .42);
   cursor: pointer;
@@ -355,7 +355,7 @@
 .warning-card,
 .error-card {
   border: 1px solid rgba(154, 168, 190, .22);
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   background: rgba(9, 13, 20, .72);
   color: var(--muted);
   padding: 12px 14px;
@@ -416,7 +416,7 @@
 .tower-name-cell small { color: var(--muted); font-size: 11px; font-weight: 600; }
 .empires-watchtower-overlay { position: fixed; inset: 0; align-items: center; justify-items: center; overflow: auto; }
 .tower-access-dialog { width: min(780px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: hidden; }
-.tower-dialog-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(4,8,14,.42); }
+.tower-dialog-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: rgba(4,8,14,.42); }
 .tower-dialog-summary span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
 .tower-access-note { color: var(--muted); font-size: 13px; line-height: 1.45; }
 .tower-dialog-tabs { display: inline-flex; align-items: center; gap: 6px; padding: 4px; border: 1px solid var(--border); border-radius: 999px; background: rgba(4,8,14,.52); width: fit-content; max-width: 100%; }
@@ -424,13 +424,13 @@
 .tower-dialog-tabs button small { color: inherit; font-size: 11px; opacity: .82; }
 .tower-dialog-tabs button:hover { color: #fff; background: rgba(148,163,184,.1); }
 .tower-dialog-tabs button.active { color: var(--active-color); background: rgba(240,198,79,.16); box-shadow: inset 0 0 0 1px rgba(240,198,79,.42); }
-.tower-rank-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(4,8,14,.42); }
+.tower-rank-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: rgba(4,8,14,.42); }
 .tower-rank-filter span { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: 0; text-transform: uppercase; }
 .tower-rank-filter button { border: 1px solid rgba(148,163,184,.24); border-radius: 999px; background: rgba(15,23,42,.72); color: var(--text); padding: 5px 9px; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
 .tower-rank-filter button:hover { border-color: rgba(240,198,79,.5); color: #fff; }
 .tower-rank-filter button.active { border-color: rgba(240,198,79,.78); background: rgba(240,198,79,.18); color: var(--active-color); }
 .tower-access-list { display: grid; gap: 8px; max-height: min(430px, 48vh); overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
-.tower-access-list article { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(118px, auto); align-items: center; gap: 12px; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: rgba(5,9,15,.62); }
+.tower-access-list article { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(118px, auto); align-items: center; gap: 12px; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: rgba(5,9,15,.62); }
 .tower-access-list article > * { min-width: 0; }
 .tower-access-list .status-pill { justify-self: end; max-width: 100%; white-space: normal; text-align: right; }
 .tower-access-list article strong { color: #fff; }
@@ -438,7 +438,7 @@
 .tower-access-flags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tower-access-flags span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid rgba(240,198,79,.22); border-radius: 999px; color: var(--active-color); background: rgba(240,198,79,.08); font-size: 12px; font-weight: 700; }
 .tower-claims-list { display: grid; gap: 8px; max-height: min(430px, 48vh); overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
-.tower-claims-list button { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(0, 1.8fr); align-items: center; gap: 12px; min-width: 0; width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: rgba(5,9,15,.62); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.tower-claims-list button { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(0, 1.8fr); align-items: center; gap: 12px; min-width: 0; width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: rgba(5,9,15,.62); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .tower-claims-list button:hover { border-color: rgba(240,198,79,.5); background: rgba(240,198,79,.07); }
 .tower-claims-list strong { display: block; color: #fff; }
 .tower-claims-list small { display: block; color: var(--muted); margin-top: 3px; }
@@ -503,7 +503,7 @@
 .siege-active-summary,
 .siege-participant-card {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   background: rgba(4, 8, 14, .48);
   padding: 14px;
 }
@@ -608,7 +608,7 @@
   min-width: 0;
   padding: 9px 10px;
   border: 1px solid rgba(148, 163, 184, .18);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: rgba(4, 8, 14, .42);
 }
 
@@ -668,7 +668,7 @@
   gap: 4px;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-panel);
   background: rgba(4, 8, 14, .48);
   padding: 12px;
 }
@@ -693,7 +693,7 @@
   overflow-x: auto;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-panel);
   background: rgba(4, 8, 14, .52);
 }
 
@@ -704,7 +704,7 @@
   gap: 7px;
   min-height: 32px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--muted);
   padding: 5px 11px;
@@ -744,7 +744,7 @@
 .empire-overview-grid dl,
 .empire-detail-list article {
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-panel);
   background: rgba(4, 8, 14, .38);
   padding: 12px;
 }

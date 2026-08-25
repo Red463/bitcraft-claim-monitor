@@ -1,9 +1,9 @@
-.bot-control-page { min-height: 100vh; padding: 18px 22px 24px; background: radial-gradient(circle at top left, rgba(88,101,242,.16), transparent 34%), var(--bg); }
+.bot-control-page { min-height: 100vh; padding: 18px 22px 24px; background: var(--canvas); }
 .surface-mode-bot { --service-accent: var(--signal-discord); }
 .bot-console { width: min(100%, 1720px); margin: 0 auto; }
 .bot-dashboard { gap: 10px; }
 .bot-overview { display: grid; grid-template-columns: repeat(4, minmax(190px, 1fr)); gap: 8px; }
-.bot-overview div { border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(135deg, rgba(88,101,242,.14), rgba(255,255,255,.025)); padding: 8px 10px; display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 3px 8px; min-height: 62px; align-items: center; box-shadow: 0 10px 24px rgba(0,0,0,.14); }
+.bot-overview div { border: 1px solid var(--line-subtle); border-radius: var(--radius-panel); background: color-mix(in srgb, var(--surface-2) 92%, var(--signal-discord)); padding: 8px 10px; display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 3px 8px; min-height: 62px; align-items: center; box-shadow: none; }
 .bot-overview svg { color: #5865f2; }
 .bot-overview strong { grid-column: 2; color: var(--text); font: 700 16px Rajdhani, sans-serif; line-height: 1; }
 .bot-overview span { grid-column: 2; color: var(--muted); font-size: 10.5px; line-height: 1.25; overflow-wrap: anywhere; }
@@ -38,13 +38,13 @@
 .bot-exceptions .empty-state { min-height: 74px; border: 0; border-radius: 0; grid-template-columns: auto auto; justify-content: center; align-content: center; }
 .bot-desktop-section-nav { min-width: 0; }
 .bot-mobile-section-nav { display: none; }
-.bot-section-nav { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(180deg, rgba(88,101,242,.08), rgba(255,255,255,.018)); padding: 10px; display: grid; gap: 11px; box-shadow: 0 14px 28px rgba(0,0,0,.18); }
+.bot-section-nav { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; border: 1px solid var(--line-subtle); border-radius: var(--radius-panel); background: var(--surface-1); padding: 10px; display: grid; gap: 11px; box-shadow: none; }
 .bot-nav-title { border-bottom: 1px solid rgba(255,255,255,.08); padding: 2px 4px 10px; display: grid; gap: 3px; }
 .bot-nav-title strong { color: var(--gold); font: 700 16px Rajdhani, sans-serif; line-height: 1; }
 .bot-nav-title span { color: var(--muted); font-size: 11px; }
 .bot-nav-group { display: grid; gap: 5px; }
 .bot-nav-group p { margin: 0 0 1px; color: var(--muted); font-size: var(--font-micro); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.bot-section-nav button { min-height: 46px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); padding: 8px 9px; display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer; position: relative; overflow: hidden; }
+.bot-section-nav button { min-height: 46px; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--muted); padding: 8px 9px; display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer; position: relative; overflow: hidden; }
 .bot-section-nav button:hover, .bot-section-nav button.active { color: var(--text); border-color: rgba(88,101,242,.42); background: rgba(88,101,242,.13); }
 .bot-section-nav button.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 999px; background: #5865f2; }
 .bot-section-nav button.active svg { color: #5865f2; }
@@ -65,9 +65,9 @@
   .bot-exceptions > article { grid-template-columns: 20px minmax(0, 1fr); }
   .bot-exceptions > article button { grid-column: 2; justify-self: start; }
   .bot-desktop-section-nav { display: none; }
-  .bot-mobile-section-nav { display: grid; position: sticky; top: 0; z-index: 4; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: 0 10px 24px rgba(0,0,0,.22); }
+  .bot-mobile-section-nav { display: grid; position: sticky; top: 0; z-index: 4; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: 0 10px 24px rgba(0,0,0,.22); }
   .bot-mobile-section-nav > label { color: var(--muted); font-size: var(--font-micro); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-  .bot-mobile-section-nav select { width: 100%; min-height: 42px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-strong, #10151d); color: var(--text); padding: 7px 10px; font: inherit; }
+  .bot-mobile-section-nav select { width: 100%; min-height: 42px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel-strong, #10151d); color: var(--text); padding: 7px 10px; font: inherit; }
   .bot-mobile-section-current { display: grid; gap: 2px; }
   .bot-mobile-section-current strong { font-size: 13px; }
   .bot-mobile-section-current span { color: var(--muted); font-size: 11px; }
@@ -76,7 +76,7 @@
   .bot-mobile-section-list { max-height: min(48vh, 360px); overflow-y: auto; padding-top: 8px; display: grid; gap: 9px; }
   .bot-mobile-section-list > div { display: flex; flex-wrap: wrap; gap: 5px; }
   .bot-mobile-section-list p { flex: 0 0 100%; margin: 0; color: var(--muted); font-size: var(--font-micro); font-weight: 800; text-transform: uppercase; }
-  .bot-mobile-section-list button { min-height: 36px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); padding: 6px 9px; }
+  .bot-mobile-section-list button { min-height: 36px; border: 1px solid var(--border); border-radius: var(--radius-control); background: transparent; color: var(--muted); padding: 6px 9px; }
   .bot-mobile-section-list button.active { border-color: rgba(88,101,242,.62); background: rgba(88,101,242,.15); color: var(--text); }
   .bot-overview { overflow-x: auto; grid-auto-flow: column; grid-auto-columns: minmax(220px, 82vw); grid-template-columns: none; scroll-snap-type: x mandatory; }
   .bot-overview > div { scroll-snap-align: start; }

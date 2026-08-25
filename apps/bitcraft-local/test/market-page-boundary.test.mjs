@@ -111,7 +111,8 @@ test("Market exposes source-backed warnings and a compact mobile workspace picke
   const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
 
   assert.match(marketPage, /marketStatus\.generatedAt/);
-  assert.match(marketPage, /className="global-market-warning" role="status"/);
+  assert.match(marketPage, /className="global-market-warning"[^>]*role="status"/);
+  assert.match(marketPage, /className="global-market-warning"[^>]*title=\{marketStatusMessage\}/);
   assert.match(marketPage, /className="global-market-mobile-nav"/);
   assert.match(marketPage, /aria-label="Choose Global Market workspace"/);
   assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*\.global-market-mobile-nav\s*\{[^}]*display:\s*grid/s);

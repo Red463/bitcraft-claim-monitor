@@ -9,28 +9,28 @@ import type { AnyRecord } from "./main-app-data";
  */
 
 export const DEFAULT_THEME = {
-  bg: "#0c0d10",
-  sidebar: "#06070a",
-  panel: "#181b21",
-  panel2: "#11141a",
-  border: "#353b46",
-  cardTop: "#111923",
-  cardBottom: "#080d14",
-  cardTitle: "#b8c2cf",
+  bg: "#030403",
+  sidebar: "#050605",
+  panel: "#0b0e0b",
+  panel2: "#070907",
+  border: "#34382f",
+  cardTop: "#111510",
+  cardBottom: "#070907",
+  cardTitle: "#c5c8bf",
   cardValue: "#ffffff",
-  iconBg: "#12181f",
-  activeColor: "#f0c64f",
-  activeBg: "#3a3118",
-  activeBorder: "#7a6428",
-  hoverBorder: "#5f5127",
-  muted: "#a8adba",
-  text: "#f6f3ea",
-  gold: "#f0c64f",
+  iconBg: "#0f120e",
+  activeColor: "#d9af3d",
+  activeBg: "#2a2411",
+  activeBorder: "#8f772d",
+  hoverBorder: "#75652b",
+  muted: "#a8ada3",
+  text: "#f0ede4",
+  gold: "#d9af3d",
   good: "#4ee28a",
   danger: "#ef6461",
-  gradientTop: "#1f1f1f",
-  gradientMid: "#080808",
-  gradientBase: "#030303",
+  gradientTop: "#111510",
+  gradientMid: "#070907",
+  gradientBase: "#030403",
   gradientTopStop: "0",
   gradientMidStop: "58",
   gradientFadeStop: "100",
@@ -46,6 +46,20 @@ export type ThemeContrastResult = {
 type ThemeKey = keyof ThemeSettings;
 export type ThemeRangeKey = "gradientTopStop" | "gradientMidStop" | "gradientFadeStop" | "gradientHeight";
 export type ThemeColorKey = Exclude<ThemeKey, ThemeRangeKey>;
+
+const LEGACY_DEFAULT_THEME: ThemeSettings = {
+  bg: "#0c0d10", sidebar: "#06070a", panel: "#181b21", panel2: "#11141a", border: "#353b46",
+  cardTop: "#111923", cardBottom: "#080d14", cardTitle: "#b8c2cf", cardValue: "#ffffff", iconBg: "#12181f",
+  activeColor: "#f0c64f", activeBg: "#3a3118", activeBorder: "#7a6428", hoverBorder: "#5f5127", muted: "#a8adba",
+  text: "#f6f3ea", gold: "#f0c64f", good: "#4ee28a", danger: "#ef6461", gradientTop: "#1f1f1f",
+  gradientMid: "#080808", gradientBase: "#030303", gradientTopStop: "0", gradientMidStop: "58", gradientFadeStop: "100", gradientHeight: "32",
+};
+
+export function migrateLegacyDefaultTheme(theme: ThemeSettings): ThemeSettings {
+  const isLegacyDefault = (Object.keys(LEGACY_DEFAULT_THEME) as ThemeKey[])
+    .every((key) => theme[key] === LEGACY_DEFAULT_THEME[key]);
+  return isLegacyDefault ? DEFAULT_THEME : theme;
+}
 
 export const CUSTOM_THEME_STORAGE_KEY = "theme.custom.local";
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
@@ -237,6 +251,16 @@ export function applyTheme(theme: Partial<ThemeSettings>) {
   const gradientMidStop = clampThemeNumber(theme.gradientMidStop, 0, 100, DEFAULT_THEME.gradientMidStop);
   const gradientFadeStop = clampThemeNumber(theme.gradientFadeStop, 0, 100, DEFAULT_THEME.gradientFadeStop);
   const gradientHeight = clampThemeNumber(theme.gradientHeight, 12, 72, DEFAULT_THEME.gradientHeight);
+  const panel = theme.panel ?? DEFAULT_THEME.panel;
+  const panel2 = theme.panel2 ?? DEFAULT_THEME.panel2;
+  const cardTop = theme.cardTop ?? DEFAULT_THEME.cardTop;
+  const border = theme.border ?? DEFAULT_THEME.border;
+  document.documentElement.style.setProperty("--canvas", bg);
+  document.documentElement.style.setProperty("--surface-1", panel2);
+  document.documentElement.style.setProperty("--surface-2", panel);
+  document.documentElement.style.setProperty("--surface-3", cardTop);
+  document.documentElement.style.setProperty("--line-subtle", `color-mix(in srgb, ${border} 55%, transparent)`);
+  document.documentElement.style.setProperty("--line-strong", border);
   document.documentElement.style.setProperty("--theme-gradient-top-stop", `${gradientTopStop}%`);
   document.documentElement.style.setProperty("--theme-gradient-mid-stop", `${gradientMidStop}%`);
   document.documentElement.style.setProperty("--theme-gradient-fade-stop", `${gradientFadeStop}%`);

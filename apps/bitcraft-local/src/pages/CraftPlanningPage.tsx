@@ -627,7 +627,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   return (
     <div className="panel craft-planning-page">
       <header className="page-header split-header craft-plan-page-header">
-        <div>
+        <div className="route-title-copy">
           <h2><ClipboardList size={24} /> Craft Planning</h2>
           <p>{hasPlan ? String(config.name ?? "Settlement craft plan") : "Admin-controlled procurement board for settlement crafting goals."}</p>
         </div>

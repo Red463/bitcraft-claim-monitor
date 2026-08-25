@@ -9,6 +9,19 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.8] - 2026-08-25
+
+### Changed
+
+- Applied the Obsidian Ledger neutral palette, sharper panel geometry, and flatter operational surfaces across the maintained application and Bot/Admin views.
+- Replaced repeated page-title heroes with the contextual title in the application utility bar.
+- Simplified the application footer into a quieter provenance and support strip.
+
+### Fixed
+
+- Migrated browsers using the previous built-in theme to the new Obsidian default while preserving deliberately customised themes.
+- Fixed Global Market warnings overflowing its compact command panel and removed obsolete floating-tool styling.
+
 ## [0.62.0-beta.7] - 2026-08-25
 
 ### Fixed

@@ -95,7 +95,7 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, members
   return (
     <div className="panel activity-panel">
       <header className="members-topbar activity-topbar">
-        <div>
+        <div className="route-title-copy">
           <h2>Activity</h2>
           <p>A live audit trail of settlement updates and owned-storage movements.</p>
         </div>

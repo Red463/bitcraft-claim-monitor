@@ -308,7 +308,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
   return (
     <div className="panel market-page">
       <header className="members-topbar market-topbar">
-        <div>
+        <div className="route-title-copy">
           <h2>{settlementMarketTitle(data.claim?.name)}</h2>
           <p>{`${formatNumber(all.length)} monitored listing${all.length === 1 ? "" : "s"} for ${filterLabel}`}</p>
         </div>

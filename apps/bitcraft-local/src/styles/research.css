@@ -25,10 +25,10 @@
 .research-panel .mini-stat {
   min-height: 112px;
   border: 1px solid rgba(108,123,145,.24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+    var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
   grid-template-columns: 44px minmax(0, 1fr);
@@ -39,7 +39,7 @@
   width: 42px;
   height: 42px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--radius-dialog);
   background: rgba(255,255,255,.035);
   color: #f3c532;
 }
@@ -72,10 +72,10 @@
 
 .research-panel .research-unlocks {
   border: 1px solid rgba(108,123,145,.24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+    var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 12px;
 }
@@ -122,7 +122,7 @@
 
 .research-lanes section {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   padding: 14px;
   background: var(--panel-2);
 }
@@ -135,10 +135,10 @@
   max-height: 640px;
   padding: 18px;
   border-color: rgba(108,123,145,.24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+    var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
 }
 
@@ -184,7 +184,7 @@
   gap: 8px;
   align-items: center;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: var(--panel);
   padding: 10px;
 }
@@ -194,7 +194,7 @@
   grid-template-columns: 26px minmax(0, 1fr) auto;
   gap: 10px;
   border-color: rgba(154,168,190,.16);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(5,8,12,.78);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.02);
 }
@@ -222,7 +222,7 @@
   display: inline-grid;
   place-items: center;
   border: 1px solid rgba(154,168,190,.18);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(255,255,255,.035);
 }
 
