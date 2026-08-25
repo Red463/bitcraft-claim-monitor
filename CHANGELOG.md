@@ -9,6 +9,19 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.16] - 2026-08-25
+
+### Changed
+
+- Expanded Global Market region selection to every Relay-ready region.
+- Replaced recoverable regional warm-up warnings with a compact neutral live-data status.
+
+### Fixed
+
+- Reconnected failed regional market sessions automatically and kept healthy regional feeds subscribed.
+- Prevented valid all-region market data from exceeding legacy order and listing safety limits.
+- Reserved Global Market error alerts for genuine source failures while retaining last-good data during recovery.
+
 ## [0.62.0-beta.15] - 2026-08-25
 
 ### Changed

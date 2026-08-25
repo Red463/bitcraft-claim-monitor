@@ -41,6 +41,7 @@ import {
 import { createMarketTransitionDispatcher } from "./src/server/marketTransitionDispatcher.mjs";
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
+import { readyMarketRegionIds } from "./src/server/marketRegionScope.mjs";
 import { mapResourceRegionCatalog, nameMapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
 import { MAP_RESOURCE_LEASE_ACQUISITION_LIMIT, MapResourcePageError, buildMapResourcePartitionPayload, createMapResourceCursorCodec, mapResourceSelectionLeasePlan, parseMapResourcePartitionScope, parseMapResourceSelectionScope } from "./src/server/mapResourcePages.mjs";
 import {
@@ -817,9 +818,13 @@ const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime({
       observedAt,
     }),
   rotationMs: Math.max(1_000, Number(process.env.RELAY_MARKET_REGION_ROTATION_MS ?? 15_000)),
+  maxOrders: Math.max(5_000, Number(process.env.RELAY_MARKET_REGION_MAX_ORDERS ?? 20_000)),
+  maxClosedListings: Math.max(10_000, Number(process.env.RELAY_MARKET_REGION_MAX_CLOSED_LISTINGS ?? 25_000)),
+  maxStalls: Math.max(1_000, Number(process.env.RELAY_MARKET_REGION_MAX_STALLS ?? 5_000)),
+  maxApplyRows: Math.max(25_000, Number(process.env.RELAY_MARKET_REGION_MAX_APPLY_ROWS ?? 50_000)),
   poolOptions: {
-    maxSessions: Math.max(1, Number(process.env.RELAY_MARKET_REGION_MAX_SESSIONS ?? 4)),
-    idleCloseMs: Math.max(10_000, Number(process.env.RELAY_MARKET_REGION_IDLE_CLOSE_MS ?? 60_000)),
+    maxSessions: Math.max(1, Number(process.env.RELAY_MARKET_REGION_MAX_SESSIONS ?? 16)),
+    idleCloseMs: Math.max(10_000, Number(process.env.RELAY_MARKET_REGION_IDLE_CLOSE_MS ?? 300_000)),
     staggerMs: Math.max(0, Number(process.env.RELAY_MARKET_REGION_STAGGER_MS ?? 250)),
   },
 });
@@ -6372,11 +6377,11 @@ function regionalMarketReadScope(claimId) {
     : [];
   const runtimeActiveRegionIds = relayRegionalMarketRuntime.health().activeRegionIds;
   const configuredActiveRegionIds = configuredRegionalMarketRegionIds(claimId);
-  const allowedRegionIds = configuredActiveRegionIds.length
-    ? configuredActiveRegionIds
-    : runtimeActiveRegionIds.length
-      ? runtimeActiveRegionIds
-      : persistedActiveRegionIds;
+  const allowedRegionIds = readyMarketRegionIds(gameDataProviderHealth(), [
+    ...runtimeActiveRegionIds,
+    ...persistedActiveRegionIds,
+    ...configuredActiveRegionIds,
+  ]);
   return { current, allowedRegionIds };
 }
 
@@ -10525,9 +10530,9 @@ function startBackgroundTasks() {
       }
       if (!relayRegionalMarketStarted) {
         try {
-          const settings = getSettings();
-          const activeRegionIds = parseRegionIds(
-            `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+          const activeRegionIds = readyMarketRegionIds(
+            relayProvider.health(),
+            configuredRegionalMarketRegionIds(claimId),
           );
           await relayRegionalMarketRuntime.start({
             relayBaseUrl,
@@ -10541,13 +10546,13 @@ function startBackgroundTasks() {
         }
       } else {
         try {
-          const settings = getSettings();
           await relayRegionalMarketRuntime.reconcile({
             relayBaseUrl,
             claimId,
             primaryRegionId: regionId,
-            activeRegionIds: parseRegionIds(
-              `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+            activeRegionIds: readyMarketRegionIds(
+              relayProvider.health(),
+              configuredRegionalMarketRegionIds(claimId),
             ),
           });
         } catch (error) {

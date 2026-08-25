@@ -82,6 +82,6 @@ test("primary page families use flat Obsidian surfaces instead of legacy card gr
 
 test("Global Market warnings retain an accessible expandable disclosure", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
-  assert.match(marketPage, /className="global-market-data-alert"\s+role="status"/);
-  assert.match(marketPage, /<details>[\s\S]*?<summary>[\s\S]*?<ul>\{marketIssues\.map/s);
+  assert.match(marketPage, /className="global-market-data-alert error"\s+role="alert"/);
+  assert.match(marketPage, /<details>[\s\S]*?<summary>[\s\S]*?<ul>\{marketErrorIssues\.map/s);
 });

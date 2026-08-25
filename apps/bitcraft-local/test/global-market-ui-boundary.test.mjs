@@ -188,6 +188,17 @@ test("Overview and Deals use generation-invalidated local Relay projections", ()
   assert.doesNotMatch(deals, /Route distance and map coordinates will appear/);
 });
 
+test("Global Market keeps enough live regional sessions for the complete Relay topology", () => {
+  const server = source("../server.mjs");
+
+  assert.match(server, /RELAY_MARKET_REGION_MAX_SESSIONS \?\? 16/);
+  assert.match(server, /RELAY_MARKET_REGION_IDLE_CLOSE_MS \?\? 300_000/);
+  assert.match(server, /RELAY_MARKET_REGION_MAX_ORDERS \?\? 20_000/);
+  assert.match(server, /RELAY_MARKET_REGION_MAX_CLOSED_LISTINGS \?\? 25_000/);
+  assert.match(server, /RELAY_MARKET_REGION_MAX_STALLS \?\? 5_000/);
+  assert.match(server, /RELAY_MARKET_REGION_MAX_APPLY_ROWS \?\? 50_000/);
+});
+
 test("Browse follows the central page cycle and keeps history non-blocking", () => {
   const browse = source("../src/pages/market/MarketBrowse.tsx");
   const generationHook = source("../src/hooks/useGameDataGeneration.ts");

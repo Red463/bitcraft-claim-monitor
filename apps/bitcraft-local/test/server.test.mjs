@@ -1338,12 +1338,12 @@ test("server collection paginates listings and protects production mutations", a
     rarityStr: "Common",
     iconAssetName: null,
   });
-  const foreignFavoriteQuote = await fetch(`${origin}/api/local/market/favorite-quotes`, {
+  const otherActiveRegionFavoriteQuote = await fetch(`${origin}/api/local/market/favorite-quotes`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ regionId: "9", items: [{ itemType: "item", itemId: "30" }] }),
   });
-  assert.equal(foreignFavoriteQuote.status, 403);
+  assert.equal(otherActiveRegionFavoriteQuote.status, 200);
   const favoriteQuoteRefreshes = await Promise.all(Array.from({ length: 8 }, () => fetch(
     `${origin}/api/local/market/favorite-quotes`,
     {
@@ -1389,8 +1389,8 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(marketStalls.stalls[0].orders[0].remainingStock, "2147483647");
   assert.equal(marketStalls.stalls[0].orders[0].offers[0].itemName, "Leather");
   assert.equal(marketStalls.stalls[0].orders[0].requires[0].quantity, "9007199254740993");
-  const foreignRegionStalls = await fetch(`${origin}/api/local/market/stalls?claimId=${claimId}&regionId=9`);
-  assert.equal(foreignRegionStalls.status, 403);
+  const otherActiveRegionStalls = await fetch(`${origin}/api/local/market/stalls?claimId=${claimId}&regionId=9`);
+  assert.equal(otherActiveRegionStalls.status, 200);
   const foreignClaimStalls = await fetch(`${origin}/api/local/market/stalls?claimId=999999999&regionId=19`);
   assert.equal(foreignClaimStalls.status, 403);
   const marketPriceHistory = await fetch(`${origin}/api/local/market/price-history?claimId=${claimId}&regionId=19&itemType=item&itemId=30`).then((response) => response.json());
@@ -1422,7 +1422,7 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(marketOverview.movers.length, 0);
   assert.equal(marketOverview.moverBaseline, "collecting");
   const marketRegions = await fetch(`${origin}/api/local/market/regions?claimId=${claimId}`).then((response) => response.json());
-  assert.deepEqual(marketRegions.regions.map((region) => region.regionId), ["19"]);
+  assert.deepEqual(marketRegions.regions.map((region) => region.regionId), ["9", "19"]);
   const liveDeals = await fetch(`${origin}/api/local/market/deals?claimId=${claimId}`).then((response) => response.json());
   assert.equal(liveDeals.deals[0].buyPrice, "15");
   assert.equal(liveDeals.deals[0].sellPrice, "20");
@@ -1430,12 +1430,12 @@ test("server collection paginates listings and protects production mutations", a
   assert.equal(liveDeals.coverage, "current-orders");
   const scopedLiveDeals = await fetch(`${origin}/api/local/market/deals?claimId=${claimId}&regions=19`).then((response) => response.json());
   assert.deepEqual(scopedLiveDeals.deals.map((deal) => deal.buyRegionId), ["19"]);
-  const foreignRegionDeals = await fetch(`${origin}/api/local/market/deals?claimId=${claimId}&regions=9`);
-  assert.equal(foreignRegionDeals.status, 403);
+  const otherActiveRegionDeals = await fetch(`${origin}/api/local/market/deals?claimId=${claimId}&regions=9`);
+  assert.equal(otherActiveRegionDeals.status, 200);
   const allRegionalBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=all&pageSize=25`).then((response) => response.json());
-  assert.deepEqual(allRegionalBuyOrders.rows.map((row) => row.regionId), ["19"]);
+  assert.deepEqual(allRegionalBuyOrders.rows.map((row) => row.regionId), ["19", "9"]);
   const regionalBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=9&search=Leather&pageSize=25&sort=unitPrice&direction=desc`);
-  assert.equal(regionalBuyOrders.status, 403);
+  assert.equal(regionalBuyOrders.status, 200);
   const foreignClaimBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=999999999&regionId=19`);
   assert.equal(foreignClaimBuyOrders.status, 403);
   const unconfiguredRegionBuyOrders = await fetch(`${origin}/api/local/market/buy-orders?claimId=${claimId}&regionId=3`);

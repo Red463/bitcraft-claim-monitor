@@ -106,15 +106,18 @@ test("Market header metadata wraps under text scaling on phones", () => {
   assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.market-page \.dashboard-top-meta\s*\{[^}]*flex-wrap:\s*wrap/s);
 });
 
-test("Market exposes source-backed warnings and a compact mobile workspace picker", () => {
+test("Market separates real errors from recoverable freshness notices", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
 
   assert.match(marketPage, /marketStatus\.generatedAt/);
-  assert.match(marketPage, /className="global-market-data-alert"[^>]*role="status"/);
-  assert.match(marketPage, /<details>[\s\S]*?<summary>[\s\S]*?Market data degraded[\s\S]*?<ul>[\s\S]*?marketIssues\.map/s);
-  assert.doesNotMatch(marketPage, /className="global-market-warning"/);
+  assert.match(marketPage, /marketStatus\.errors/);
+  assert.match(marketPage, /className="global-market-data-alert error"[^>]*role="alert"/);
+  assert.match(marketPage, /className="global-market-data-status"[^>]*role="status"/);
+  assert.match(marketPage, /Live data updating/);
   assert.match(css, /\.global-market-data-alert\s*\{[^}]*border:[^}]*background:/s);
+  assert.match(css, /\.global-market-data-alert\.error\s*\{[^}]*border-color:/s);
+  assert.match(css, /\.global-market-data-status\s*\{[^}]*border:/s);
   assert.match(css, /\.global-market-data-alert summary\s*\{[^}]*display:\s*grid[^}]*cursor:\s*pointer/s);
   assert.match(marketPage, /className="global-market-mobile-nav"/);
   assert.match(marketPage, /aria-label="Choose Global Market workspace"/);

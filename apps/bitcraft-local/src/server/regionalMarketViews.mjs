@@ -138,6 +138,7 @@ export function regionalMarketStatus(snapshot, options = {}) {
       confidence: "unknown",
       ageMs: null,
       warnings: ["Relay regional market has not loaded yet."],
+      errors: [],
     };
   }
   const current = record(snapshot);
@@ -178,12 +179,14 @@ export function regionalMarketStatus(snapshot, options = {}) {
       : []),
     ...missingRegionIds.map((regionId) => `Relay regional market has not loaded region ${regionId} yet.`),
   ];
+  const errors = [];
   if (!loadedRegions.length) {
     return {
       freshness: "unavailable",
       confidence: current.confidence === "authoritative" ? "partial" : String(current.confidence ?? "unknown"),
       ageMs: null,
       warnings: [...new Set(warnings)],
+      errors,
     };
   }
 
@@ -219,7 +222,7 @@ export function regionalMarketStatus(snapshot, options = {}) {
   }
   if (current.lastError) {
     freshness = "stale";
-    warnings.push(String(current.lastError));
+    errors.push(String(current.lastError));
   }
   if (runtime.running === true) {
     for (const regionId of targetRegionIds) {
@@ -235,7 +238,7 @@ export function regionalMarketStatus(snapshot, options = {}) {
       }
       if (health.lastError) {
         freshness = "stale";
-        warnings.push(String(health.lastError));
+        errors.push(String(health.lastError));
       }
     }
   }
@@ -246,6 +249,7 @@ export function regionalMarketStatus(snapshot, options = {}) {
       : String(current.confidence ?? "unknown"),
     ageMs,
     warnings: [...new Set(warnings)],
+    errors: [...new Set(errors)],
   };
 }
 
@@ -256,6 +260,7 @@ export function globalCatalogStatus(catalogSource, options = {}) {
       confidence: "unknown",
       ageMs: null,
       warnings: ["Relay global catalog has not loaded yet."],
+      errors: [],
     };
   }
   const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
@@ -280,9 +285,10 @@ export function globalCatalogStatus(catalogSource, options = {}) {
     || catalogAgeMs == null
     || (catalogAgeMs > staleAfterMs && !runtimeHealthy);
   const warnings = [];
+  const errors = [];
   if (catalogStale) {
     if (runtimeError) {
-      warnings.push(`Relay global catalog error: ${String(runtimeError)}`);
+      errors.push(`Relay global catalog error: ${String(runtimeError)}`);
     } else if ((runtime.running === true || runtimeExpected) && subscription.connected !== true) {
       warnings.push("Relay global catalog subscription is disconnected.");
     } else if ((runtime.running === true || runtimeExpected) && subscription.applied !== true) {
@@ -300,6 +306,7 @@ export function globalCatalogStatus(catalogSource, options = {}) {
     confidence: catalogStale ? "partial" : "authoritative",
     ageMs: catalogAgeMs,
     warnings: [...new Set(warnings)],
+    errors: [...new Set(errors)],
   };
 }
 
@@ -316,6 +323,10 @@ export function combinedMarketStatus(orderStatus, catalogSource, options = {}) {
     ...(Array.isArray(orders.warnings) ? orders.warnings.map(String) : []),
     ...catalog.warnings,
   ];
+  const errors = [
+    ...(Array.isArray(orders.errors) ? orders.errors.map(String) : []),
+    ...(Array.isArray(catalog.errors) ? catalog.errors.map(String) : []),
+  ];
   const orderAgeMs = Number.isFinite(Number(orders.ageMs)) ? Number(orders.ageMs) : null;
   const ageMs = [orderAgeMs, catalog.ageMs].filter((age) => age != null);
   return {
@@ -329,6 +340,7 @@ export function combinedMarketStatus(orderStatus, catalogSource, options = {}) {
       : "authoritative",
     ageMs: ageMs.length ? Math.max(...ageMs) : null,
     warnings: [...new Set(warnings)],
+    errors: [...new Set(errors)],
   };
 }
 

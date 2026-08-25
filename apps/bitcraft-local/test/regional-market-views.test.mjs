@@ -401,6 +401,7 @@ test("regional market status reports per-region age and disconnected sessions as
   assert.equal(disconnected.freshness, "stale");
   assert.equal(disconnected.ageMs, 30_000);
   assert.match(disconnected.warnings.join(" "), /disconnected/i);
+  assert.deepEqual(disconnected.errors, ["socket lost"]);
 
   const connectedWithError = views.regionalMarketStatus(current, {
     regionId: "19",
@@ -417,7 +418,7 @@ test("regional market status reports per-region age and disconnected sessions as
     },
   });
   assert.equal(connectedWithError.freshness, "stale");
-  assert.match(connectedWithError.warnings.join(" "), /detail subscription reset/);
+  assert.deepEqual(connectedWithError.errors, ["detail subscription reset"]);
 
   const quietButConnected = views.regionalMarketStatus(current, {
     regionId: "19",
@@ -446,6 +447,7 @@ test("regional market status reports per-region age and disconnected sessions as
   assert.equal(aged.freshness, "stale");
   assert.equal(aged.ageMs, 120_000);
   assert.match(aged.warnings.join(" "), /older than/i);
+  assert.deepEqual(aged.errors, []);
 
   const neverLoaded = views.regionalMarketStatus(current, {
     regionId: "7",
@@ -603,6 +605,7 @@ test("market response freshness includes the older global catalog dependency", (
     confidence: "partial",
     ageMs: 120_000,
     warnings: ["Relay global catalog is older than 60 seconds."],
+    errors: [],
   });
 
   assert.deepEqual(views.combinedMarketStatus(orderStatus, null, {
@@ -613,6 +616,7 @@ test("market response freshness includes the older global catalog dependency", (
     confidence: "unknown",
     ageMs: null,
     warnings: ["Relay global catalog has not loaded yet."],
+    errors: [],
   });
 });
 
@@ -637,6 +641,7 @@ test("connected global catalog remains live when its data has not changed", () =
     confidence: "authoritative",
     ageMs: 120_000,
     warnings: [],
+    errors: [],
   });
 });
 
@@ -665,7 +670,8 @@ test("global catalog status immediately marks a failed expected runtime stale", 
     freshness: "stale",
     confidence: "partial",
     ageMs: 500,
-    warnings: ["Relay global catalog error: Relay topology unavailable"],
+    warnings: [],
+    errors: ["Relay global catalog error: Relay topology unavailable"],
   });
 });
 
@@ -690,6 +696,7 @@ test("global catalog status allows a split web process to use fresh worker data"
     confidence: "authoritative",
     ageMs: 500,
     warnings: [],
+    errors: [],
   });
 });
 

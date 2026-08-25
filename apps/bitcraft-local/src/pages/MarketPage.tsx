@@ -2,7 +2,7 @@ import React from "react";
 import { Activity, AlertTriangle, Bookmark, ChevronDown, Clock3, Globe2, Search, Store, TrendingUp } from "lucide-react";
 
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
-import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
+import { activeRegionLabel, type ActiveRegion } from "../hooks/useActiveRegions";
 import { useGameDataGeneration } from "../hooks/useGameDataGeneration";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { toNumber, type AnyRecord } from "../main-app-data";
@@ -20,7 +20,7 @@ import { MarketOpportunities } from "./market/MarketOpportunities";
 import { MarketOverview } from "./market/MarketOverview";
 import { MarketSaved } from "./market/MarketSaved";
 import { MarketStalls } from "./market/MarketStalls";
-import { marketFavoriteKeys, type MarketItemKey } from "./market/globalMarket";
+import { marketFavoriteKeys, marketRegionScopeUrl, type MarketItemKey } from "./market/globalMarket";
 import { handleTablistKeyDown } from "./market/marketUi";
 
 const FAVORITES_KEY = "bitcraft.market.favorites.v1";
@@ -38,7 +38,6 @@ export function Market({
   access,
   locationSearch,
   fallbackRegionId,
-  activeRegionScopeKey,
   auth,
   onAuthInvalidated,
   onQueryStateChange,
@@ -50,7 +49,6 @@ export function Market({
   access?: EffectiveAccess | null;
   locationSearch: string;
   fallbackRegionId: string;
-  activeRegionScopeKey?: string;
   auth: UserAuthState;
   onAuthInvalidated: () => void;
   onQueryStateChange: () => void;
@@ -70,7 +68,7 @@ export function Market({
     }
   });
   const [pendingWatchItem, setPendingWatchItem] = React.useState<AnyRecord | null>(null);
-  const activeRegions = useActiveRegions(undefined, claimId, activeRegionScopeKey);
+  const [activeRegions, setActiveRegions] = React.useState<ActiveRegion[]>([]);
   const marketGeneration = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
   const [overviewState, setOverviewState] = React.useState<{ loading: boolean; error: string; data: AnyRecord | null }>({ loading: true, error: "", data: null });
   const activeRegionIds = React.useMemo(() => new Set(activeRegions.map((region) => region.regionId)), [activeRegions]);
@@ -84,6 +82,30 @@ export function Market({
     refreshHeaders: manualRefreshHeaders(request, "market"),
     trackRefresh: trackPromise,
   }), [request?.id, request?.sequence, trackPromise]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    trackPromise("global-market-regions", fetch(marketRegionScopeUrl(claimId), {
+      headers: marketRefresh.refreshHeaders,
+      signal: controller.signal,
+    }).then((response) => response.ok
+      ? response.json()
+      : Promise.reject(new Error(`market regions HTTP ${response.status}`))))
+      .then((payload) => {
+        const regions = Array.isArray(payload.regions) ? payload.regions : [];
+        setActiveRegions(regions
+          .map((region: AnyRecord) => ({ ...region, regionId: String(region.regionId ?? "") }))
+          .filter((region: ActiveRegion) => /^\d+$/.test(region.regionId)));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setActiveRegions((current) => current.length || !/^\d+$/.test(fallbackRegionId)
+            ? current
+            : [{ regionId: fallbackRegionId, regionName: `Region ${fallbackRegionId}`, source: "fallback" }]);
+        }
+      });
+    return () => controller.abort();
+  }, [claimId, fallbackRegionId, marketGeneration, marketRefresh.refreshHeaders, request?.sequence, trackPromise]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -161,7 +183,8 @@ export function Market({
 
   const marketStatus = overviewState.data ?? {};
   const marketWarnings = Array.isArray(marketStatus.warnings) ? marketStatus.warnings.map(String).filter(Boolean) : [];
-  const marketIssues = [...new Set([overviewState.error, ...marketWarnings].filter(Boolean))];
+  const marketErrors = Array.isArray(marketStatus.errors) ? marketStatus.errors.map(String).filter(Boolean) : [];
+  const marketErrorIssues = [...new Set([overviewState.error, ...marketErrors].filter(Boolean))];
 
   if (!allowedView) return <div className="panel restricted-access-panel"><section className="empty-state restricted-access-state"><Globe2 size={34} /><strong>Market is restricted</strong><span>No global market workspaces are available for your account.</span></section></div>;
 
@@ -180,7 +203,8 @@ export function Market({
         <label className="global-market-mobile-nav"><span>Workspace</span><select aria-label="Choose Global Market workspace" value={currentView} onChange={(event) => selectView(event.target.value as GlobalMarketViewId)}>{views.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}</select></label>
         <div className="global-market-toolbar-meta"><span className={`global-market-freshness ${marketStatus.freshness !== "fresh" || overviewState.error ? "warning" : ""}`}><Clock3 size={13} /> {marketStatus.generatedAt ? `Updated ${timeAgo(marketStatus.generatedAt)}` : overviewState.loading ? "Checking freshness…" : "Freshness unavailable"}</span><label className="field global-market-region"><span>Market region</span><select value={regionId || "All"} onChange={(event) => setRegionChoice(event.target.value)}><option value="All">All active regions</option>{activeRegions.map((region) => <option value={region.regionId} key={region.regionId}>{activeRegionLabel(region, fallbackRegionId)}</option>)}</select></label></div>
       </section>
-      {marketIssues.length ? <div className="global-market-data-alert" role="status"><details><summary><AlertTriangle size={16} /><span><strong>{overviewState.error ? "Market status unavailable" : "Market data degraded"}</strong><small>Last complete market data remains visible while live sources recover.</small></span><span className="global-market-data-alert-count">{marketIssues.length} {marketIssues.length === 1 ? "detail" : "details"}<ChevronDown size={14} /></span></summary><ul>{marketIssues.map((warning) => <li key={warning}>{warning}</li>)}</ul></details></div> : null}
+      {marketErrorIssues.length ? <div className="global-market-data-alert error" role="alert"><details><summary><AlertTriangle size={16} /><span><strong>Market data unavailable</strong><small>Last complete market data remains visible while the live source recovers.</small></span><span className="global-market-data-alert-count">{marketErrorIssues.length} {marketErrorIssues.length === 1 ? "detail" : "details"}<ChevronDown size={14} /></span></summary><ul>{marketErrorIssues.map((error) => <li key={error}>{error}</li>)}</ul></details></div> : null}
+      {!marketErrorIssues.length && marketWarnings.length ? <div className="global-market-data-status" role="status"><Clock3 size={14} /><span><strong>Live data updating</strong><small>{marketWarnings[0]}</small></span></div> : null}
       {currentView === "overview" ? <div id="market-panel-overview" role="tabpanel" aria-labelledby="market-tab-overview"><MarketOverview {...marketRefresh} claimId={claimId} regionId={regionId} overviewState={overviewState} favorites={favorites} onOpenItem={openItem} /></div> : null}
       {currentView === "browse" ? <div id="market-panel-browse" role="tabpanel" aria-labelledby="market-tab-browse"><MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} canWatch={tabAllowed("deal-watch")} onWatchItem={watchItem} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /></div> : null}
       {currentView === "opportunities" ? <MarketOpportunities {...marketRefresh} claimId={claimId} regionId={regionId} activeRegions={activeRegions} canViewRoutes={tabAllowed("deals")} canViewDemand={tabAllowed("buy-orders")} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}

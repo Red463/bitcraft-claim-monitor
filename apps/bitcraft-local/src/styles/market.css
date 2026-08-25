@@ -625,6 +625,15 @@
   overflow: hidden;
 }
 
+.global-market-data-alert.error {
+  border-color: rgba(235, 93, 93, .46);
+}
+
+.global-market-data-alert.error summary > svg,
+.global-market-data-alert.error .global-market-data-alert-count {
+  color: #ff8585;
+}
+
 .global-market-data-alert details,
 .global-market-data-alert summary {
   min-width: 0;
@@ -698,6 +707,45 @@
 
 .global-market-data-alert li + li {
   margin-top: 5px;
+}
+
+.global-market-data-status {
+  min-height: 38px;
+  padding: 7px 11px;
+  border: 1px solid rgba(108, 123, 145, .22);
+  border-radius: var(--radius-control);
+  background: #090d12;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #8ea0b6;
+}
+
+.global-market-data-status > svg {
+  flex: 0 0 auto;
+  color: #86a0bd;
+}
+
+.global-market-data-status span {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+}
+
+.global-market-data-status strong {
+  color: #c9d2de;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.global-market-data-status small {
+  overflow: hidden;
+  color: #7f8c9d;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .global-market-workspace {
