@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.20] - 2026-08-25
+
+### Fixed
+
+- Prevented valid closed market listings from producing false missing-settlement warnings when their settlement or seller had no active order.
+
 ## [0.62.0-beta.19] - 2026-08-25
 
 ### Changed

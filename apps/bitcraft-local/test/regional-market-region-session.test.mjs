@@ -568,6 +568,47 @@ test("regional market session rejects closed evidence above its explicit row bud
   await session.stop();
 });
 
+test("regional market session enriches identities used only by closed listings", async () => {
+  const fake = fakeBindings();
+  fake.rows.closedListingState[0] = {
+    ...fake.rows.closedListingState[0],
+    claimEntityId: 103n,
+    ownerEntityId: 704n,
+  };
+  fake.rows.claimState.push({ entityId: 103n, name: "Closed Market" });
+  fake.rows.playerUsernameState.push({ entityId: 704n, username: "Former Seller" });
+  const snapshots = [];
+  const session = new sessionModule.RelayRegionalMarketRegionSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+    now: () => new Date("2026-07-30T12:00:00.000Z"),
+  });
+
+  await session.start({
+    uri: "wss://relay.example:4019",
+    database: "relay-region-19",
+    schemaFingerprint: "regional-v1",
+    manifest,
+    generation: 4,
+    regionId: "19",
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.subscriptions[0].onApplied({});
+  assert.deepEqual(fake.state.subscriptions[1].queries, [
+    "SELECT * FROM claim_state WHERE entity_id = 100 OR entity_id = 101 OR entity_id = 103",
+    "SELECT * FROM player_username_state WHERE entity_id = 700 OR entity_id = 701 OR entity_id = 702 OR entity_id = 704",
+  ]);
+
+  fake.state.subscriptions[1].onApplied({});
+  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  const published = snapshots.at(-1);
+  assert.equal(published.data.closedListings[0].claimName, "Closed Market");
+  assert.equal(published.data.closedListings[0].ownerUsername, "Former Seller");
+  assert.doesNotMatch(published.warnings.join(" "), /closed listing .* has no claim_state row/i);
+  await session.stop();
+});
+
 test("regional market session reconnects with bounded backoff after disconnect", async () => {
   assert.ok(sessionModule, "regional market session module must exist");
   const fake = fakeBindings();
