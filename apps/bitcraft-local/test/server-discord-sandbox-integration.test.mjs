@@ -7,9 +7,11 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { createTimbersteelFetch } from "./support/timbersteelFetch.mjs";
 
 const appDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const sandboxChannelId = "666666666666666666";
+const { fetch, registerOrigin } = createTimbersteelFetch();
 
 async function listen(server) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -24,6 +26,7 @@ async function availablePort() {
 }
 
 async function waitForHealth(origin, child) {
+  registerOrigin(origin);
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
     if (child.exitCode != null) throw new Error(`Server exited with code ${child.exitCode}`);

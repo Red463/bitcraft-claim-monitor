@@ -95,7 +95,7 @@ corepack pnpm --filter @workspace/bitcraft-local run build
 
 Result: passed, including server/bindings compilation, asset verification, frontend typecheck/build, and Relay runtime-boundary verification.
 
-Complete package test (run once as required):
+Initial complete package test before post-review maintenance:
 
 ```sh
 corepack pnpm --filter @workspace/bitcraft-local test
@@ -140,5 +140,56 @@ The public module contains no `currentClaimId`, current-state repository, histor
 
 ## Concerns
 
-- The complete package suite is not green because Task 2's production host hardening left 11 older production-mode server fixtures polling by localhost Host. Fixing those fixtures requires a separate focused test-maintenance change across legacy server suites; relaxing the production HostProfile rule would reintroduce the security bug Task 2 fixed.
 - Public caches and rate limits are process-local as required for the current single-process deployment. A later multi-replica deployment will need shared coordination, already reserved for deployment documentation work.
+
+## Post-review complete-suite maintenance
+
+The original complete-package RED exposed these 11 production-mode fixture failures:
+
+- `record-mode Admin manual tests post only to the local fake sandbox channel`
+- `maintenance hold blocks Discord network and leaves pre-start outbox rows untouched`
+- `public and Admin health redact persisted schema errors from every diagnostic path`
+- `non-owners cannot grant or revoke owner access, and the final active owner remains enabled`
+- `owner role changes revoke affected sessions and leave an audit record`
+- `Discord commands from another guild are rejected before dispatch`
+- `password setup cannot create an Admin session outside Timbersteel OAuth`
+- `server collection paginates listings and protects production mutations`
+- `background polling failures keep the server online`
+- `retired recipe catalog refresh route, scheduler key, and tables are absent`
+- `regional market retirement cleanup runs after the older collector marker`
+
+Root cause: all fixtures intentionally launched the server in production mode, but polled and exercised it through a raw `127.0.0.1:<port>` Host. Task 2 correctly made localhost development hosts unavailable in production. The server therefore returned `421` before the old health helpers could observe readiness. The production HostProfile rule was not changed and no `BITCRAFT_TEST` bypass was restored.
+
+Test-only files changed:
+
+- `apps/bitcraft-local/test/support/timbersteelFetch.mjs`
+- `apps/bitcraft-local/test/server-discord-sandbox-integration.test.mjs`
+- `apps/bitcraft-local/test/server-schema-health-redaction.test.mjs`
+- `apps/bitcraft-local/test/server-security-boundaries.test.mjs`
+- `apps/bitcraft-local/test/server.test.mjs`
+
+The shared fixture adapter routes only explicitly registered local application origins through `node:http` with the exact `Host: app.timbersteeltrade.com`. It rewrites the matching test Origin to `https://app.timbersteeltrade.com`, preserves typed request bodies with an explicit content length, exposes the response body as a stream with native-fetch timing, and delegates fake Relay/Discord/upstream origins to the native fetch implementation.
+
+Focused GREEN command:
+
+```sh
+node --experimental-strip-types --test test/server-security-boundaries.test.mjs test/server-schema-health-redaction.test.mjs test/server-discord-sandbox-integration.test.mjs test/server.test.mjs
+```
+
+Result: 11 passed, 0 failed.
+
+Final complete-package GREEN command:
+
+```sh
+corepack pnpm --filter @workspace/bitcraft-local test
+```
+
+Result: 2,650 tests; 2,647 passed, 0 failed, 3 skipped. The three skips are the existing Windows symlink-permission skips.
+
+Final build command:
+
+```sh
+corepack pnpm --filter @workspace/bitcraft-local run build
+```
+
+Result: passed, including server/bindings compilation, asset verification, frontend typecheck/build, and Relay runtime-boundary verification.

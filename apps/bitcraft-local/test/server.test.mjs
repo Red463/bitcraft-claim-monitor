@@ -10,6 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import { legalPolicyForEnvironment } from "../src/legal/legalPolicy.mjs";
 import { createEmpireMembershipRepository } from "../src/server/empireMembership.mjs";
 import { legalPolicyDigests } from "../src/server/legalPolicyDigest.mjs";
+import { createTimbersteelFetch } from "./support/timbersteelFetch.mjs";
 
 const appDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const claimId = "1369094286777412590";
@@ -20,6 +21,7 @@ const relayBindingManifest = JSON.parse(await readFile(
   "utf8",
 ));
 const mapResourceRegionIds = ["3", "7", "8", "9", "11", "12", "13", "14", "15", "17", "18", "19", "23"];
+const { fetch, registerOrigin } = createTimbersteelFetch();
 
 process.env.RETIRED_TABLE_GUARD_TEST = "true";
 
@@ -70,6 +72,7 @@ async function availablePort() {
 }
 
 async function waitForHealth(origin, child) {
+  registerOrigin(origin);
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
     if (child.exitCode != null) throw new Error(`Server exited with code ${child.exitCode}`);
