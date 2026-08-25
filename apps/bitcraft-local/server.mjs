@@ -13,6 +13,9 @@ import { parseMemberPermissions } from "./shared/member-permissions.mjs";
 import { resolveRequestHostProfile } from "./src/server/public/hostProfiles.mjs";
 import { publicFeatureFlags, routeHostProfileRequest } from "./src/server/public/router.mjs";
 import { createPublicApiRouter, createPublicCatalogService, createPublicDataService } from "./src/server/public/publicData.mjs";
+import { resolvePublicDiscordOAuthConfig } from "./src/server/public/auth.mjs";
+import { createPublicAuthRouter } from "./src/server/public/authRouter.mjs";
+import { createPublicIdentityRepository } from "./src/server/public/identity.mjs";
 import { mimeType, routeGroup, securityHeaders, shouldFallbackToFrontend, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
 import { createGameIconFallbackService, serveGameIconRequest } from "./src/server/gameIconFallback.mjs";
@@ -264,7 +267,7 @@ import {
   readOAuthStateCookie,
   resolveOAuthStateSecret,
 } from "./src/server/oauthState.mjs";
-import { legalPolicyForEnvironment } from "./src/legal/legalPolicy.mjs";
+import { claimMonitorLegalPolicyForEnvironment, legalPolicyForEnvironment } from "./src/legal/legalPolicy.mjs";
 import { legalPolicyDigests } from "./src/server/legalPolicyDigest.mjs";
 import {
   currentLegalSnapshot,
@@ -449,6 +452,9 @@ const configuredDiscordSandboxChannelId = String(process.env.DISCORD_SANDBOX_CHA
 const legalPolicy = legalPolicyForEnvironment(process.env);
 const legalDigests = legalPolicyDigests(legalPolicy);
 const legalSnapshot = currentLegalSnapshot(legalPolicy, legalDigests);
+const claimMonitorLegalPolicy = claimMonitorLegalPolicyForEnvironment(process.env);
+const claimMonitorLegalDigests = legalPolicyDigests(claimMonitorLegalPolicy);
+const claimMonitorLegalSnapshot = currentLegalSnapshot(claimMonitorLegalPolicy, claimMonitorLegalDigests);
 const serveFrontend = isProduction || process.env.SERVE_STATIC === "true";
 const featurebaseJwtSecret = process.env.FEATUREBASE_JWT_SECRET ?? "";
 const legacyAdminPasswordAuth = process.env.ENABLE_LEGACY_ADMIN_PASSWORD_AUTH === "true";
@@ -599,6 +605,7 @@ cleanupRetiredRegionalMarketState();
 installRetiredTableAuthorizer(db);
 
 const statements = createPreparedStatements(db);
+const publicIdentityRepository = createPublicIdentityRepository(db);
 const discordOutboxLeaser = createDiscordOutboxLeaser(db, {
   workerId: `${processRole}:${os.hostname()}:${process.pid}:${randomBytes(8).toString("hex")}`,
   leaseMs: discordNotificationLeaseMs,
@@ -7814,6 +7821,15 @@ async function serveBuiltFrontend(url, method, res) {
   return true;
 }
 
+function publicOAuthStateSecret() {
+  const keyName = "public_discord_oauth_state_secret";
+  const stored = String(statements.getSecret.get(keyName)?.value ?? "").trim();
+  if (stored) return stored;
+  const generated = randomBytes(32).toString("base64url");
+  statements.upsertSecret.run(keyName, generated, new Date().toISOString());
+  return generated;
+}
+
 const publicDataService = createPublicDataService({
   http: new RelayHttpClient({ baseUrl: relayBaseUrl }),
   normalizers: {
@@ -7829,7 +7845,7 @@ const publicCatalogService = createPublicCatalogService({
   searchEntities: (query, limit) => gameCatalogRepository.searchEntities(query, limit),
   recipeDetail: recipeDetailFromLocalCatalog,
 });
-const publicApiRequest = createPublicApiRouter({
+const publicDataApiRequest = createPublicApiRouter({
   data: publicDataService,
   catalog: publicCatalogService,
   serveIcon: (pathname, res) => serveGameIconRequest(
@@ -7838,6 +7854,33 @@ const publicApiRequest = createPublicApiRouter({
     gameIconFallbackService,
   ),
 });
+const configuredPublicFeatures = publicFeatureFlags();
+const resolvedPublicOAuthConfig = resolvePublicDiscordOAuthConfig(process.env);
+const publicAuthRequest = createPublicAuthRouter({
+  repository: publicIdentityRepository,
+  legalPolicy: claimMonitorLegalPolicy,
+  legalSnapshot: claimMonitorLegalSnapshot,
+  stateSecret: publicOAuthStateSecret(),
+  config: {
+    ...resolvedPublicOAuthConfig,
+    enabled: resolvedPublicOAuthConfig.enabled
+      && configuredPublicFeatures.publicCollaborationEnabled
+      && configuredPublicFeatures.publicLegalConfigurationConfirmed,
+  },
+});
+async function publicApiRequest(request) {
+  const isLegalRequest = request.url.pathname === "/api/public/legal";
+  const isAuthRequest = request.url.pathname.startsWith("/api/public/auth/");
+  if (isLegalRequest || (isAuthRequest
+    && configuredPublicFeatures.publicCollaborationEnabled
+    && configuredPublicFeatures.publicLegalConfigurationConfirmed)) {
+    if (isAuthRequest
+      && request.url.pathname !== "/api/public/auth/session"
+      && !rateLimit(request.req, request.res, "auth", RATE_LIMITS.auth)) return true;
+    if (await publicAuthRequest(request)) return true;
+  }
+  return publicDataApiRequest(request);
+}
 
 function manualRefreshAccess(req, res) {
   const rawHeader = req.headers[MANUAL_REFRESH_HEADER];
@@ -7873,8 +7916,8 @@ const server = createServer(async (req, res) => {
       url,
       res,
       send,
-      features: publicFeatureFlags(),
-      publicRequest: (request) => publicApiRequest({ ...request, address: clientAddress(req) }),
+      features: configuredPublicFeatures,
+      publicRequest: (request) => publicApiRequest({ ...request, req, address: clientAddress(req) }),
     })) return;
     const routeMeasurement = measuredRoutePaths.has(url.pathname)
       ? routePerformanceTelemetry.observe(req, res, { path: url.pathname })

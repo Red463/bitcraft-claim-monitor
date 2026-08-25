@@ -33,30 +33,36 @@ test("safeReturnPath keeps local paths and rejects external or malformed redirec
 
 test("requestLogPolicy suppresses generic callback details for slow, closed, and exceptional requests", () => {
   assert.equal(typeof httpRequests.requestLogPolicy, "function");
-  const callback = "/api/local/auth/discord/callback?code=secret-code&state=secret-state";
+  const callbacks = [
+    "/api/local/auth/discord/callback?code=secret-code&state=secret-state",
+    "/api/public/auth/discord/callback?code=public-secret-code&state=public-secret-state",
+  ];
 
-  assert.deepEqual(httpRequests.requestLogPolicy(callback, "slow"), {
-    logGeneric: false,
-    discordDiagnostic: null,
-  });
-  assert.deepEqual(httpRequests.requestLogPolicy(callback, "closed"), {
-    logGeneric: false,
-    discordDiagnostic: null,
-  });
-  assert.deepEqual(httpRequests.requestLogPolicy(callback, "exception"), {
-    logGeneric: false,
-    discordDiagnostic: {
-      stage: "callback",
-      event: "failure",
-      reason: "local",
-    },
-  });
+  for (const callback of callbacks) {
+    assert.deepEqual(httpRequests.requestLogPolicy(callback, "slow"), {
+      logGeneric: false,
+      discordDiagnostic: null,
+    });
+    assert.deepEqual(httpRequests.requestLogPolicy(callback, "closed"), {
+      logGeneric: false,
+      discordDiagnostic: null,
+    });
+    assert.deepEqual(httpRequests.requestLogPolicy(callback, "exception"), {
+      logGeneric: false,
+      discordDiagnostic: {
+        stage: "callback",
+        event: "failure",
+        reason: "local",
+      },
+    });
+    assert.doesNotMatch(
+      JSON.stringify(httpRequests.requestLogPolicy(callback, "exception")),
+      /secret-code|secret-state|callback\?/,
+    );
+  }
+
   assert.deepEqual(httpRequests.requestLogPolicy("/api/local/health?probe=1", "slow"), {
     logGeneric: true,
     discordDiagnostic: null,
   });
-  assert.doesNotMatch(
-    JSON.stringify(httpRequests.requestLogPolicy(callback, "exception")),
-    /secret-code|secret-state|callback\?/,
-  );
 });

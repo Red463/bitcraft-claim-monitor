@@ -1,6 +1,8 @@
 import React from "react";
-import { Boxes, ChevronRight, Hammer, Home, RefreshCw, Search, Users } from "lucide-react";
+import { Boxes, ChevronRight, Hammer, Home, RefreshCw, Search, UserRound, Users } from "lucide-react";
 import { loadPublicSnapshot, searchPublicCatalog, searchPublicSettlements, type PublicHint, type PublicSnapshot } from "./api";
+import { PublicAccountSettings } from "./PublicAccountSettings";
+import { PublicLegalPage } from "./PublicLegalPage";
 import { addRecentSettlement, readRecentSettlements } from "./preferences.mjs";
 import { publicSettlementPath } from "./routes.mjs";
 import { createVisibleRefreshController } from "./visibleRefresh.mjs";
@@ -27,7 +29,8 @@ function Freshness({ snapshot, refreshing }: { snapshot: PublicSnapshot | null; 
 }
 
 function Overview({ claim }: { claim: Row }) {
-  return <section className="public-metric-grid">{[["Tier", claim.tier], ["Supplies", claim.supplies], ["Treasury", claim.treasury], ["Tiles", claim.numTiles]].map(([label, value]) => <article className="public-panel" key={String(label)}><span>{label}</span><strong>{value == null ? "Unavailable" : number(value)}</strong></article>)}</section>;
+  const metrics: Array<[string, unknown]> = [["Tier", claim.tier], ["Supplies", claim.supplies], ["Treasury", claim.treasury], ["Tiles", claim.numTiles]];
+  return <section className="public-metric-grid">{metrics.map(([label, value]) => <article className="public-panel" key={label}><span>{label}</span><strong>{value == null ? "Unavailable" : number(value)}</strong></article>)}</section>;
 }
 
 function Members({ members, citizens }: { members: Row; citizens: Row }) {
@@ -79,5 +82,5 @@ function Calculator() {
 }
 
 function Placeholder({ route }: { route: Route }) { return <section className="public-panel public-placeholder"><h1>{title(route)}</h1><p>{route.id === "help" ? "Use settlement search to open current public state. Data refreshes while this page is visible." : "This public area is being prepared."}</p></section>; }
-function Navigation({ route }: { route: Route }) { const claimId = route.params.claimId; const links: Array<[string, string, string, typeof Home]> = claimId ? [["Overview", `/settlements/${claimId}`, "settlement", Home], ["Members", `/settlements/${claimId}/members`, "members", Users], ["Inventory", `/settlements/${claimId}/inventory`, "inventory", Boxes], ["Craft monitor", `/settlements/${claimId}/crafts`, "crafts", Hammer]] : []; return <aside className="public-sidebar"><a className="brand" href="/"><div><h1>Claim Monitor</h1><span>Public settlement data</span></div></a><nav>{links.map(([label, href, id, Icon]) => <a className={route.id === id ? "active" : ""} href={href} key={id}><Icon size={16} />{label}</a>)}<a className={route.id === "calculator" ? "active" : ""} href="/calculator"><Hammer size={16} />Craft calculator</a><a href="/help">Help</a><a href="/plans">Plans</a><a href="/settings">Settings</a></nav></aside>; }
-export function PublicAppShell({ route }: { route: Route }) { const settlement = ["settlement", "members", "inventory", "crafts"].includes(route.id); return <div className="public-app-shell"><Navigation route={route} /><main className="public-main"><SearchPanel />{settlement ? <SnapshotPage route={route} /> : route.id === "calculator" ? <Calculator /> : <Placeholder route={route} />}</main></div>; }
+function Navigation({ route }: { route: Route }) { const claimId = route.params.claimId; const links: Array<[string, string, string, typeof Home]> = claimId ? [["Overview", `/settlements/${claimId}`, "settlement", Home], ["Members", `/settlements/${claimId}/members`, "members", Users], ["Inventory", `/settlements/${claimId}/inventory`, "inventory", Boxes], ["Craft monitor", `/settlements/${claimId}/crafts`, "crafts", Hammer]] : []; return <aside className="public-sidebar"><a className="brand" href="/"><div><h1>Claim Monitor</h1><span>Public settlement data</span></div></a><nav>{links.map(([label, href, id, Icon]) => <a className={route.id === id ? "active" : ""} href={href} key={id}><Icon size={16} />{label}</a>)}<a className={route.id === "calculator" ? "active" : ""} href="/calculator"><Hammer size={16} />Craft calculator</a><a href="/help">Help</a><a href="/plans">Plans</a><a className={["account", "settings"].includes(route.id) ? "active" : ""} href="/settings"><UserRound size={16} />Account &amp; settings</a><a className={route.id === "terms" ? "active" : ""} href="/terms">Terms</a><a className={route.id === "privacy" ? "active" : ""} href="/privacy">Privacy</a></nav></aside>; }
+export function PublicAppShell({ route }: { route: Route }) { const settlement = ["settlement", "members", "inventory", "crafts"].includes(route.id); const identity = route.id === "account" || route.id === "settings"; const legal = route.id === "terms" || route.id === "privacy"; return <div className="public-app-shell"><Navigation route={route} /><main className="public-main">{!identity && !legal ? <SearchPanel /> : null}{settlement ? <SnapshotPage route={route} /> : route.id === "calculator" ? <Calculator /> : identity ? <PublicAccountSettings page={route.id as "account" | "settings"} /> : legal ? <PublicLegalPage type={route.id as "terms" | "privacy"} /> : <Placeholder route={route} />}</main></div>; }

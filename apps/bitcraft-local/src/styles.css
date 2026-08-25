@@ -1,3 +1,5 @@
+@import url("./styles/public-shell.css");
+
 :root {
   color-scheme: dark;
   --bg: #0c0d10;
@@ -1283,6 +1285,3 @@ body .market-page tbody tr:hover td {
 .restricted-access-panel { min-height: 45vh; display: grid; place-items: center; }
 .restricted-access-state { max-width: 520px; text-align: center; }
 .restricted-access-state small { color: var(--muted); }
-
-@import url("./styles/public-shell.css");
-
