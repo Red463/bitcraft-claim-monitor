@@ -14,7 +14,7 @@ import {
   marketFreshnessNotice,
   type MarketRefreshProps,
 } from "./globalMarket";
-import { exactMarketInteger } from "./marketUi";
+import { exactMarketInteger, marketPriceClass } from "./marketUi";
 
 export function MarketDeals({
   claimId,
@@ -127,18 +127,18 @@ export function MarketDeals({
       </div>
       {freshnessNotice ? <div className="info">{freshnessNotice}</div> : null}
       {state.error ? <div className="error">Deals unavailable: {state.error}. The last rendered live generation remains visible.</div> : null}
-      <div className="metric-grid market-deal-summary"><MiniStat icon={<TrendingUp />} label="Matching Deals" value={formatNumber(rows.length)} /><MiniStat icon={<TrendingUp />} label="Best Unit Profit" value={formatGoldAmount(topProfit)} /><MiniStat icon={<TrendingUp />} label="Best Route Potential" value={formatGoldAmount(bestRoutePotential)} /></div>
+      <div className="metric-grid market-deal-summary"><MiniStat icon={<TrendingUp />} label="Matching Deals" value={formatNumber(rows.length)} /><MiniStat icon={<TrendingUp />} label="Best Unit Profit" value={<span className={marketPriceClass("profit", topProfit)}>{formatGoldAmount(topProfit)}</span>} /><MiniStat icon={<TrendingUp />} label="Best Route Potential" value={<span className={marketPriceClass("profit", bestRoutePotential)}>{formatGoldAmount(bestRoutePotential)}</span>} /></div>
       <DataTable
         rows={rows}
         rowLimit={250}
         columns={[
           ["Item", (deal) => <ItemLabel item={{ ...deal, name: deal.itemName, iconAssetName: deal.itemIconAssetName }} />, (deal) => String(deal.itemName ?? "")],
-          ["Buy at", (deal) => <span className="market-price-location"><strong>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span>, (deal) => deal.buyPrice],
-          ["Sell at", (deal) => <span className="market-price-location"><strong>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span>, (deal) => deal.sellPrice],
+          ["Buy at", (deal) => <span className="market-price-location"><strong className={marketPriceClass("ask")}>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span>, (deal) => deal.buyPrice],
+          ["Sell at", (deal) => <span className="market-price-location"><strong className={marketPriceClass("bid")}>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span>, (deal) => deal.sellPrice],
           ["Trade depth", (deal) => <span className="market-trade-depth"><span><small>Available</small>{formatNumber(deal.buyQuantity)}</span><span><small>Wanted</small>{formatNumber(deal.sellQuantity)}</span><span><small>Max trade</small><strong>{formatNumber(deal.maxQuantity)}</strong></span></span>, (deal) => deal.maxQuantity],
           ["Distance", (deal) => deal.distance == null ? "—" : `${formatNumber(deal.distance)} tiles`, (deal) => deal.distance ?? Number.MAX_SAFE_INTEGER],
-          ["Unit profit", (deal) => <span className="positive">{formatGoldAmount(deal.profit)}</span>, (deal) => deal.profit],
-          ["Gain", (deal) => <span className="positive">{formatNumber(deal.profitPercent)}%</span>, (deal) => toNumber(deal.profitPercent)],
+          ["Unit profit", (deal) => <span className={marketPriceClass("profit", deal.profit)}>{formatGoldAmount(deal.profit)}</span>, (deal) => deal.profit],
+          ["Gain", (deal) => <span className={toNumber(deal.profitPercent) > 0 ? "market-price market-price-profit" : toNumber(deal.profitPercent) < 0 ? "market-price market-price-loss" : "market-price market-price-neutral"}>{formatNumber(deal.profitPercent)}%</span>, (deal) => toNumber(deal.profitPercent)],
         ]}
         emptyState={state.loading ? "Loading current arbitrage routes…" : "No deals match these route filters."}
         emptyKind="no-match"

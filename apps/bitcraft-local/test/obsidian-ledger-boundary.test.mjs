@@ -80,7 +80,8 @@ test("primary page families use flat Obsidian surfaces instead of legacy card gr
   assert.match(bot, /\.bot-section-nav\s*\{[^}]*background:\s*var\(--surface-1\)[^}]*box-shadow:\s*none/s);
 });
 
-test("clamped Global Market warnings retain a full-text hover disclosure", () => {
+test("Global Market warnings retain an accessible expandable disclosure", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
-  assert.match(marketPage, /className="global-market-warning"\s+title=\{marketStatusMessage\}/);
+  assert.match(marketPage, /className="global-market-data-alert"\s+role="status"/);
+  assert.match(marketPage, /<details>[\s\S]*?<summary>[\s\S]*?<ul>\{marketIssues\.map/s);
 });

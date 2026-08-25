@@ -111,8 +111,11 @@ test("Market exposes source-backed warnings and a compact mobile workspace picke
   const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
 
   assert.match(marketPage, /marketStatus\.generatedAt/);
-  assert.match(marketPage, /className="global-market-warning"[^>]*role="status"/);
-  assert.match(marketPage, /className="global-market-warning"[^>]*title=\{marketStatusMessage\}/);
+  assert.match(marketPage, /className="global-market-data-alert"[^>]*role="status"/);
+  assert.match(marketPage, /<details>[\s\S]*?<summary>[\s\S]*?Market data degraded[\s\S]*?<ul>[\s\S]*?marketIssues\.map/s);
+  assert.doesNotMatch(marketPage, /className="global-market-warning"/);
+  assert.match(css, /\.global-market-data-alert\s*\{[^}]*border:[^}]*background:/s);
+  assert.match(css, /\.global-market-data-alert summary\s*\{[^}]*display:\s*grid[^}]*cursor:\s*pointer/s);
   assert.match(marketPage, /className="global-market-mobile-nav"/);
   assert.match(marketPage, /aria-label="Choose Global Market workspace"/);
   assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*\.global-market-mobile-nav\s*\{[^}]*display:\s*grid/s);

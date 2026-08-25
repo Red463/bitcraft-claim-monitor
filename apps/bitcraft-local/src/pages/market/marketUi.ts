@@ -2,6 +2,23 @@ import type React from "react";
 
 export type MarketAvailability = "any" | "sell" | "buy" | "both";
 
+export type MarketPriceRole = "ask" | "bid" | "profit" | "neutral";
+
+export function marketPriceClass(role: MarketPriceRole, value: unknown = null): string {
+  if (role === "ask") return "market-price market-price-ask";
+  if (role === "bid") return "market-price market-price-bid";
+  if (role === "profit") {
+    const normalized = String(value ?? "0").trim();
+    if (/^-\d+$/.test(normalized) && BigInt(normalized) < 0n) return "market-price market-price-loss";
+    if (/^\d+$/.test(normalized) && BigInt(normalized) > 0n) return "market-price market-price-profit";
+  }
+  return "market-price market-price-neutral";
+}
+
+export function marketSuggestionResults<T>(items: T[], query: string, open: boolean): T[] {
+  return open && query.trim().length >= 2 ? items.slice(0, 12) : [];
+}
+
 export function availabilityFlags(value: MarketAvailability) {
   return {
     availableOnly: value !== "any",

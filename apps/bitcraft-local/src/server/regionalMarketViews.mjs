@@ -193,14 +193,26 @@ export function regionalMarketStatus(snapshot, options = {}) {
   });
   const knownAges = ages.filter((age) => age != null);
   const ageMs = knownAges.length ? Math.max(...knownAges) : null;
+  const runtime = record(options.runtimeHealth);
+  const pool = record(runtime.pool);
+  const sessions = Array.isArray(pool.sessions) ? pool.sessions.map(record) : [];
+  const sessionHealth = (regionId) => {
+    const session = sessions.find((entry) => String(entry.regionId ?? "") === regionId);
+    return session ? record(session.health) : null;
+  };
   let freshness = missingRegionIds.length ? "stale" : "fresh";
   for (const [index, region] of loadedRegions.entries()) {
     const regionId = String(region.regionId);
     const age = ages[index];
+    const health = sessionHealth(regionId);
+    const connectedAndApplied = runtime.running === true
+      && health?.connected === true
+      && health.applied === true
+      && !health.lastError;
     if (age == null) {
       freshness = "stale";
       warnings.push(`Relay regional market region ${regionId} has no valid receive time.`);
-    } else if (age > staleAfterMs) {
+    } else if (age > staleAfterMs && !connectedAndApplied) {
       freshness = "stale";
       warnings.push(`Relay regional market region ${regionId} is older than ${staleAfterMs}ms.`);
     }
@@ -209,17 +221,17 @@ export function regionalMarketStatus(snapshot, options = {}) {
     freshness = "stale";
     warnings.push(String(current.lastError));
   }
-  const runtime = record(options.runtimeHealth);
   if (runtime.running === true) {
-    const pool = record(runtime.pool);
-    const sessions = Array.isArray(pool.sessions) ? pool.sessions.map(record) : [];
     for (const regionId of targetRegionIds) {
-      const session = sessions.find((entry) => String(entry.regionId ?? "") === regionId);
-      if (!session) continue;
-      const health = record(session.health);
+      const health = sessionHealth(regionId);
+      if (!health) continue;
       if (health.connected === false) {
         freshness = "stale";
         warnings.push(`Relay regional market region ${regionId} is disconnected.`);
+      }
+      if (health.applied === false) {
+        freshness = "stale";
+        warnings.push(`Relay regional market region ${regionId} has not applied yet.`);
       }
       if (health.lastError) {
         freshness = "stale";
@@ -254,6 +266,10 @@ export function globalCatalogStatus(catalogSource, options = {}) {
   const subscription = record(options.runtimeHealth?.subscription);
   const runtimeError = subscription.lastError ?? runtime.lastError;
   const runtimeExpected = options.runtimeExpected === true;
+  const runtimeHealthy = runtime.running === true
+    && subscription.connected === true
+    && subscription.applied === true
+    && !runtimeError;
   const runtimeUnhealthy = runtimeError
     || (runtime.running === true && (
       subscription.connected !== true
@@ -262,7 +278,7 @@ export function globalCatalogStatus(catalogSource, options = {}) {
     || (runtimeExpected && runtime.running !== true);
   const catalogStale = Boolean(runtimeUnhealthy)
     || catalogAgeMs == null
-    || catalogAgeMs > staleAfterMs;
+    || (catalogAgeMs > staleAfterMs && !runtimeHealthy);
   const warnings = [];
   if (catalogStale) {
     if (runtimeError) {

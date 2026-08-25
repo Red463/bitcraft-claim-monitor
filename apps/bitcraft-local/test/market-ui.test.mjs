@@ -4,10 +4,31 @@ import test from "node:test";
 import {
   availabilityFlags,
   marketChartPoints,
+  marketPriceClass,
+  marketSuggestionResults,
   nextOptionIndex,
   nextTabIndex,
   regionalMarketQuotes,
 } from "../src/pages/market/marketUi.ts";
+
+test("catalog refresh cannot reopen suggestions after an item selection", () => {
+  const refreshedItems = [
+    { id: "1", name: "Simple Plank" },
+    { id: "2", name: "Simple Plank Output" },
+  ];
+
+  assert.deepEqual(marketSuggestionResults(refreshedItems, "simple plank", false), []);
+  assert.deepEqual(marketSuggestionResults(refreshedItems, "simple plank", true), refreshedItems);
+});
+
+test("market price roles map to stable semantic classes", () => {
+  assert.equal(marketPriceClass("ask"), "market-price market-price-ask");
+  assert.equal(marketPriceClass("bid"), "market-price market-price-bid");
+  assert.equal(marketPriceClass("profit", "135"), "market-price market-price-profit");
+  assert.equal(marketPriceClass("profit", "0"), "market-price market-price-neutral");
+  assert.equal(marketPriceClass("profit", "-5"), "market-price market-price-loss");
+  assert.equal(marketPriceClass("neutral"), "market-price market-price-neutral");
+});
 
 test("regional quotes preserve exact values and sort by best ask", () => {
   const quotes = regionalMarketQuotes([

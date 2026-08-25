@@ -419,6 +419,24 @@ test("regional market status reports per-region age and disconnected sessions as
   assert.equal(connectedWithError.freshness, "stale");
   assert.match(connectedWithError.warnings.join(" "), /detail subscription reset/);
 
+  const quietButConnected = views.regionalMarketStatus(current, {
+    regionId: "19",
+    nowMs: Date.parse("2026-07-30T12:02:00.000Z"),
+    staleAfterMs: 60_000,
+    runtimeHealth: {
+      running: true,
+      pool: {
+        sessions: [{
+          regionId: "19",
+          health: { connected: true, applied: true, lastError: null },
+        }],
+      },
+    },
+  });
+  assert.equal(quietButConnected.freshness, "fresh");
+  assert.equal(quietButConnected.ageMs, 120_000);
+  assert.doesNotMatch(quietButConnected.warnings.join(" "), /older than/i);
+
   const aged = views.regionalMarketStatus(current, {
     regionId: "19",
     nowMs: Date.parse("2026-07-30T12:02:00.000Z"),
@@ -595,6 +613,30 @@ test("market response freshness includes the older global catalog dependency", (
     confidence: "unknown",
     ageMs: null,
     warnings: ["Relay global catalog has not loaded yet."],
+  });
+});
+
+test("connected global catalog remains live when its data has not changed", () => {
+  assert.deepEqual(views.globalCatalogStatus({
+    receivedAt: "2026-07-30T11:58:00.000Z",
+  }, {
+    nowMs: Date.parse("2026-07-30T12:00:00.000Z"),
+    staleAfterMs: 60_000,
+    runtimeExpected: true,
+    runtimeHealth: {
+      running: true,
+      lastError: null,
+      subscription: {
+        connected: true,
+        applied: true,
+        lastError: null,
+      },
+    },
+  }), {
+    freshness: "fresh",
+    confidence: "authoritative",
+    ageMs: 120_000,
+    warnings: [],
   });
 });
 

@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, Bookmark, Clock3, Globe2, Search, Store, TrendingUp } from "lucide-react";
+import { Activity, AlertTriangle, Bookmark, ChevronDown, Clock3, Globe2, Search, Store, TrendingUp } from "lucide-react";
 
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
@@ -161,7 +161,7 @@ export function Market({
 
   const marketStatus = overviewState.data ?? {};
   const marketWarnings = Array.isArray(marketStatus.warnings) ? marketStatus.warnings.map(String).filter(Boolean) : [];
-  const marketStatusMessage = overviewState.error || marketWarnings.join(" ");
+  const marketIssues = [...new Set([overviewState.error, ...marketWarnings].filter(Boolean))];
 
   if (!allowedView) return <div className="panel restricted-access-panel"><section className="empty-state restricted-access-state"><Globe2 size={34} /><strong>Market is restricted</strong><span>No global market workspaces are available for your account.</span></section></div>;
 
@@ -178,8 +178,9 @@ export function Market({
           })}
         </div></div>
         <label className="global-market-mobile-nav"><span>Workspace</span><select aria-label="Choose Global Market workspace" value={currentView} onChange={(event) => selectView(event.target.value as GlobalMarketViewId)}>{views.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}</select></label>
-        <div className="global-market-toolbar-meta"><span className={`global-market-freshness ${marketStatus.freshness !== "fresh" || overviewState.error ? "warning" : ""}`}><Clock3 size={13} /> {marketStatus.generatedAt ? `Updated ${timeAgo(marketStatus.generatedAt)}` : overviewState.loading ? "Checking freshness…" : "Freshness unavailable"}</span><label className="field global-market-region"><span>Market region</span><select value={regionId || "All"} onChange={(event) => setRegionChoice(event.target.value)}><option value="All">All active regions</option>{activeRegions.map((region) => <option value={region.regionId} key={region.regionId}>{activeRegionLabel(region, fallbackRegionId)}</option>)}</select></label>{marketStatusMessage ? <small className="global-market-warning" title={marketStatusMessage} role="status">{marketStatusMessage}</small> : null}</div>
+        <div className="global-market-toolbar-meta"><span className={`global-market-freshness ${marketStatus.freshness !== "fresh" || overviewState.error ? "warning" : ""}`}><Clock3 size={13} /> {marketStatus.generatedAt ? `Updated ${timeAgo(marketStatus.generatedAt)}` : overviewState.loading ? "Checking freshness…" : "Freshness unavailable"}</span><label className="field global-market-region"><span>Market region</span><select value={regionId || "All"} onChange={(event) => setRegionChoice(event.target.value)}><option value="All">All active regions</option>{activeRegions.map((region) => <option value={region.regionId} key={region.regionId}>{activeRegionLabel(region, fallbackRegionId)}</option>)}</select></label></div>
       </section>
+      {marketIssues.length ? <div className="global-market-data-alert" role="status"><details><summary><AlertTriangle size={16} /><span><strong>{overviewState.error ? "Market status unavailable" : "Market data degraded"}</strong><small>Last complete market data remains visible while live sources recover.</small></span><span className="global-market-data-alert-count">{marketIssues.length} {marketIssues.length === 1 ? "detail" : "details"}<ChevronDown size={14} /></span></summary><ul>{marketIssues.map((warning) => <li key={warning}>{warning}</li>)}</ul></details></div> : null}
       {currentView === "overview" ? <div id="market-panel-overview" role="tabpanel" aria-labelledby="market-tab-overview"><MarketOverview {...marketRefresh} claimId={claimId} regionId={regionId} overviewState={overviewState} favorites={favorites} onOpenItem={openItem} /></div> : null}
       {currentView === "browse" ? <div id="market-panel-browse" role="tabpanel" aria-labelledby="market-tab-browse"><MarketBrowse {...marketRefresh} claimId={claimId} mode="browse" regionId={regionId} favorites={favorites} onToggleFavorite={toggleFavorite} canWatch={tabAllowed("deal-watch")} onWatchItem={watchItem} onShowMap={onShowMap} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /></div> : null}
       {currentView === "opportunities" ? <MarketOpportunities {...marketRefresh} claimId={claimId} regionId={regionId} activeRegions={activeRegions} canViewRoutes={tabAllowed("deals")} canViewDemand={tabAllowed("buy-orders")} locationSearch={locationSearch} onQueryStateChange={onQueryStateChange} /> : null}

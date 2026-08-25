@@ -617,15 +617,87 @@
   color: #ffd27a;
 }
 
-.global-market-warning {
-  color: #ffd27a;
-  line-height: 1.35;
-  text-align: right;
+.global-market-data-alert {
+  border: 1px solid rgba(232, 188, 67, .34);
+  border-radius: var(--radius-control);
+  background: #0b0e12;
+  color: #d7dde6;
   overflow: hidden;
+}
+
+.global-market-data-alert details,
+.global-market-data-alert summary {
+  min-width: 0;
+}
+
+.global-market-data-alert summary {
+  min-height: 46px;
+  padding: 8px 12px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.global-market-data-alert summary::-webkit-details-marker {
+  display: none;
+}
+
+.global-market-data-alert summary > svg {
+  color: #e8bc43;
+}
+
+.global-market-data-alert summary > span:not(.global-market-data-alert-count) {
+  display: grid;
+  gap: 1px;
+}
+
+.global-market-data-alert strong {
+  color: #f0f3f7;
+  font-size: 12px;
+}
+
+.global-market-data-alert small {
+  color: #909bac;
+  font-size: 11px;
+}
+
+.global-market-data-alert-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #c7a844;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.global-market-data-alert-count svg {
+  transition: transform 120ms ease;
+}
+
+.global-market-data-alert details[open] .global-market-data-alert-count svg {
+  transform: rotate(180deg);
+}
+
+.global-market-data-alert ul {
+  margin: 0;
+  padding: 9px 14px 11px 38px;
+  border-top: 1px solid rgba(108, 123, 145, .18);
+  background: #080b0f;
+  color: #b6c0ce;
+  font: 11px/1.45 "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+}
+
+.global-market-data-alert li {
   overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+}
+
+.global-market-data-alert li + li {
+  margin-top: 5px;
 }
 
 .global-market-workspace {
@@ -1105,6 +1177,30 @@
   line-height: 1.25;
 }
 
+.market-page .market-price {
+  font-variant-numeric: tabular-nums;
+}
+
+.market-page .market-price.market-price-ask {
+  color: #e4b84b;
+}
+
+.market-page .market-price.market-price-bid {
+  color: #72b9f8;
+}
+
+.market-page .market-price.market-price-profit {
+  color: var(--good);
+}
+
+.market-page .market-price.market-price-loss {
+  color: var(--danger);
+}
+
+.market-page .market-price.market-price-neutral {
+  color: var(--text);
+}
+
 .market-price-chart {
   position: relative;
   min-height: 220px;
@@ -1420,8 +1516,12 @@
   .global-market-region {
     width: 100%;
   }
-  .global-market-warning {
-    text-align: left;
+  .global-market-data-alert summary {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .global-market-data-alert-count {
+    grid-column: 2;
+    justify-self: start;
   }
   .market-toggle-group {
     grid-column: auto;
