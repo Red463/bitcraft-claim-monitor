@@ -30,7 +30,7 @@ import {
 } from "./auth.mjs";
 import { publicAccountView } from "./identity.mjs";
 
-function exactPublicOriginRequest(req) {
+export function exactPublicOriginRequest(req) {
   const value = String(req.headers.origin ?? "").trim();
   if (!value) return false;
   try {

@@ -16,6 +16,8 @@ import { createPublicApiRouter, createPublicCatalogService, createPublicDataServ
 import { resolvePublicDiscordOAuthConfig } from "./src/server/public/auth.mjs";
 import { createPublicAuthRouter } from "./src/server/public/authRouter.mjs";
 import { createPublicIdentityRepository } from "./src/server/public/identity.mjs";
+import { createPublicPlanRouter } from "./src/server/public/planRouter.mjs";
+import { createPublicPlanComputationService, createPublicPlanRepository } from "./src/server/public/publicPlans.mjs";
 import { mimeType, routeGroup, securityHeaders, shouldFallbackToFrontend, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
 import { createGameIconFallbackService, serveGameIconRequest } from "./src/server/gameIconFallback.mjs";
@@ -7868,6 +7870,21 @@ const publicAuthRequest = createPublicAuthRouter({
       && configuredPublicFeatures.publicLegalConfigurationConfirmed,
   },
 });
+const configuredPublicPlanTokenHmacKey = String(process.env.PUBLIC_PLAN_TOKEN_HMAC_KEY ?? "").trim();
+const publicPlanRepository = configuredPublicFeatures.publicCollaborationEnabled && configuredPublicPlanTokenHmacKey
+  ? createPublicPlanRepository(db, { tokenHmacKey: configuredPublicPlanTokenHmacKey })
+  : null;
+const publicPlanComputation = publicPlanRepository
+  ? createPublicPlanComputationService({ data: publicDataService, catalog: publicCatalogService })
+  : null;
+const publicPlanRequest = publicPlanRepository && publicPlanComputation
+  ? createPublicPlanRouter({
+      repository: publicPlanRepository,
+      identityRepository: publicIdentityRepository,
+      legalSnapshot: claimMonitorLegalSnapshot,
+      computation: publicPlanComputation,
+    })
+  : null;
 async function publicApiRequest(request) {
   const isLegalRequest = request.url.pathname === "/api/public/legal";
   const isAuthRequest = request.url.pathname.startsWith("/api/public/auth/");
@@ -7879,6 +7896,15 @@ async function publicApiRequest(request) {
       && !rateLimit(request.req, request.res, "auth", RATE_LIMITS.auth)) return true;
     if (await publicAuthRequest(request)) return true;
   }
+  const isPlanRequest = request.url.pathname === "/api/public/plans"
+    || request.url.pathname.startsWith("/api/public/plans/")
+    || request.url.pathname.startsWith("/api/public/invites/")
+    || request.url.pathname.startsWith("/api/public/shared-plans/");
+  if (isPlanRequest
+    && configuredPublicFeatures.publicCollaborationEnabled
+    && configuredPublicFeatures.publicLegalConfigurationConfirmed
+    && publicPlanRequest
+    && await publicPlanRequest(request)) return true;
   return publicDataApiRequest(request);
 }
 

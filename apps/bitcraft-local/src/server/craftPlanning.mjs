@@ -1583,6 +1583,7 @@ function materialRowsForRequirements({
 
 export function computeCraftPlan({
   config,
+  preparedConfig = null,
   detailsByKey = new Map(),
   storageSources = [],
   playerSources = [],
@@ -1592,7 +1593,7 @@ export function computeCraftPlan({
   craftSourceErrors = [],
   catalogWarnings = [],
 } = {}) {
-  const normalized = normalizeCraftPlanConfig(config);
+  const normalized = preparedConfig ?? normalizeCraftPlanConfig(config);
   if (!normalized.enabled || normalized.targets.length === 0) {
     return { config: normalized, enabled: normalized.enabled, targets: [], materials: [], steps: [], gatherNext: [], unavailableSources: [], warnings: [], personalViews: { fishing: { tiers: [] } } };
   }
