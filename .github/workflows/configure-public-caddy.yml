@@ -40,11 +40,20 @@ jobs:
             caddy:2.11.3-alpine \
             caddy validate --config /etc/caddy/Caddyfile
 
-  configure:
+  approve:
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     environment: relay-cutover
+    steps:
+      - name: Record public Caddy approval
+        run: printf 'Public Caddy approval admitted for %s.\n' "$GITHUB_SHA"
+
+  configure:
+    needs: approve
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: relay-preview
     steps:
       - name: Configure pinned SSH identity
         env:
