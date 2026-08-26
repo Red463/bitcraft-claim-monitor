@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.63.0-beta.9] - 2026-08-26
+
+### Fixed
+
+- Fixed dormant public OAuth credential installation for existing production environments that predate the public configuration keys.
+
 ## [0.63.0-beta.8] - 2026-08-26
 
 ### Added

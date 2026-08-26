@@ -46,25 +46,37 @@ export function parseCredentialPayload(bytes) {
   return { clientId: parsed.clientId, clientSecret: parsed.clientSecret };
 }
 
-function exactEnvironmentValue(source, key) {
+function environmentValue(source, key) {
   const matches = [...source.matchAll(new RegExp(`^${key}=(.*)$`, "gm"))];
-  if (matches.length !== 1) throw new Error(`${key} must be configured exactly once.`);
-  return matches[0][1];
+  if (matches.length > 1) throw new Error(`${key} must be configured exactly once.`);
+  return matches[0]?.[1] ?? null;
+}
+
+function setEnvironmentValue(source, key, value) {
+  if (environmentValue(source, key) !== null) {
+    return source.replace(new RegExp(`^${key}=.*$`, "m"), () => `${key}=${value}`);
+  }
+  return `${source}${source.endsWith("\n") || source.length === 0 ? "" : "\n"}${key}=${value}\n`;
 }
 
 export function editPublicOAuthEnvironment(source, credentials) {
   if (typeof source !== "string" || source.includes("\0")) throw new Error("Protected environment file is invalid.");
-  if (exactEnvironmentValue(source, "PUBLIC_PROFILE_ENABLED") !== "false"
-    || exactEnvironmentValue(source, "PUBLIC_COLLABORATION_ENABLED") !== "false"
-    || exactEnvironmentValue(source, "PUBLIC_LEGAL_CONFIGURATION_CONFIRMED") !== "false"
-    || exactEnvironmentValue(source, "PUBLIC_ORIGIN") !== PUBLIC_ORIGIN) {
+  const publicProfileEnabled = environmentValue(source, "PUBLIC_PROFILE_ENABLED");
+  const publicCollaborationEnabled = environmentValue(source, "PUBLIC_COLLABORATION_ENABLED");
+  const publicLegalConfirmed = environmentValue(source, "PUBLIC_LEGAL_CONFIGURATION_CONFIRMED");
+  const publicOrigin = environmentValue(source, "PUBLIC_ORIGIN");
+  if ([publicProfileEnabled, publicCollaborationEnabled, publicLegalConfirmed]
+    .some((value) => value !== null && value !== "false")
+    || (publicOrigin !== null && publicOrigin !== PUBLIC_ORIGIN)) {
     throw new Error("Public feature gates must remain disabled during credential installation.");
   }
-  exactEnvironmentValue(source, "PUBLIC_DISCORD_OAUTH_CLIENT_ID");
-  exactEnvironmentValue(source, "PUBLIC_DISCORD_OAUTH_CLIENT_SECRET");
-  return source
-    .replace(/^PUBLIC_DISCORD_OAUTH_CLIENT_ID=.*$/m, () => `PUBLIC_DISCORD_OAUTH_CLIENT_ID=${credentials.clientId}`)
-    .replace(/^PUBLIC_DISCORD_OAUTH_CLIENT_SECRET=.*$/m, () => `PUBLIC_DISCORD_OAUTH_CLIENT_SECRET=${credentials.clientSecret}`);
+  environmentValue(source, "PUBLIC_DISCORD_OAUTH_CLIENT_ID");
+  environmentValue(source, "PUBLIC_DISCORD_OAUTH_CLIENT_SECRET");
+  return setEnvironmentValue(
+    setEnvironmentValue(source, "PUBLIC_DISCORD_OAUTH_CLIENT_ID", credentials.clientId),
+    "PUBLIC_DISCORD_OAUTH_CLIENT_SECRET",
+    credentials.clientSecret,
+  );
 }
 
 function protectedEnvironmentMetadata(environmentPath, enforceRootOwnership) {
