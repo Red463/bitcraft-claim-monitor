@@ -25,6 +25,7 @@ test("sendJson writes JSON with shared security headers and explicit response he
 
   assert.equal(res.status, 201);
   assert.equal(res.headers["content-type"], "application/json");
+  assert.equal(res.headers["content-length"], Buffer.byteLength(JSON.stringify({ ok: true })));
   assert.equal(res.headers["set-cookie"], "session=abc");
   assert.equal(res.headers["x-content-type-options"], "nosniff");
   assert.equal(res.headers["x-frame-options"], "SAMEORIGIN");
@@ -47,4 +48,27 @@ test("sendText and sendBinary preserve cache policy and payload body", () => {
   assert.equal(binary.headers["cache-control"], "no-cache");
   assert.equal(binary.headers.etag, "abc");
   assert.equal(binary.body, payload);
+});
+
+test("sendJson emits no body or content length for a 204 response", () => {
+  const response = fakeResponse();
+  sendJson(response, 204, {});
+  assert.equal(response.headers["content-length"], undefined);
+  assert.equal(response.body, undefined);
+});
+
+test("sendBinary emits exact length for content and no body headers for 204 or 304", () => {
+  const binary = fakeResponse();
+  sendBinary(binary, 200, Uint8Array.of(1, 2, 3, 4), "application/octet-stream");
+  assert.equal(binary.headers["content-length"], 4);
+  assert.deepEqual([...binary.body], [1, 2, 3, 4]);
+
+  for (const status of [204, 304]) {
+    const bodyless = fakeResponse();
+    sendBinary(bodyless, status, Uint8Array.of(1), "application/octet-stream", { etag: '"v1"' });
+    assert.equal(bodyless.body, undefined);
+    assert.equal(bodyless.headers["content-length"], undefined);
+    assert.equal(bodyless.headers["content-type"], undefined);
+    assert.equal(bodyless.headers.etag, '"v1"');
+  }
 });

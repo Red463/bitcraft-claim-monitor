@@ -1,5 +1,5 @@
-export const LEGAL_VERSION = "2026-07-25";
-export const LEGAL_EFFECTIVE_DATE = "2026-07-25";
+export const LEGAL_VERSION = "2026-07-31";
+export const LEGAL_EFFECTIVE_DATE = "2026-07-31";
 
 export const defaultLegalOperator = Object.freeze({
   controllerName: "Thomas Bush",
@@ -34,11 +34,11 @@ const providerDefinitions = Object.freeze([
     location: "International processing under Discord's terms and privacy policy.",
   },
   {
-    key: "bitjita",
-    name: "BitJita",
-    role: "Public BitCraft game-data API",
-    data: "Public game, character, settlement, inventory, market, and activity information.",
-    location: "As described by BitJita.",
+    key: "bitcraft-relay",
+    name: "BitCraft Relay",
+    role: "Current public BitCraft game-data relay",
+    data: "Public BitCraft game, character, settlement, inventory, market, and activity information requested by the app server.",
+    location: "The Relay operator and infrastructure locations have not been published to this app; processing may occur outside the United Kingdom.",
   },
   {
     key: "proton",
@@ -120,7 +120,7 @@ function termsSections(operator) {
       title: "Operator and status",
       paragraphs: [
         operator.status,
-        `${project} is unofficial and is not affiliated with Clockwork Labs, BitCraft, BitJita, Discord, HostWorld, Namecheap, Proton, GitHub, or Buy Me a Coffee.`,
+        `${project} is unofficial and is not affiliated with Clockwork Labs, BitCraft, BitCraft Relay, Discord, HostWorld, Namecheap, Proton, GitHub, or Buy Me a Coffee.`,
       ],
     },
     {
@@ -151,7 +151,8 @@ function termsSections(operator) {
       title: "Discord, game-data, and app features",
       paragraphs: [
         `${project} may provide Discord bot commands, notifications, guild tools, role management, moderation, polls, events, diagnostics, market watches, alerts, production tools, history, analytics, backups, and administration.`,
-        "BitJita and BitCraft information may be public, delayed, partial, unavailable, or inaccurate. Calculations and estimates are operational aids, not guaranteed facts.",
+        "BitCraft Relay provides current public game data, completed-sale evidence, and live craft-contribution events.",
+        "BitCraft information may be public, delayed, partial, unavailable, or inaccurate. Calculations and estimates are operational aids, not guaranteed facts.",
       ],
     },
     {
@@ -179,14 +180,14 @@ function termsSections(operator) {
       id: "intellectual-property",
       title: "Intellectual property and trademarks",
       paragraphs: [
-        `The ${project} code and original presentation remain subject to their applicable ownership and licence terms. BitCraft, Discord, BitJita, provider names, game assets, and third-party content belong to their respective owners.`,
+        `The ${project} code and original presentation remain subject to their applicable ownership and licence terms. BitCraft, BitCraft Relay, Discord, provider names, game assets, and third-party content belong to their respective owners.`,
       ],
     },
     {
       id: "third-party-services",
       title: "Third-party services",
       paragraphs: [
-        "Discord, BitJita, hosting, domain, email, source-code, and donation services operate under their own terms and privacy policies. The operator does not control their independent availability or processing.",
+        "Discord, BitCraft Relay, hosting, domain, email, source-code, and donation services operate under their own terms and privacy policies. The operator does not control their independent availability or processing.",
       ],
     },
     {
@@ -257,7 +258,7 @@ function privacySections(operator) {
       title: "Personal data we process",
       paragraphs: [
         "Depending on the features you use, this includes Discord ID and profile data, sessions, settings, legal acceptance, character links, market watches and alerts, bot/guild interactions, role and moderation records, votes and RSVPs, delivery diagnostics, security logs, optional analytics, and privacy correspondence.",
-        "Public BitJita game and settlement data may become personal data in context when it is linked to a Discord account or community activity. Special-category data is not intentionally requested.",
+        "Public BitCraft game and settlement data obtained through BitCraft Relay may become personal data in context when it is linked to a Discord account or community activity. Special-category data is not intentionally requested.",
       ],
     },
     {
@@ -294,14 +295,14 @@ function privacySections(operator) {
       id: "sharing",
       title: "Service providers and disclosures",
       paragraphs: [
-        "Data is shared only as needed with the providers listed below, where you direct a Discord/BitJita action, to protect people or the service, to comply with law, or with your permission. Discord API data is not sold or shared with donation or advertising services.",
+        "Data is shared only as needed with the providers listed below, where you direct a Discord action, to protect people or the service, to comply with law, or with your permission. The app server requests current public game data, completed-sale evidence, and craft-contribution events from BitCraft Relay. Discord API data is not sold or shared with game-data, donation, or advertising services.",
       ],
     },
     {
       id: "international-transfers",
       title: "International processing",
       paragraphs: [
-        "The primary VPS/database arrangement is described as UK-hosted. Discord, GitHub, Buy Me a Coffee, Proton, Namecheap, BitJita, and their providers may process data internationally under their own safeguards and applicable transfer mechanisms.",
+        "The primary VPS/database arrangement is described as UK-hosted. BitCraft Relay may process data internationally; its operator and infrastructure locations have not been published to this app. Discord, GitHub, Buy Me a Coffee, Proton, Namecheap, and their providers may also process data internationally under their own safeguards and applicable transfer mechanisms.",
       ],
     },
     {
@@ -374,5 +375,199 @@ export function legalPolicyForEnvironment(env = {}) {
       sections: privacySections(operator),
     },
     notice: "These documents describe this service and are not legal advice to users or other operators.",
+  });
+}
+
+export const CLAIM_MONITOR_LEGAL_VERSION = "2026-08-25";
+export const CLAIM_MONITOR_LEGAL_EFFECTIVE_DATE = "2026-08-25";
+
+const claimMonitorProviders = Object.freeze([
+  {
+    key: "hostworld",
+    name: "HostWorld",
+    role: "UK virtual private server and database hosting provider",
+    data: "Public app accounts, sessions, plans, legal records, security logs, backups, and operational files.",
+    location: "United Kingdom",
+  },
+  {
+    key: "discord",
+    name: "Discord",
+    role: "OAuth identity provider",
+    data: "Discord ID, username, global display name, avatar, authorization code, and short-lived access token used for sign-in or recent reauthentication.",
+    location: "International processing under Discord's terms and privacy policy.",
+  },
+  {
+    key: "bitcraft-relay",
+    name: "BitCraft Relay",
+    role: "Public BitCraft game-data relay",
+    data: "Settlement and catalog lookups requested while a user searches, opens a page, or refreshes visible data.",
+    location: "The Relay operator and infrastructure locations have not been published to this app; processing may occur outside the United Kingdom.",
+  },
+  {
+    key: "proton",
+    name: "Proton",
+    role: "Email service for privacy correspondence",
+    data: "Email addresses, message content, attachments, and correspondence records.",
+    location: "Switzerland and other locations described by Proton.",
+  },
+]);
+
+const claimMonitorRetention = Object.freeze([
+  { key: "account", label: "Discord account profile, settings, and legal acceptance", rule: "Until account deletion" },
+  { key: "inactive-account", label: "Inactive public accounts", rule: "Purge-eligible after 24 months without login only when there is no owned plan and no accepted editor membership; viewer-only memberships do not exempt the account and are removed during purge", months: 24 },
+  { key: "sessions", label: "Signed-in sessions", rule: "30 days", days: 30 },
+  { key: "reauthentication", label: "Recent deletion reauthentication", rule: "10 minutes", days: 0 },
+  { key: "plans", label: "Saved plans and their memberships", rule: "Until the owner deletes or transfers them, or deletes the account after choosing each plan's disposition" },
+  { key: "bearer-links", label: "Bearer links", rule: "Until expiry, revocation, plan deletion, or account deletion, whichever occurs first" },
+  { key: "full-ip", label: "Full IP address in security logs", rule: "7 days", days: 7 },
+  { key: "security-anonymised", label: "Hashed or anonymised security logs", rule: "180 days", days: 180 },
+  { key: "exports", label: "Generated account exports", rule: "Returned to the requester and not retained as a separate server file" },
+  { key: "privacy-correspondence", label: "Privacy correspondence", rule: "24 months unless a dispute or legal obligation requires longer", months: 24 },
+  { key: "backups", label: "Restricted encrypted backups", rule: "According to the published server backup rotation, normally no more than 90 days" },
+  { key: "deletion-ledger", label: "Pseudonymous deletion-restoration receipts", rule: "90 days", days: 90 },
+]);
+
+function claimMonitorTermsSections(operator) {
+  return [
+    {
+      id: "operator",
+      title: "Operator and status",
+      paragraphs: [operator.status, "BitCraft Claim Monitor is unofficial and is not affiliated with Clockwork Labs, BitCraft, BitCraft Relay, or Discord."],
+    },
+    {
+      id: "accounts",
+      title: "Anonymous use and Discord OAuth accounts",
+      paragraphs: [
+        "Public settlement lookups work without an account. Optional signed-in features use Discord OAuth with the identify scope only and store a separate Claim Monitor account and session.",
+        `You must be at least ${operator.minimumAge} years old and protect access to the Discord account used to sign in.`,
+      ],
+    },
+    {
+      id: "relay",
+      title: "Public game-data lookups",
+      paragraphs: [
+        "BitCraft Relay supplies public settlement and catalog results when you search, open a settlement page, refresh visible data, or use a plan feature. Results may be delayed, partial, unavailable, or inaccurate and are not guaranteed facts.",
+      ],
+    },
+    {
+      id: "plans-and-links",
+      title: "Plans and bearer links",
+      paragraphs: [
+        "Signed-in users may create plans and choose to share selected plan access through bearer links. Anyone holding a valid bearer link can use the access it grants until it expires or is revoked, so you must protect and revoke links as appropriate.",
+      ],
+    },
+    {
+      id: "acceptable-use",
+      title: "Acceptable use",
+      paragraphs: ["Do not bypass access controls, misuse another person's identifiers or bearer links, overload the service, or submit unlawful or harmful content."],
+    },
+    {
+      id: "availability",
+      title: "Availability and liability",
+      paragraphs: [
+        "The free service may change, pause, or end. Nothing excludes liability that cannot lawfully be excluded, including data-protection duties and mandatory consumer rights.",
+      ],
+    },
+    {
+      id: "changes",
+      title: "Changes and contact",
+      paragraphs: [`Material changes receive a new legal version. Contact ${operator.privacyEmail} with legal or privacy questions.`],
+    },
+    {
+      id: "law",
+      title: "Governing law",
+      paragraphs: [`These Terms are governed by the law of ${operator.governingLaw}, without removing mandatory rights available where you live.`],
+    },
+  ];
+}
+
+function claimMonitorPrivacySections(operator) {
+  return [
+    {
+      id: "controller",
+      title: "Controller",
+      paragraphs: [`${operator.controllerName}, based in ${operator.controllerCountry}, is the controller. Contact ${operator.privacyEmail}.`],
+    },
+    {
+      id: "data",
+      title: "Personal data we process",
+      paragraphs: [
+        "An optional Discord OAuth account contains Discord ID, username, global display name, avatar, sessions, settings, legal acceptance, saved plans, plan membership, bearer links, exports requested, recent reauthentication, and deletion records.",
+        "Requests may also produce security logs containing IP address, hashed or anonymised network identifiers, request details, and user-agent hashes. Public BitCraft Relay lookups can become personal data in context when saved in a plan or associated with an account.",
+      ],
+    },
+    {
+      id: "purposes",
+      title: "Purposes and lawful bases",
+      paragraphs: [
+        "Contract is used to provide requested accounts, sessions, settings, plans, bearer links, exports, and deletion controls. Legitimate interests support proportionate security logging, abuse prevention, diagnostics, and reliable restore safeguards. Legal obligation applies to rights requests and disputes where required.",
+      ],
+    },
+    {
+      id: "sharing",
+      title: "Providers and international processing",
+      paragraphs: [
+        "Data is shared only as needed with the providers listed below, to follow your request, protect the service, comply with law, or with your permission. Discord receives the OAuth exchange; BitCraft Relay receives public lookup requests without the Claim Monitor session cookie.",
+      ],
+    },
+    {
+      id: "cookies",
+      title: "Necessary cookies",
+      paragraphs: [
+        "Secure HttpOnly cookies hold the Claim Monitor session, OAuth state, and short recent-reauthentication proof. They are necessary for the requested account flow. Optional feedback widgets and usage measurement are not enabled on the public profile.",
+      ],
+    },
+    {
+      id: "retention",
+      title: "Retention",
+      paragraphs: ["The retention table below states the applicable periods or events. Data is removed sooner when a valid deletion request applies, except for limited security, legal, backup, or restore-integrity records."],
+    },
+    {
+      id: "exports-and-deletion",
+      title: "Exports, reauthentication, and deletion",
+      paragraphs: [
+        "A signed-in user can download an account export. Account deletion requires recent reauthentication with the same Discord account and a preflight that identifies the required disposition of owned plans before deletion can complete.",
+        "Deletion removes the public Claim Monitor account and associated live public-profile data according to the chosen plan dispositions. It does not delete Discord membership, create or remove a Timbersteel administrator, alter a Timbersteel account, or delete data held independently by providers. Restricted backup copies expire under the backup rotation, and pseudonymous restore receipts prevent deleted public data from silently returning.",
+      ],
+    },
+    {
+      id: "rights",
+      title: "Your rights",
+      paragraphs: [`Depending on applicable law, you may request access, correction, deletion, restriction, portability, or object to processing. Use the account settings or email ${operator.privacyEmail}. Requests are normally answered within one month.`],
+    },
+    {
+      id: "security",
+      title: "Security",
+      paragraphs: ["Controls include separate public identity tables and cookies, signed OAuth state, same-origin and CSRF checks, short recent reauthentication, rate limits, restricted secrets, encrypted backups, and restore safeguards. No internet service can promise absolute security."],
+    },
+    {
+      id: "complaints",
+      title: "Complaints and changes",
+      paragraphs: [`Contact ${operator.privacyEmail}. You may also complain to the UK Information Commissioner's Office or another data-protection authority available to you. Material changes receive a new version and effective date.`],
+    },
+  ];
+}
+
+export function claimMonitorLegalPolicyForEnvironment(env = {}) {
+  if (String(env?.NODE_ENV ?? "").toLowerCase() === "production"
+    && String(env?.PUBLIC_PROFILE_ENABLED ?? "").toLowerCase() === "true"
+    && String(env?.PUBLIC_LEGAL_CONFIGURATION_CONFIRMED ?? "").toLowerCase() !== "true") {
+    throw new Error("Production requires PUBLIC_LEGAL_CONFIGURATION_CONFIRMED=true after reviewing the Claim Monitor legal documents");
+  }
+  const operator = validatedOperator({
+    ...env,
+    LEGAL_PROJECT_NAME: "BitCraft Claim Monitor",
+    LEGAL_PRIVACY_EMAIL: "privacy@claim-monitor.com",
+  });
+  return Object.freeze({
+    version: CLAIM_MONITOR_LEGAL_VERSION,
+    effectiveDate: CLAIM_MONITOR_LEGAL_EFFECTIVE_DATE,
+    operator,
+    supportUrl: "",
+    providers: claimMonitorProviders.map((provider) => ({ ...provider })),
+    retention: claimMonitorRetention.map((rule) => ({ ...rule })),
+    terms: { title: "Terms of Service", sections: claimMonitorTermsSections(operator) },
+    privacy: { title: "Privacy Policy", sections: claimMonitorPrivacySections(operator) },
+    notice: "These documents describe BitCraft Claim Monitor and are not legal advice to users or other operators.",
   });
 }

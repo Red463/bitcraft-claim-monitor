@@ -18,7 +18,7 @@ test("shared async states expose distinct accessible semantics without owning pa
   assert.equal(existsSync(url), true);
   const component = readFileSync(url, "utf8");
 
-  assert.match(component, /"loading"\s*\|\s*"empty"\s*\|\s*"no-match"\s*\|\s*"restricted"\s*\|\s*"stale"\s*\|\s*"error"/);
+  assert.match(component, /"loading"\s*\|\s*"empty"\s*\|\s*"no-match"\s*\|\s*"restricted"\s*\|\s*"stale"\s*\|\s*"warning"\s*\|\s*"error"/);
   assert.match(component, /kind === "error" \? "alert" : "status"/);
   assert.match(component, /aria-live=/);
   assert.match(component, /title: string/);
@@ -36,7 +36,7 @@ test("action buttons preserve validation disabling while announcing pending work
   assert.match(component, /aria-busy=\{pending\}/);
 });
 
-test("public routes distinguish initial loading, settled empty, no match, restricted, stale, and error states", () => {
+test("public routes distinguish initial loading, settled empty, no match, restricted, partial, stale, and error states", () => {
   const files = [
     "../src/pages/LeaderboardPage.tsx",
     "../src/pages/EmpiresPage.tsx",
@@ -48,7 +48,9 @@ test("public routes distinguish initial loading, settled empty, no match, restri
   for (const kind of ["loading", "empty", "no-match", "restricted", "error"]) {
     assert.match(files, new RegExp(`kind=[{]?\\"${kind}\\"`));
   }
-  assert.match(source("../src/components/main/AppChrome.tsx"), /kind="stale"/);
+  const appChrome = source("../src/components/main/AppChrome.tsx");
+  assert.match(appChrome, /className="refresh-warning"/);
+  assert.match(appChrome, /role="dialog" aria-label="Refresh warning details"/);
   assert.match(files, /AppSkeleton/);
 });
 
@@ -118,7 +120,7 @@ test("initial route failures and skeletons are exclusive from empty operational 
   const empires = source("../src/pages/EmpiresPage.tsx");
 
   assert.match(leaderboard, /if \(state\.loading && !state\.data\) return <AppSkeleton \/>;\s*if \(state\.error && !state\.data\) return <AsyncState kind="error"/);
-  assert.match(publicCrafts, /if \(state\.loading && !state\.data\) return <AppSkeleton \/>;\s*if \(state\.error && !state\.data\) return <AsyncState kind="error"/);
+  assert.match(publicCrafts, /if \(providerLoading && !providerData\) return <AppSkeleton \/>;\s*if \(providerError && !providerData\) return <AsyncState kind="error"/);
   assert.match(empires, /overview\.loading && !overview\.data\s*\? <AppSkeleton \/>\s*:\s*overview\.error && !overview\.data\s*\? <AsyncState kind="error"/);
   assert.match(empires, /watchtowers\.loading && !watchtowers\.data\s*\? <AppSkeleton \/>\s*:\s*watchtowers\.error && !watchtowers\.data\s*\? <AsyncState kind="error"/);
 });

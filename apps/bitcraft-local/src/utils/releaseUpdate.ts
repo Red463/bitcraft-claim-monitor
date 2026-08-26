@@ -47,3 +47,27 @@ export function releaseUpdateDecision({
   if (!current) return lastLoaded && lastLoaded !== next ? "updated" : "remember";
   return documentHidden ? "reload" : "prompt";
 }
+
+export function observeReleaseBuild({
+  currentBuildId,
+  nextBuildId,
+  documentHidden,
+  storage,
+}: {
+  currentBuildId: string;
+  nextBuildId: string;
+  documentHidden: boolean;
+  storage: ReleaseUpdateStorage;
+}) {
+  const decision = releaseUpdateDecision({
+    currentBuildId,
+    lastLoadedBuildId: readLastLoadedReleaseBuild(storage),
+    nextBuildId,
+    documentHidden,
+  });
+  if (decision === "remember" || decision === "updated") writeLastLoadedReleaseBuild(storage, nextBuildId);
+  return {
+    decision,
+    showUpdatedNotice: decision === "updated",
+  };
+}

@@ -13,23 +13,23 @@
 }
 
 .skills-dashboard { display: grid; grid-template-columns: minmax(320px, .9fr) minmax(360px, 1.1fr); gap: 14px; align-items: stretch; }
-.focus-panel, .coverage-panel { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 15px; display: grid; gap: 12px; }
+.focus-panel, .coverage-panel { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel); padding: 15px; display: grid; gap: 12px; }
 .focus-panel h3, .coverage-panel h3 { display: flex; align-items: center; gap: 8px; color: var(--gold); font-size: 18px; }
-.focus-metrics { border: 1px solid rgba(255,255,255,.06); border-radius: 7px; background: var(--panel-2); padding: 8px 12px; }
+.focus-metrics { border: 1px solid rgba(255,255,255,.06); border-radius: var(--radius-control); background: var(--panel-2); padding: 8px 12px; }
 .focus-list { display: grid; gap: 7px; }
-.focus-list div { min-height: 34px; border: 1px solid rgba(255,255,255,.06); border-radius: 7px; background: var(--panel-2); padding: 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.focus-list div { min-height: 34px; border: 1px solid rgba(255,255,255,.06); border-radius: var(--radius-control); background: var(--panel-2); padding: 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .focus-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .focus-list strong { color: var(--gold); font-family: "JetBrains Mono", monospace; font-size: 12px; }
 .coverage-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.coverage-list button { min-height: 62px; border: 1px solid rgba(255,255,255,.06); border-radius: 7px; background: var(--panel-2); color: var(--muted); padding: 9px 10px; display: grid; gap: 3px; text-align: left; cursor: pointer; }
+.coverage-list button { min-height: 62px; border: 1px solid rgba(255,255,255,.06); border-radius: var(--radius-control); background: var(--panel-2); color: var(--muted); padding: 9px 10px; display: grid; gap: 3px; text-align: left; cursor: pointer; }
 .coverage-list button:hover, .coverage-list button.active { border-color: rgba(240,198,79,.45); background: rgba(240,198,79,.08); }
 .coverage-list span { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .coverage-list b { color: var(--gold); font-size: 12px; }
 .coverage-list small { color: var(--muted); }
-.adventure-skills-panel { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 15px; display: grid; gap: 12px; }
+.adventure-skills-panel { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel); padding: 15px; display: grid; gap: 12px; }
 .adventure-skills-panel h3 { display: flex; align-items: center; gap: 8px; color: var(--gold); font-size: 18px; }
 .adventure-skill-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
-.adventure-skill-grid article { border: 1px solid rgba(255,255,255,.06); border-radius: 7px; background: var(--panel-2); padding: 10px; display: grid; gap: 6px; min-width: 0; }
+.adventure-skill-grid article { border: 1px solid rgba(255,255,255,.06); border-radius: var(--radius-control); background: var(--panel-2); padding: 10px; display: grid; gap: 6px; min-width: 0; }
 .adventure-skill-grid article > span { color: var(--text); font-size: 13px; }
 .adventure-skill-grid b { display: flex; align-items: center; gap: 7px; color: var(--gold); font-size: 12px; }
 .adventure-skill-grid small { color: var(--muted); font-weight: 400; white-space: nowrap; }
@@ -68,10 +68,10 @@
 .skills-page .mini-stat {
   min-height: 76px;
   border: 1px solid rgba(108,123,145,.24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+    var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 12px 16px;
   grid-template-columns: 34px minmax(0, 1fr);
@@ -81,7 +81,7 @@
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   background: rgba(255,255,255,.035);
   color: #f3c532;
 }
@@ -99,19 +99,19 @@
   line-height: 1;
   font-weight: 800;
 }
-.profession-insights { border: 1px solid rgba(108,123,145,.24); border-radius: 7px; background: linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99)); overflow: hidden; }
-.settlement-needs { display: grid; grid-template-columns: minmax(220px, .32fr) minmax(0, 1fr); gap: 12px; align-items: stretch; border: 1px solid rgba(108,123,145,.24); border-radius: 7px; background: linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99)); padding: 12px; }
+.profession-insights { border: 1px solid rgba(108,123,145,.24); border-radius: var(--radius-control); background: var(--surface-2); overflow: hidden; }
+.settlement-needs { display: grid; grid-template-columns: minmax(220px, .32fr) minmax(0, 1fr); gap: 12px; align-items: stretch; border: 1px solid rgba(108,123,145,.24); border-radius: var(--radius-control); background: var(--surface-2); padding: 12px; }
 .settlement-needs-heading { display: flex; gap: 10px; align-items: flex-start; padding: 6px 4px; }
 .settlement-needs-heading > span { color: var(--gold); }
 .settlement-needs-heading h3 { margin: 0; color: var(--text); font-size: 15px; }.settlement-needs-heading p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
 .settlement-needs-list { display: flex; gap: 7px; overflow-x: auto; }
-.settlement-needs-list button { min-width: 230px; max-width: 310px; border: 1px solid rgba(154,168,190,.16); border-radius: 7px; background: rgba(5,8,12,.78); color: var(--text); padding: 9px 10px; display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; text-align: left; cursor: pointer; }
+.settlement-needs-list button { min-width: 230px; max-width: 310px; border: 1px solid rgba(154,168,190,.16); border-radius: var(--radius-control); background: rgba(5,8,12,.78); color: var(--text); padding: 9px 10px; display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; text-align: left; cursor: pointer; }
 .settlement-needs-list button:hover, .settlement-needs-list button:focus-visible { border-color: rgba(240,198,79,.42); }.settlement-needs-list button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .settlement-needs-list button small { grid-column: 1 / -1; color: var(--muted); line-height: 1.3; }.settlement-needs-clear { min-height: 62px; flex: 1; display: flex; align-items: center; gap: 9px; color: var(--good); }.settlement-needs-clear span strong, .settlement-needs-clear span small { display: block; }.settlement-needs-clear small { color: var(--muted); margin-top: 2px; }
 .capability-state { display: inline-flex; width: fit-content; min-height: 21px; align-items: center; border-radius: 999px; padding: 2px 7px; background: rgba(116,182,255,.1); color: var(--info, #74b6ff); font-size: 10px; font-weight: 800; }
 .capability-state.ready { background: rgba(78,226,138,.1); color: var(--good); }.capability-state.gap, .capability-state.next-gap { background: rgba(239,100,97,.12); color: #ff9a97; }.capability-state.next-dependency { background: rgba(240,198,79,.12); color: var(--gold); }
 .capability-grid { border-top: 1px solid rgba(108,123,145,.2); padding: 12px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.capability-grid > button { min-width: 0; border: 1px solid rgba(154,168,190,.16); border-radius: 7px; background: rgba(5,8,12,.78); color: var(--text); padding: 11px; text-align: left; cursor: pointer; }
+.capability-grid > button { min-width: 0; border: 1px solid rgba(154,168,190,.16); border-radius: var(--radius-control); background: rgba(5,8,12,.78); color: var(--text); padding: 11px; text-align: left; cursor: pointer; }
 .capability-grid > button:hover, .capability-grid > button.active { border-color: rgba(240,198,79,.38); background: rgba(240,198,79,.045); }.capability-grid > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .capability-card-heading { display: flex; justify-content: space-between; gap: 8px; align-items: center; }.capability-card-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .capability-card-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 10px 0; }.capability-card-metrics span { min-width: 0; }.capability-card-metrics small, .capability-card-metrics b { display: block; }.capability-card-metrics small { color: var(--muted); font-size: 9px; }.capability-card-metrics b { margin-top: 2px; color: var(--text); font-size: 12px; }
@@ -128,7 +128,7 @@
 .profession-insights-glance { display: flex; align-items: center; gap: 16px; }
 .profession-insights-glance > span { display: grid; gap: 2px; min-width: 72px; }
 .profession-insights-glance strong { min-height: 22px; display: flex; align-items: center; color: #f4f7fb; font-size: 13px; white-space: nowrap; }
-.profession-insights-toggle { min-height: 34px; border: 1px solid rgba(154,168,190,.28); border-radius: 7px; background: #080d14; color: #cbd4df; padding: 0 10px; display: inline-flex; align-items: center; gap: 7px; font: inherit; cursor: pointer; }
+.profession-insights-toggle { min-height: 34px; border: 1px solid rgba(154,168,190,.28); border-radius: var(--radius-control); background: var(--surface-1); color: #cbd4df; padding: 0 10px; display: inline-flex; align-items: center; gap: 7px; font: inherit; cursor: pointer; }
 .profession-insights-toggle:hover { border-color: rgba(240,198,79,.45); color: #fff; }
 .profession-insights-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .profession-insights-toggle svg { transition: transform .16s ease; }
@@ -143,10 +143,10 @@
 .skills-page .coverage-panel,
 .skills-page .adventure-skills-panel {
   border: 1px solid rgba(108,123,145,.24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+    var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
 }
@@ -173,7 +173,7 @@
 }
 .skills-page .focus-metrics {
   border-color: rgba(154,168,190,.14);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(5,8,12,.78);
   padding: 10px 12px;
 }
@@ -185,7 +185,7 @@
 .skills-page .focus-tier-segment {
   min-height: 34px;
   border: 1px solid var(--tier-border);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--tier-bg) 88%, rgba(255,255,255,.05)), rgba(5,8,12,.82));
   box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
@@ -213,7 +213,7 @@
 .skills-page .coverage-list button,
 .skills-page .adventure-skill-grid article {
   border-color: rgba(154,168,190,.16);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(5,8,12,.78);
 }
 .skills-page .focus-list div {
@@ -255,19 +255,19 @@
 .skills-page .adventure-skill-grid article { padding: 12px; }
 .skills-page .toolbar-row.skills-toolbar {
   border: 1px solid rgba(108,123,145,.22);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: linear-gradient(180deg, rgba(11,16,22,.94), rgba(6,9,14,.96));
   padding: 12px;
 }
 .skills-page .heatmap-wrap {
   border-color: rgba(108,123,145,.24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
-    linear-gradient(to right, #090e15 30%, transparent),
-    linear-gradient(to left, #090e15 30%, transparent) 100% 0,
+    linear-gradient(to right, var(--surface-2) 30%, transparent),
+    linear-gradient(to left, var(--surface-2) 30%, transparent) 100% 0,
     linear-gradient(to right, rgba(0,0,0,.32), transparent),
     linear-gradient(to left, rgba(0,0,0,.32), transparent) 100% 0;
-  background-color: #090e15;
+  background-color: var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
 }
 .skills-page .skill-table thead th {
@@ -278,10 +278,10 @@
   letter-spacing: .07em;
 }
 .skills-page .skill-table .sticky-col {
-  background: #090e15;
+  background: var(--surface-2);
 }
 .skills-page .skill-table thead .sticky-col {
-  background: #080d14;
+  background: var(--surface-1);
 }
 .skills-page .skill-table .profession-header.sorted,
 .skills-page .skill-table .best,
@@ -311,11 +311,11 @@
 }
 .skills-page .tier-legend {
   border: 1px solid rgba(108,123,145,.18);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(5,8,12,.54);
   padding: 10px 12px;
 }
-.heatmap-wrap { border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; overflow-y: hidden; background: var(--panel); }
+.heatmap-wrap { border: 1px solid var(--border); border-radius: var(--radius-panel); overflow-x: auto; overflow-y: hidden; background: var(--panel); }
 .skill-table { min-width: 1580px; table-layout: fixed; }
 .skill-table th, .skill-table td { padding: 8px 5px; text-align: center; }
 .skill-table thead th { height: 48px; cursor: pointer; user-select: none; white-space: nowrap; }

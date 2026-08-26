@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { normalizeRoutePerformancePath } from "./routePerformance.mjs";
 
 export const SERVER_HEALTH_SCHEMA_VERSION = 1;
 export const SERVER_HEALTH_THRESHOLDS = Object.freeze({ staleMs: 180_000, diskWarning: 80, diskCritical: 90, memoryWarning: 80, memoryCritical: 90, eventLoopWarningMs: 100, eventLoopCriticalMs: 250, http5xxWarningRate: 0.02, http5xxCriticalRate: 0.1 });
@@ -32,7 +33,7 @@ export function normalizeServerHealthSnapshot(raw, { now = Date.now() } = {}) {
   if (number(raw.schemaVersion) !== SERVER_HEALTH_SCHEMA_VERSION) throw new Error("Unsupported monitoring snapshot schema");
   const capturedAt = new Date(raw.capturedAt);
   if (!Number.isFinite(capturedAt.getTime())) throw new Error("Monitoring snapshot timestamp is invalid");
-  const services = safeArray(raw.services, 8).map((service) => ({ name: redactServerHealthText(service.name), active: Boolean(service.active), state: redactServerHealthText(service.state), pid: number(service.pid), restarts: number(service.restarts), memoryBytes: number(service.memoryBytes), cpuPercent: number(service.cpuPercent), uptimeSeconds: number(service.uptimeSeconds) }));
+  const services = safeArray(raw.services, 8).map((service) => ({ name: redactServerHealthText(service.name), active: Boolean(service.active), required: service.required !== false, state: redactServerHealthText(service.state), pid: number(service.pid), restarts: number(service.restarts), memoryBytes: number(service.memoryBytes), cpuPercent: number(service.cpuPercent), uptimeSeconds: number(service.uptimeSeconds) }));
   const processes = safeArray(raw.processes, 20).map((process) => ({ pid: number(process.pid), user: redactServerHealthText(process.user), name: redactServerHealthText(process.name), cpuPercent: number(process.cpuPercent), memoryPercent: number(process.memoryPercent), command: redactServerHealthText(process.command) }));
   const logs = safeArray(raw.logs, 250).map((entry, index) => ({ id: String(entry.id ?? index), at: String(entry.at ?? raw.capturedAt), service: redactServerHealthText(entry.service), severity: ["error", "warning", "info"].includes(entry.severity) ? entry.severity : "info", message: redactServerHealthText(entry.message) }));
   return {
@@ -53,7 +54,7 @@ export function serverHealthState(snapshot, application = {}) {
     if (snapshot.ageMs > SERVER_HEALTH_THRESHOLDS.staleMs) raise("critical", "Host collector is stale");
     if (snapshot.host.diskPercent >= SERVER_HEALTH_THRESHOLDS.diskCritical) raise("critical", "Disk usage is critical"); else if (snapshot.host.diskPercent >= SERVER_HEALTH_THRESHOLDS.diskWarning) raise("warning", "Disk usage is high");
     if (snapshot.host.memoryPercent >= SERVER_HEALTH_THRESHOLDS.memoryCritical) raise("critical", "Memory usage is critical"); else if (snapshot.host.memoryPercent >= SERVER_HEALTH_THRESHOLDS.memoryWarning) raise("warning", "Memory usage is high");
-    if (snapshot.services.some((service) => !service.active)) raise("critical", "One or more monitored services are inactive");
+    if (snapshot.services.some((service) => service.required !== false && !service.active)) raise("critical", "One or more monitored services are inactive");
   }
   if (number(application.eventLoopDelayMs) >= SERVER_HEALTH_THRESHOLDS.eventLoopCriticalMs) raise("critical", "Node event-loop delay is critical");
   else if (number(application.eventLoopDelayMs) >= SERVER_HEALTH_THRESHOLDS.eventLoopWarningMs) raise("warning", "Node event-loop delay is elevated");
@@ -78,7 +79,7 @@ export async function readServerHealthFiles(dataDir, { now = Date.now(), maxByte
   try {
     const info = await stat(historyPath);
     if (info.size <= maxBytes * 5) {
-      history = (await readFile(historyPath, "utf8")).trim().split("\n").filter(Boolean).slice(-10_080).map((line) => JSON.parse(line)).filter((row) => now - new Date(row.capturedAt).getTime() <= 7 * 86_400_000).map((row) => normalizeServerHealthSnapshot({ ...row, services: [], processes: [], logs: [] }, { now }));
+      history = (await readFile(historyPath, "utf8")).trim().split("\n").filter(Boolean).slice(-10_080).map((line) => JSON.parse(line)).filter((row) => now - new Date(row.capturedAt).getTime() <= 7 * 86_400_000).map((row) => normalizeServerHealthSnapshot({ ...row, services: row.services ?? [], processes: [], logs: [] }, { now }));
     }
   } catch {}
   return { snapshot, history, warning };
@@ -146,4 +147,44 @@ export function runApplicationMetricPersistence(write, warn = () => {}) {
     warn(`Application health metric persistence skipped: ${message}`);
     return { ok: false, error: message };
   }
+}
+
+function publicPercentiles(raw) {
+  return { p50: number(raw?.p50), p95: number(raw?.p95), p99: number(raw?.p99) };
+}
+
+function publicGate(raw) {
+  return {
+    active: Math.max(0, Math.floor(number(raw?.active))),
+    queued: Math.max(0, Math.floor(number(raw?.queued))),
+    rejected: Math.max(0, Math.floor(number(raw?.rejected))),
+    maxConcurrent: Math.max(0, Math.floor(number(raw?.maxConcurrent))),
+    maxQueued: Math.max(0, Math.floor(number(raw?.maxQueued))),
+  };
+}
+
+export function publicRoutePerformanceHealth(raw = {}, { gates = {} } = {}) {
+  const allowedProfiles = ["gameDataRead", "orderBookRead", "favoriteQuotesRead"];
+  const rateLimits = {};
+  for (const name of allowedProfiles) {
+    if (!raw.rateLimits?.[name]) continue;
+    rateLimits[name] = {
+      reportOnly: Boolean(raw.rateLimits[name].reportOnly),
+      wouldLimit: Math.max(0, Math.floor(number(raw.rateLimits[name].wouldLimit))),
+    };
+  }
+  return {
+    sampleCount: Math.max(0, Math.floor(number(raw.sampleCount))),
+    routes: safeArray(raw.routes, 20).map((route) => ({
+      path: normalizeRoutePerformancePath(route.path),
+      sampleCount: Math.max(0, Math.floor(number(route.sampleCount))),
+      statusCounts: Object.fromEntries(Object.entries(route.statusCounts ?? {}).filter(([status]) => /^[1-5]\d\d$/.test(status)).map(([status, count]) => [status, Math.max(0, Math.floor(number(count)))])),
+      status429: Math.max(0, Math.floor(number(route.status429))),
+      durationMs: publicPercentiles(route.durationMs),
+      responseBytes: publicPercentiles(route.responseBytes),
+      projectionMs: publicPercentiles(route.projectionMs),
+    })),
+    rateLimits,
+    gates: Object.fromEntries(["gameData", "market"].filter((name) => gates[name]).map((name) => [name, publicGate(gates[name])])),
+  };
 }

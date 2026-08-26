@@ -1,7 +1,7 @@
 import { toNumber, unwrap, type AnyRecord } from "../main-app-data.ts";
 
 /*
- * Normalizers convert mixed BitJita/local helper payloads into the stable shape
+ * Normalizers convert mixed provider/local helper payloads into the stable shape
  * expected by page components. Keep these defensive: missing optional fields
  * should result in null/empty values rather than blanking a page.
  */
@@ -9,26 +9,39 @@ import { toNumber, unwrap, type AnyRecord } from "../main-app-data.ts";
 /**
  * Normalise player detail fields used for online/session displays.
  *
- * BitJita has exposed playtime and sign-in data under several field names over
+ * Upstream payloads have exposed playtime and sign-in data under several field names over
  * time, so this function preserves all known aliases and returns explicit nulls
  * when the API has not provided a usable value.
  */
 export function normalizePlayer(player: AnyRecord): AnyRecord {
-  const signInTs = toNumber(
-    player.signInTimestamp ??
+  const signInValue = player.signInTimestamp ??
     player.sign_in_timestamp ??
     player.signedInTimestamp ??
     player.sessionStartTimestamp ??
-    player.session_start_timestamp,
-  );
+    player.session_start_timestamp;
+  const numericSignIn = toNumber(signInValue);
+  const signInTs = numericSignIn > 0
+    ? Math.floor(numericSignIn > 10_000_000_000 ? numericSignIn / 1000 : numericSignIn)
+    : typeof signInValue === "string" && Number.isFinite(Date.parse(signInValue))
+      ? Math.floor(Date.parse(signInValue) / 1000)
+      : 0;
   const now = Math.floor(Date.now() / 1000);
-  const signedIn = Boolean(player.signedIn ?? player.online ?? player.isOnline ?? (signInTs > 0));
+  const presenceSource = String(player.presenceSource ?? "").trim() || null;
+  const signedInValue = player.signedIn ?? player.online ?? player.isOnline;
+  const signedIn = typeof signedInValue === "boolean"
+    ? signedInValue
+    : signInTs > 0
+      ? true
+      : presenceSource === "unavailable"
+        ? null
+        : false;
   const existingSessionSeconds = toNumber(player.sessionSeconds ?? player.session_seconds ?? player.currentSessionSeconds);
   const timePlayedSeconds = toNumber(
     player.timePlayed ??
     player.totalTimePlayed ??
     player.totalPlayed ??
     player.totalPlayedSeconds ??
+    player.timePlayedSeconds ??
     player.time_played ??
     player.total_time_played,
   );
@@ -37,6 +50,7 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
     player.totalTimeSignedIn ??
     player.totalSignedIn ??
     player.totalSignedInSeconds ??
+    player.timeSignedInSeconds ??
     player.time_signed_in ??
     player.total_time_signed_in,
   );
@@ -61,6 +75,8 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
     username: player.username ?? player.userName,
     regionId: regionId || null,
     regionName: regionName || null,
+    presenceRegionId: player.presenceRegionId == null ? null : String(player.presenceRegionId),
+    presenceSource,
     signedIn,
     sessionSeconds: signInTs > 0 ? Math.max(0, now - signInTs) : existingSessionSeconds > 0 ? existingSessionSeconds : null,
     timePlayedSeconds: timePlayedSeconds > 0 ? timePlayedSeconds : null,
@@ -69,7 +85,7 @@ export function normalizePlayer(player: AnyRecord): AnyRecord {
 }
 
 export function normalizeData(raw: AnyRecord | null) {
-  // Most BitJita endpoints return named wrappers, but local helper endpoints may
+  // Most provider endpoints return named wrappers, but local helper endpoints may
   // already return plain arrays/objects. unwrap keeps page components independent
   // from those transport details.
   const claim = raw?.claim?.claim ?? raw?.claim ?? {};
@@ -83,13 +99,14 @@ export function normalizeData(raw: AnyRecord | null) {
   const market = unwrap<AnyRecord[]>(raw?.market, "listings", []);
   const crafts = unwrap<AnyRecord[]>(raw?.crafts, "craftResults", []);
   const players = unwrap<AnyRecord[]>(raw?.players, "players", []).map(normalizePlayer);
-  const region = unwrap<AnyRecord[]>(raw?.region, "claims", []);
-  const layout = raw?.layout ?? {};
+  const region = unwrap<AnyRecord[]>(raw?.["region-claims"], "claims", unwrap<AnyRecord[]>(raw?.region, "claims", []));
+  const regionCoverage = raw?.["region-claims"]?.coverage ?? {};
   const skills = raw?.skills ?? {};
-  const contributions = raw?.contributions ?? {};
+  const contributionPayload = raw?.contributions ?? {};
+  const contributions = contributionPayload.byCraft ?? contributionPayload;
+  const contributionObservedSince = contributionPayload.observedSince ?? null;
   const marketApi = raw?.marketApi ?? { histories: [], trades: [] };
-  const regionStatus = unwrap<AnyRecord[]>(raw?.regionStatus, "regions", []);
-  const tradeVolume = raw?.tradeVolume ?? {};
-  return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, layout, skills, contributions, marketApi, regionStatus, tradeVolume };
+  const regionStatus = unwrap<AnyRecord[]>(raw?.region, "regions", unwrap<AnyRecord[]>(raw?.regionStatus, "regions", []));
+  return { claim, members, citizens, buildings, inventories, construction, research, recruitment, market, crafts, players, region, regionCoverage, skills, contributions, contributionObservedSince, marketApi, regionStatus };
 }
 

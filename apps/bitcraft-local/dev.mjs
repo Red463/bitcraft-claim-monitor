@@ -15,8 +15,8 @@ function run(command, args, env = {}) {
   });
 }
 
-const localApiPort = process.env.LOCAL_API_PORT ?? "18430";
-const vitePort = process.env.PORT ?? "18428";
+const localApiPort = process.env.LOCAL_API_PORT ?? "19430";
+const vitePort = process.env.PORT ?? "19428";
 
 const children = [
   run(nodeBin, [path.join(root, "server.mjs")], { LOCAL_API_PORT: localApiPort }),

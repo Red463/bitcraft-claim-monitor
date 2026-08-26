@@ -1,10 +1,10 @@
 .app-popup-backdrop { position: fixed; inset: 0; z-index: calc(var(--z-modal) + 2); display: grid; place-items: center; padding: 20px; background: rgba(2,4,8,.62); backdrop-filter: blur(3px); }
-.app-popup { width: min(460px, calc(100vw - 32px)); border: 1px solid rgba(108,123,145,.34); border-radius: 10px; background: linear-gradient(180deg, rgba(21,26,34,.98), rgba(8,11,17,.98)); box-shadow: 0 28px 80px rgba(0,0,0,.52); padding: 16px; display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; }
+.app-popup { width: min(460px, calc(100vw - 32px)); border: 1px solid rgba(108,123,145,.34); border-radius: var(--radius-panel); background: linear-gradient(180deg, rgba(21,26,34,.98), rgba(8,11,17,.98)); box-shadow: 0 28px 80px rgba(0,0,0,.52); padding: 16px; display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; }
 .app-popup-info { border-color: rgba(86,213,255,.35); }
 .app-popup-success { border-color: rgba(99,235,165,.4); }
 .app-popup-warning { border-color: rgba(255,179,71,.46); }
 .app-popup-danger { border-color: rgba(239,100,97,.5); }
-.app-popup-icon { width: 42px; height: 42px; border-radius: 9px; display: grid; place-items: center; color: var(--active-color); background: rgba(240,198,79,.1); border: 1px solid rgba(240,198,79,.22); }
+.app-popup-icon { width: 42px; height: 42px; border-radius: var(--radius-panel); display: grid; place-items: center; color: var(--active-color); background: rgba(240,198,79,.1); border: 1px solid rgba(240,198,79,.22); }
 .app-popup-warning .app-popup-icon { color: #ffb347; background: rgba(255,179,71,.1); border-color: rgba(255,179,71,.28); }
 .app-popup-danger .app-popup-icon { color: var(--danger); background: rgba(239,100,97,.1); border-color: rgba(239,100,97,.3); }
 .app-popup-success .app-popup-icon { color: var(--good); background: rgba(99,235,165,.1); border-color: rgba(99,235,165,.28); }

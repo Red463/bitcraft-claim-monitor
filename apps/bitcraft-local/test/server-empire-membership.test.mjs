@@ -6,7 +6,45 @@ import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import {
   createEmpireMembershipRepository,
   normalizeEmpireMembershipRoster,
+  relayEmpireMembershipObservation,
 } from "../src/server/empireMembership.mjs";
+
+test("Relay Empire observations wait for primary apply and derive the monitored roster", () => {
+  const partial = {
+    primaryRegionId: "19",
+    regions: [{ regionId: "7" }],
+    settlements: [],
+  };
+  assert.deepEqual(relayEmpireMembershipObservation(partial, "40"), {
+    state: "waiting",
+    primaryRegionId: "19",
+  });
+
+  const current = {
+    primaryRegionId: "19",
+    regions: [{ regionId: "19" }],
+    settlements: [{ regionId: "19", claimEntityId: "40", empireEntityId: "10" }],
+    empires: [{ regionId: "19", entityId: "10", name: "Timbersteel Empire" }],
+    members: [{ regionId: "19", entityId: "20", empireEntityId: "10", username: "Owner" }],
+  };
+  assert.deepEqual(relayEmpireMembershipObservation(current, "40"), {
+    state: "roster",
+    primaryRegionId: "19",
+    regionId: "19",
+    roster: {
+      empireId: "10",
+      empireName: "Timbersteel Empire",
+      members: [{ playerEntityId: "20", playerName: "Owner" }],
+    },
+  });
+  assert.deepEqual(relayEmpireMembershipObservation({
+    ...current,
+    settlements: [],
+  }, "40"), {
+    state: "none",
+    primaryRegionId: "19",
+  });
+});
 
 function repository() {
   const db = new DatabaseSync(":memory:");

@@ -9,28 +9,28 @@ import type { AnyRecord } from "./main-app-data";
  */
 
 export const DEFAULT_THEME = {
-  bg: "#0c0d10",
-  sidebar: "#06070a",
-  panel: "#181b21",
-  panel2: "#11141a",
-  border: "#353b46",
-  cardTop: "#111923",
-  cardBottom: "#080d14",
-  cardTitle: "#b8c2cf",
+  bg: "#050506",
+  sidebar: "#07080a",
+  panel: "#0e1012",
+  panel2: "#090a0c",
+  border: "#30343a",
+  cardTop: "#15181b",
+  cardBottom: "#090a0c",
+  cardTitle: "#c7cbd1",
   cardValue: "#ffffff",
-  iconBg: "#12181f",
-  activeColor: "#f0c64f",
-  activeBg: "#3a3118",
-  activeBorder: "#7a6428",
-  hoverBorder: "#5f5127",
-  muted: "#a8adba",
-  text: "#f6f3ea",
-  gold: "#f0c64f",
+  iconBg: "#111418",
+  activeColor: "#d9af3d",
+  activeBg: "#2a2411",
+  activeBorder: "#8f772d",
+  hoverBorder: "#75652b",
+  muted: "#a5abb3",
+  text: "#f0f1f3",
+  gold: "#d9af3d",
   good: "#4ee28a",
   danger: "#ef6461",
-  gradientTop: "#1f1f1f",
-  gradientMid: "#080808",
-  gradientBase: "#030303",
+  gradientTop: "#15181b",
+  gradientMid: "#090a0c",
+  gradientBase: "#050506",
   gradientTopStop: "0",
   gradientMidStop: "58",
   gradientFadeStop: "100",
@@ -46,6 +46,33 @@ export type ThemeContrastResult = {
 type ThemeKey = keyof ThemeSettings;
 export type ThemeRangeKey = "gradientTopStop" | "gradientMidStop" | "gradientFadeStop" | "gradientHeight";
 export type ThemeColorKey = Exclude<ThemeKey, ThemeRangeKey>;
+
+const LEGACY_DEFAULT_THEME: ThemeSettings = {
+  bg: "#0c0d10", sidebar: "#06070a", panel: "#181b21", panel2: "#11141a", border: "#353b46",
+  cardTop: "#111923", cardBottom: "#080d14", cardTitle: "#b8c2cf", cardValue: "#ffffff", iconBg: "#12181f",
+  activeColor: "#f0c64f", activeBg: "#3a3118", activeBorder: "#7a6428", hoverBorder: "#5f5127", muted: "#a8adba",
+  text: "#f6f3ea", gold: "#f0c64f", good: "#4ee28a", danger: "#ef6461", gradientTop: "#1f1f1f",
+  gradientMid: "#080808", gradientBase: "#030303", gradientTopStop: "0", gradientMidStop: "58", gradientFadeStop: "100", gradientHeight: "32",
+};
+
+const GREEN_TINTED_OBSIDIAN_THEME: ThemeSettings = {
+  bg: "#030403", sidebar: "#050605", panel: "#0b0e0b", panel2: "#070907", border: "#34382f",
+  cardTop: "#111510", cardBottom: "#070907", cardTitle: "#c5c8bf", cardValue: "#ffffff", iconBg: "#0f120e",
+  activeColor: "#d9af3d", activeBg: "#2a2411", activeBorder: "#8f772d", hoverBorder: "#75652b", muted: "#a8ada3",
+  text: "#f0ede4", gold: "#d9af3d", good: "#4ee28a", danger: "#ef6461", gradientTop: "#111510",
+  gradientMid: "#070907", gradientBase: "#030403", gradientTopStop: "0", gradientMidStop: "58", gradientFadeStop: "100", gradientHeight: "32",
+};
+
+export function migrateLegacyDefaultTheme(theme: ThemeSettings): ThemeSettings {
+  const identityKeys: ThemeKey[] = ["bg", "sidebar", "panel", "panel2", "border"];
+  const isLegacyDefault = [LEGACY_DEFAULT_THEME, GREEN_TINTED_OBSIDIAN_THEME].some((previousDefault) => {
+    const hasPreviousCore = identityKeys.every((key) => theme[key] === previousDefault[key]);
+    const containsOnlyBuiltInValues = (Object.keys(previousDefault) as ThemeKey[])
+      .every((key) => theme[key] === previousDefault[key] || theme[key] === DEFAULT_THEME[key]);
+    return hasPreviousCore && containsOnlyBuiltInValues;
+  });
+  return isLegacyDefault ? DEFAULT_THEME : theme;
+}
 
 export const CUSTOM_THEME_STORAGE_KEY = "theme.custom.local";
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
@@ -199,7 +226,7 @@ export const THEME_FIELDS: Array<[ThemeColorKey, string, string]> = [
 export const THEME_GRADIENT_RANGE_FIELDS: ThemeRangeKey[] = ["gradientTopStop", "gradientMidStop", "gradientFadeStop", "gradientHeight"];
 
 export const THEME_PRESETS: Array<{ id: string; label: string; description: string; theme: ThemeSettings }> = [
-  { id: "default", label: "Default", description: "Original Timbersteel gold on dark steel.", theme: DEFAULT_THEME },
+  { id: "default", label: "Default", description: "Neutral graphite with restrained Timbersteel gold accents.", theme: DEFAULT_THEME },
   { id: "command", label: "Command", description: "Darker dashboard-style black and charcoal.", theme: { ...DEFAULT_THEME, bg: "#030303", sidebar: "#05070b", panel: "#111923", panel2: "#070c12", border: "#273140", cardTop: "#101821", cardBottom: "#060a10", cardTitle: "#b8c2cf", activeBg: "#332b16", activeBorder: "#7a6428", hoverBorder: "#625328", muted: "#aab3c2", text: "#f7f8fb", gradientTop: "#1f1f1f", gradientMid: "#080808", gradientBase: "#030303" } },
   { id: "steel", label: "Steel", description: "Cooler blue-grey surfaces with blue accent.", theme: { ...DEFAULT_THEME, bg: "#071018", sidebar: "#050a10", panel: "#121f2b", panel2: "#0b141d", border: "#2e4356", cardTop: "#142434", cardBottom: "#07111a", cardTitle: "#b9d8ef", iconBg: "#0b1824", gold: "#65b7fa", activeColor: "#65b7fa", activeBg: "#12334b", activeBorder: "#3d79a8", hoverBorder: "#4e8bbc", good: "#63eba5", gradientTop: "#16283a", gradientMid: "#071018", gradientBase: "#03070c" } },
   { id: "ember", label: "Ember", description: "Warm copper-gold for a forge feel.", theme: { ...DEFAULT_THEME, bg: "#110b08", sidebar: "#080604", panel: "#211714", panel2: "#160f0c", border: "#493329", cardTop: "#2a1d17", cardBottom: "#100a07", cardTitle: "#f0cda5", iconBg: "#1b110b", gold: "#f5aa45", activeColor: "#f5aa45", activeBg: "#3d2510", activeBorder: "#915c25", hoverBorder: "#a66a2a", good: "#63eba5", danger: "#ff6b65", gradientTop: "#2d1b10", gradientMid: "#110b08", gradientBase: "#050302" } },
@@ -222,21 +249,22 @@ export const THEME_FIELD_GROUPS: Array<{ title: string; keys: ThemeColorKey[] }>
 export const MAP_DEFAULT_LAYERS = ["roadsLayer", ...Array.from({ length: 11 }, (_, tier) => `claimT${tier}Layer`)];
 
 export function applyTheme(theme: Partial<ThemeSettings>) {
+  const resolvedTheme = migrateLegacyDefaultTheme({ ...DEFAULT_THEME, ...theme });
   for (const [key, , cssVar] of THEME_FIELDS) {
-    const value = theme[key] ?? DEFAULT_THEME[key];
+    const value = resolvedTheme[key];
     document.documentElement.style.setProperty(cssVar, value);
   }
-  const bg = theme.bg ?? DEFAULT_THEME.bg;
-  const gold = theme.gold ?? DEFAULT_THEME.gold;
-  const activeColor = theme.activeColor ?? DEFAULT_THEME.activeColor;
-  const activeBg = theme.activeBg ?? DEFAULT_THEME.activeBg;
-  const gradientTop = theme.gradientTop ?? DEFAULT_THEME.gradientTop;
-  const gradientMid = theme.gradientMid ?? DEFAULT_THEME.gradientMid;
-  const gradientBase = theme.gradientBase ?? DEFAULT_THEME.gradientBase;
-  const gradientTopStop = clampThemeNumber(theme.gradientTopStop, 0, 100, DEFAULT_THEME.gradientTopStop);
-  const gradientMidStop = clampThemeNumber(theme.gradientMidStop, 0, 100, DEFAULT_THEME.gradientMidStop);
-  const gradientFadeStop = clampThemeNumber(theme.gradientFadeStop, 0, 100, DEFAULT_THEME.gradientFadeStop);
-  const gradientHeight = clampThemeNumber(theme.gradientHeight, 12, 72, DEFAULT_THEME.gradientHeight);
+  const { bg, gold, activeColor, activeBg, gradientTop, gradientMid, gradientBase, panel, panel2, cardTop, border } = resolvedTheme;
+  const gradientTopStop = clampThemeNumber(resolvedTheme.gradientTopStop, 0, 100, DEFAULT_THEME.gradientTopStop);
+  const gradientMidStop = clampThemeNumber(resolvedTheme.gradientMidStop, 0, 100, DEFAULT_THEME.gradientMidStop);
+  const gradientFadeStop = clampThemeNumber(resolvedTheme.gradientFadeStop, 0, 100, DEFAULT_THEME.gradientFadeStop);
+  const gradientHeight = clampThemeNumber(resolvedTheme.gradientHeight, 12, 72, DEFAULT_THEME.gradientHeight);
+  document.documentElement.style.setProperty("--canvas", bg);
+  document.documentElement.style.setProperty("--surface-1", panel2);
+  document.documentElement.style.setProperty("--surface-2", panel);
+  document.documentElement.style.setProperty("--surface-3", cardTop);
+  document.documentElement.style.setProperty("--line-subtle", `color-mix(in srgb, ${border} 55%, transparent)`);
+  document.documentElement.style.setProperty("--line-strong", border);
   document.documentElement.style.setProperty("--theme-gradient-top-stop", `${gradientTopStop}%`);
   document.documentElement.style.setProperty("--theme-gradient-mid-stop", `${gradientMidStop}%`);
   document.documentElement.style.setProperty("--theme-gradient-fade-stop", `${gradientFadeStop}%`);

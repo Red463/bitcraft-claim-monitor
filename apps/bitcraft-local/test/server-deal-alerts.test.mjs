@@ -104,3 +104,81 @@ test("dealAlertDiscordPayload preserves the current market deal DM shape", () =>
     }],
   });
 });
+
+test("live-order deal alerts expose and label their current median baseline", () => {
+  const row = publicDealAlertRow({
+    baseline_window_days: 0,
+    baseline_average: "10",
+    sales_count: 3,
+    raw_json: JSON.stringify({
+      listing: {
+        price: "90071992547409931",
+        quantity: "90071992547409933",
+      },
+      baseline: {
+        kind: "current-sell-median",
+        unitPrice: "90071992547409999",
+        sampleCount: 3,
+      },
+    }),
+  });
+  assert.equal(row.baselineKind, "current-sell-median");
+  assert.equal(row.sampleCount, 3);
+  assert.equal(row.unitPrice, "90071992547409931");
+  assert.equal(row.quantity, "90071992547409933");
+  assert.equal(row.baselineAverage, "90071992547409999");
+  assert.equal(
+    row.totalValue,
+    (90071992547409931n * 90071992547409933n).toString(),
+  );
+
+  const payload = dealAlertDiscordPayload({
+    itemName: "Leather",
+    discountPercent: 40,
+    baselineAverage: 10,
+    baselineWindowDays: 0,
+    baselineKind: "current-sell-median",
+    sampleCount: 3,
+    unitPrice: 6,
+    quantity: 2,
+    marketClaimName: "Timbersteel Trade",
+    regionId: "19",
+    createdAt: "2026-07-30T12:00:00.000Z",
+  });
+  assert.equal(
+    payload.embeds[0].description,
+    "**Leather** is listed 40% below the current regional sell-order median.",
+  );
+  assert.deepEqual(payload.embeds[0].fields[1], {
+    name: "Baseline",
+    value: "10g live median (3 listings)",
+    inline: true,
+  });
+
+  const exactHalfRow = publicDealAlertRow({
+    baseline_average: 90071992547410000,
+    raw_json: JSON.stringify({
+      baseline: {
+        kind: "current-sell-median",
+        unitPrice: "90071992547409999.5",
+        sampleCount: 4,
+      },
+    }),
+  });
+  assert.equal(exactHalfRow.baselineAverage, "90071992547409999.5");
+  const exactHalfPayload = dealAlertDiscordPayload({
+    itemName: "Exact Cargo",
+    discountPercent: 10,
+    baselineAverage: exactHalfRow.baselineAverage,
+    baselineKind: exactHalfRow.baselineKind,
+    sampleCount: exactHalfRow.sampleCount,
+    unitPrice: "81064793292668999",
+    quantity: "1",
+    marketClaimName: "Timbersteel Trade",
+    regionId: "19",
+  });
+  assert.equal(
+    exactHalfPayload.embeds[0].fields[1].value,
+    "90,071,992,547,409,999.5g live median (4 listings)",
+  );
+});

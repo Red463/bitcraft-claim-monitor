@@ -1,4 +1,5 @@
 import { parseDateValue, toNumber, type AnyRecord } from "../../main-app-data.ts";
+import { explicitInventoryStackKey } from "../../server/game-data/inventoryProjection.ts";
 
 const ACTIVE_CRAFT_WINDOW_MS = 30 * 1000;
 
@@ -11,12 +12,20 @@ export function hasRecentCraftContribution(contributors: AnyRecord[]): boolean {
   });
 }
 export function craftProgressKey(job: AnyRecord): string {
-  return String(job.entityId ?? job.id ?? job.craftEntityId ?? `${job.buildingName ?? "structure"}:${job.recipeId ?? ""}:${job.craftedItem?.[0]?.item_id ?? ""}`);
+  return String(job.entityId ?? job.id ?? job.craftEntityId ?? `${job.buildingName ?? "structure"}:${job.recipeId ?? ""}:${job.craftedItem?.[0]?.itemId ?? job.craftedItem?.[0]?.item_id ?? ""}`);
 }
 export function productionMetrics(job: AnyRecord, itemLookup: Map<string, AnyRecord>) {
-  const item = itemLookup.get(String(job.craftedItem?.[0]?.item_id)) ?? {};
-  const skillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
-  const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
+  const output = job.craftedItem?.[0];
+  let outputKey: string | null = null;
+  try {
+    outputKey = output ? explicitInventoryStackKey(output) : null;
+  } catch {
+    // Malformed or partial output identity remains unresolved.
+  }
+  const item = outputKey ? itemLookup.get(outputKey) ?? {} : {};
+  const partialOutputIdentity = Boolean(output) && outputKey === null;
+  const skillId = toNumber(job.levelRequirements?.[0]?.skillId ?? job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skillId ?? job.experiencePerProgress?.[0]?.skill_id);
+  const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skillId ?? xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity);
   const total = toNumber(job.totalActionsRequired);
   const progress = toNumber(job.progress);
   const remaining = Math.max(0, total - progress);
@@ -27,10 +36,10 @@ export function productionMetrics(job: AnyRecord, itemLookup: Map<string, AnyRec
     total,
     progress,
     remaining,
-    tier: toNumber(item.tier ?? job.tier),
+    tier: partialOutputIdentity ? null : toNumber(item.tier ?? job.tier),
     totalXp: total * experiencePerEffort,
     remainingXp: remaining * experiencePerEffort,
     completion: total > 0 ? progress / total : 0,
-    name: String(item.name ?? job.recipeName ?? ""),
+    name: partialOutputIdentity ? "" : String(item.name ?? job.recipeName ?? ""),
   };
 }

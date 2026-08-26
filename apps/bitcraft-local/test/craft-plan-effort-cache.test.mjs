@@ -43,6 +43,7 @@ test("canonical baseline removes live sources and completed building progress", 
     playerIds: [],
     craftPlayerIds: [],
     bankPlayerIds: [],
+    bankContainerIds: [],
     deployableContainerIds: [],
   });
   assert.equal(result.sectionOverrides["items:5"], "Farming");

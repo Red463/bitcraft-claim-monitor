@@ -30,7 +30,7 @@ test("Craft Planning labels estimated active output as material-planning coverag
   assert.match(page, />Covered for material planning<\/span>/);
   assert.match(page, />Estimated craft output; counted for material planning<\/span>/);
   assert.match(page, /Passive craft/);
-  assert.match(page, /Location not reported by BitJita/);
+  assert.match(page, /Location not reported by Relay/);
   assert.doesNotMatch(page, />Estimated active output; not counted<\/span>/);
 });
 
@@ -226,17 +226,22 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /workstationPresets/);
   assert.match(manager, /addWorkstationPreset/);
   assert.match(manager, /\/admin\/craft-plan\/workstation-preset\?tier=/);
-  assert.match(manager, /Loaded from BitJita claim research/);
+  assert.match(manager, /Loaded from live settlement research/);
+  assert.match(manager, /Live settlement research has no tier upgrade materials available yet/);
   assert.match(manager, /tierPresets/);
-  assert.match(server, /nestedKeys = \["input", "inputs"/);
-  assert.match(server, /techType === "settlement"/);
   assert.match(manager, /Target items/);
   assert.doesNotMatch(manager, /craft-plan-item-icon"><ItemIcon item=\{target\} \/><\/span><ItemLabel item=\{target\} \/>/);
   assert.match(manager, /Settlement storage/);
   assert.match(manager, /Players & deployables/);
   assert.match(manager, /bankPlayerIds/);
-  assert.match(manager, />Banks<\/span>/);
-  assert.match(manager, /all BitJita-visible settlement banks/i);
+  assert.match(manager, /bankContainerIds/);
+  assert.match(manager, /const TABS = \[[^\]]*"banks"/);
+  assert.match(manager, /\/admin\/craft-plan\/player-banks\?playerId=/);
+  assert.match(manager, /BANK_LOAD_CONCURRENCY\s*=\s*3/);
+  assert.match(manager, /Tracked only/);
+  assert.match(manager, /Empty — tracked/);
+  assert.match(manager, /Unavailable — tracked/);
+  assert.doesNotMatch(manager, />Banks<\/span>/);
   assert.match(manager, /craft-plan-player-source-card/);
   assert.match(styles, /\.craft-plan-player-source-toggles\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(100px,\s*1fr\)\)/s);
   assert.match(styles, /\.craft-plan-player-source-card\s+header\s*\{[^}]*display:\s*grid/s);
@@ -257,9 +262,37 @@ test("Craft Planning manager owns full admin editing controls", () => {
   assert.match(manager, /buildingProgress/);
   assert.match(manager, /delete nextProgress\[itemKey\(target\)\]/);
   assert.match(server, /reconcileCraftPlanBuildingProgress/);
-  assert.match(server, /\/claims\/\$\{encodeURIComponent\(claimId\)\}\/buildings/);
+  assert.match(server, /currentClaimBuildingsProjection\(claimId\)/);
+  assert.doesNotMatch(server, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/buildings/);
   assert.match(server, /\/api\/local\/admin\/craft-plan\/workstation-preset/);
-  assert.match(server, /fetchBitjita\(`\/buildings\/\$\{encodeURIComponent\(workstation\.id\)\}`/);
+  assert.match(server, /\/api\/local\/admin\/craft-plan\/player-banks/);
+  assert.match(server, /providerCatalogRepository\.listDescriptions\("building"\)/);
+  assert.match(server, /providerCatalogRepository\.listDescriptions\("construction_recipe"\)/);
+  assert.match(server, /normalizeCatalogWorkstationTarget/);
+  assert.doesNotMatch(server, /fetchBitjita\(`\/buildings\/\$\{encodeURIComponent\(workstation\.id\)\}`/);
+});
+
+test("Craft Planning reads current members and inventories from Relay-owned services", () => {
+  const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const adminStart = server.indexOf("async function craftPlanAdminResponse");
+  const adminEnd = server.indexOf("function craftPlanAuditLabels", adminStart);
+  const adminResponse = adminStart >= 0 && adminEnd > adminStart ? server.slice(adminStart, adminEnd) : "";
+  const liveStart = server.indexOf("async function computedCraftPlanResponseFresh");
+  const liveEnd = server.indexOf("async function craftPlanDiscordReport", liveStart);
+  const liveResponse = liveStart >= 0 && liveEnd > liveStart ? server.slice(liveStart, liveEnd) : "";
+
+  assert.match(server, /function currentMembersProjection/);
+  assert.match(server, /function currentInventoryProjection/);
+  assert.match(adminResponse, /currentMembersProjection\(claimId\)/);
+  assert.match(adminResponse, /currentInventoryProjection\(claimId\)/);
+  assert.match(adminResponse, /relayPlayerDataService\.inventory/);
+  assert.match(liveResponse, /currentMembersProjection\(claimId\)/);
+  assert.match(liveResponse, /currentInventoryProjection\(claimId\)/);
+  assert.match(liveResponse, /relayPlayerDataService\.inventory/);
+  assert.doesNotMatch(adminResponse, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/(?:members|inventories)/);
+  assert.doesNotMatch(adminResponse, /fetchBitjita\(`\/players\/\$\{encodeURIComponent\(playerId\)\}\/inventories/);
+  assert.doesNotMatch(liveResponse, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/(?:members|inventories)/);
+  assert.doesNotMatch(liveResponse, /fetchBitjita\(`\/players\/\$\{encodeURIComponent\(playerId\)\}\/inventories/);
 });
 
 test("Craft Planning manager exposes a lazy, resilient audit history tab", () => {
@@ -307,38 +340,28 @@ test("Craft Planning manager renders presets as compact tier-only controls", () 
 });
 
 
-test("Craft Planning manager shows compact catalog diagnostics and manual refresh controls", () => {
+test("Craft Planning manager does not expose the retired scheduled catalog refresh", () => {
   const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
 
-  assert.match(manager, /\/admin\/craft-plan\/catalog-refresh/);
-  assert.match(manager, /Refresh planner catalog/);
-  assert.match(manager, /No planner catalog yet/);
-  assert.match(manager, /processedCount/);
-  assert.match(manager, /totalCount/);
-  assert.match(manager, /itemCount/);
-  assert.match(manager, /cargoCount/);
-  assert.match(manager, /recipeCount/);
-  assert.match(manager, /byproductCount/);
-  assert.match(manager, /failureCount/);
-  assert.match(manager, /lastSuccessAt/);
-  assert.match(manager, /completedAt/);
-  assert.match(manager, /scheduledJob\?\.running/);
-  assert.match(manager, /catalogContinuing/);
-  assert.match(manager, /catalogPollingActive/);
-  assert.match(manager, /Last full refresh/);
-  assert.match(manager, /Next batch queued/);
-  assert.match(manager, /if \(!open \|\| !catalogPollingActive\) return/);
-  assert.match(manager, /window\.setInterval\(\(\) => \{\s*void loadCatalogStatus\(\{ silent: true \}\);\s*\}, CATALOG_REFRESH_POLL_MS\)/s);
-  assert.match(manager, /window\.clearInterval/);
-  assert.doesNotMatch(manager, /window\.setTimeout\(\(\) => \{\s*void loadCatalogStatus\(\{ silent: true \}\);\s*\}, CATALOG_REFRESH_POLL_MS\)/s);
-  assert.match(manager, /run\?\.status === "completed"/);
-  assert.doesNotMatch(manager, /run\?\.status === "complete"/);
-  assert.match(styles, /\.craft-plan-catalog-band/);
-  assert.match(styles, /\.craft-plan-catalog-stats/);
-  assert.match(styles, /\.craft-plan-catalog-stat/);
-  assert.match(styles, /\.craft-plan-catalog-empty/);
+  assert.doesNotMatch(manager, /\/admin\/craft-plan\/catalog-refresh/);
+  assert.doesNotMatch(manager, /Refresh planner catalog/);
+  assert.doesNotMatch(manager, /CATALOG_REFRESH_POLL_MS|catalogPollingActive|catalogContinuing/);
+  assert.doesNotMatch(styles, /\.craft-plan-catalog-band|\.craft-plan-catalog-stats|\.craft-plan-catalog-stat/);
   assert.match(styles, /\.craft-plan-manager-backdrop \{ position: fixed; inset: 0;/);
+});
+
+test("Craft Calculator and Craft Plan target search use the provider-neutral local catalog", () => {
+  const calculator = readFileSync(new URL("../src/pages/CraftCalculatorPage.tsx", import.meta.url), "utf8");
+  const manager = readFileSync(new URL("../src/pages/CraftPlanManagerDialog.tsx", import.meta.url), "utf8");
+
+  for (const source of [calculator, manager]) {
+    assert.match(source, /\/catalog\/search\?q=/);
+    assert.doesNotMatch(source, /\/api\/bitjita|BITJITA_API|market\?q=|market\?search=/);
+  }
+  assert.doesNotMatch(calculator, /findOutputAliasDetail|augmentDetailWithOutputAlias/);
+  assert.doesNotMatch(calculator, /BitJita/);
+  assert.doesNotMatch(manager, /Search BitJita items/);
 });
 test("Dashboard shows Gather Next instead of Recent Activity", () => {
   const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
@@ -349,67 +372,53 @@ test("Dashboard shows Gather Next instead of Recent Activity", () => {
   assert.doesNotMatch(dashboard, /DashboardCardHeader title="Recent Activity"/);
 });
 
-test("Craft Planning catalog refresh stays in the scheduled job/admin layer, not page-load requests", () => {
+test("Craft Planning reads the continuously projected Relay catalog without a scheduled ingestion job", () => {
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
 
   assert.match(server, /createGameCatalogRepository/);
-  assert.match(server, /runRecipeCatalogRefreshJob/);
-  assert.match(server, /weekly@1@00:00/);
-  assert.match(server, /catalog database/);
-  assert.match(server, /\/api\/local\/admin\/craft-plan\/catalog-refresh/);
-  assert.match(server, /\/items/);
-  assert.match(server, /\/cargo/);
-  assert.match(server, /cursor_kind|cursorKind/);
-  assert.match(server, /recipeDetailHasPlanningMetadata/);
-  assert.match(server, /refreshKnownRecipeCatalogEntries/);
-  assert.match(server, /refreshCraftPlanProducerCatalog/);
-  assert.match(server, /GAME_CATALOG_REFRESH_DETAIL_DELAY_MS/);
-  assert.match(server, /await delay\(gameCatalogRefreshDetailDelayMs\)/);
-  assert.match(server, /GAME_CATALOG_NORMALIZATION_VERSION/);
-  assert.match(server, /catalogRefreshShouldResume\(previousRun, storedNormalizationVersion\)/);
-  assert.match(server, /game_catalog_normalization_version/);
-  assert.match(server, /fetchGameDataProbabilitySnapshot\(\{/);
-  assert.match(server, /replaceProbabilitySnapshot\(probabilitySource\)/);
-  assert.match(server, /listProbabilityEffortCandidates\(\)/);
-  assert.match(server, /replaceEffortWeights\(\s*effortCandidates,\s*CRAFT_PLAN_EFFORT_MODEL_VERSION/);
-  assert.match(server, /game_catalog_effort_model_version/);
-  assert.match(server, /scheduleGameCatalogNormalizationRefresh\(\)/);
+  assert.doesNotMatch(server, /runRecipeCatalogRefreshJob|recipe_catalog_refresh|game_catalog_refresh_runs|game_catalog_refresh_targets/);
+  assert.doesNotMatch(server, /\/api\/local\/admin\/craft-plan\/catalog-refresh/);
+  assert.doesNotMatch(server, /fetchGameDataProbabilitySnapshot|GAME_CATALOG_REFRESH_/);
 
-  const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?const bitjitaProxyCache/)?.[0] ?? "";
+  const computedCraftPlan = server.match(/async function computedCraftPlanResponse[\s\S]*?async function craftPlanDiscordReport/)?.[0] ?? "";
   assert.match(computedCraftPlan, /const catalogTargets = craftPlanCatalogTargets\(config\)/);
   assert.match(computedCraftPlan, /collectLocalCatalogCraftPlanDetails\([\s\S]*?gameCatalogRepository,[\s\S]*?catalogTargets,[\s\S]*?config\.routeOverrides,[\s\S]*?64,[\s\S]*?\[\],[\s\S]*?requireValidatedProbabilities: true/);
   assert.match(computedCraftPlan, /enrichCraftPlanSourcesFromLocalCatalog\(gameCatalogRepository, sources\.inventory, catalogWarnings\)/);
-  assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/inventories`/);
-  assert.match(computedCraftPlan, /fetchBitjita\(`\/claims\/\$\{encodeURIComponent\(claimId\)\}\/members`/);
+  assert.match(computedCraftPlan, /currentInventoryProjection\(claimId\)/);
+  assert.match(computedCraftPlan, /currentMembersProjection\(claimId\)/);
   assert.match(computedCraftPlan, /memberNames/);
-  assert.match(computedCraftPlan, /fetchBitjita\(`\/crafts\?claimEntityId=\$\{encodeURIComponent\(claimId\)\}&completed=false`/);
+  assert.match(computedCraftPlan, /currentCraftPlanProjection\(claimId\)/);
+  assert.match(computedCraftPlan, /craftPlanCurrentSourceRevision\(normalizedClaimId\)/);
+  assert.match(computedCraftPlan, /cached\.sourceRevision === sourceRevision/);
+  assert.match(computedCraftPlan, /existing\?\.sourceRevision === sourceRevision/);
+  assert.match(computedCraftPlan, /domains:\s*\["inventories",\s*"crafts"\]/);
   assert.match(computedCraftPlan, /config\.sourceRules\.craftPlayerIds/);
   assert.match(computedCraftPlan, /selectedPlayerInventoryIds\(config\.sourceRules\)/);
   assert.match(computedCraftPlan, /config\.sourceRules\.bankPlayerIds/);
+  assert.match(computedCraftPlan, /filterSelectedPlayerBankSources\(config\.sourceRules, sources\.banks\)/);
   assert.match(computedCraftPlan, /sources\.banks/);
   assert.match(computedCraftPlan, /bankSources/);
-  assert.match(computedCraftPlan, /\/players\/\$\{encodeURIComponent\(playerId\)\}\/crafts\?completed=all/);
-  assert.match(computedCraftPlan, /trackedCraftPlanOutputs\(craftPayloads, detailsByKey, claimId\)/);
-  assert.match(server, /trackedPassiveCraftPlanOutputs/);
-  assert.match(computedCraftPlan, /passive-crafts\?status=all/);
-  assert.match(computedCraftPlan, /type:\s*"Tracked passive crafts"/);
-  assert.match(computedCraftPlan, /activeCrafts:\s*\[[\s\S]*trackedCraftPlanOutputs[\s\S]*trackedPassiveCraftPlanOutputs/);
+  assert.match(computedCraftPlan, /trackedRelayCraftPlanOutputs\(\s*craftsPayload,\s*detailsByKey,\s*claimId,\s*config\.sourceRules\.craftPlayerIds/);
+  assert.doesNotMatch(computedCraftPlan, /fetchBitjita\([^)]*(?:\/crafts|passive-crafts)/);
+  assert.doesNotMatch(computedCraftPlan, /\/players\/\$\{encodeURIComponent\(playerId\)\}\/crafts\?completed=all/);
+  assert.doesNotMatch(computedCraftPlan, /passive-crafts\?status=all/);
   assert.match(computedCraftPlan, /craftPlanEffortBaselineKey/);
   assert.match(computedCraftPlan, /craftPlanEffortBaselineCache\.getOrCreate/);
   assert.match(computedCraftPlan, /compactCraftPlanEffortInput\(computeCraftPlan/);
   assert.match(computedCraftPlan, /calculateCraftPlanEffortProgress/);
   assert.match(computedCraftPlan, /effortProgress/);
   const playerInventoryLoop = computedCraftPlan.match(/for \(const playerId of selectedPlayerInventoryIds\(config\.sourceRules\)\)[\s\S]*?const livePlan/)?.[0] ?? "";
-  assert.equal((playerInventoryLoop.match(/\/players\/\$\{encodeURIComponent\(playerId\)\}\/inventories/g) ?? []).length, 1);
+  assert.equal((playerInventoryLoop.match(/relayPlayerDataService\.inventory/g) ?? []).length, 1);
   assert.match(playerInventoryLoop, /inventoryPlayerIds\.has\(playerId\)/);
-  assert.match(playerInventoryLoop, /bankPlayerIds\.has\(playerId\)/);
+  assert.match(playerInventoryLoop, /filterSelectedPlayerBankSources/);
   assert.doesNotMatch(computedCraftPlan, /recipeDetailFromCatalogOrFetch|addCraftPlanItemOutputDetails|addCraftPlanCargoDerivationDetails|collectRecipeDetails|enrichCraftPlanSourceItems|fetchCraftPlanItemDetail/);
 });
 
-test("Craft Planning serves a compact live board and lazy item drilldowns", () => {
+test("Craft Planning serves a compact live board and lazy item drilldowns", async () => {
   const server = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const page = readFileSync(new URL("../src/pages/CraftPlanningPage.tsx", import.meta.url), "utf8");
-  const bitjitaEndpoints = readFileSync(new URL("../src/api/bitjitaEndpoints.ts", import.meta.url), "utf8");
+  const gameDataLoader = readFileSync(new URL("../src/api/gameDataLoader.ts", import.meta.url), "utf8");
+  const { pageDomains } = await import(new URL("../src/api/pageDomains.ts", import.meta.url).href);
 
   assert.match(server, /computedCompactCraftPlanResponse/);
   assert.match(server, /createCraftPlanResponseWorkspace/);
@@ -427,7 +436,9 @@ test("Craft Planning serves a compact live board and lazy item drilldowns", () =
   assert.match(page, /Confirmed stock and guaranteed active crafts/);
   assert.match(page, /Effort progress unavailable/);
   assert.doesNotMatch(page, /needsBoardCompletion/);
-  assert.match(bitjitaEndpoints, /activePanel === "planning"/);
+  assert.deepEqual(pageDomains("planning"), []);
+  assert.match(gameDataLoader, /const domains = pageDomains\(activePanel\)/);
+  assert.doesNotMatch(gameDataLoader, /legacyPageEndpoint|\/api\/bitjita/);
 });
 
 test("Craft Planning explains unavailable producer yields and labels logistics routes", () => {

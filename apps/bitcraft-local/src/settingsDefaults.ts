@@ -1,5 +1,6 @@
 import { DEFAULT_THEME } from "./theme";
 import type { AppSettings, DiscordPresence, DiscordRolePanel, DiscordWelcomeFlow } from "./types/settings";
+import { createDefaultRolePanels } from "./discordRolePanelDefaults.mjs";
 export { DEFAULT_USER_TOAST_SETTINGS } from "./notifications/userToastSettings";
 
 /*
@@ -82,40 +83,7 @@ export const DEFAULT_COLOUR_ROLES = [
   { key: "white", label: "White", roleName: "White", roleId: "", color: 0xf4f4f4 },
 ];
 
-export const DEFAULT_ROLE_PANELS: DiscordRolePanel[] = [
-  {
-    key: "access",
-    label: "Access Roles",
-    channelId: "",
-    messageId: "",
-    title: "Welcome to Timbersteel Trade!",
-    description: "Choose your access role below.",
-    mode: "single",
-    showHelperText: true,
-    options: [
-      { key: "citizen", label: "Citizen", roleId: "", emoji: "1" },
-      { key: "visitor", label: "Visitor", roleId: "", emoji: "2" },
-    ],
-  },
-  {
-    key: "professions",
-    label: "Profession Roles",
-    channelId: "",
-    messageId: "",
-    title: "Choose Your Professions",
-    description: "Select as many profession interests as you like.",
-    mode: "multi",
-    showHelperText: true,
-    options: Object.keys(DEFAULT_CRAFT_ROLES).map((key) => ({
-      key,
-      label: key === "leatherworking" ? "Leatherworking" : key[0].toUpperCase() + key.slice(1),
-      roleId: DEFAULT_CRAFT_ROLES[key],
-      emoji: "",
-    })),
-  },
-  { key: "events", label: "Event Roles", channelId: "", messageId: "", title: "Event Roles", description: "Choose event pings you want.", mode: "multi", showHelperText: true, options: [] },
-  { key: "timezones", label: "Timezone Roles", channelId: "", messageId: "", title: "Timezone Roles", description: "Choose your timezone group.", mode: "single", showHelperText: true, options: [] },
-];
+export const DEFAULT_ROLE_PANELS: DiscordRolePanel[] = createDefaultRolePanels(DEFAULT_CRAFT_ROLES);
 
 export const DEFAULT_WELCOME_FLOW: DiscordWelcomeFlow = {
   enabled: false,
@@ -136,28 +104,6 @@ export const DEFAULT_DISCORD_PRESENCE: DiscordPresence = {
 
 export const DISCORD_CHANNEL_FIELDS = Object.keys(DEFAULT_DISCORD_CHANNELS);
 
-export const DEFAULT_COLLECTOR_SETTINGS: AppSettings["collectorSettings"] = {
-  // Background collectors support local history, notifications, diagnostics,
-  // and cached tools. Live public pages primarily read BitJita through the local
-  // proxy, so these intervals are not the same as the browser display refresh.
-  claim: { label: "Claim", enabled: true, intervalSeconds: 30 },
-  members: { label: "Members", enabled: true, intervalSeconds: 30 },
-  players: { label: "Player details", enabled: true, intervalSeconds: 60 },
-  professions: { label: "Professions", enabled: true, intervalSeconds: 30 },
-  production: { label: "Production", enabled: true, intervalSeconds: 30 },
-  inventory: { label: "Inventory and storage", enabled: true, intervalSeconds: 60 },
-  construction: { label: "Construction", enabled: true, intervalSeconds: 60 },
-  research: { label: "Research", enabled: true, intervalSeconds: 600 },
-  market: { label: "Market", enabled: true, intervalSeconds: 60 },
-  region: { label: "Region", enabled: true, intervalSeconds: 300 },
-  mapCatalog: { label: "Map/catalog", enabled: true, intervalSeconds: 600 },
-  marketListings: { label: "Market listing sync", enabled: true, intervalSeconds: 60 },
-  empireMembership: { label: "Empire membership history", enabled: true, intervalSeconds: 60 },
-  productionContributions: { label: "Production contribution sync", enabled: true, intervalSeconds: 300 },
-  storageActivity: { label: "Storage activity", enabled: true, intervalSeconds: 60 },
-  marketTrades: { label: "Member market trades", enabled: true, intervalSeconds: 60 },
-};
-
 export const DEFAULT_SETTINGS: AppSettings = {
   claimId: DEFAULT_CLAIM_ID,
   syncUrl: DEFAULT_SYNC_URL,
@@ -165,15 +111,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: DEFAULT_THEME,
   refreshSeconds: 30,
   serverRefreshSeconds: 30,
-  collectorSettings: DEFAULT_COLLECTOR_SETTINGS,
   defaultPage: "dashboard",
-  defaultRegion: "",
+  defaultRegion: "19",
   additionalActiveRegions: "",
   toastSettings: { marketListings: true, marketSales: true, production: true },
-  marketDealWatch: { maxWatchesPerUser: 10, thresholdPercent: 30, minConfirmedSales: 3, discordDmEnabled: true },
+  marketDealWatch: { maxWatchesPerUser: 10, thresholdPercent: 30, minActiveListings: 3, discordDmEnabled: true },
   branding: {},
   visitorSecurity: { fullIpRetentionDays: 7, statsRetentionDays: 180, geoipProvider: "ipapi", geoipCacheDays: 30, geoipSourceUrl: "", geoipAccountId: "", geoipLicenseKey: "", geoipLicenseKeyConfigured: false },
-  browserSnapshotsEnabled: true,
   discord: {
     enabled: false,
     applicationId: "",

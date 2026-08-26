@@ -1,4 +1,5 @@
-import { toNumber, type AnyRecord } from "../main-app-data";
+import { toNumber, type AnyRecord } from "../main-app-data.ts";
+export { gameIconSources, gameIconUrl } from "./gameAssets.mjs";
 
 export function catalogEntries(catalog: unknown): AnyRecord[] {
   if (Array.isArray(catalog)) return catalog;
@@ -15,19 +16,20 @@ export function playerInventoryItems(payload: AnyRecord | null | undefined, inve
       const itemType = contents.itemType ?? contents.item_type;
       if (itemId == null || itemType === 1 || itemType === "cargo") return [];
       const item = lookup.get(String(itemId));
-      return item ? [{ ...item, quantity: toNumber(contents.quantity), inventoryName: inventory.inventoryName ?? "Inventory" }] : [];
+      return item ? [{
+        ...item,
+        quantity: typeof contents.quantity === "bigint"
+          ? contents.quantity.toString()
+          : contents.quantity ?? "0",
+        inventoryName: inventory.inventoryName ?? "Inventory",
+      }] : [];
     }));
 }
 
 export function playerToolbeltTools(payload: AnyRecord | null | undefined): AnyRecord[] {
-  return playerInventoryItems(payload, "Toolbelt").filter((item) => String(item.tag ?? item.tags ?? "").includes("Tool"));
-}
-
-export function bitjitaIconUrl(item: AnyRecord | null | undefined): string | null {
-  const raw = String(item?.iconAssetName ?? item?.icon_asset_name ?? item?.iconAddress ?? item?.icon_address ?? "").replaceAll("\\", "/").replace(/^\/+/, "").replace(/\.webp$/i, "");
-  if (!raw || raw === "\uFFEE") return null;
-  const path = raw.startsWith("Items/") ? `GeneratedIcons/${raw}` : raw;
-  return `https://bitjita.com/${path}.webp`;
+  return playerInventoryItems(payload, "Toolbelt").filter((item) => (
+    item.toolType != null || String(item.tag ?? item.tags ?? "").includes("Tool")
+  ));
 }
 
 export function isMarketableItem(item: AnyRecord): boolean {
@@ -64,34 +66,29 @@ export function visibleEquipmentSlots(slots: AnyRecord[]): AnyRecord[] {
   return [...visible, ...unexpectedEquipped];
 }
 
-function equipmentSignature(slots: AnyRecord[]): string {
-  return slots
-    .map((slot: AnyRecord) => `${slot.primary}:${slot.item?.id ?? "empty"}`)
-    .sort()
-    .join("|");
-}
-
 export function equipmentPresets(payload: AnyRecord | null | undefined, fallbackSlots: AnyRecord[]): AnyRecord[] {
-  const presets = Array.isArray(payload?.presets) ? payload.presets : [];
-  const activePreset = presets.find((preset: AnyRecord) => preset.active);
-  const currentSlots = fallbackSlots.length ? fallbackSlots : activePreset ? equipmentSlots(activePreset) : [];
-  const currentSignature = equipmentSignature(currentSlots);
-  const alternatePreset = presets.find((preset: AnyRecord) => {
-    const slots = equipmentSlots(preset);
-    return slots.some((slot: AnyRecord) => slot.item) && equipmentSignature(slots) !== currentSignature;
-  });
-  return [1, 2].map((index) => {
-    const preset = index === 2 ? alternatePreset : activePreset;
-    const slots = index === 1 ? currentSlots : preset ? equipmentSlots(preset) : [];
-    const presetTwoActive = Boolean(alternatePreset?.active);
-    return {
-      id: String(index === 1 ? "current-equipment" : preset?.entityId ?? preset?.id ?? `preset-${index}`),
-      label: `Preset ${index}`,
-      active: index === 2 ? presetTwoActive : !presetTwoActive,
-      reported: index === 1 ? currentSlots.length > 0 : Boolean(preset),
-      slots,
-    };
-  });
+  const presets = (Array.isArray(payload?.presets) ? payload.presets : [])
+    .slice()
+    .sort((left: AnyRecord, right: AnyRecord) => toNumber(left.index) - toNumber(right.index));
+  const currentSlots = fallbackSlots.length
+    ? fallbackSlots
+    : equipmentSlots(presets.find((preset: AnyRecord) => preset.active) ?? {});
+  return [
+    {
+      id: "current-equipment",
+      label: "Current Gear",
+      active: true,
+      reported: currentSlots.length > 0,
+      slots: currentSlots,
+    },
+    ...presets.map((preset: AnyRecord, index: number) => ({
+      id: String(preset.entityId ?? preset.id ?? `preset-${index + 1}`),
+      label: `Preset ${index + 1}`,
+      active: false,
+      reported: true,
+      slots: equipmentSlots(preset),
+    })),
+  ];
 }
 
 export function equippedCount(slots: AnyRecord[]): number {

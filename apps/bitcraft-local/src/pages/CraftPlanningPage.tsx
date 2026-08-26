@@ -123,6 +123,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [detailError, setDetailError] = React.useState<string | null>(null);
   const detailRequestRef = React.useRef(0);
+  const detailAbortControllerRef = React.useRef<AbortController | null>(null);
   const [itemDetailFeedback, setItemDetailFeedback] = React.useState<ItemDetailFeedback | null>(null);
   const [rowOverrideError, setRowOverrideError] = React.useState<string | null>(null);
   const [routeSavePendingId, setRouteSavePendingId] = React.useState<string | null>(null);
@@ -132,6 +133,17 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   React.useEffect(() => {
     selectedNeedRef.current = selectedNeed;
   }, [selectedNeed]);
+
+  React.useEffect(() => {
+    detailAbortControllerRef.current?.abort();
+    detailAbortControllerRef.current = null;
+    detailRequestRef.current += 1;
+    return () => {
+      detailAbortControllerRef.current?.abort();
+      detailAbortControllerRef.current = null;
+      detailRequestRef.current += 1;
+    };
+  }, [claimId, request?.sequence]);
 
   React.useEffect(() => {
     fetch(`${LOCAL_API}/admin/me`)
@@ -151,7 +163,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
         if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
         if (stale) return;
         setPlan(body);
-        if (request && selectedNeedRef.current) await openNeedDetail(selectedNeedRef.current);
+        if (request && selectedNeedRef.current) await openNeedDetail(selectedNeedRef.current, true);
       });
     void trackPromise("craft-plan", refresh)
       .catch((err) => {
@@ -166,7 +178,10 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     };
   }, [claimId, managerRefreshToken, refreshToken, request?.sequence, trackPromise]);
 
-  async function openNeedDetail(cell: NeedCell) {
+  async function openNeedDetail(cell: NeedCell, propagateError = false) {
+    detailAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    detailAbortControllerRef.current = controller;
     const requestId = ++detailRequestRef.current;
     const nextItemKey = cell.items?.[0]?.key ?? itemKey(cell.item);
     setItemDetailFeedback((current) => current?.itemKey === nextItemKey ? current : null);
@@ -176,7 +191,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
     setDetailLoading(true);
     try {
       const keys = [...new Set(cell.items.map(itemKey).filter(Boolean))];
-      const detail = fetch(`${LOCAL_API}/craft-plan/detail?claimId=${encodeURIComponent(claimId)}&keys=${encodeURIComponent(keys.join(","))}`, { headers: manualRefreshHeaders(request, "planning") })
+      const detail = fetch(`${LOCAL_API}/craft-plan/detail?claimId=${encodeURIComponent(claimId)}&keys=${encodeURIComponent(keys.join(","))}`, { headers: manualRefreshHeaders(request, "planning"), signal: controller.signal })
         .then(async (response) => {
           const body = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
@@ -189,13 +204,18 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
       setSelectedNeed({ ...cell, item: items[0] ?? cell.item, items });
       setDetailSteps(Array.isArray(body.steps) ? body.steps : []);
     } catch (detailFetchError) {
-      if (requestId === detailRequestRef.current) setDetailError(detailFetchError instanceof Error ? detailFetchError.message : String(detailFetchError));
+      const wasAborted = detailFetchError instanceof Error && detailFetchError.name === "AbortError";
+      if (!wasAborted && requestId === detailRequestRef.current) setDetailError(detailFetchError instanceof Error ? detailFetchError.message : String(detailFetchError));
+      if (propagateError) throw detailFetchError;
     } finally {
+      if (detailAbortControllerRef.current === controller) detailAbortControllerRef.current = null;
       if (requestId === detailRequestRef.current) setDetailLoading(false);
     }
   }
 
   function closeNeedDetail() {
+    detailAbortControllerRef.current?.abort();
+    detailAbortControllerRef.current = null;
     detailRequestRef.current += 1;
     setSelectedNeed(null);
     setDetailSteps([]);
@@ -327,7 +347,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
                     <strong>{craft.passive ? `Passive craft · ${craft.buildingName ?? "Unknown structure"}` : craft.buildingName ?? "Crafting station"}</strong>
                     <small>{craft.playerName ?? "Unknown player"} - {craft.status ?? (craft.completed ? "Ready to collect" : "In progress")}</small>
                   </>}
-                  {craft.locationUnknown ? <small>Location not reported by BitJita</small> : null}
+                  {craft.locationUnknown ? <small>Location not reported by Relay</small> : null}
                 </span>
                 <span className="craft-plan-tracked-craft-totals"><strong>{quantity(craft.expectedQuantity ?? craft.quantity)} expected</strong><small>{quantity(craft.guaranteedQuantity)} guaranteed</small></span>
               </div>)}
@@ -607,7 +627,7 @@ export function CraftPlanningPage({ claimId, refreshToken }: { claimId: string; 
   return (
     <div className="panel craft-planning-page">
       <header className="page-header split-header craft-plan-page-header">
-        <div>
+        <div className="route-title-copy">
           <h2><ClipboardList size={24} /> Craft Planning</h2>
           <p>{hasPlan ? String(config.name ?? "Settlement craft plan") : "Admin-controlled procurement board for settlement crafting goals."}</p>
         </div>

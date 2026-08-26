@@ -45,7 +45,7 @@ test("Craft planning item details use an intentional loading strip and close con
   const loadingMatch = css.match(/\.craft-plan-detail-loading\s*\{([^}]+)\}/);
   assert.ok(loadingMatch, "detail loading-strip CSS should exist");
   assert.match(loadingMatch[1], /display:\s*flex/);
-  assert.match(loadingMatch[1], /border-radius:\s*8px/);
+  assert.match(loadingMatch[1], /border-radius:\s*var\(--radius-panel\)/);
   assert.match(loadingMatch[1], /background:/);
 
   const closeMatch = css.match(/\.craft-plan-need-detail \.modal-header \.icon-button\s*\{([^}]+)\}/);
@@ -310,6 +310,17 @@ test("Craft planning route cards and calculations wrap without horizontal scroll
   assert.match(css, /\.craft-plan-route-option:has\(input:focus-visible\)\s*\{/);
   assert.match(css, /\.craft-plan-route-option strong,[\s\S]*white-space:\s*normal;[\s\S]*overflow-wrap:\s*anywhere;/);
   assert.match(css, /\.craft-plan-calculation-body\s*\{[^}]*display:\s*grid[^}]*min-width:\s*0/s);
+});
+
+test("craft plan manager uses a roomy viewport-bound bank workspace", () => {
+  const css = readFileSync(new URL("../src/styles/craft-planning.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.craft-plan-manager\s*\{[^}]*width:\s*min\(1680px,\s*calc\(100vw - 24px\)\)[^}]*max-height:\s*calc\(100dvh - 24px\)/s);
+  assert.match(css, /\.craft-plan-bank-toolbar\s*\{/);
+  assert.match(css, /\.craft-plan-bank-group\s*\{/);
+  assert.match(css, /\.craft-plan-bank-grid\s*\{[^}]*minmax\(340px,\s*1fr\)/s);
+  assert.match(css, /@media[^}]*max-width:\s*900px[^}]*\{[\s\S]*?\.craft-plan-manager\s*\{[^}]*width:\s*100vw[^}]*max-height:\s*100dvh/s);
+  assert.match(css, /@media[^}]*max-width:\s*700px[^}]*\{[\s\S]*?\.craft-plan-bank-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
 });
 
 test("Overall Needs Board progress sits on the left and shares section completion tones", () => {

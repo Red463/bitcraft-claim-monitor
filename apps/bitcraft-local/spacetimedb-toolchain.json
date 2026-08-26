@@ -1,0 +1,21 @@
+{
+  "cli": {
+    "version": "2.7.0",
+    "releaseTag": "v2.7.0-hotfix3",
+    "releaseUrl": "https://github.com/clockworklabs/SpacetimeDB/releases/tag/v2.7.0-hotfix3",
+    "artifacts": {
+      "windowsX86_64": {
+        "name": "spacetime-x86_64-pc-windows-msvc.zip",
+        "sha256": "d64a6b1ccb214892ee22571d71fc1cbd105a5f23a560d440a77843e8cec557e7"
+      },
+      "linuxX86_64": {
+        "name": "spacetime-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "d25c6c9e4ec5d52fe43cd7d37aaf43b9f4d4fa2d228b6ecd241ba75bdae99831"
+      }
+    }
+  },
+  "sdk": {
+    "package": "spacetimedb",
+    "version": "2.7.0"
+  }
+}

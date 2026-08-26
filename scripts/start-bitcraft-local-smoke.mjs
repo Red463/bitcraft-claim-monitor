@@ -4,6 +4,8 @@ import { request } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { smokeServerEnvironment } from "./smoke-server-environment.mjs";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const appDir = path.join(repoRoot, "apps", "bitcraft-local");
 const distIndex = path.join(appDir, "dist", "index.html");
@@ -12,7 +14,8 @@ const pidFile = path.join(logDir, "bitcraft-local-smoke.pid");
 const port = String(process.env.APP_PORT ?? process.env.PORT ?? "18449");
 const healthUrl = `http://127.0.0.1:${port}/api/local/health`;
 const shouldRestart = process.argv.includes("--restart");
-const shouldForceRestart = process.argv.includes("--force-restart");
+const shouldAdminReview = process.argv.includes("--admin-review");
+const shouldForceRestart = process.argv.includes("--force-restart") || shouldAdminReview;
 
 mkdirSync(logDir, { recursive: true });
 
@@ -155,17 +158,12 @@ async function main() {
       cwd: appDir,
       detached: true,
       stdio: ["ignore", out, err],
-      env: {
-        ...process.env,
-        APP_HOST: "127.0.0.1",
-        APP_PORT: port,
-        SERVE_STATIC: "true",
-        BITCRAFT_PROCESS_ROLE: "web",
-        ENABLE_SERVER_POLLING: "false",
-        ENABLE_SCHEDULED_JOBS: "false",
-        ENABLE_DISCORD_STARTUP: "false",
-        BITCRAFT_LOCAL_DATA_DIR: path.join(repoRoot, ".dev-data"),
-      },
+      env: smokeServerEnvironment({
+        inherited: process.env,
+        repoRoot,
+        adminReview: shouldAdminReview,
+        port,
+      }),
     });
 
     writeFileSync(pidFile, `${child.pid}\n`);

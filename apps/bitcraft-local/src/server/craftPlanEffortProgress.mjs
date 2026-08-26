@@ -247,7 +247,7 @@ export function unavailableCraftPlanEffortProgress() {
       missingWeightCount: 0,
       missingWeightKeys: [],
     },
-    warnings: ["Effort progress is unavailable until the planner catalog refresh completes."],
+    warnings: ["Effort progress is unavailable until compatible Relay catalog data is ready."],
   };
   return {
     modelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
@@ -337,7 +337,7 @@ export function calculateCraftPlanEffortProgress({
         missingWeightKeys: missingWeightKeys.slice(0, MAX_MISSING_WEIGHT_KEYS),
       },
       warnings: missingWeightKeys.length
-        ? [`Effort progress uses a neutral one-action estimate for ${missingWeightKeys.length} required material${missingWeightKeys.length === 1 ? "" : "s"} because BitJita does not expose verified gathering yields for them.`]
+        ? [`Effort progress uses a neutral one-action estimate for ${missingWeightKeys.length} required material${missingWeightKeys.length === 1 ? "" : "s"} because verified gathering yields are unavailable for them.`]
         : [],
     };
   };

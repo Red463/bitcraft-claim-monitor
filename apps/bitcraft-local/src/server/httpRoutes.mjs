@@ -4,12 +4,13 @@ export function securityHeaders(headers = {}) {
   return {
     "content-security-policy": [
       "default-src 'self'",
-      "script-src 'self'",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "img-src 'self' data: blob: https:",
+      "script-src 'self' https://do.featurebase.app",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://do.featurebase.app",
+      "img-src 'self' data: https://cdn.discordapp.com https://*.featurebase.app https://*.featurebase-attachments.com https://fb-usercontent.fra1.cdn.digitaloceanspaces.com",
       "font-src 'self' data: https://fonts.gstatic.com",
-      "connect-src 'self' https://bitjita.com https://discord.com",
-      "frame-src https://bitcraftsync.app https://bitcraftmap.com https://bccodex.com",
+      "connect-src 'self' https://*.featurebase.app wss://*.featurebase.app",
+      "frame-src https://bitcraftsync.app https://bccodex.com https://*.featurebase.app",
+      "media-src https://*.featurebase.app https://*.featurebase-attachments.com",
       "object-src 'none'",
       "base-uri 'self'",
       "form-action 'self'",
@@ -43,13 +44,15 @@ export function mimeType(filePath) {
 export function staticCacheControl(filePath) {
   return String(filePath).endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable";
 }
+export function shouldFallbackToFrontend(pathname) {
+  return !String(pathname).startsWith("/game-icons/");
+}
 export function routeGroup(pathname) {
   if (pathname.startsWith("/api/local/admin")) return "admin";
   if (pathname.startsWith("/api/local/auth") || pathname.startsWith("/api/local/user")) return "auth";
   if (pathname.startsWith("/api/discord")) return "discord";
-  if (pathname.startsWith("/api/bitjita")) return "bitjita-proxy";
   if (pathname.startsWith("/api/local")) return "local-api";
-  if (pathname.startsWith("/assets/") || pathname === "/favicon.svg" || pathname === "/favicon.ico") return "static";
+  if (pathname.startsWith("/assets/") || pathname.startsWith("/game-icons/") || pathname === "/favicon.svg" || pathname === "/favicon.ico") return "static";
   return "app";
 }
 

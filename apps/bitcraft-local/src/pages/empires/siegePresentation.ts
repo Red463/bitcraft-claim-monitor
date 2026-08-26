@@ -20,9 +20,21 @@ export function groupSiegeParticipants(tower: AnyRecord) {
     .sort((a, b) => a.time - b.time);
   return {
     attackers: participants.filter((entry) => entry.attacker === true),
-    defenders: participants.filter((entry) => entry.attacker !== true),
+    defenders: participants.filter((entry) => entry.attacker === false),
+    unknown: participants.filter((entry) => entry.attacker !== true && entry.attacker !== false),
     startedAt: starts[0]?.raw ?? null,
   };
+}
+
+export function siegeParticipantKey(
+  participant: AnyRecord,
+  role: "attacker" | "defender" | "unknown",
+  index: number,
+): string {
+  const entityId = String(participant.entityId ?? "").trim();
+  if (entityId) return `${role}:${entityId}`;
+  const empireId = String(participant.empireEntityId ?? participant.empireId ?? "").trim();
+  return `${role}:${empireId || "unknown"}:${index}`;
 }
 
 export function siegeDurationLabel(startedAt: unknown, now = Date.now()): string {

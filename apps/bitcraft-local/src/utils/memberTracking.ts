@@ -4,7 +4,7 @@ import { normalizeData } from "./normalize";
 
 // "Excluded members" are configured by admins for people who technically belong
 // to the claim but should not be shown in settlement operations. Matching uses
-// both stable ids and names because BitJita payloads are not completely
+// both stable ids and names because historic payloads are not completely
 // consistent about which identifier is present in every domain.
 export function memberTrackingId(member: AnyRecord | null | undefined): string {
   return String(

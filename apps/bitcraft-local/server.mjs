@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
 import { setDefaultResultOrder } from "node:dns";
@@ -10,40 +10,119 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseMemberPermissions } from "./shared/member-permissions.mjs";
-import { mimeType, routeGroup, securityHeaders, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
+import { resolveRequestHostProfile } from "./src/server/public/hostProfiles.mjs";
+import { publicFeatureFlags, routeHostProfileRequest } from "./src/server/public/router.mjs";
+import { createPublicApiRouter, createPublicCatalogService, createPublicDataService } from "./src/server/public/publicData.mjs";
+import { resolvePublicDiscordOAuthConfig } from "./src/server/public/auth.mjs";
+import { createPublicAuthRouter } from "./src/server/public/authRouter.mjs";
+import { createPublicIdentityRepository } from "./src/server/public/identity.mjs";
+import { createPublicPlanRouter } from "./src/server/public/planRouter.mjs";
+import { createPublicPlanComputationService, createPublicPlanRepository } from "./src/server/public/publicPlans.mjs";
+import { createPublicModerationRepository } from "./src/server/public/moderation.mjs";
+import { createPublicAdminRouter } from "./src/server/public/adminRouter.mjs";
+import { mimeType, routeGroup, securityHeaders, shouldFallbackToFrontend, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
+import { createGameIconFallbackService, serveGameIconRequest } from "./src/server/gameIconFallback.mjs";
 import { parseCookies, serializeHttpOnlyCookie } from "./src/server/httpCookies.mjs";
 import { originFromRequest as requestOriginFromRequest, requestLogPolicy, safeReturnPath, sameOriginRequest as requestSameOriginRequest } from "./src/server/httpRequests.mjs";
 import { appUserCsrfToken, csrfToken, validCsrfHeader } from "./src/server/httpCsrf.mjs";
 import { BODY_LIMITS, readJson, readRawBody } from "./src/server/httpBodies.mjs";
 import { createRateLimiter, RATE_LIMITS, requestAddress } from "./src/server/httpRateLimit.mjs";
+import { createHeavyRouteGate, createRoutePerformanceTelemetry, normalizeRoutePerformancePath, sendHeavyRouteCapacityResponse } from "./src/server/routePerformance.mjs";
 import { anonymizeIpAddress, createIpHasher, normalizeIpAddress } from "./src/server/visitorIp.mjs";
 import { normalizeVisitorSecuritySettings } from "./src/server/visitorSecuritySettings.mjs";
 import { publicNotificationActivityEvent } from "./src/server/notificationActivity.mjs";
+import { projectCraftContributionEnvelope } from "./src/server/craftContributionProjection.mjs";
+import { projectCraftContributionLeaderboard } from "./src/server/craftContributionLeaderboard.mjs";
+import { partitionCraftContributionRows, readCraftContributionDiagnostics } from "./src/server/craftContributionVisibility.mjs";
 import { dealAlertDiscordPayload, publicDealAlertRow } from "./src/server/dealAlerts.mjs";
-import { nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
-import { bitjitaTimestampIso, marketEventSourceKey, normalizeListing, tradeMatchesListing } from "./src/server/marketActivity.mjs";
-import { craftDisplayName, isCompletedProductionJob, normalizeProductionJob, normalizeProfessionKey, productionMetrics } from "./src/server/productionActivity.mjs";
-import { recipeCatalogKey, recipeDetailHasPlanningMetadata, recipeTargetFromDetail, recipeTargetFromRow } from "./src/server/recipeCatalog.mjs";
+import { createOperationalHistoryRetentionDryRunJob, nextScheduledRunIso, parseScheduledJobSchedule, publicScheduledJobRow, recoverStaleScheduledJobs as recoverStaleScheduledJobsRegistry, scheduledJobsStatus as scheduledJobsStatusResponse, scheduledJobScheduleLabel, seedScheduledJobs as seedScheduledJobsRegistry, serializeScheduledJobSchedule } from "./src/server/scheduledJobs.mjs";
+import { gameTimestampIso, normalizeListing } from "./src/server/marketActivity.mjs";
+import { currentMarketListings, marketLeaderboardFromCurrent } from "./src/server/currentMarketViews.mjs";
 import {
-  GAME_CATALOG_NORMALIZATION_VERSION,
-  catalogNormalizationNeedsRefresh,
-  catalogRefreshShouldResume,
-  createGameCatalogRepository,
-} from "./src/server/gameCatalog.mjs";
-import { fetchGameDataProbabilitySnapshot } from "./src/server/gameDataProbabilitySource.mjs";
+  buyOrderBaselineKey,
+  readBuyOrderSaleBaselines,
+} from "./src/server/buyOrderSaleBaselines.mjs";
+import {
+  compactRelayMarketTransitionEvents,
+  createRelayMarketTransitionWriter,
+  deriveRelayMarketTransitions,
+} from "./src/server/relayMarketTransitions.mjs";
+import { createMarketTransitionDispatcher } from "./src/server/marketTransitionDispatcher.mjs";
+import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
+import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
+import { readyMarketRegionIds } from "./src/server/marketRegionScope.mjs";
+import { mapResourceRegionCatalog, nameMapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
+import { MAP_RESOURCE_LEASE_ACQUISITION_LIMIT, MapResourcePageError, buildMapResourcePartitionPayload, createMapResourceCursorCodec, mapResourceSelectionLeasePlan, parseMapResourcePartitionScope, parseMapResourceSelectionScope } from "./src/server/mapResourcePages.mjs";
+import {
+  MapResourceBinaryRouteError,
+  binaryPartitionRecoveryResponse,
+  binaryPartitionResponse,
+  createMapResourceEventLeaseAcquisition,
+  initialMapResourcePartitionEvent,
+  parseMapResourceBinaryScope,
+  publicMapResourcePartitionEvent,
+  runWithConcurrency,
+} from "./src/server/mapResourceBinaryRoute.mjs";
+import { MapSnapshotError, authorizedMapPlayerIds, buildMapSnapshot, combineMapSpatialSnapshots, mapRequestAccess, parseMapScope } from "./src/server/mapSnapshot.mjs";
+import { serveLocalMapTile } from "./src/server/mapTiles.mjs";
+import { createTerrainTileStore } from "./src/server/terrainTileStore.mjs";
+import { createRoadTileStore } from "./src/server/roadTileStore.mjs";
+import { createMapPerformanceTelemetry, publicMapHealth, shouldRecordMapRequestLatency } from "./src/server/mapPerformance.mjs";
+import { createRelayClaimScopeFence } from "./src/server/relayClaimScopeFence.mjs";
+import { createRelayProductionLifecycleCoordinator } from "./src/server/relayProductionLifecycleCoordinator.mjs";
+import { createRelaySettlementTransitionCoordinator } from "./src/server/relaySettlementTransitionCoordinator.mjs";
+import { relayReconnectDelayMs } from "./src/server/relayRuntimeBackoff.mjs";
+import {
+  empireClaimMembersView,
+  empireDetailsView,
+  empireOverviewView,
+  empireSnapshotStatus,
+  empireWatchtowersView,
+} from "./src/server/empireViews.mjs";
+import {
+  combinedMarketStatus,
+  globalCatalogStatus,
+  regionalBuyOrdersView,
+  regionalMarketCatalogView,
+  regionalMarketDealsView,
+  regionalMarketFavoriteQuotesView,
+  regionalMarketFavoriteItemsView,
+  regionalMarketOverviewView,
+  regionalMarketOrderBookView,
+  regionalMarketPriceHistoryView,
+  regionalMarketPriceQuote,
+  regionalMarketStallsView,
+  regionalMarketStatus,
+} from "./src/server/regionalMarketViews.mjs";
+import { craftDisplayName, normalizeProfessionKey, productionMetrics } from "./src/server/productionActivity.mjs";
+import { createGameCatalogRepository } from "./src/server/gameCatalog.mjs";
+import { createProviderCatalogRepository } from "./src/server/catalogRepository.mjs";
 import { buildProbabilityWorkbookBuffer } from "./src/server/probabilityWorkbook.mjs";
-import { classifyCatalogRefreshError, parseRetryAfterMs, withCatalogRefreshTargetContext } from "./src/server/catalogRefreshRecovery.mjs";
 import { defaultDiscordSettings, normalizeDiscordPresence, normalizeDiscordRolePanel, normalizeDiscordSettings, normalizeDiscordWelcomeFlow } from "./src/server/discordSettings.mjs";
+import { unavailableDiscordDiscovery } from "./src/server/discordDiscoveryAvailability.mjs";
 import { resolveDiscordChannelSelection } from "./src/server/discordNotifications.mjs";
 import { discordEmbedForActivity as buildDiscordEmbedForActivity } from "./src/server/discordEmbeds.mjs";
+import {
+  canonicalCutoverDiscordDelivery,
+} from "./src/server/canonicalCutoverAnnouncement.mjs";
+import { completeDiscordOutboxFailure, createDiscordOutboxLeaser } from "./src/server/discordOutboxLease.mjs";
+import { fetchDiscordWithLease } from "./src/server/discordRequestLease.mjs";
 import { marketSaleDiscordRecipientDecision } from "./src/server/marketSaleDiscordRecipients.mjs";
 import { parseYouTubeFeed, resolveYouTubeChannelInput, youtubeFeedUrl, youtubeVideosToNotify } from "./src/server/youtubeMonitor.mjs";
-import { collectorCurrentTables, collectorPrimaryPayloadDomain, domainPayloadKeys, normalizeCollectorSettings, payloadDomainCollector, payloadDomainsForCollectors } from "./src/server/collectorSettings.mjs";
+import {
+  createScheduledRelayReconciler,
+  readRelayClaimBuildingsForPlanning,
+  readRelayClaimForSupplyReport,
+  readRelayCraftsForDiscord,
+  readRelayOnlineMembers,
+  runIndependentReconciliation,
+} from "./src/server/relayReconciliation.mjs";
 import { normalizeMarketDealWatchSettings } from "./src/server/marketDealWatchSettings.mjs";
+import { evaluateLiveDealWatches, sameEnabledDealWatchRevision } from "./src/server/liveDealWatch.mjs";
 import { normalizePopupConfig, publicPopups } from "./src/server/appPopups.mjs";
 import { ACCESS_CONTROL_TARGETS, ACCESS_RULE_MODES, normalizeAccessControlConfig, publicEffectiveAccess, resetLegacyMarketAccessRules } from "./src/access/accessControl.mjs";
-import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, createCraftPlanResponseWorkspace, craftPlanAuditDetails, craftPlanAuditLimit, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanAuditRows, normalizeCraftPlanConfig, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
+import { collectLocalCatalogCraftPlanDetails, computeCraftPlan, createCraftPlanResponseWorkspace, craftPlanAuditDetails, craftPlanAuditLimit, craftPlanCatalogTargets, craftPlanDetailResponse, normalizeCraftPlanAuditRows, normalizeCraftPlanConfig, recipesForTarget as catalogRecipesForTarget, reconcileCraftPlanBuildingProgress } from "./src/server/craftPlanning.mjs";
 import {
   CRAFT_PLAN_EFFORT_MODEL_VERSION,
   calculateCraftPlanEffortProgress,
@@ -64,39 +143,108 @@ import {
 } from "./src/server/craftPlanProgressAudit.mjs";
 import { buildCraftPlanDiscordEmbed, buildCraftPlanDiscordReport, buildUnavailableCraftPlanDiscordReport, craftPlanReportProfessions, dueCraftPlanReportOccurrence, nextCraftPlanReportOccurrenceIso, normalizeCraftPlanReportProfession, validateCraftPlanReportSettings } from "./src/server/craftPlanDiscordReports.mjs";
 import { craftPlanInteractionDiagnostic, deferredDiscordInteractionResult, editDiscordInteractionOriginal, preflightCraftPlanInteraction, runDiscordTaskAfterResponse } from "./src/server/discordCraftPlanInteractions.mjs";
-import { buildWorkstationPresets, normalizeWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
-import { craftPlanCatalogLookup, playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
-import { createBitjitaProxyCache } from "./src/server/bitjitaProxyCache.mjs";
-import { buildMarketOverview, collectMarketSnapshots, snapshotRetentionCutoff } from "./src/server/globalMarketInsights.mjs";
+import { buildWorkstationPresets, normalizeCatalogWorkstationTarget } from "./src/server/craftPlanWorkstationPresets.mjs";
+import { filterSelectedPlayerBankSources, playerBankOptions, playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemsFromSlots, trackedRelayCraftPlanOutputs } from "./src/server/craftPlanSources.mjs";
+import { bankSourceBelongsToPlayer } from "./src/craftPlanBankIdentity.mjs";
+import { resolveCraftPlanPlayerBanks } from "./src/server/craftPlanPlayerBanksAdmin.mjs";
 import {
   MANUAL_REFRESH_HEADER,
   createManualRefreshGuard,
 } from "./src/server/manualRefreshGuard.mjs";
-import { createRequestCoordinator } from "./src/server/requestCoordinator.mjs";
 import { ADMIN_ROLE_LABELS, adminHasPermission, adminPermissionFor, normalizeAdminRole } from "./src/server/adminPermissions.mjs";
 import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/publicUsers.mjs";
+import { createFeaturebaseJwt } from "./src/server/featurebaseJwt.mjs";
 import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
 import { discordProfileDisplayName, validAdminUsername, validDiscordId } from "./src/server/authIdentity.mjs";
-import { createAdminLoginAttemptStore, loginAttemptKey } from "./src/server/adminLoginAttempts.mjs";
-import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/server/passwordAuth.mjs";
+import { hashPassword, validLegacyAdminPassword } from "./src/server/passwordAuth.mjs";
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
+import { APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES, latestOperationalHistoryBackupVerification, normalizeOperationalHistoryRetentionSettings, operationalHistoryRetentionPreview, readOperationalMarketTradeDailyReport, recordOperationalHistoryBackupVerification, runOperationalHistoryRetention, validateOperationalHistoryRetentionEnableGate } from "./src/server/operationalHistoryRetention.mjs";
+import { installRetiredTableAuthorizer } from "./src/server/retiredTableAuthorizer.mjs";
 import { applyDatabaseConnectionPragmas } from "./src/server/databasePragmas.mjs";
-import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
-import { jobBudgetAllowsMore, normalizeJobBudget, selectResumeBatch } from "./src/server/jobBudget.mjs";
+import { applicationMetricInitialDelayMs, buildServerHealthResponse, createCachedServerHealthReader, filterServerHealthLogs, publicRoutePerformanceHealth, readServerHealthFiles, redactServerHealthText, runApplicationMetricPersistence, serverHealthState, SERVER_HEALTH_THRESHOLDS } from "./src/server/serverHealth.mjs";
 import { createPreparedStatements } from "./src/server/preparedStatements.mjs";
-import { aggregateEmpireHexite, createEmpireHexiteRefreshJob, createEmpireHexiteRepository } from "./src/server/empireHexite.mjs";
+import {
+  createCurrentStateRepository,
+  createRelayTopologyDiscoveryCache,
+  buildCatalogItemDetail,
+  buildResearchTierPresets,
+  canonicalF32Decimal,
+  canonicalNonNegativeDecimal,
+  enrichConstructionWithCatalog,
+  enrichCraftsDomain,
+  enrichCraftsForPlanning,
+  enrichEquipmentWithCatalog,
+  enrichInventoryWithCatalog,
+  enrichMarketWithCatalog,
+  enrichPublicCraftsWithCatalog,
+  enrichRecruitmentWithCatalog,
+  enrichResearchWithCatalog,
+  createGameDataCompositionDependencies,
+  gameDataResponse,
+  discoverRelayTopology,
+  generationDomainsForListener,
+  generationSourceDomains,
+  acquireMapLeaseUnlessClosed,
+  bindMapLeaseRelease,
+  combineMapResourceLeases,
+  mapResourceLeaseInputs,
+  mapRequestNeedsResourceReadiness,
+  mapSpatialLeaseInputs,
+  mapSpatialLeaseNeedsInitialWait,
+  mapRequestLogTarget,
+  mapGenerationDomainsForLayers,
+  mapSnapshotStatusCode,
+  publicGenerationEvent,
+  mergeClaimInventoryWithBanks,
+  normalizeClaimCraftPayloads,
+  normalizeClaimInventory,
+  normalizeClaimPayload,
+  normalizeCitizensPayload,
+  normalizeMembersPayload,
+  parseDomainKeys,
+  relayTopologyFromPayloads,
+  RelayHttpClient,
+  RelayBitCraftProvider,
+  RelayClaimMarketRuntime,
+  RelayEmpireRuntime,
+  RelayGlobalCatalogRuntime,
+  RelayPlayerDataService,
+  RelayPrimaryRegionRuntime,
+  RelayPublicCraftRuntime,
+  RelayRegionalMarketRuntime,
+  RelayRegionClaimsRuntime,
+  RelayMapSpatialScopeManager,
+  mapSpatialScopeKey,
+  RelayMapResourceRuntime,
+  MapResourceAdmissionError,
+  RelayMapResourceReadiness,
+  mapResourceScopeKey,
+  sanitizedMapResourceHealth,
+  sanitizeSchemaFingerprintDiagnostic,
+  RelayStorageActivityService,
+  RelayTerrainRuntime,
+  runtimeHealthWithPersistedSnapshot,
+} from "./dist-server/game-data/index.js";
+import {
+  recordedDiscordResponse,
+  requireLiveDiscord,
+  sendDiscordManualSandboxMessage,
+} from "./src/server/discordDeliveryMode.mjs";
+import { liveEmpireHexiteProjection } from "./src/server/empireHexite.mjs";
 import {
   createEmpireMembershipRepository,
-  normalizeEmpireMembershipRoster,
+  relayEmpireMembershipObservation,
 } from "./src/server/empireMembership.mjs";
 import { defaultOwnerDiscordIdFromEnv, seedDefaultDiscordOwner } from "./src/server/defaultOwnerAdmin.mjs";
-import { applyAdditiveColumnMigrations, applyLegacySchemaCleanup, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
+import { applyAdditiveColumnMigrations, applyDiscordOutboxLeaseMigration, applyLegacySchemaCleanup, applyMarketHistoryExactAmountMigration, applyMarketTradeRegionBackfill, applyOperationalHistoryRetentionMigration, applyProductionContributionExactAmountMigration, applyProviderTransitionLeaseMigration, applySchemaIndexStatements, applySettlementStateMigration } from "./src/server/schemaMigrations.mjs";
 import { processRoleCapabilities, resolveProcessRole } from "./src/server/processRole.mjs";
+import { assertCanonicalDiscordGatewayReady, resolveDeploymentRuntime } from "./src/server/deploymentRuntime.mjs";
 import { currentAppAnnouncementKey as resolveCurrentAppAnnouncementKey, currentAppBuildId as resolveCurrentAppBuildId, currentAppReleaseKey as resolveCurrentAppReleaseKey, releaseVersionAlreadyAnnounced } from "./src/server/appRelease.mjs";
 import { lookupHttpSessionUser } from "./src/server/sessionLookups.mjs";
-import { runSettlementStateTransaction, settlementStateActivityChanges, settlementStateSummary } from "./src/server/settlementState.mjs";
+import { resolveSmokeAdminReviewMode, smokeAdminReviewMutationRejection } from "./src/server/smokeAdminReview.mjs";
+import { runSettlementStateTransaction, settlementStateActivityChanges } from "./src/server/settlementState.mjs";
 import { resolveDiscordOAuthConfig } from "./src/server/discordOAuthConfig.mjs";
 import {
   buildDiscordAuthorizeUrl,
@@ -124,7 +272,7 @@ import {
   readOAuthStateCookie,
   resolveOAuthStateSecret,
 } from "./src/server/oauthState.mjs";
-import { legalPolicyForEnvironment } from "./src/legal/legalPolicy.mjs";
+import { claimMonitorLegalPolicyForEnvironment, legalPolicyForEnvironment } from "./src/legal/legalPolicy.mjs";
 import { legalPolicyDigests } from "./src/server/legalPolicyDigest.mjs";
 import {
   currentLegalSnapshot,
@@ -145,9 +293,12 @@ import {
   unlinkUserCharacter,
 } from "./src/server/userPrivacy.mjs";
 import { deleteUserAccount } from "./src/server/accountDeletion.mjs";
+import { deletePublicAccount, publicAccountDeletionReview } from "./src/server/public/accountDeletion.mjs";
 import {
+  coordinatePublicPrivacyDeletion,
   coordinatePrivacyDeletion,
   readDeletionLedger,
+  replayPublicPrivacyDeletions,
   replayPrivacyDeletions,
 } from "./src/server/privacyDeletionLedger.mjs";
 import { runPrivacyRetention } from "./src/server/privacyRetention.mjs";
@@ -157,6 +308,18 @@ setDefaultResultOrder("ipv4first");
 const eventLoopHistogram = monitorEventLoopDelay({ resolution: 20 });
 eventLoopHistogram.enable();
 const requestTelemetry = [];
+const mapPerformanceTelemetry = createMapPerformanceTelemetry();
+const routePerformanceTelemetry = createRoutePerformanceTelemetry({ maxEntries: 10_000 });
+const gameDataHeavyRouteGate = createHeavyRouteGate({ maxConcurrent: 8, maxQueued: 16 });
+const marketHeavyRouteGate = createHeavyRouteGate({ maxConcurrent: 8, maxQueued: 16 });
+const measuredRoutePaths = new Set([
+  "/api/local/game-data",
+  "/api/local/market/overview",
+  "/api/local/market/order-book",
+  "/api/local/market/favorite-quotes",
+  "/api/local/history",
+  "/api/local/admin/server-health",
+]);
 const plannerTelemetry = {
   freshCalculations: 0,
   cacheHits: 0,
@@ -171,8 +334,6 @@ const plannerTelemetry = {
   lastResponseBytes: 0,
   lastCompletedAt: null,
 };
-const bitjitaTelemetry = { requests: 0, failures: 0, timeouts: 0, rateLimits: 0, lastFailureAt: null };
-
 function applicationHealthTelemetry() {
   const recent = requestTelemetry.filter((entry) => Date.now() - entry.at <= 60 * 60 * 1000);
   const durations = recent.map((entry) => entry.durationMs).sort((a, b) => a - b);
@@ -183,7 +344,10 @@ function applicationHealthTelemetry() {
     current.count += 1; current.totalMs += entry.durationMs; current.maxMs = Math.max(current.maxMs, entry.durationMs); groups[entry.path] = current;
     return groups;
   }, {})).map((entry) => ({ ...entry, averageMs: Math.round(entry.totalMs / entry.count) })).sort((a, b) => b.maxMs - a.maxMs).slice(0, 20);
-  return { requests: recent.length, status5xx, status5xxRate: recent.length ? status5xx / recent.length : 0, p50Ms: percentile(.5), p95Ms: percentile(.95), p99Ms: percentile(.99), eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0, memory: process.memoryUsage(), uptimeSeconds: process.uptime(), slowEndpoints: slow, planner: { ...plannerTelemetry }, bitjita: { ...bitjitaTelemetry, coordinator: workerRequestCoordinator?.stats() ?? null } };
+  const routePerformance = publicRoutePerformanceHealth(routePerformanceTelemetry.snapshot(), {
+    gates: { gameData: gameDataHeavyRouteGate.snapshot(), market: marketHeavyRouteGate.snapshot() },
+  });
+  return { requests: recent.length, status5xx, status5xxRate: recent.length ? status5xx / recent.length : 0, p50Ms: percentile(.5), p95Ms: percentile(.95), p99Ms: percentile(.99), eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0, memory: process.memoryUsage(), uptimeSeconds: process.uptime(), slowEndpoints: slow, routePerformance, planner: { ...plannerTelemetry } };
 }
 
 async function serverHealthResponse(url, { includeDiagnosticBundle = false } = {}) {
@@ -192,7 +356,8 @@ async function serverHealthResponse(url, { includeDiagnosticBundle = false } = {
   const overall = serverHealthState(files.snapshot, application);
   const logs = filterServerHealthLogs(files.snapshot?.logs ?? [], { service: url.searchParams.get("service") ?? "", severity: url.searchParams.get("severity") ?? "", search: url.searchParams.get("search") ?? "", cursor: url.searchParams.get("cursor") ?? 0, limit: url.searchParams.get("limit") ?? 50 });
   const incidents = db.prepare("SELECT * FROM server_health_incidents ORDER BY last_observed_at DESC LIMIT 100").all();
-  const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: false }, version: appVersion, buildId: currentAppBuildId() };
+  const craftContributionDiagnostics = readCraftContributionDiagnostics(db);
+  const response = { overall, collectorWarning: files.warning, hostSnapshot: files.snapshot, history: files.history, application, database: databaseStatus(), scheduledJobs: scheduledJobsStatus(), craftContributionDiagnostics, incidents, logs, thresholds: SERVER_HEALTH_THRESHOLDS, redaction: { commandLines: true, environment: false, secrets: "redacted", requestQueries: "not-retained", requestIdentifiers: "not-retained" }, version: appVersion, buildId: currentAppBuildId() };
   return buildServerHealthResponse(response, { includeDiagnosticBundle });
 }
 
@@ -246,10 +411,39 @@ async function evaluateServerHealthIncidents() {
   }
 }
 
-const rateLimit = createRateLimiter({ sendJson: send });
+const trustedProxyAddresses = String(process.env.TRUSTED_PROXY_ADDRESSES ?? "")
+  .split(",")
+  .map((address) => address.trim())
+  .filter(Boolean);
+const clientAddress = (req) => requestAddress(req, { trustedProxyAddresses });
+const rateLimit = createRateLimiter({
+  sendJson: send,
+  addressForRequest: clientAddress,
+  onDecision: (decision) => routePerformanceTelemetry.recordRateLimitDecision(decision),
+});
 
-// This server is the local app boundary: it serves the built frontend, proxies
-// BitJita requests, owns SQLite history/configuration, validates admin sessions,
+async function runHeavyProjection(gate, measurement, project) {
+  return gate.run(() => {
+    const startedAt = Date.now();
+    try {
+      return project();
+    } finally {
+      measurement?.recordProjection(Date.now() - startedAt);
+    }
+  });
+}
+
+function runMeasuredProjection(measurement, project) {
+  const startedAt = Date.now();
+  try {
+    return project();
+  } finally {
+    measurement?.recordProjection(Date.now() - startedAt);
+  }
+}
+
+// This server is the local app boundary: it serves the built frontend, owns
+// SQLite history/configuration, validates admin sessions,
 // runs scheduled jobs, and delivers Discord notifications. Keep cross-cutting
 // concerns here small and explicit; route-specific UI shaping belongs in the
 // frontend or focused helper functions below.
@@ -260,64 +454,109 @@ const isTestRuntime = process.env.BITCRAFT_TEST === "true" || process.env.NODE_E
 const discordApiOrigin = isTestRuntime && process.env.DISCORD_API_ORIGIN
   ? String(process.env.DISCORD_API_ORIGIN).replace(/\/+$/, "")
   : "https://discord.com/api/v10";
+const deploymentRuntime = resolveDeploymentRuntime(process.env);
+const configuredDiscordDeliveryMode = deploymentRuntime.discordDeliveryMode;
+const configuredDiscordSandboxChannelId = String(process.env.DISCORD_SANDBOX_CHANNEL_ID ?? "").trim();
 const legalPolicy = legalPolicyForEnvironment(process.env);
 const legalDigests = legalPolicyDigests(legalPolicy);
 const legalSnapshot = currentLegalSnapshot(legalPolicy, legalDigests);
+const claimMonitorLegalPolicy = claimMonitorLegalPolicyForEnvironment(process.env);
+const claimMonitorLegalDigests = legalPolicyDigests(claimMonitorLegalPolicy);
+const claimMonitorLegalSnapshot = currentLegalSnapshot(claimMonitorLegalPolicy, claimMonitorLegalDigests);
 const serveFrontend = isProduction || process.env.SERVE_STATIC === "true";
-const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
+const featurebaseJwtSecret = process.env.FEATUREBASE_JWT_SECRET ?? "";
 const legacyAdminPasswordAuth = process.env.ENABLE_LEGACY_ADMIN_PASSWORD_AUTH === "true";
 const processRole = resolveProcessRole(process.env, { isProduction });
 const processRoleConfig = processRoleCapabilities(processRole);
-const workerRequestCoordinator = processRole === "worker" ? createRequestCoordinator({ concurrency: 8 }) : null;
 const serverPollingEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SERVER_POLLING !== "false";
-const discordStartupEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_DISCORD_STARTUP !== "false";
+const discordStartupEnabled = deploymentRuntime.discordGatewayEnabled;
 const scheduledJobsEnabled = processRoleConfig.runBackgroundJobs && process.env.ENABLE_SCHEDULED_JOBS !== "false";
+const discordNotificationOutboxProcessingEnabled = process.env.ENABLE_DISCORD_OUTBOX_PROCESSING !== "false";
+const marketTransitionDispatcherEnabled = process.env.ENABLE_MARKET_TRANSITION_DISPATCHER !== "false";
+const marketTransitionDispatcherIntervalMs = Math.max(
+  Number(process.env.MARKET_TRANSITION_DISPATCHER_INTERVAL_MS ?? 5_000),
+  1_000,
+);
+const discordNetworkEnabled = process.env.ENABLE_DISCORD_NETWORK !== "false";
 const discordNotificationOutboxIntervalMs = Math.max(Number(process.env.DISCORD_NOTIFICATION_OUTBOX_INTERVAL_MS ?? 5000), 1000);
 const discordNotificationMaxAttempts = Math.max(Number(process.env.DISCORD_NOTIFICATION_MAX_ATTEMPTS ?? 8), 1);
+const configuredDiscordRequestTimeoutMs = Number(process.env.DISCORD_REQUEST_TIMEOUT_MS ?? 10_000);
+const discordRequestTimeoutMs = Number.isFinite(configuredDiscordRequestTimeoutMs)
+  ? Math.max(Math.floor(configuredDiscordRequestTimeoutMs), 1_000)
+  : 10_000;
+const configuredDiscordCompletionWriteMarginMs = Number(process.env.DISCORD_OUTBOX_COMPLETION_MARGIN_MS ?? 5_000);
+const discordOutboxCompletionWriteMarginMs = Number.isFinite(configuredDiscordCompletionWriteMarginMs)
+  ? Math.max(Math.floor(configuredDiscordCompletionWriteMarginMs), 1_000)
+  : 5_000;
+const minimumDiscordNotificationLeaseMs = discordRequestTimeoutMs + discordOutboxCompletionWriteMarginMs + 1;
+const configuredDiscordNotificationLeaseMs = Number(process.env.DISCORD_NOTIFICATION_LEASE_MS ?? 60_000);
+const discordNotificationLeaseMs = Number.isFinite(configuredDiscordNotificationLeaseMs)
+  ? Math.max(Math.floor(configuredDiscordNotificationLeaseMs), minimumDiscordNotificationLeaseMs)
+  : Math.max(60_000, minimumDiscordNotificationLeaseMs);
 let discordNotificationOutboxRunning = false;
-const storageActivityJobBudget = normalizeJobBudget({
-  maxRuntimeMs: process.env.STORAGE_ACTIVITY_MAX_RUNTIME_MS ?? 15000,
-  batchSize: process.env.STORAGE_ACTIVITY_BATCH_SIZE ?? 25,
-});
-const marketTradeJobBudget = normalizeJobBudget({
-  maxRuntimeMs: process.env.MARKET_TRADES_MAX_RUNTIME_MS ?? 15000,
-  batchSize: process.env.MARKET_TRADES_BATCH_SIZE ?? 20,
-});
+let marketTransitionDispatcherRunning = false;
+
+function assertDiscordNetworkEnabled() {
+  if (!discordNetworkEnabled) throw new Error("Discord network access is disabled");
+}
+
 const MARKET_DAILY_HISTORY_LIMIT = 365;
-const gameCatalogRefreshJobBudget = normalizeJobBudget({
-  maxRuntimeMs: process.env.GAME_CATALOG_REFRESH_MAX_RUNTIME_MS ?? 30000,
-  batchSize: process.env.GAME_CATALOG_REFRESH_BATCH_SIZE ?? 250,
-});
-const gameCatalogRefreshDetailDelaySetting = Number(process.env.GAME_CATALOG_REFRESH_DETAIL_DELAY_MS ?? process.env.GAME_CATALOG_REFRESH_DELAY_MS ?? 100);
-const gameCatalogRefreshDetailDelayMs = Number.isFinite(gameCatalogRefreshDetailDelaySetting) && gameCatalogRefreshDetailDelaySetting >= 0
-  ? Math.floor(gameCatalogRefreshDetailDelaySetting)
-  : 100;
-const gameCatalogRefreshContinueDelaySetting = Number(process.env.GAME_CATALOG_REFRESH_CONTINUE_DELAY_MS ?? 5000);
-const gameCatalogRefreshContinueDelayMs = Number.isFinite(gameCatalogRefreshContinueDelaySetting) && gameCatalogRefreshContinueDelaySetting >= 1000
-  ? Math.floor(gameCatalogRefreshContinueDelaySetting)
-  : 5000;
-const gameCatalogRefreshRetryDelaysMs = String(process.env.GAME_CATALOG_REFRESH_RETRY_DELAYS_MS ?? "15000,60000,300000")
-  .split(",")
-  .map((value) => Number(value.trim()))
-  .filter((value) => Number.isFinite(value) && value > 0)
-  .map((value) => Math.floor(value));
-if (!gameCatalogRefreshRetryDelaysMs.length) gameCatalogRefreshRetryDelaysMs.push(15000, 60000, 300000);
-const marketTradeNotificationRecoveryWindowMs = Math.max(1, toNumber(process.env.MARKET_TRADE_NOTIFICATION_RECOVERY_HOURS ?? 24)) * 60 * 60 * 1000;
 const snapshotIntervalMs = Math.max(Number(process.env.SNAPSHOT_INTERVAL_MS ?? 30000), 10000);
+const relayHttpRefreshSetting = Number(process.env.RELAY_HTTP_REFRESH_MS ?? 15000);
+const relayHttpRefreshMs = Number.isFinite(relayHttpRefreshSetting)
+  ? Math.max(5000, Math.min(Math.floor(relayHttpRefreshSetting), 60000))
+  : 15000;
+const relayBaseUrl = process.env.BITCRAFT_RELAY_ORIGIN ?? "https://relay.bitcraftsync.app";
 const productionMissingGraceMs = Math.max(Number(process.env.PRODUCTION_MISSING_GRACE_MS ?? 120000), 0);
 const dataDir = process.env.BITCRAFT_LOCAL_DATA_DIR ?? path.join(root, "data");
+const terrainLayoutEvidence = JSON.parse(readFileSync(
+  path.join(root, "test", "fixtures", "terrain-live-layout.json"),
+  "utf8",
+));
+const terrainTileBuildDeadlineSetting = Number(process.env.TERRAIN_TILE_BUILD_DEADLINE_MS ?? 600_000);
+const terrainTileStore = createTerrainTileStore({
+  dataDir,
+  limits: {
+    deadlineMs: Number.isFinite(terrainTileBuildDeadlineSetting)
+      ? Math.max(120_000, terrainTileBuildDeadlineSetting)
+      : 600_000,
+  },
+  encoder: async ({ generation, zoom, x, y, tileSize }) => {
+    const { renderTerrainTileChannels } = await import("./src/server/terrainTileRenderer.mjs");
+    return renderTerrainTileChannels({ generation, evidence: generation.evidence, zoom, x, y, tileSize });
+  },
+});
+const roadTileStore = createRoadTileStore({ dataDir });
 const privacyLedgerPath = process.env.PRIVACY_LEDGER_PATH
-  ?? (isProduction && !isTestRuntime ? "/var/backups/bitcraft-claim-monitor/privacy-deletion-ledger.jsonl" : path.join(dataDir, "privacy-deletion-ledger.jsonl"));
+  ?? (isProduction && !isTestRuntime ? "/var/backups/bitcraft-claim-monitor-relay/privacy-deletion-ledger.jsonl" : path.join(dataDir, "privacy-deletion-ledger.jsonl"));
 const readCachedServerHealthFiles = createCachedServerHealthReader(() => readServerHealthFiles(dataDir), { ttlMs: 30_000 });
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const appVersion = String(packageJson.version ?? "0.0.0-dev");
-const appIdentifier = process.env.BITJITA_APP_IDENTIFIER ?? "BitCraft Claim Monitor (github.com/Red463/bitcraft-claim-monitor)";
+const appIdentifier = process.env.BITCRAFT_APP_IDENTIFIER ?? "BitCraft Claim Monitor Relay (github.com/Red463/bitcraft-claim-monitor-relay)";
+const gameIconFallbackService = createGameIconFallbackService({
+  metadataOrigin: process.env.BITJITA_ICON_API_ORIGIN ?? "https://bitjita.com",
+  approvedHosts: String(process.env.BITJITA_ICON_APPROVED_HOSTS ?? "bitjita.com,cdn.bitjita.com").split(","),
+  timeoutMs: Number(process.env.BITJITA_ICON_TIMEOUT_MS ?? 5_000),
+  maxBytes: Number(process.env.BITJITA_ICON_MAX_BYTES ?? 512 * 1024),
+  appIdentifier,
+});
 const ipHash = createIpHasher(appIdentifier);
-const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor/blob/main/CHANGELOG.md";
+const changelogUrl = "https://github.com/Red463/bitcraft-claim-monitor-relay/blob/main/CHANGELOG.md";
 const changelogPath = path.resolve(root, "..", "..", "CHANGELOG.md");
 const repoRoot = path.resolve(root, "..", "..");
+const smokeAdminReviewMode = resolveSmokeAdminReviewMode({
+  env: process.env,
+  isProduction,
+  repoRoot,
+  dataDir,
+});
 const brandingDir = path.join(dataDir, "branding");
 const backupDir = path.join(dataDir, "backups");
+const configuredOperationalHistoryBackupRoot = String(process.env.BITCRAFT_OPERATIONAL_HISTORY_BACKUP_ROOT ?? "").trim();
+const operationalHistoryApprovedBackupRoot = isProduction
+  && configuredOperationalHistoryBackupRoot
+  ? configuredOperationalHistoryBackupRoot
+  : "";
 const geoipDir = path.join(dataDir, "geoip");
 const geoipDataPath = process.env.GEOIP_DATA_PATH ?? path.join(geoipDir, "geoip.json");
 const maxGeoipJsonFallbackBytes = 25 * 1024 * 1024;
@@ -360,26 +599,570 @@ applyLegacySchemaCleanup(db);
 
 
 applyAdditiveColumnMigrations(db);
+applyDiscordOutboxLeaseMigration(db);
+applyProviderTransitionLeaseMigration(db);
+applyMarketHistoryExactAmountMigration(db);
+applyMarketTradeRegionBackfill(db);
+applyProductionContributionExactAmountMigration(db);
+applyOperationalHistoryRetentionMigration(db);
 applySchemaIndexStatements(db);
 
 const now = new Date().toISOString();
 applyDefaultAppSettings(db, { serverRefreshSeconds: Math.round(snapshotIntervalMs / 1000), updatedAt: now });
+cleanupRetiredRegionalMarketState();
+installRetiredTableAuthorizer(db);
 
 const statements = createPreparedStatements(db);
+const publicIdentityRepository = createPublicIdentityRepository(db);
+const discordOutboxLeaser = createDiscordOutboxLeaser(db, {
+  workerId: `${processRole}:${os.hostname()}:${process.pid}:${randomBytes(8).toString("hex")}`,
+  leaseMs: discordNotificationLeaseMs,
+  now: () => new Date(),
+});
+if (processRoleConfig.runBackgroundJobs && discordNotificationOutboxProcessingEnabled) {
+  discordOutboxLeaser.recoverExpiredLeases(new Date().toISOString());
+}
+const gameDataGenerationListeners = new Set();
+let productionRelayLifecycleCoordinator = null;
+let settlementRelayTransitionCoordinator = null;
+function notifyGameDataGenerationListeners(event) {
+  for (const listener of gameDataGenerationListeners) {
+    if (listener.claimId !== event.claimId) continue;
+    const changedDomains = generationDomainsForListener(event, listener);
+    if (!changedDomains.length) continue;
+    try {
+      listener.response.write(`data: ${JSON.stringify(publicGenerationEvent(event, changedDomains))}\n\n`);
+    } catch {
+      gameDataGenerationListeners.delete(listener);
+    }
+  }
+}
+function publishGameDataGeneration(event) {
+  productionRelayLifecycleCoordinator?.onCommit(event);
+  settlementRelayTransitionCoordinator?.onCommit(event);
+  notifyGameDataGenerationListeners(event);
+}
+const currentStateRepository = createCurrentStateRepository(db, {
+  onCommit: publishGameDataGeneration,
+});
+const relayProvider = new RelayBitCraftProvider();
+const providerCatalogRepository = createProviderCatalogRepository(db);
+productionRelayLifecycleCoordinator = createRelayProductionLifecycleCoordinator({
+  configuredClaimId: currentClaimId,
+  readCraftSnapshot: (claimId) => currentStateRepository.read(claimId, "crafts"),
+  enrichCrafts: enrichRelayCraftsForSideEffects,
+  applyProductionLifecycle: async (claimId, crafts) => {
+    await runProductionActivityCollector(claimId, { crafts });
+  },
+  onAttempt: () => collectorAttempt("production", "Applying committed Relay crafts"),
+  onSuccess: (_event, _snapshot, startedAt) => collectorSuccess("production", startedAt),
+  onFailure: (error, _event, startedAt) => collectorFailure("production", startedAt, error),
+});
+settlementRelayTransitionCoordinator = createRelaySettlementTransitionCoordinator({
+  configuredClaimId: currentClaimId,
+  readDomainSnapshot: (claimId, domain) => currentStateRepository.read(claimId, domain),
+  applySettlementTransition: async (_claimId, summary, context) => {
+    recordSettlementState(summary, context.snapshots.claim.data);
+  },
+  onAttempt: () => {
+    setCollectorStatus("settlementTransitions", {
+      label: "Settlement transitions",
+      enabled: true,
+      source: "relay-commits",
+    });
+    return collectorAttempt("settlementTransitions", "Applying committed Relay settlement domains");
+  },
+  onSuccess: (_event, _context, startedAt) => collectorSuccess("settlementTransitions", startedAt),
+  onRecovery: () => collectorSuccess("settlementTransitions", Date.now()),
+  onFailure: (error, _event, startedAt) => {
+    setCollectorStatus("settlementTransitions", {
+      label: "Settlement transitions",
+      enabled: true,
+      source: "relay-commits",
+    });
+    collectorFailure("settlementTransitions", startedAt ?? Date.now(), error);
+  },
+});
+const relayStorageActivityService = new RelayStorageActivityService({
+  http: new RelayHttpClient({ baseUrl: relayBaseUrl }),
+  appendEvents: (events) => currentStateRepository.appendEvents(events),
+  getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+  batchSize: 25,
+  concurrency: 5,
+});
+const relayPlayerDataService = new RelayPlayerDataService({
+  http: new RelayHttpClient({ baseUrl: relayBaseUrl }),
+  readMembers: (claimId) => {
+    const data = currentStateRepository.read(claimId, "members")?.data;
+    if (Array.isArray(data)) return data;
+    return Array.isArray(data?.members) ? data.members : [];
+  },
+  getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+  getDescription: (kind, id) => providerCatalogRepository.getDescription(kind, id),
+  ttlMs: relayHttpRefreshMs,
+});
+const relayBindingManifest = JSON.parse(readFileSync(
+  path.join(root, "src", "server", "game-data", "bindings", "schema-manifest.json"),
+  "utf8",
+));
+const relayTerrainRuntime = new RelayTerrainRuntime({
+  manifest: relayBindingManifest,
+  tileStore: terrainTileStore,
+  evidence: terrainLayoutEvidence,
+  onBuildFailure: (error) => console.warn(`Relay terrain tile build failed: ${error}`),
+});
+let relayEmpireRuntimeReady = null;
+let relayGlobalCatalogRuntimeReady = null;
+const relayGlobalCatalogRuntime = new RelayGlobalCatalogRuntime({
+  manifest: relayBindingManifest,
+  catalogRepository: providerCatalogRepository,
+  currentStateRepository,
+  onEmpireFoundries: (snapshot) => relayEmpireRuntimeReady?.updateGlobalFoundries({
+      ...snapshot,
+      warnings: snapshot.foundryWarnings,
+    }),
+  onEmpireNotifications: (snapshot) => (
+    relayEmpireRuntimeReady?.updateGlobalSiegeNotifications(snapshot)
+  ),
+});
+const relayPrimaryRegionRuntime = new RelayPrimaryRegionRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+  reconnectDelayMs: relayReconnectDelayMs,
+});
+const relayRegionClaimsRuntime = new RelayRegionClaimsRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+  reconnectDelayMs: relayReconnectDelayMs,
+});
+const terrainLiveRebuildEnabled = process.env.ENABLE_RELAY_TERRAIN_LIVE_REBUILD === "true";
+const MAP_PLAYER_MOBILE_IDENTITY_VERIFIED = true;
+const MAP_SPATIAL_INITIAL_WAIT_MS = 2_000;
+const MAP_ENEMY_IDENTITY_VERIFIED = true;
+const MAP_RESOURCE_COORDINATES_VERIFIED = true;
+const MAP_WAYSTONE_COORDINATES_VERIFIED = false;
+// Resource/location, player/mobile, and enemy/catalog joins are live-verified
+// in configured region 19. Waystone identities remain independently gated.
+const MAP_SPATIAL_COLLECTION_VERIFIED = true;
+const relayTopologyDiscovery = createRelayTopologyDiscoveryCache({ discover: discoverRelayTopology });
+const relayMapSpatialScopeManager = new RelayMapSpatialScopeManager({
+  manifest: relayBindingManifest,
+  discoverTopology: relayTopologyDiscovery,
+  // Scoped map generations are live notifications, not repository commits;
+  // they must not trigger settlement/production commit side effects.
+  onGeneration: (snapshot, scope) => notifyGameDataGenerationListeners({
+    claimId: scope.claimId,
+    generation: snapshot.generation,
+    generatedAt: snapshot.receivedAt,
+    changedDomains: ["map-spatial"],
+    mapSpatialScopeKey: mapSpatialScopeKey(scope),
+  }),
+});
+const relayMapResourceRuntime = new RelayMapResourceRuntime({
+  manifest: relayBindingManifest,
+  discoverTopology: relayTopologyDiscovery,
+  cacheMaxBytes: Math.max(1, Number(process.env.MAP_RESOURCE_CACHE_MAX_BYTES ?? 536_870_912)),
+  onGeneration: (snapshot) => notifyGameDataGenerationListeners({
+    claimId: currentClaimId(),
+    generation: snapshot.generation,
+    generatedAt: snapshot.receivedAt,
+    changedDomains: ["map-resources"],
+    mapResourceScopeKey: mapResourceScopeKey(snapshot.regionId, snapshot.resourceId),
+  }),
+});
+const relayMapResourceReadiness = new RelayMapResourceReadiness({
+  manifest: relayBindingManifest,
+  runtime: relayMapResourceRuntime,
+  discoverTopology: relayTopologyDiscovery,
+});
+const mapResourceCursorCodec = createMapResourceCursorCodec(randomBytes(32));
+const relayMarketTransitionWriter = createRelayMarketTransitionWriter(db, {
+  addActivity,
+  enqueueDiscordActivity: (
+    claimId,
+    eventType,
+    summary,
+    occurredAt,
+    metadata,
+    activitySourceKey,
+  ) => enqueueDiscordActivityRow(eventType, summary, occurredAt, metadata, {
+    sourceKey: `${eventType}:${claimId}:${activitySourceKey}`,
+    processImmediately: false,
+  }),
+  processOutbox: kickDiscordNotificationOutbox,
+});
+const marketTransitionDispatcher = createMarketTransitionDispatcher({
+  repository: currentStateRepository,
+  writer: relayMarketTransitionWriter,
+  workerId: `${processRole}:market-transitions:${os.hostname()}:${process.pid}:${randomBytes(8).toString("hex")}`,
+  leaseMs: Math.max(
+    5_000,
+    Number(process.env.MARKET_TRANSITION_LEASE_MS ?? 60_000),
+  ),
+  now: () => new Date(),
+});
+const relayClaimMarketRuntime = new RelayClaimMarketRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+  reconnectDelayMs: relayReconnectDelayMs,
+  deriveTransitionEvents: ({ claimId, previousData, currentData, observedAt }) => (
+    compactRelayMarketTransitionEvents(deriveRelayMarketTransitions({
+      previous: previousData == null
+        ? null
+        : enrichMarketSnapshot(claimId, previousData),
+      current: enrichMarketSnapshot(claimId, currentData),
+      observedAt,
+    }))
+  ),
+  onSnapshotCommitted: ({ claimId }) => kickMarketTransitionDispatcher(claimId),
+});
+const relayPublicCraftRuntime = new RelayPublicCraftRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+  poolOptions: {
+    maxSessions: Math.max(1, Number(process.env.RELAY_REGION_MAX_SESSIONS ?? 4)),
+    idleCloseMs: Math.max(10_000, Number(process.env.RELAY_REGION_IDLE_CLOSE_MS ?? 60_000)),
+    staggerMs: Math.max(0, Number(process.env.RELAY_REGION_STAGGER_MS ?? 250)),
+  },
+});
+const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+  onCurrentPublished: ({
+    claimId,
+    currentData,
+    observedAt,
+  }) => queueMarketDealWatchEvaluation({
+      claimId,
+      snapshot: currentData,
+      observedAt,
+    }),
+  rotationMs: Math.max(1_000, Number(process.env.RELAY_MARKET_REGION_ROTATION_MS ?? 15_000)),
+  maxOrders: Math.max(5_000, Number(process.env.RELAY_MARKET_REGION_MAX_ORDERS ?? 20_000)),
+  maxClosedListings: Math.max(10_000, Number(process.env.RELAY_MARKET_REGION_MAX_CLOSED_LISTINGS ?? 25_000)),
+  maxStalls: Math.max(1_000, Number(process.env.RELAY_MARKET_REGION_MAX_STALLS ?? 5_000)),
+  maxApplyRows: Math.max(25_000, Number(process.env.RELAY_MARKET_REGION_MAX_APPLY_ROWS ?? 50_000)),
+  poolOptions: {
+    maxSessions: Math.max(1, Number(process.env.RELAY_MARKET_REGION_MAX_SESSIONS ?? 16)),
+    idleCloseMs: Math.max(10_000, Number(process.env.RELAY_MARKET_REGION_IDLE_CLOSE_MS ?? 300_000)),
+    staggerMs: Math.max(0, Number(process.env.RELAY_MARKET_REGION_STAGGER_MS ?? 250)),
+  },
+});
+const relayEmpireRuntime = new RelayEmpireRuntime({
+  manifest: relayBindingManifest,
+  currentStateRepository,
+  onSnapshotCommitted: syncEmpireMembershipFromRelaySnapshot,
+  onNotificationScopeChanged: async (empireIds) => {
+    const runtime = relayGlobalCatalogRuntimeReady;
+    if (!runtime) throw new Error("Relay global notification runtime is not initialized");
+    await runtime.setEmpireNotificationScope(empireIds);
+    const health = runtime.health();
+    const notificationHealth = health.subscription?.notifications;
+    const lastError = health.notificationLastError
+      ?? notificationHealth?.lastError
+      ?? null;
+    if (lastError) throw new Error(lastError);
+    if (empireIds.length && notificationHealth?.applied !== true) {
+      throw new Error("Relay siege notification scope is waiting for the global connection");
+    }
+  },
+  rotationMs: Math.max(1_000, Number(process.env.RELAY_EMPIRE_REGION_ROTATION_MS ?? 15_000)),
+  poolOptions: {
+    maxSessions: Math.max(1, Number(process.env.RELAY_EMPIRE_REGION_MAX_SESSIONS ?? 4)),
+    idleCloseMs: Math.max(10_000, Number(process.env.RELAY_EMPIRE_REGION_IDLE_CLOSE_MS ?? 60_000)),
+    staggerMs: Math.max(0, Number(process.env.RELAY_EMPIRE_REGION_STAGGER_MS ?? 250)),
+  },
+});
+relayGlobalCatalogRuntimeReady = relayGlobalCatalogRuntime;
+relayEmpireRuntimeReady = relayEmpireRuntime;
+const relayRegionalMarketStaleMs = Math.max(
+  5_000,
+  Number(process.env.RELAY_MARKET_REGION_STALE_MS) || 60_000,
+);
+const relayGlobalCatalogStaleMs = Math.max(
+  5_000,
+  Number(process.env.RELAY_GLOBAL_CATALOG_STALE_MS) || 60_000,
+);
+const relayEmpireRegionStaleMs = Math.max(
+  5_000,
+  Number(process.env.RELAY_EMPIRE_REGION_STALE_MS) || 60_000,
+);
+let relayProviderRefreshTimer = null;
+let relayProviderStarted = false;
+let relayGlobalCatalogSupervisorTimer = null;
+let relayGlobalCatalogReconnectAttempt = 0;
+let relayGlobalCatalogNextAttemptAt = 0;
+let relayGlobalCatalogApplyDeadlineAt = 0;
+let relayGlobalCatalogReconcileInFlight = null;
+let relayGlobalCatalogLastHealthPersistedAt = 0;
+let requestRelayRuntimeRefresh = null;
+let relayPrimaryRegionStarted = false;
+let relayClaimMarketStarted = false;
+let relayPublicCraftStarted = false;
+let relayRegionalMarketStarted = false;
+let relayEmpireStarted = false;
+let relayRegionClaimsStarted = false;
+let relayTerrainStarted = false;
+const relayClaimScopeFence = createRelayClaimScopeFence([
+  {
+    stop: async () => {
+      try { await relayTerrainRuntime.stop(); } finally { relayTerrainStarted = false; }
+    },
+  },
+  {
+    stop: async () => {
+      try { await relayPublicCraftRuntime.stop(); } finally { relayPublicCraftStarted = false; }
+    },
+  },
+  {
+    stop: async () => {
+      try { await relayRegionalMarketRuntime.stop(); } finally { relayRegionalMarketStarted = false; }
+    },
+  },
+  {
+    stop: async () => {
+      try { await relayEmpireRuntime.stop(); } finally { relayEmpireStarted = false; }
+    },
+  },
+  {
+    stop: async () => {
+      try { await relayClaimMarketRuntime.stop(); } finally { relayClaimMarketStarted = false; }
+    },
+  },
+  {
+    stop: async () => {
+      try { await relayRegionClaimsRuntime.stop(); } finally { relayRegionClaimsStarted = false; }
+    },
+  },
+  { stop: async () => relayMapSpatialScopeManager.stop() },
+  { stop: async () => relayMapResourceRuntime.stop() },
+  {
+    stop: async () => {
+      try { await relayPrimaryRegionRuntime.stop(); } finally { relayPrimaryRegionStarted = false; }
+    },
+  },
+]);
+function gameDataProviderHealth() {
+  const processHealth = relayProvider.health();
+  const health = processHealth.running ? processHealth : currentStateRepository.readHealth() ?? processHealth;
+  const safeSources = Object.fromEntries(Object.entries(health.sources ?? {}).map(([sourceKey, source]) => [
+    sourceKey,
+    {
+      ...source,
+      schemaFingerprintDiagnostic: source.schemaFingerprintDiagnostic
+        ? sanitizeSchemaFingerprintDiagnostic(source.schemaFingerprintDiagnostic)
+        : null,
+    },
+  ]));
+  const catalogSnapshot = currentStateRepository.read(currentClaimId(), "catalogs");
+  const globalCatalog = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayGlobalCatalogRuntime.health(),
+    snapshot: catalogSnapshot,
+    subscriptionHealth: currentStateRepository.readSubscriptionHealth(
+      catalogSnapshot?.provenance?.sourceKey ?? "global",
+      "catalogs",
+    ),
+  });
+  const playerSnapshot = currentStateRepository.read(currentClaimId(), "players");
+  const primaryRegion = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayPrimaryRegionRuntime.health(),
+    snapshot: playerSnapshot,
+    subscriptionHealth: playerSnapshot
+      ? currentStateRepository.readSubscriptionHealth(playerSnapshot.provenance.sourceKey, "players")
+      : null,
+  });
+  const publicCraftSnapshot = currentStateRepository.read(currentClaimId(), "public-crafts");
+  const publicCrafts = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayPublicCraftRuntime.health(),
+    snapshot: publicCraftSnapshot,
+    subscriptionHealth: publicCraftSnapshot
+      ? currentStateRepository.readSubscriptionHealth(publicCraftSnapshot.provenance.sourceKey, "public-crafts")
+      : null,
+  });
+  const claimMarketSnapshot = currentStateRepository.read(currentClaimId(), "market");
+  const claimMarket = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayClaimMarketRuntime.health(),
+    snapshot: claimMarketSnapshot,
+    subscriptionHealth: claimMarketSnapshot
+      ? currentStateRepository.readSubscriptionHealth(claimMarketSnapshot.provenance.sourceKey, "market")
+      : null,
+  });
+  const regionalMarketSnapshot = currentStateRepository.read(currentClaimId(), "regional-market");
+  const regionalMarket = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayRegionalMarketRuntime.health(),
+    snapshot: regionalMarketSnapshot,
+    subscriptionHealth: regionalMarketSnapshot
+      ? currentStateRepository.readSubscriptionHealth(regionalMarketSnapshot.provenance.sourceKey, "regional-market")
+      : null,
+  });
+  const regionClaimsSnapshot = currentStateRepository.read(currentClaimId(), "region-claims");
+  const regionClaims = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayRegionClaimsRuntime.health(),
+    snapshot: regionClaimsSnapshot,
+    subscriptionHealth: regionClaimsSnapshot
+      ? currentStateRepository.readSubscriptionHealth(regionClaimsSnapshot.provenance.sourceKey, "region-claims")
+      : null,
+  });
+  const empireSnapshot = currentStateRepository.read(currentClaimId(), "empires");
+  const empires = runtimeHealthWithPersistedSnapshot({
+    runtimeHealth: relayEmpireRuntime.health(),
+    snapshot: empireSnapshot,
+    subscriptionHealth: empireSnapshot
+      ? currentStateRepository.readSubscriptionHealth(empireSnapshot.provenance.sourceKey, "empires")
+      : null,
+  });
+  const rawDiagnostic = globalCatalog.schemaDiagnostic
+    ?? safeSources.global?.schemaFingerprintDiagnostic
+    ?? null;
+  const diagnostic = rawDiagnostic
+    ? sanitizeSchemaFingerprintDiagnostic(rawDiagnostic)
+    : null;
+  return {
+    ...health,
+    sources: safeSources,
+    globalCatalog: {
+      ...globalCatalog,
+      schemaDiagnostic: globalCatalog.schemaDiagnostic
+        ? sanitizeSchemaFingerprintDiagnostic(globalCatalog.schemaDiagnostic)
+        : null,
+      schemaHealth: {
+        source: "global",
+        typedState: globalCatalog.subscription?.typedState ?? "disconnected",
+        expectedFingerprint: String(relayBindingManifest.schemas?.global?.fingerprint ?? "") || null,
+        observedFingerprint: diagnostic?.observed ?? health.sources?.global?.schemaFingerprint ?? null,
+        attemptedAt: diagnostic?.attemptedAt ?? null,
+        error: diagnostic?.error ?? null,
+      },
+    },
+    primaryRegion,
+    publicCrafts,
+    claimMarket,
+    regionalMarket,
+    regionClaims,
+    empires,
+    mapResources: sanitizedMapResourceHealth(relayMapResourceRuntime.health()),
+  };
+}
+
+function regionalMarketRuntimeHeartbeat() {
+  const runtime = relayRegionalMarketRuntime.health();
+  const sessions = Array.isArray(runtime?.pool?.sessions) ? runtime.pool.sessions : [];
+  const activeRegionIds = Array.isArray(runtime?.activeRegionIds) ? runtime.activeRegionIds.map(String) : [];
+  const sessionByRegion = new Map(sessions.map((session) => [String(session?.regionId ?? ""), session?.health ?? {}]));
+  const healthy = runtime.running === true
+    && activeRegionIds.length > 0
+    && activeRegionIds.every((regionId) => {
+      const health = sessionByRegion.get(regionId);
+      return health?.connected === true && health.applied === true && !health.lastError;
+    });
+  const lastError = runtime.lastError
+    ?? sessions.map((session) => session?.health?.lastError).find(Boolean)
+    ?? null;
+  const lastAppliedAt = sessions
+    .map((session) => String(session?.health?.lastAppliedAt ?? ""))
+    .filter(Boolean)
+    .sort()
+    .at(-1) ?? null;
+  return {
+    ...runtime,
+    subscription: {
+      connected: healthy,
+      applied: healthy,
+      lastAppliedAt,
+      lastError,
+      typedState: healthy ? "connected" : "disconnected",
+    },
+    lastError,
+  };
+}
+function globalRegionSubscriptionHealth() {
+  const runtime = relayGlobalCatalogRuntime.health();
+  if (runtime.running) return runtime;
+  const persisted = currentStateRepository.readSubscriptionHealth("global", "region");
+  if (!persisted) return runtime;
+  const observedAtMs = Date.parse(persisted.updatedAt);
+  const heartbeatFreshForMs = Math.max(relayHttpRefreshMs * 3, 30_000);
+  const heartbeatFresh = Number.isFinite(observedAtMs)
+    && Date.now() - observedAtMs <= heartbeatFreshForMs;
+  const lastError = persisted.lastError
+    ?? (heartbeatFresh ? null : "Relay global region subscription heartbeat is stale.");
+  const typedState = persisted.runtimeState ?? "disconnected";
+  return {
+    ...runtime,
+    persisted: true,
+    subscription: {
+      connected: typedState === "connected" && heartbeatFresh && persisted.connected && !lastError,
+      applied: persisted.generation > 0,
+      lastAppliedAt: persisted.updatedAt,
+      lastError,
+      typedState,
+    },
+    lastError,
+  };
+}
+async function persistGlobalRegionSubscriptionHealth() {
+  const runtime = relayGlobalCatalogRuntime.health();
+  const subscription = runtime.subscription ?? {};
+  const relayGlobalHeartbeatDomains = ["catalogs", "skills", "region"];
+  const observedAt = new Date().toISOString();
+  for (const domain of relayGlobalHeartbeatDomains) {
+    const snapshot = currentStateRepository.read(currentClaimId(), domain);
+    await currentStateRepository.recordSubscriptionHealth({
+      sourceKey: "global",
+      domain,
+      generation: snapshot?.generation ?? 0,
+      connected: runtime.running
+        && subscription.connected === true
+        && subscription.applied === true
+        && !subscription.lastError
+        && !runtime.lastError,
+      runtimeState: subscription.typedState
+        ?? (runtime.running && subscription.connected === true
+          ? "connected"
+          : "disconnected"),
+      lastError: subscription.lastError ?? runtime.lastError ?? null,
+    }, observedAt);
+  }
+}
+const relayPrimaryRegionHeartbeatDomains = [
+  "players",
+  "equipment",
+  "construction",
+  "research",
+  "recruitment",
+  "inventory-banks",
+  "contributions",
+];
+async function persistRelayRuntimeDomainHeartbeats(runtimeHealth, domains) {
+  const subscription = runtimeHealth?.subscription ?? {};
+  const connected = runtimeHealth?.running === true
+    && subscription.connected === true
+    && subscription.applied === true
+    && !subscription.lastError
+    && !runtimeHealth?.lastError;
+  const lastError = subscription.lastError ?? runtimeHealth?.lastError ?? null;
+  const observedAt = new Date().toISOString();
+  for (const domain of domains) {
+    const snapshot = currentStateRepository.read(currentClaimId(), domain);
+    if (!snapshot) continue;
+    await currentStateRepository.recordSubscriptionHealth({
+      sourceKey: snapshot.provenance.sourceKey,
+      domain,
+      generation: snapshot.generation,
+      connected,
+      runtimeState: runtimeHealth?.subscription?.typedState
+        ?? (connected ? "connected" : "disconnected"),
+      lastError,
+    }, observedAt);
+  }
+}
 const craftPlanProgressAudit = createCraftPlanProgressAuditRepository(db, {
   statements,
   retentionDays: 14,
 });
 let craftPlanProgressAuditWriteWarning = null;
 const gameCatalogRepository = createGameCatalogRepository(db);
-const empireHexiteRepository = createEmpireHexiteRepository(db);
 const empireMembershipRepository = createEmpireMembershipRepository(db);
-const runEmpireHexiteRefreshJob = createEmpireHexiteRefreshJob({
-  repository: empireHexiteRepository,
-  fetchJson: (pathname) => fetchBitjita(pathname, { cache: false }),
-  batchSize: Math.max(1, Math.min(Number(process.env.EMPIRE_HEXITE_BATCH_SIZE ?? 50), 100)),
-  requestsPerMinute: Math.max(1, Math.min(Number(process.env.EMPIRE_HEXITE_REQUESTS_PER_MINUTE ?? 150), 150)),
-});
 
 seedDefaultDiscordOwner({ db, statements, defaultOwnerDiscordId: defaultOwnerDiscordIdFromEnv(process.env), isTestRuntime });
 
@@ -390,652 +1173,6 @@ function toNumber(value) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function upsertRecipeCatalogDetail(target, detail, source = "bitjita") {
-  const normalized = recipeTargetFromDetail(detail, target);
-  const now = new Date().toISOString();
-  statements.upsertRecipeCatalogEntry.run(
-    recipeCatalogKey(normalized.kind, normalized.id),
-    normalized.kind,
-    normalized.id,
-    normalized.itemType,
-    normalized.name,
-    normalized.tier,
-    normalized.rarity,
-    normalized.tag,
-    normalized.iconAssetName,
-    JSON.stringify(detail),
-    source,
-    now,
-    now,
-  );
-  return normalized;
-}
-
-async function fetchAndStoreRecipeDetail(target, source = "on_demand") {
-  const kind = String(target.kind ?? "") === "cargo" ? "cargo" : "items";
-  const id = String(target.id ?? "").trim();
-  if (!id) {
-    const error = new Error("Recipe target id is required");
-    error.statusCode = 400;
-    throw error;
-  }
-  const detail = await fetchBitjita(`/${kind}/${encodeURIComponent(id)}`);
-  upsertRecipeCatalogDetail({ ...target, id, kind }, detail, source);
-  return detail;
-}
-
-async function recipeDetailFromCatalogOrFetch(target) {
-  const kind = String(target.kind ?? "") === "cargo" ? "cargo" : "items";
-  const id = String(target.id ?? "").trim();
-  const key = recipeCatalogKey(kind, id);
-  const cached = statements.getRecipeCatalogEntry.get(key);
-  if (cached?.detail_json) {
-    const detail = safeJson(cached.detail_json, {});
-    if (recipeDetailHasPlanningMetadata(detail, { ...target, id, kind })) {
-      return {
-        detail,
-        cached: true,
-        lastSyncedAt: cached.last_synced_at,
-        lastError: cached.last_error,
-      };
-    }
-    try {
-      const refreshed = await fetchAndStoreRecipeDetail({ ...target, id, kind }, "metadata_refresh");
-      return {
-        detail: refreshed,
-        cached: false,
-        lastSyncedAt: new Date().toISOString(),
-        lastError: null,
-      };
-    } catch {
-      return {
-        detail,
-        cached: true,
-        lastSyncedAt: cached.last_synced_at,
-        lastError: cached.last_error,
-      };
-    }
-  }
-  const detail = await fetchAndStoreRecipeDetail({ ...target, id, kind }, "on_demand");
-  return {
-    detail,
-    cached: false,
-    lastSyncedAt: new Date().toISOString(),
-    lastError: null,
-  };
-}
-
-function recipeDetailFromCatalog(target) {
-  const kind = String(target.kind ?? "") === "cargo" ? "cargo" : "items";
-  const id = String(target.id ?? "").trim();
-  const cached = statements.getRecipeCatalogEntry.get(recipeCatalogKey(kind, id));
-  if (!cached?.detail_json) return null;
-  const detail = safeJson(cached.detail_json, {});
-  if (!recipeDetailHasPlanningMetadata(detail, { ...target, id, kind })) return null;
-  return {
-    detail,
-    cached: true,
-    lastSyncedAt: cached.last_synced_at,
-    lastError: cached.last_error,
-  };
-}
-
-function recipeCatalogCached(target) {
-  return Boolean(recipeDetailFromCatalog(target));
-}
-
-function craftPlanRecipeDiscoveryLimit() {
-  return Math.max(1, Math.min(Number(process.env.RECIPE_CATALOG_DISCOVERY_LIMIT ?? 2000), 2000));
-}
-
-function craftPlanCatalogCandidateTarget(kind, row = {}) {
-  const id = String(row.id ?? row.itemId ?? "").trim();
-  if (!/^\d+$/.test(id)) return null;
-  return { id, kind, itemType: kind === "cargo" ? 1 : 0, name: row.name, tier: row.tier, tag: row.tag, iconAssetName: row.iconAssetName };
-}
-
-async function refreshCraftPlanProducerCatalog({ jobKey } = {}) {
-  const [itemRows, cargoRows] = await Promise.all([
-    craftPlanItemCatalogRowsCached().catch(() => []),
-    craftPlanCargoCatalogRowsCached().catch(() => []),
-  ]);
-  const candidates = [
-    ...itemRows.filter((row) => craftPlanHasItemListOutputs(row) && !craftPlanCargoLooksLikeTransportPackage(row)).map((row) => craftPlanCatalogCandidateTarget("items", row)),
-    ...cargoRows.filter((row) => !craftPlanCargoLooksLikeTransportPackage(row)).map((row) => craftPlanCatalogCandidateTarget("cargo", row)),
-  ].filter(Boolean).filter((target) => !recipeCatalogCached(target));
-  const limit = craftPlanRecipeDiscoveryLimit();
-  const selected = candidates.slice(0, limit);
-  let discovered = 0;
-  let discoveryFailed = 0;
-  let stoppedEarly = false;
-  for (const target of selected) {
-    try {
-      await fetchAndStoreRecipeDetail(target, "scheduled_job");
-      discovered += 1;
-    } catch (error) {
-      discoveryFailed += 1;
-      const message = error instanceof Error ? error.message : String(error);
-      statements.updateRecipeCatalogError.run(message, new Date().toISOString(), recipeCatalogKey(target.kind, target.id));
-      if (message.includes("HTTP 429")) {
-        stoppedEarly = true;
-        break;
-      }
-    }
-    if ((discovered + discoveryFailed) % 25 === 0) updateScheduledJobProgress(jobKey, { stage: "recipe_discovery", discovered, discoveryFailed, candidates: candidates.length });
-    await delay(100);
-  }
-  return {
-    discovered,
-    discoveryFailed,
-    discoverySkipped: Math.max(candidates.length - discovered - discoveryFailed, 0),
-    discoveryCandidates: candidates.length,
-    discoveryLimit: limit,
-    discoveryStoppedEarly: stoppedEarly,
-  };}
-
-async function refreshKnownRecipeCatalogEntries({ jobKey } = {}) {
-  const limit = Math.max(1, Math.min(Number(process.env.RECIPE_CATALOG_REFRESH_LIMIT ?? 250), 1000));
-  const rows = statements.listRecipeCatalogEntries.all(limit)
-    .filter((row) => String(row.source ?? "") !== "game_catalog_refresh");
-
-  let refreshed = 0;
-  let failed = 0;
-  let stoppedEarly = false;
-
-  for (const row of rows) {
-    const target = recipeTargetFromRow(row);
-    try {
-      await fetchAndStoreRecipeDetail(target, "scheduled_job");
-      refreshed += 1;
-    } catch (error) {
-      failed += 1;
-      const message = error instanceof Error ? error.message : String(error);
-      statements.updateRecipeCatalogError.run(message, new Date().toISOString(), row.catalog_key);
-      if (message.includes("HTTP 429")) {
-        stoppedEarly = true;
-        break;
-      }
-    }
-    if ((refreshed + failed) % 25 === 0) updateScheduledJobProgress(jobKey, { stage: "legacy_recipe_catalog", refreshed, failed, knownRows: rows.length });
-    if (gameCatalogRefreshDetailDelayMs > 0) await delay(gameCatalogRefreshDetailDelayMs);
-  }
-
-  const discovery = stoppedEarly ? {
-    discovered: 0,
-    discoveryFailed: 0,
-    discoverySkipped: 0,
-    discoveryCandidates: 0,
-    discoveryLimit: craftPlanRecipeDiscoveryLimit(),
-    discoveryStoppedEarly: true,
-  } : await refreshCraftPlanProducerCatalog({ jobKey });
-  const knownRecipes = toNumber(statements.recipeCatalogCount.get()?.count);
-  return {
-    refreshed,
-    failed,
-    skipped: Math.max(knownRecipes - refreshed - failed - discovery.discovered, 0),
-    knownRecipes,
-    stoppedEarly: stoppedEarly || discovery.discoveryStoppedEarly,
-    ...discovery,
-  };
-}
-
-function firstArrayValue(...values) {
-  for (const value of values) {
-    if (Array.isArray(value)) return value;
-  }
-  return [];
-}
-
-function firstObjectValue(...values) {
-  for (const value of values) {
-    if (value && typeof value === "object" && !Array.isArray(value)) return value;
-  }
-  return {};
-}
-
-function gameCatalogListRows(kind, payload) {
-  const nested = firstObjectValue(payload?.data, payload?.result, payload?.payload);
-  return firstArrayValue(
-    payload?.[kind === "cargo" ? "cargos" : "items"],
-    payload?.items,
-    payload?.cargos,
-    payload?.results,
-    nested?.[kind === "cargo" ? "cargos" : "items"],
-    nested?.items,
-    nested?.cargos,
-    nested?.results,
-  ).filter((row) => row && typeof row === "object");
-}
-
-function gameCatalogListMetrics(payload) {
-  const nested = firstObjectValue(payload?.data, payload?.result, payload?.payload);
-  return firstObjectValue(payload?.metrics, payload?.pagination, nested?.metrics, nested?.pagination, payload, nested);
-}
-
-function gameCatalogListTarget(kind, row = {}) {
-  const id = String(row.id ?? row.itemId ?? row.targetId ?? "").trim();
-  if (!/^\d+$/.test(id)) return null;
-  return {
-    id,
-    kind: kind === "cargo" ? "cargo" : "items",
-    itemType: kind === "cargo" ? 1 : 0,
-    name: row.name ?? row.itemName ?? null,
-    tag: row.tag ?? null,
-    tier: row.tier ?? null,
-    rarityStr: row.rarityStr ?? row.rarity ?? null,
-    iconAssetName: row.iconAssetName ?? null,
-    itemListId: row.itemListId ?? row.item_list_id ?? null,
-    catalogRow: row,
-  };
-}
-
-function gameCatalogRefreshTargetKey(target) {
-  return `${target.kind}:${target.id}`;
-}
-
-function gameCatalogRefreshPhase(target) {
-  return target?.kind === "cargo" ? "detail_cargo" : "detail_items";
-}
-
-function seedCraftPlanCatalogCaches(itemTargets, cargoTargets) {
-  const nowMs = Date.now();
-  craftPlanItemCatalogCache = { expiresAt: nowMs + CRAFT_PLAN_ITEM_CATALOG_TTL_MS, rows: itemTargets.map((target) => target.catalogRow ?? target) };
-  craftPlanCargoCatalogCache = { expiresAt: nowMs + CRAFT_PLAN_CARGO_CATALOG_TTL_MS, rows: cargoTargets.map((target) => target.catalogRow ?? target) };
-}
-
-async function fetchGameCatalogTargets(kind) {
-  const endpoint = kind === "cargo" ? "/cargo" : "/items";
-  const rows = [];
-  let page = 1;
-  let totalPages = 1;
-  do {
-    const payload = await fetchBitjita(`${endpoint}?page=${page}`, { cache: false });
-    const pageRows = gameCatalogListRows(kind, payload);
-    rows.push(...pageRows);
-    const metrics = gameCatalogListMetrics(payload);
-    const pageCount = Math.floor(toNumber(metrics.totalPages ?? metrics.total_pages ?? metrics.pages ?? 1) || 1);
-    if (pageCount > 1) totalPages = pageCount;
-    else {
-      const totalRows = Math.floor(toNumber(metrics.total ?? metrics.totalCount ?? metrics.count ?? pageRows.length) || pageRows.length);
-      totalPages = pageRows.length > 0 ? Math.max(1, Math.ceil(totalRows / pageRows.length)) : 1;
-    }
-    page += 1;
-  } while (page <= totalPages);
-
-  const seen = new Set();
-  const targets = [];
-  for (const row of rows) {
-    const target = gameCatalogListTarget(kind, row);
-    if (!target) continue;
-    const key = gameCatalogRefreshTargetKey(target);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    targets.push(target);
-  }
-  return targets;
-}
-
-async function fetchAndStoreGameCatalogDetail(target) {
-  try {
-    const endpointKind = target.kind === "cargo" ? "cargo" : "items";
-    const payload = await fetchBitjita(`/${endpointKind}/${encodeURIComponent(target.id)}`, { cache: false });
-    const stored = gameCatalogRepository.upsertDetail(payload, {
-      updatedAt: new Date().toISOString(),
-      fallback: { id: target.id, kind: target.kind, itemType: target.itemType, name: target.name, tag: target.tag, tier: target.tier, rarity: target.rarityStr, iconAssetName: target.iconAssetName, itemListId: target.itemListId },
-    });
-    upsertRecipeCatalogDetail(target, payload, "game_catalog_refresh");
-    return stored;
-  } catch (error) {
-    throw withCatalogRefreshTargetContext(error, target);
-  }
-}
-
-function storedGameCatalogNormalizationVersion() {
-  return Number(statements.getSetting.get("game_catalog_normalization_version")?.value ?? 0);
-}
-
-async function runRecipeCatalogRefreshJob({ jobKey } = {}) {
-  const startedAt = new Date().toISOString();
-  const previousRun = gameCatalogRepository.getLatestRefreshRun();
-  const storedNormalizationVersion = storedGameCatalogNormalizationVersion();
-  const resuming = catalogRefreshShouldResume(previousRun, storedNormalizationVersion);
-  let refreshRun = resuming
-    ? gameCatalogRepository.updateRefreshRun(previousRun.id, {
-      status: "running",
-      phase: previousRun.phase ?? "list_items",
-      completedAt: null,
-      lastError: null,
-      updatedAt: startedAt,
-    })
-    : gameCatalogRepository.beginRefreshRun({
-      status: "running",
-      phase: "list_items",
-      startedAt,
-      updatedAt: startedAt,
-    });
-  if (!resuming) {
-    statements.upsertSetting.run(
-      "game_catalog_normalization_version",
-      String(GAME_CATALOG_NORMALIZATION_VERSION),
-      startedAt,
-    );
-  }
-  let queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-  let itemCount = refreshRun.itemCount;
-  let cargoCount = refreshRun.cargoCount;
-
-  if (queueCounts.total === 0) {
-    updateScheduledJobProgress(jobKey, { stage: "list_items", processedCount: 0, totalCount: 0 });
-    const itemTargets = await fetchGameCatalogTargets("items");
-    for (const target of itemTargets) gameCatalogRepository.upsertEntityIdentity(target, { updatedAt: new Date().toISOString(), kind: "items" });
-    refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-      phase: "list_cargo",
-      itemCount: itemTargets.length,
-      updatedAt: new Date().toISOString(),
-    });
-
-    updateScheduledJobProgress(jobKey, { stage: "list_cargo", itemCount: itemTargets.length, processedCount: 0, totalCount: 0 });
-    const cargoTargets = await fetchGameCatalogTargets("cargo");
-    for (const target of cargoTargets) gameCatalogRepository.upsertEntityIdentity(target, { updatedAt: new Date().toISOString(), kind: "cargo" });
-    seedCraftPlanCatalogCaches(itemTargets, cargoTargets);
-    gameCatalogRepository.replaceRefreshTargets(refreshRun.id, [...itemTargets, ...cargoTargets]);
-    queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-    itemCount = itemTargets.length;
-    cargoCount = cargoTargets.length;
-    refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-      phase: "detail_items",
-      cursorKind: null,
-      cursorId: null,
-      processedCount: 0,
-      totalCount: queueCounts.total,
-      itemCount,
-      cargoCount,
-      recipeCount: 0,
-      byproductCount: 0,
-      failureCount: 0,
-      lastError: null,
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
-  let batch = gameCatalogRepository.listPendingRefreshTargets(refreshRun.id, gameCatalogRefreshJobBudget.batchSize);
-  let retryingFailures = false;
-  const resumeFailedTargetFirst = queueCounts.failed > 0 && (
-    previousRun?.status === "failed"
-    || previousRun?.phase === "waiting_retry"
-    || previousRun?.phase === "retry_failures"
-  );
-  if (resumeFailedTargetFirst) {
-    const retries = gameCatalogRepository.listRetryableRefreshTargets(refreshRun.id, gameCatalogRefreshJobBudget.batchSize, 3);
-    const remainingSlots = Math.max(0, gameCatalogRefreshJobBudget.batchSize - retries.length);
-    batch = [...retries, ...gameCatalogRepository.listPendingRefreshTargets(refreshRun.id, remainingSlots || 1).slice(0, remainingSlots)];
-    retryingFailures = retries.length > 0;
-  } else if (!batch.length && queueCounts.failed > 0) {
-    batch = gameCatalogRepository.listRetryableRefreshTargets(refreshRun.id, gameCatalogRefreshJobBudget.batchSize, 3);
-    retryingFailures = batch.length > 0;
-  }
-  const startedAtMs = Date.now();
-  let processedThisRun = 0;
-  let processedCount = queueCounts.processed;
-  let recipeCount = refreshRun.recipeCount;
-  let byproductCount = refreshRun.byproductCount;
-  let failureCount = refreshRun.failureCount;
-  let cursorKind = refreshRun.cursorKind;
-  let cursorId = refreshRun.cursorId;
-  let pausedForBudget = false;
-
-  refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-    phase: retryingFailures ? "retry_failures" : gameCatalogRefreshPhase(batch[0]),
-    cursorKind,
-    cursorId,
-    totalCount: queueCounts.total,
-    itemCount,
-    cargoCount,
-    processedCount,
-    recipeCount,
-    byproductCount,
-    failureCount,
-    lastError: null,
-    updatedAt: new Date().toISOString(),
-  });
-
-  for (const target of batch) {
-    if (!jobBudgetAllowsMore(startedAtMs, gameCatalogRefreshJobBudget, processedThisRun)) {
-      pausedForBudget = true;
-      break;
-    }
-
-    try {
-      const detail = await fetchAndStoreGameCatalogDetail(target);
-      processedThisRun += 1;
-      processedCount += 1;
-      recipeCount += detail.recipes.length;
-      byproductCount += detail.itemListOutputs.length;
-      cursorKind = target.kind;
-      cursorId = target.id;
-      gameCatalogRepository.markRefreshTargetProcessed(refreshRun.id, target.catalogKey);
-      queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-      processedCount = queueCounts.processed;
-      refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-        phase: gameCatalogRefreshPhase(target),
-        cursorKind,
-        cursorId,
-        processedCount,
-        totalCount: queueCounts.total,
-        itemCount,
-        cargoCount,
-        recipeCount,
-        byproductCount,
-        failureCount,
-        updatedAt: new Date().toISOString(),
-      });
-      updateScheduledJobProgress(jobKey, {
-        stage: gameCatalogRefreshPhase(target),
-        cursorKind,
-        cursorId,
-        processedCount,
-        totalCount: queueCounts.total,
-        itemCount,
-        cargoCount,
-        recipeCount,
-        byproductCount,
-        failureCount,
-      });
-      if (gameCatalogRefreshDetailDelayMs > 0) await delay(gameCatalogRefreshDetailDelayMs);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const recovery = classifyCatalogRefreshError(error, {
-        attemptNumber: Number(target.attemptCount ?? 0) + 1,
-        retryDelaysMs: gameCatalogRefreshRetryDelaysMs,
-      });
-
-      if (recovery.action === "stop") {
-        gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-          status: "failed",
-          phase: gameCatalogRefreshPhase(target),
-          cursorKind,
-          cursorId,
-          processedCount,
-          totalCount: queueCounts.total,
-          itemCount,
-          cargoCount,
-          recipeCount,
-          byproductCount,
-          failureCount,
-          lastError: message,
-          updatedAt: new Date().toISOString(),
-        });
-        throw error;
-      }
-
-      failureCount += 1;
-      if (recovery.action === "retry") {
-        gameCatalogRepository.markRefreshTargetFailed(refreshRun.id, target.catalogKey, message);
-        queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-        gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-          status: "paused",
-          phase: "waiting_retry",
-          cursorKind,
-          cursorId,
-          processedCount,
-          totalCount: queueCounts.total,
-          itemCount,
-          cargoCount,
-          recipeCount,
-          byproductCount,
-          failureCount,
-          lastError: message,
-          updatedAt: new Date().toISOString(),
-        });
-        return {
-          complete: false,
-          continueAfterMs: recovery.delayMs,
-          retryReason: recovery.reason,
-          lastError: message,
-          processedCount,
-          totalCount: queueCounts.total,
-          itemCount,
-          cargoCount,
-          recipeCount,
-          byproductCount,
-          failureCount,
-          resumed: resuming,
-          cursorKind,
-          cursorId,
-        };
-      }
-
-      gameCatalogRepository.markRefreshTargetUnavailable(refreshRun.id, target.catalogKey, message, 3);
-      queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-      refreshRun = gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-        status: "running",
-        phase: gameCatalogRefreshPhase(target),
-        cursorKind,
-        cursorId,
-        processedCount,
-        totalCount: queueCounts.total,
-        itemCount,
-        cargoCount,
-        recipeCount,
-        byproductCount,
-        failureCount,
-        lastError: message,
-        updatedAt: new Date().toISOString(),
-      });
-    }
-  }
-
-  queueCounts = gameCatalogRepository.getRefreshTargetCounts(refreshRun.id);
-  const retryableFailures = gameCatalogRepository.listRetryableRefreshTargets(refreshRun.id, 1, 3).length;
-  if (pausedForBudget || queueCounts.pending > 0 || retryableFailures > 0) {
-    const pausedAt = new Date().toISOString();
-    gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-      status: "paused",
-      phase: retryableFailures > 0 && queueCounts.pending === 0
-        ? "retry_failures"
-        : gameCatalogRefreshPhase(batch[Math.max(0, processedThisRun - 1)] ?? batch[0] ?? null),
-      cursorKind,
-      cursorId,
-      processedCount,
-      totalCount: queueCounts.total,
-      itemCount,
-      cargoCount,
-      recipeCount,
-      byproductCount,
-      failureCount,
-      lastError: null,
-      updatedAt: pausedAt,
-    });
-    return {
-      complete: false,
-      continueAfterMs: gameCatalogRefreshContinueDelayMs,
-      processedCount,
-      totalCount: queueCounts.total,
-      itemCount,
-      cargoCount,
-      recipeCount,
-      byproductCount,
-      failureCount,
-      resumed: resuming,
-      cursorKind,
-      cursorId,
-    };
-  }
-
-  gameCatalogRepository.deleteOrphanRecipes();
-  const legacyRefresh = await refreshKnownRecipeCatalogEntries({ jobKey });
-  updateScheduledJobProgress(jobKey, { stage: "probability_snapshot" });
-  const probabilitySource = await fetchGameDataProbabilitySnapshot({
-    itemListsUrl: process.env.GAME_DATA_ITEM_LISTS_URL,
-    resourcesUrl: process.env.GAME_DATA_RESOURCES_URL,
-    sourceUrl: process.env.GAME_DATA_SOURCE_URL,
-  });
-  probabilitySource.sources = [
-    {
-      sourceKind: "bitjita_catalog",
-      sourceUrl: `${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api`,
-      sourceRevision: `catalog-normalization-${GAME_CATALOG_NORMALIZATION_VERSION}`,
-    },
-    ...(probabilitySource.sources ?? []),
-  ];
-  const probabilitySnapshot = gameCatalogRepository.replaceProbabilitySnapshot(probabilitySource);
-  const effortCandidates = gameCatalogRepository.listProbabilityEffortCandidates();
-  const effortUpdatedAt = new Date().toISOString();
-  const completedAt = new Date().toISOString();
-  const effortWeightCount = gameCatalogRepository.replaceEffortWeights(
-    effortCandidates,
-    CRAFT_PLAN_EFFORT_MODEL_VERSION,
-    effortUpdatedAt,
-    () => {
-      statements.upsertSetting.run(
-        "game_catalog_effort_model_version",
-        String(CRAFT_PLAN_EFFORT_MODEL_VERSION),
-        effortUpdatedAt,
-      );
-      gameCatalogRepository.updateRefreshRun(refreshRun.id, {
-        status: "completed",
-        phase: "complete",
-        cursorKind,
-        cursorId,
-        processedCount,
-        totalCount: queueCounts.total,
-        itemCount,
-        cargoCount,
-        recipeCount,
-        byproductCount,
-        failureCount,
-        lastError: null,
-        completedAt,
-        updatedAt: completedAt,
-      });
-    },
-  );
-  craftPlanEffortBaselineCache.clear();
-  craftPlanResponseGeneration += 1;
-  craftPlanResponseCache.clear();
-  probabilityWorkbookCache = null;
-  probabilityWorkbookInflight = null;
-
-  return {
-    complete: true,
-    processedCount,
-    totalCount: queueCounts.total,
-    itemCount,
-    cargoCount,
-    recipeCount,
-    byproductCount,
-    failureCount,
-    resumed: resuming,
-    cursorKind,
-    cursorId,
-    effortModelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
-    effortWeightCount,
-    effortUpdatedAt,
-    probabilitySnapshot,
-    ...legacyRefresh,
-  };
 }
 
 function updateScheduledJobProgress(jobKey, metadata) {
@@ -1142,29 +1279,32 @@ async function runPrivacyRetentionJob() {
         randomUUID: () => operationId,
       }),
     }),
+    deleteInactivePublicAccount: async (account) => coordinatePublicPrivacyDeletion({
+      ledgerPath: privacyLedgerPath,
+      key: privacyLedgerKey(),
+      discordId: account.discordId,
+      deleteAccount: (operationId) => deletePublicAccount(db, {
+        userId: account.id,
+        discordId: account.discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions: [],
+        randomUUID: () => operationId,
+      }),
+    }),
   });
 }
+
+const runOperationalHistoryRetentionDryRunJob = createOperationalHistoryRetentionDryRunJob({
+  db,
+  readSettings: operationalHistoryRetentionSettings,
+  runRetention: runOperationalHistoryRetention,
+});
 
 // Scheduled jobs are registered here rather than scattered through route
 // handlers so Admin can expose a consistent enable/run/status surface for each
 // background task. Jobs should report progress in metadata when they can run for
 // longer than a normal request.
 const scheduledJobRegistry = {
-  recipe_catalog_refresh: {
-    label: "Recipe catalog refresh",
-    description: "Refreshes the Craft Planning catalog database from BitJita once per week, storing normalized item, cargo, recipe, and byproduct records for future planner reads.",
-    schedule: "weekly@1@00:00",
-    legacySchedules: ["daily_midnight", "daily@00:00"],
-    enabled: true,
-    run: runRecipeCatalogRefreshJob,
-  },
-  global_market_insights: {
-    label: "Global market insights",
-    description: "Refreshes all-region market snapshots and overview modules from live BitJita data.",
-    schedule: "interval@1800",
-    enabled: true,
-    run: runGlobalMarketInsightsJob,
-  },
   youtube_channel_monitor: {
     label: "YouTube channel monitor",
     description: "Checks monitored YouTube channels for new videos and posts announcements to Discord.",
@@ -1181,17 +1321,10 @@ const scheduledJobRegistry = {
   },
   market_deal_watch: {
     label: "Market deal watch",
-    description: "Checks watched Price Finder items for sell listings below confirmed regional sale averages.",
+    description: "Reconciles enabled watches against the current Relay sell-order generation; live generations trigger checks immediately.",
     schedule: "interval@1800",
     enabled: true,
-    run: runMarketDealWatchJob,
-  },
-  empire_hexite_reserves_refresh: {
-    label: "Empire Hexite reserves",
-    description: "Refreshes estimated empire Hexite Energy and ready Capsule holdings from BitJita wallets, player storage, and aligned-claim inventories.",
-    schedule: "interval@21600",
-    enabled: true,
-    run: runEmpireHexiteRefreshJob,
+    run: queueMarketDealWatchEvaluation,
   },
   geoip_database_refresh: {
     label: "GeoIP database refresh",
@@ -1207,6 +1340,13 @@ const scheduledJobRegistry = {
     enabled: true,
     run: runPrivacyRetentionJob,
   },
+  operational_history_retention_dry_run: {
+    label: "Operational history retention preview",
+    description: "Reports aggregate eligible history rows. Rollup writes and deletion remain disabled.",
+    schedule: "daily@03:00",
+    enabled: true,
+    run: runOperationalHistoryRetentionDryRunJob,
+  },
 };
 
 function seedScheduledJobs() {
@@ -1214,22 +1354,10 @@ function seedScheduledJobs() {
 }
 
 const scheduledJobStaleAfterMs = 15 * 60 * 1000;
-const recipeCatalogStaleAfterMs = 2 * 60 * 1000;
 const scheduledJobContinuationTimers = new Map();
 
 function recoverStaleScheduledJobs() {
-  const recovered = recoverStaleScheduledJobsRegistry({ statements, staleAfterMs: scheduledJobStaleAfterMs });
-  const current = new Date();
-  const updatedAt = current.toISOString();
-  const catalogCutoff = new Date(current.getTime() - recipeCatalogStaleAfterMs).toISOString();
-  const catalogResult = statements.resetStaleRecipeCatalogJob.run(
-    "Recovered stalled planner catalog refresh after two minutes without progress.",
-    updatedAt,
-    JSON.stringify({ recoveredAt: updatedAt, staleAfterMinutes: 2, reason: "no_progress" }),
-    updatedAt,
-    catalogCutoff,
-  );
-  return recovered + catalogResult.changes;
+  return recoverStaleScheduledJobsRegistry({ statements, staleAfterMs: scheduledJobStaleAfterMs });
 }
 
 function scheduledJobRow(row) {
@@ -1256,31 +1384,6 @@ function scheduleScheduledJobContinuation(jobKey, delayMs) {
   }, Math.max(0, delayMs));
   timer.unref?.();
   scheduledJobContinuationTimers.set(jobKey, timer);
-}
-
-function craftPlanCatalogRefreshStatus() {
-  recoverStaleScheduledJobs();
-  const storedNormalizationVersion = storedGameCatalogNormalizationVersion();
-  const storedEffortModelVersion = Number(statements.getSetting.get("game_catalog_effort_model_version")?.value ?? 0);
-  const effortCompatible = storedEffortModelVersion === CRAFT_PLAN_EFFORT_MODEL_VERSION;
-  const effortWeights = effortCompatible
-    ? gameCatalogRepository.getEffortWeights(CRAFT_PLAN_EFFORT_MODEL_VERSION)
-    : new Map();
-  return {
-    scheduledJob: scheduledJobRow(statements.getScheduledJob.get("recipe_catalog_refresh")),
-    latestRun: gameCatalogRepository.getLatestRefreshRun(),
-    recentRuns: gameCatalogRepository.listRefreshRuns(10),
-    normalizationVersion: GAME_CATALOG_NORMALIZATION_VERSION,
-    storedNormalizationVersion,
-    normalizationOutdated: catalogNormalizationNeedsRefresh(storedNormalizationVersion),
-    effortModelVersion: CRAFT_PLAN_EFFORT_MODEL_VERSION,
-    storedEffortModelVersion,
-    effortCompatible,
-    effortWeightCount: effortWeights.size,
-    effortUpdatedAt: effortCompatible
-      ? gameCatalogRepository.getEffortWeightRevision(CRAFT_PLAN_EFFORT_MODEL_VERSION)
-      : null,
-  };
 }
 
 async function runScheduledJob(jobKey, { manual = false } = {}) {
@@ -1341,18 +1444,6 @@ function checkScheduledJobs() {
 }
 
 seedScheduledJobs();
-
-function scheduleGameCatalogNormalizationRefresh() {
-  if (!scheduledJobsEnabled || isTestRuntime) return;
-  if (!catalogNormalizationNeedsRefresh(storedGameCatalogNormalizationVersion())) return;
-  const key = "recipe_catalog_refresh";
-  const row = statements.getScheduledJob.get(key);
-  if (!row || row.enabled === 0 || row.running) return;
-  const now = new Date().toISOString();
-  statements.updateScheduledJobSettings.run(row.schedule, 1, now, now, key);
-}
-
-scheduleGameCatalogNormalizationRefresh();
 
 function publicDiscordYouTubeChannel(row) {
   return row ? {
@@ -1490,116 +1581,16 @@ function unwrap(payload, key, fallback) {
 }
 
 function recordProductionJobs(claimId, craftsPayload, occurredAt) {
-  const jobs = unwrap(craftsPayload, "craftResults", []).map((job) => normalizeProductionJob(job, craftsPayload));
-  const seen = new Set(jobs.map((job) => job.key));
-  const activeRows = statements.activeProductionJobs.all(claimId);
-  const existing = new Map(activeRows.map((row) => [row.job_key, row]));
-  const existingByStableKey = new Map(activeRows.map((row) => [normalizeProductionJob(safeJson(row.raw_json)).key, row]));
-  const hasProductionBaseline = toNumber(statements.productionJobCount.get(claimId)?.count) > 0;
-  const pendingNotifications = [];
-  const diagnostics = [{
-    status: "debug",
-    eventType: "production_poll",
-    summary: `Production poll saw ${jobs.length} active craft${jobs.length === 1 ? "" : "s"}`,
-    reason: hasProductionBaseline ? "Production baseline exists" : "First production baseline; start notifications are suppressed for this poll",
-    metadata: discordDiagnosticContext("production_started", {
-      claimId,
-      activeCraftCount: jobs.length,
-      activeKnownBeforePoll: existing.size,
-      hasProductionBaseline,
-      crafts: jobs.slice(0, 12).map((job) => ({
-        key: job.key,
-        label: job.label,
-        crafterName: job.crafterName,
-        skillName: job.skillName,
-        professionKey: job.professionKey,
-        tier: job.tier,
-        totalXp: job.totalXp,
-        progressPct: job.progressPct,
-        totalEffort: job.totalEffort,
-        remainingEffort: job.remainingEffort,
-      })),
-    }),
-  }];
-
-  for (const job of jobs) {
-    let current = existing.get(job.key) ?? existingByStableKey.get(job.key);
-    if (current && current.job_key !== job.key) {
-      statements.rekeyProductionJob.run(job.key, current.job_key);
-      current = { ...current, job_key: job.key };
-      existing.set(job.key, current);
-    }
-    const firstSeen = current?.first_seen ?? occurredAt;
-    const jobWithTiming = { ...job, firstSeen, lastSeen: occurredAt };
-    if (!current && isCompletedProductionJob(job)) {
-      diagnostics.push({
-        status: "skipped",
-        eventType: "production_started",
-        summary: `Craft already complete when first observed: ${job.label}`,
-        reason: "Newly observed craft is already complete or ready to collect; start notification suppressed",
-        metadata: discordDiagnosticContext("production_started", jobWithTiming),
-      });
-      continue;
-    }
-    statements.upsertProductionJob.run(job.key, claimId, job.label, job.buildingName, job.crafterName, firstSeen, occurredAt, JSON.stringify(jobWithTiming));
-    const startAlreadyNotified = current ? Boolean(current.start_notified) : false;
-    if (startAlreadyNotified) {
-      diagnostics.push({
-        status: "debug",
-        eventType: "production_started",
-        summary: `Craft start already notified: ${job.label}`,
-        reason: "Existing active craft row already has start_notified=1",
-        metadata: discordDiagnosticContext("production_started", { ...jobWithTiming, existingFirstSeen: current.first_seen, existingLastSeen: current.last_seen }),
-      });
-    }
-    if (!startAlreadyNotified && hasProductionBaseline) {
-      const summary = `Craft started: ${job.label}`;
-      const sourceKey = `production_started:${job.key}`;
-      statements.insertSourcedActivity.run(claimId, "production_started", summary, occurredAt, JSON.stringify(jobWithTiming), sourceKey);
-      const skipReason = productionNotificationSkipReason("production_started", jobWithTiming);
-      const retryWhenOlder = isProductionStartAgeGateSkip(skipReason);
-      if (skipReason) {
-        diagnostics.push({ status: "skipped", eventType: "production_started", summary, reason: skipReason, metadata: discordDiagnosticContext("production_started", jobWithTiming) });
-      } else {
-        pendingNotifications.push({ jobKey: job.key, sourceKey, eventType: "production_started", summary, occurredAt, metadata: jobWithTiming });
-      }
-      if (!retryWhenOlder) statements.markProductionStartNotified.run(job.key);
-    }
-  }
-
-  for (const [key, current] of existing) {
-    if (seen.has(key)) continue;
-    const lastSeenMs = new Date(String(current.last_seen ?? "")).getTime();
-    if (Number.isFinite(lastSeenMs) && Date.now() - lastSeenMs < productionMissingGraceMs) {
-      diagnostics.push({
-        status: "debug",
-        eventType: "production_completed",
-        summary: `Craft missing briefly: ${current.label}`,
-        reason: `Craft has been absent for less than ${Math.round(productionMissingGraceMs / 1000)} seconds; completion is delayed to avoid duplicate start notifications from transient API gaps`,
-        metadata: discordDiagnosticContext("production_completed", { key, label: current.label, buildingName: current.building_name, crafterName: current.crafter_name, lastSeen: current.last_seen }),
-      });
-      continue;
-    }
-    statements.completeProductionJob.run(occurredAt, key);
-    const job = { ...normalizeProductionJob(safeJson(current.raw_json)), key, label: current.label, buildingName: current.building_name, crafterName: current.crafter_name };
-    const metadata = {
-      key,
-      label: current.label,
-      buildingName: current.building_name,
-      crafterName: current.crafter_name,
-      ...job,
-    };
-    const summary = `Craft completed: ${current.label}`;
-    const sourceKey = `production_completed:${key}`;
-    statements.insertSourcedActivity.run(claimId, "production_completed", summary, occurredAt, JSON.stringify(metadata), sourceKey);
-    const skipReason = productionNotificationSkipReason("production_completed", metadata);
-    if (skipReason) {
-      diagnostics.push({ status: "skipped", eventType: "production_completed", summary, reason: skipReason, metadata: discordDiagnosticContext("production_completed", metadata) });
-    } else {
-      pendingNotifications.push({ jobKey: key, sourceKey, eventType: "production_completed", summary, occurredAt, metadata });
-    }
-  }
-  return { pendingNotifications, diagnostics };
+  return recordProductionJobsFromSnapshot({
+    statements,
+    claimId,
+    craftsPayload,
+    occurredAt,
+    missingGraceMs: productionMissingGraceMs,
+    diagnosticContext: discordDiagnosticContext,
+    notificationSkipReason: productionNotificationSkipReason,
+    isStartAgeGateSkip: isProductionStartAgeGateSkip,
+  });
 }
 
 async function deliverProductionNotifications(pendingNotifications = []) {
@@ -1656,30 +1647,16 @@ function publicDiscordSettings() {
   };
 }
 
-function getCollectorSettings() {
-  return normalizeCollectorSettings(safeJson(statements.getSetting.get("collector_settings_json")?.value, {}));
-}
-
 function currentClaimId() {
   return statements.getSetting.get("claim_id")?.value ?? defaultClaimId;
 }
 
-function migrateRetiredBuyOrderCollector() {
-  const markerKey = "regional_buy_order_collector_retired_at";
-  if (statements.getSetting.get(markerKey)?.value) return;
-  const now = new Date().toISOString();
-  const source = safeJson(statements.getSetting.get("collector_settings_json")?.value, {});
-  const current = source && typeof source === "object" && !Array.isArray(source) ? source : {};
-  const existingBuyOrders = current.buyOrders && typeof current.buyOrders === "object" ? current.buyOrders : {};
-  statements.upsertSetting.run("collector_settings_json", JSON.stringify({
-    ...current,
-    buyOrders: {
-      ...existingBuyOrders,
-      enabled: false,
-    },
-  }), now);
+function cleanupRetiredRegionalMarketState() {
   db.prepare("DELETE FROM scheduled_jobs WHERE job_key = ?").run("regional_buy_order_sale_baselines_refresh");
-  statements.upsertSetting.run(markerKey, now, now);
+  db.prepare("DELETE FROM app_settings WHERE key IN (?, ?)").run(
+    "regional_buy_order_collector_retired_at",
+    "regional_buy_order_state_retired_at",
+  );
 }
 
 function migrateMarketAccessSplit() {
@@ -1691,16 +1668,7 @@ function migrateMarketAccessSplit() {
   statements.upsertSetting.run(markerKey, now, now);
 }
 
-function scheduleInitialGlobalMarketInsights() {
-  if (statements.getSetting.get("global_market_overview_json")?.value) return;
-  const now = new Date().toISOString();
-  db.prepare("UPDATE scheduled_jobs SET next_run_at = ?, updated_at = ? WHERE job_key = ? AND last_success_at IS NULL")
-    .run(now, now, "global_market_insights");
-}
-
-migrateRetiredBuyOrderCollector();
 migrateMarketAccessSplit();
-scheduleInitialGlobalMarketInsights();
 
 function marketDealWatchSettings() {
   return normalizeMarketDealWatchSettings(safeJson(statements.getSetting.get("market_deal_watch_json")?.value, {}));
@@ -1723,7 +1691,6 @@ function getSettings() {
     theme: { ...defaultTheme, ...theme },
     refreshSeconds: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("refresh_seconds")?.value, 30),
     serverRefreshSeconds: normalizeSavedRefreshIntervalSeconds(statements.getSetting.get("server_refresh_seconds")?.value, Math.round(snapshotIntervalMs / 1000)),
-    collectorSettings: getCollectorSettings(),
     defaultPage: validAppPage(savedDefaultPage) ? savedDefaultPage : DEFAULT_APP_PAGE,
     defaultRegion: statements.getSetting.get("default_region")?.value ?? "",
     additionalActiveRegions: statements.getSetting.get("active_region_overrides")?.value ?? "",
@@ -1731,8 +1698,25 @@ function getSettings() {
     marketDealWatch: marketDealWatchSettings(),
     branding,
     visitorSecurity: visitorSecuritySettings(),
-    browserSnapshotsEnabled: false,
     discord: publicDiscordSettings(),
+  };
+}
+
+function publicBootstrapConfig() {
+  const settings = getSettings();
+  return {
+    claimId: settings.claimId,
+    claimName: String(currentStateRepository.read(settings.claimId, "claim")?.data?.name ?? "").trim(),
+    syncUrl: settings.syncUrl,
+    excludedMemberIds: settings.excludedMemberIds,
+    theme: settings.theme,
+    refreshSeconds: settings.refreshSeconds,
+    defaultPage: settings.defaultPage,
+    defaultRegion: settings.defaultRegion,
+    additionalActiveRegions: settings.additionalActiveRegions,
+    toastSettings: settings.toastSettings,
+    marketDealWatch: settings.marketDealWatch,
+    branding: settings.branding,
   };
 }
 
@@ -1744,8 +1728,11 @@ const pollStatus = {
   lastAttemptAt: null,
   lastSuccessAt: null,
   lastError: null,
-  lastRunMetrics: null,
-  collectors: Object.fromEntries(Object.entries(getCollectorSettings()).map(([key, value]) => [key, { ...value, intervalMs: value.intervalSeconds * 1000, lastAttemptAt: null, lastSuccessAt: null, lastError: null, durationMs: null, nextRunAt: null }])),
+  collectors: {
+    production: { label: "Production lifecycle", enabled: true, source: "relay-commits" },
+    settlementTransitions: { label: "Settlement transitions", enabled: true, source: "relay-commits" },
+    empireMembership: { label: "Empire membership", enabled: true, source: "relay-subscription" },
+  },
   storageLastAttemptAt: null,
   storageLastSuccessAt: null,
   storageLastError: null,
@@ -1758,20 +1745,8 @@ function serverRefreshIntervalMs() {
   return seconds * 1000;
 }
 
-function refreshCollectorStatusSettings() {
-  const settings = getCollectorSettings();
-  for (const [key, value] of Object.entries(settings)) {
-    setCollectorStatus(key, {
-      label: value.label,
-      enabled: serverPollingEnabled && value.enabled,
-      intervalSeconds: value.intervalSeconds,
-      intervalMs: value.intervalSeconds * 1000,
-    });
-  }
-}
-
 function setCollectorStatus(key, patch = {}) {
-  const current = pollStatus.collectors[key] ?? { label: key, enabled: serverPollingEnabled };
+  const current = pollStatus.collectors[key] ?? { label: key, enabled: true };
   pollStatus.collectors[key] = { ...current, ...patch };
 }
 
@@ -1779,26 +1754,12 @@ function collectorAttempt(key, step = "Starting") {
   setCollectorStatus(key, {
     lastAttemptAt: new Date().toISOString(),
     lastError: null,
-    fetchDurationMs: null,
-    fetchSteps: [],
-    payloadWriteDurationMs: null,
-    rowCount: null,
-    tableCounts: null,
     running: true,
     currentStep: step,
     progressCurrent: null,
     progressTotal: null,
   });
   return Date.now();
-}
-
-function collectorProgress(key, step, progress = {}) {
-  setCollectorStatus(key, {
-    running: true,
-    currentStep: step,
-    progressCurrent: Number.isFinite(Number(progress.current)) ? Number(progress.current) : null,
-    progressTotal: Number.isFinite(Number(progress.total)) ? Number(progress.total) : null,
-  });
 }
 
 function collectorSuccess(key, startedAt) {
@@ -1824,106 +1785,8 @@ function collectorFailure(key, startedAt, error) {
   });
 }
 
-function sideEffectCollectorDue(key, force = false) {
-  if (force) return true;
-  const settings = getCollectorSettings()[key];
-  if (!settings || settings.enabled === false) return false;
-  const lastSuccessAt = pollStatus.collectors[key]?.lastSuccessAt;
-  if (!lastSuccessAt) return true;
-  return Date.now() - new Date(lastSuccessAt).getTime() >= settings.intervalSeconds * 1000;
-}
-function blankCollectionMetrics() {
-  return {
-    startedAt: new Date().toISOString(),
-    collectors: {},
-    domainPayloadWriteDurationMs: null,
-    currentTableCounts: {},
-  };
-}
-
-function collectorMetric(metrics, key) {
-  if (!metrics || !key) return null;
-  metrics.collectors[key] ??= {
-    fetchDurationMs: 0,
-    fetchSteps: [],
-    payloadWriteDurationMs: 0,
-    tableCounts: {},
-    rowCount: 0,
-  };
-  return metrics.collectors[key];
-}
-
-function recordCollectorFetch(metrics, key, label, durationMs, error = null) {
-  const metric = collectorMetric(metrics, key);
-  if (!metric) return;
-  const roundedDuration = Math.max(Math.round(durationMs), 0);
-  metric.fetchDurationMs += roundedDuration;
-  metric.fetchSteps.push({
-    label,
-    durationMs: roundedDuration,
-    error: error ? (error instanceof Error ? error.message : String(error)) : null,
-  });
-}
-
-function recordCollectorPayloadWrite(metrics, domain, durationMs) {
-  const key = payloadDomainCollector[domain];
-  const metric = collectorMetric(metrics, key);
-  if (!metric) return;
-  metric.payloadWriteDurationMs += Math.max(Math.round(durationMs), 0);
-}
-
-async function timedCollectorFetch(metrics, key, label, load) {
-  const startedAt = Date.now();
-  collectorProgress(key, `Fetching ${label}`);
-  try {
-    const result = await load();
-    recordCollectorFetch(metrics, key, label, Date.now() - startedAt);
-    return result;
-  } catch (error) {
-    recordCollectorFetch(metrics, key, label, Date.now() - startedAt, error);
-    throw error;
-  }
-}
-
-function tableCount(table, claimId = "") {
-  try {
-    return toNumber(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE claim_id = ?`).get(String(claimId ?? ""))?.count);
-  } catch {
-    return null;
-  }
-}
-
-function collectorTableCounts(claimId) {
-  return Object.fromEntries(Object.entries(collectorCurrentTables).map(([key, tables]) => {
-    const tableCounts = Object.fromEntries(tables.map((table) => [table, tableCount(table, claimId)]));
-    return [key, {
-      tables: tableCounts,
-      rowCount: Object.values(tableCounts).reduce((sum, count) => sum + (Number.isFinite(Number(count)) ? Number(count) : 0), 0),
-    }];
-  }));
-}
-
-function applyCollectionMetrics(metrics, collectorKeys, claimId, collectedAt) {
-  if (!metrics) return;
-  const counts = collectorTableCounts(claimId);
-  metrics.completedAt = collectedAt;
-  metrics.currentTableCounts = counts;
-  for (const key of collectorKeys) {
-    const metric = metrics.collectors[key] ?? {};
-    const count = counts[key] ?? { tables: {}, rowCount: 0 };
-    setCollectorStatus(key, {
-      fetchDurationMs: Number.isFinite(Number(metric.fetchDurationMs)) ? Number(metric.fetchDurationMs) : null,
-      fetchSteps: Array.isArray(metric.fetchSteps) ? metric.fetchSteps : [],
-      payloadWriteDurationMs: Number.isFinite(Number(metric.payloadWriteDurationMs)) ? Number(metric.payloadWriteDurationMs) : null,
-      tableCounts: count.tables,
-      rowCount: count.rowCount,
-    });
-  }
-  pollStatus.lastRunMetrics = metrics;
-}
-
-
 function getSessionUser(req) {
+  if (smokeAdminReviewMode.enabled) return smokeAdminReviewMode.user;
   return lookupHttpSessionUser({
     req,
     cookieName: ADMIN_SESSION_COOKIE_NAME,
@@ -1948,43 +1811,10 @@ function audit(user, action, details = {}) {
   statements.insertAudit.run(user?.id ?? null, user?.username ?? "system", action, JSON.stringify(details), new Date().toISOString());
 }
 
-const adminLoginAttempts = createAdminLoginAttemptStore();
-const empireScoutInflight = new Map();
-const regionCache = new Map();
-const regionClaimListCache = new Map();
-const empireScoutCache = new Map();
-let activeRegionsCache = null;
-const claimDetailCache = new Map();
-const playerDetailCache = new Map();
-const craftContributionCache = new Map();
-const passiveCraftsCache = new Map();
-const playerDetailSummariesCache = new Map();
-const playerDetailSummariesInflight = new Map();
-const passiveCraftSummariesCache = new Map();
-const passiveCraftSummariesInflight = new Map();
-const productionCraftsCache = new Map();
-const productionCraftsInflight = new Map();
-let mapCatalogCache = null;
-const dashboardDataCache = new Map();
-const dashboardDataInflight = new Map();
-const UPSTREAM_CACHE_TTL_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_CACHE_MS ?? 15000));
-const UPSTREAM_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.BITJITA_PROXY_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
-const UPSTREAM_CACHE_MAX_ENTRIES = Math.max(25, Number(process.env.BITJITA_PROXY_CACHE_MAX_ENTRIES ?? 300));
-const BITJITA_FETCH_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_FETCH_TIMEOUT_MS ?? 15000));
-const EMPIRE_SCOUT_CACHE_TTL_MS = Math.max(30_000, Number(process.env.EMPIRE_SCOUT_CACHE_TTL_MS ?? 2 * 60 * 1000));
-const BITJITA_PROXY_TIMEOUT_MS = Math.max(1000, Number(process.env.BITJITA_PROXY_TIMEOUT_MS ?? 12000));
 const SLOW_REQUEST_LOG_MS = Math.max(1000, Number(process.env.SLOW_REQUEST_LOG_MS ?? 8000));
-const PRODUCTION_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_CRAFT_TIMEOUT_MS ?? 10000));
-const PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS = Math.max(1000, Number(process.env.PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS ?? 6000));
-const PLAYER_DETAIL_SUMMARY_CACHE_TTL_MS = Math.max(5000, Number(process.env.PLAYER_DETAIL_SUMMARY_CACHE_MS ?? 30_000));
-const PASSIVE_CRAFT_SUMMARY_CACHE_TTL_MS = Math.max(5000, Number(process.env.PASSIVE_CRAFT_SUMMARY_CACHE_MS ?? 60_000));
-const PRODUCTION_CRAFT_CACHE_TTL_MS = Math.max(5000, Number(process.env.PRODUCTION_CRAFT_CACHE_MS ?? 30_000));
-const LOCAL_HELPER_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.LOCAL_HELPER_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
-const DASHBOARD_DATA_CACHE_TTL_MS = Math.max(5000, Number(process.env.DASHBOARD_DATA_CACHE_MS ?? 20_000));
-const DASHBOARD_DATA_STALE_IF_ERROR_MS = Math.max(0, Number(process.env.DASHBOARD_DATA_STALE_IF_ERROR_MS ?? 5 * 60 * 1000));
 
 const CRAFT_PLAN_KEY = "active";
-const CRAFT_PLAN_RESPONSE_CACHE_TTL_MS = Math.max(5000, Number(process.env.CRAFT_PLAN_RESPONSE_CACHE_MS ?? 20_000));
+const CRAFT_PLAN_RESPONSE_CACHE_TTL_MS = Math.max(1000, Number(process.env.CRAFT_PLAN_RESPONSE_CACHE_MS ?? 5_000));
 const craftPlanResponseCache = new Map();
 const craftPlanResponseInflight = new Map();
 const craftPlanEffortBaselineCache = createCraftPlanEffortBaselineCache();
@@ -2029,87 +1859,6 @@ function saveCraftPlanConfig(config, timestamp = new Date().toISOString()) {
   craftPlanResponseCache.clear();
   craftPlanEffortBaselineCache.clear();
   return normalized;
-}
-
-function craftPlanRequirementFromRaw(raw = {}, lookup = new Map()) {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const itemId = String(raw.itemId ?? raw.itemEntityId ?? raw.item_id ?? raw.entityId ?? raw.id ?? raw.item?.id ?? "").trim();
-  const quantity = toNumber(raw.quantity ?? raw.qty ?? raw.count ?? raw.amount ?? raw.requiredQuantity ?? raw.required ?? raw.value);
-  if (!/^\d+$/.test(itemId) || quantity <= 0) return null;
-  const rawType = raw.itemType ?? raw.item_type ?? raw.kind ?? raw.item?.itemType;
-  const kind = rawType === "cargo" || rawType === 1 || rawType === "1" ? "cargo" : "items";
-  const item = lookup.get(itemId) ?? raw.item ?? {};
-  return {
-    id: itemId,
-    kind,
-    itemType: kind === "cargo" ? 1 : 0,
-    quantity: Math.ceil(quantity),
-    name: item.name ?? raw.itemName ?? raw.name ?? item.displayName ?? `Item #${itemId}`,
-    tier: item.tier ?? raw.tier ?? null,
-    rarityStr: item.rarityStr ?? item.rarity ?? raw.rarityStr ?? raw.rarity ?? null,
-    tag: item.tag ?? raw.tag ?? null,
-    iconAssetName: item.iconAssetName ?? raw.iconAssetName ?? null,
-  };
-}
-
-function collectCraftPlanRequirements(value, lookup = new Map(), depth = 0) {
-  if (!value || depth > 5) return [];
-  if (Array.isArray(value)) return value.flatMap((entry) => collectCraftPlanRequirements(entry, lookup, depth + 1));
-  if (typeof value !== "object") return [];
-  const direct = craftPlanRequirementFromRaw(value, lookup);
-  const nestedKeys = ["input", "inputs", "requirements", "requiredItems", "itemRequirements", "materials", "materialRequirements", "costs", "items", "resources"];
-  const nested = nestedKeys.flatMap((key) => collectCraftPlanRequirements(value[key], lookup, depth + 1));
-  return direct ? [direct, ...nested] : nested;
-}
-
-function tierFromResearchRow(row = {}) {
-  const text = `${row.name ?? row.techName ?? row.title ?? ""} ${row.description ?? ""}`;
-  const match = text.match(/(?:tier|t)\s*(\d{1,2})/i);
-  return match ? Number(match[1]) : toNumber(row.tier);
-}
-
-function mergePresetRequirements(requirements = []) {
-  const merged = new Map();
-  for (const item of requirements) {
-    const key = `${item.kind === "cargo" ? "cargo" : "items"}:${item.id}`;
-    const current = merged.get(key);
-    if (current) current.quantity += Math.ceil(item.quantity || 0);
-    else merged.set(key, { ...item, quantity: Math.ceil(item.quantity || 0) });
-  }
-  return [...merged.values()].filter((item) => item.quantity > 0);
-}
-
-async function fetchCraftPlanItemDetail(item) {
-  const id = String(item.id ?? item.itemId ?? "").trim();
-  if (!/^\d+$/.test(id)) return item;
-  const kind = String(item.kind ?? (String(item.itemType ?? item.item_type) === "1" ? "cargo" : "items")) === "cargo" ? "cargo" : "items";
-  try {
-    const detail = await fetchBitjita(`/${kind}/${encodeURIComponent(id)}`, { timeoutMs: 6000, cache: true });
-    return detail.item ?? detail.cargo ?? detail.data?.item ?? detail.data?.cargo ?? item;
-  } catch {
-    return item;
-  }
-}
-
-async function enrichCraftPlanRequirement(item) {
-  const detail = await fetchCraftPlanItemDetail(item);
-  return { ...item, ...targetFromRecipeCatalogItem({ ...detail, id: item.id, itemType: item.itemType }), quantity: item.quantity };
-}
-
-async function enrichCraftPlanRequirements(items = []) {
-  return Promise.all(items.map((item) => enrichCraftPlanRequirement(item)));
-}
-async function enrichCraftPlanSourceItems(sources = []) {
-  const cache = new Map();
-  async function enrichItem(item) {
-    const key = `${String(item.kind ?? "items")}:${String(item.id ?? item.itemId ?? "")}`;
-    if (!cache.has(key)) cache.set(key, enrichCraftPlanRequirement(item));
-    return cache.get(key);
-  }
-  return Promise.all((Array.isArray(sources) ? sources : []).map(async (source) => {
-    const items = Array.isArray(source.items) ? await Promise.all(source.items.map(enrichItem)) : [];
-    return { ...source, items, itemCount: source.itemCount ?? items.length };
-  }));
 }
 
 function craftPlanSourceCatalogKey(item = {}) {
@@ -2165,33 +1914,139 @@ function targetFromRecipeCatalogItem(item = {}) {
   };
 }
 
+function currentResearchProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "research");
+  if (!current) return { technologies: [] };
+  return enrichResearchWithCatalog(
+    current.data,
+    providerCatalogRepository.listDescriptions("claim_tech"),
+  ).data;
+}
+
+function currentConstructionProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "construction");
+  if (!current) return { projects: [] };
+  return enrichConstructionWithCatalog(
+    current.data,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    (kind, id) => providerCatalogRepository.getDescription(kind, id),
+  ).data;
+}
+
+function currentClaimBuildingsProjection(claimId) {
+  return readRelayClaimBuildingsForPlanning(
+    (id, domain) => currentStateRepository.read(id, domain),
+    claimId,
+  );
+}
+
+function currentRecruitmentProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "recruitment");
+  if (!current) return { claimId: String(claimId), isRecruiting: false, recruitment: [] };
+  return enrichRecruitmentWithCatalog(
+    current.data,
+    providerCatalogRepository.listDescriptions("skill"),
+  ).data;
+}
+
+function currentMembersProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "members");
+  const members = current?.data;
+  if (!Array.isArray(members)) throw new Error("Relay claim members have not loaded yet");
+  return { members };
+}
+
+function currentInventoryProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "inventories");
+  if (!current?.data) throw new Error("Relay settlement inventories have not loaded yet");
+  return enrichInventoryWithCatalog(
+    current.data,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+  );
+}
+
+function enrichMarketSnapshot(claimId, data) {
+  const claim = currentStateRepository.read(String(claimId), "claim")?.data ?? null;
+  return enrichMarketWithCatalog(data, {
+    getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    claim,
+  }).data;
+}
+
+function currentMarketProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "market");
+  return {
+    data: current?.data
+      ? enrichMarketSnapshot(claimId, current.data)
+      : { claimId: String(claimId), listings: [], marketplaces: [] },
+    observedAt: current?.provenance?.receivedAt ?? null,
+  };
+}
+
+function currentCraftPlanProjection(claimId) {
+  const current = currentStateRepository.read(String(claimId), "crafts");
+  if (!current?.data) throw new Error("Relay settlement crafts have not loaded yet");
+  return enrichCraftsForPlanning(
+    current.data,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
+  );
+}
+
+function recipeDetailFromLocalCatalog(target) {
+  const kind = String(target?.kind ?? "") === "cargo" ? "cargo" : "items";
+  const id = String(target?.id ?? "").trim();
+  const key = `${kind}:${id}`;
+  const { detailsByKey, warnings } = collectLocalCatalogCraftPlanDetails(
+    gameCatalogRepository,
+    [{ ...target, id, kind, itemType: kind === "cargo" ? 1 : 0 }],
+    {},
+    64,
+  );
+  const detail = detailsByKey.get(key);
+  if (!detail) {
+    const error = new Error(`Relay catalog has no detail for ${key}`);
+    error.statusCode = 404;
+    throw error;
+  }
+  const source = detail.item ?? detail.cargo ?? target;
+  const normalizedTarget = {
+    ...target,
+    id,
+    kind,
+    itemType: kind === "cargo" ? 1 : 0,
+    name: source?.name ?? target?.name ?? `${kind === "cargo" ? "Cargo" : "Item"} #${id}`,
+    tier: source?.tier ?? target?.tier ?? null,
+    rarityStr: source?.rarityStr ?? source?.rarity ?? target?.rarity ?? null,
+    tag: source?.tag ?? target?.tag ?? null,
+    iconAssetName: source?.iconAssetName ?? target?.iconAssetName ?? null,
+  };
+  return {
+    detail: {
+      ...detail,
+      craftingRecipes: catalogRecipesForTarget(detail, normalizedTarget, detailsByKey),
+      extractionRecipes: [],
+    },
+    cached: true,
+    provider: "relay",
+    lastSyncedAt: providerCatalogRepository.getSourceState()?.receivedAt ?? null,
+    lastError: null,
+    warnings,
+  };
+}
+
 async function craftPlanTierPresets(claimId) {
-  const payload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}/research`).catch(() => ({}));
-  const rows = unwrap(payload, "technologies", unwrap(payload, "research", []));
-  const lookup = craftPlanCatalogLookup(payload);
-  const grouped = new Map();
-  for (const row of rows) {
-    const tier = tierFromResearchRow(row);
-    const name = String(row.name ?? row.techName ?? row.title ?? "").trim();
-    const techType = String(row.techType ?? row.type ?? "").toLowerCase();
-    const isClaimTierRow = tier >= 2 && (techType === "tier_upgrade" || techType === "settlement" || /^tier\s*\d+$/i.test(name));
-    if (!isClaimTierRow) continue;
-    const current = grouped.get(tier) ?? [];
-    current.push(...collectCraftPlanRequirements(row, lookup));
-    grouped.set(tier, current);
-  }
-  const presets = [];
-  for (const [tier, requirements] of grouped.entries()) {
-    const items = await enrichCraftPlanRequirements(mergePresetRequirements(requirements));
-    if (!items.length) continue;
-    presets.push({ key: `tier-${tier}`, label: `T${tier}`, tier, source: "bitjita-research", items });
-  }
-  return presets.sort((a, b) => a.tier - b.tier);
+  const projection = currentResearchProjection(claimId);
+  return buildResearchTierPresets(
+    projection,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+  ).presets;
 }
 
 async function craftPlanWorkstationPresets() {
-  const payload = await fetchBitjita("/buildings", { cache: true });
-  return buildWorkstationPresets(payload);
+  return buildWorkstationPresets({
+    buildings: providerCatalogRepository.listDescriptions("building"),
+  });
 }
 
 async function resolveCraftPlanWorkstationPreset(tier) {
@@ -2199,33 +2054,68 @@ async function resolveCraftPlanWorkstationPreset(tier) {
   if (!Number.isInteger(cleanTier) || cleanTier < 2 || cleanTier > 10) throw new Error("Choose a workstation tier from T2 to T10");
   const presets = await craftPlanWorkstationPresets();
   const preset = presets.find((entry) => entry.tier === cleanTier);
-  if (!preset?.workstations?.length) throw new Error(`No T${cleanTier} workstation definitions were returned by BitJita`);
-  const workstations = await mapWithConcurrency(preset.workstations, 4, async (workstation) => {
-    const payload = await fetchBitjita(`/buildings/${encodeURIComponent(workstation.id)}`, { cache: true });
-    const target = normalizeWorkstationTarget(payload, workstation);
-    if (!target.requirements.length) throw new Error(`${target.name} has no construction requirements in BitJita`);
+  if (!preset?.workstations?.length) throw new Error(`No T${cleanTier} workstation definitions are available in the Relay catalog`);
+  const buildingsById = new Map(
+    providerCatalogRepository.listDescriptions("building")
+      .map((building) => [String(building.id ?? ""), building]),
+  );
+  const recipesByBuilding = new Map(
+    providerCatalogRepository.listDescriptions("construction_recipe")
+      .map((recipe) => [String(recipe.buildingDescriptionId ?? ""), recipe]),
+  );
+  const workstations = preset.workstations.map((workstation) => {
+    const building = buildingsById.get(String(workstation.id)) ?? workstation;
+    const recipe = recipesByBuilding.get(String(workstation.id));
+    if (!recipe) throw new Error(`${workstation.name} has no construction recipe in the Relay catalog`);
+    const target = normalizeCatalogWorkstationTarget(
+      building,
+      recipe,
+      (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    );
+    if (!target.requirements.length) throw new Error(`${target.name} has no construction requirements in the Relay catalog`);
     return target;
   });
   return { ...preset, workstations };
 }
 async function craftPlanAdminResponse(claimId = getSettings().claimId) {
   const config = storedCraftPlanConfig();
-  const [membersPayload, inventoriesPayload] = await Promise.all([
-    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`).catch(() => ({ members: [] })),
-    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`).catch(() => ({ buildings: [] })),
-  ]);
+  let membersPayload = { members: [] };
+  let inventoriesPayload = { buildings: [] };
+  try {
+    membersPayload = currentMembersProjection(claimId);
+  } catch {
+    // Admin configuration remains available while the first Relay member generation loads.
+  }
+  try {
+    inventoriesPayload = currentInventoryProjection(claimId);
+  } catch {
+    // Admin configuration remains available while the first Relay inventory generation loads.
+  }
   const storageSources = settlementStorageSourcesFromInventories(inventoriesPayload, []);
   const members = unwrap(membersPayload, "members", []);
   const deployableOptions = [];
+  const bankOptions = [];
   const selectedInventoryPlayers = new Set(selectedPlayerInventoryIds(config.sourceRules));
   for (const member of members.filter((entry) => selectedInventoryPlayers.has(String(entry.playerEntityId ?? entry.entityId ?? "")))) {
     const playerId = String(member.playerEntityId ?? member.entityId ?? "");
     if (!playerId) continue;
     const label = String(member.userName ?? member.username ?? playerId);
     try {
-      const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, cache: true });
-      const sources = playerInventoryContainerSources(playerId, label, payload);
-      deployableOptions.push(...await enrichCraftPlanSourceItems(sources.deployableOptions));
+      const envelope = await relayPlayerDataService.inventory({
+        configuredClaimId: currentClaimId(),
+        claimId: String(claimId),
+        playerId,
+        forceRefresh: false,
+      });
+      const sources = playerInventoryContainerSources(playerId, label, envelope.data);
+      deployableOptions.push(...enrichCraftPlanSourcesFromLocalCatalog(
+        gameCatalogRepository,
+        sources.deployableOptions,
+      ));
+      bankOptions.push(...enrichCraftPlanSourcesFromLocalCatalog(
+        gameCatalogRepository,
+        playerBankOptions(playerId, label, envelope.data, config.sourceRules.bankContainerIds),
+      ));
     } catch {
       // The admin page can still save selected players even if deployable discovery is temporarily unavailable.
     }
@@ -2240,6 +2130,7 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
     sources: {
       storage: storageSources.map((source) => ({ sourceId: source.sourceId, label: source.label, itemCount: source.items.length, items: source.items.slice(0, 12) })),
       players: members.map((member) => ({ playerId: String(member.playerEntityId ?? member.entityId ?? ""), label: String(member.userName ?? member.username ?? member.playerName ?? "Unknown member") })).filter((member) => member.playerId),
+      banks: bankOptions,
       deployables: deployableOptions,
       tierPresets: await craftPlanTierPresets(claimId),
       workstationPresets,
@@ -2247,207 +2138,34 @@ async function craftPlanAdminResponse(claimId = getSettings().claimId) {
   };
 }
 
+async function craftPlanPlayerBankResponse(playerId, claimId = getSettings().claimId) {
+  return resolveCraftPlanPlayerBanks({
+    playerId,
+    members: unwrap(currentMembersProjection(claimId), "members", []),
+    trackedBankIds: storedCraftPlanConfig().sourceRules.bankContainerIds,
+    loadInventory: (cleanPlayerId) => relayPlayerDataService.inventory({
+      configuredClaimId: currentClaimId(),
+      claimId: String(claimId),
+      playerId: cleanPlayerId,
+      forceRefresh: false,
+    }),
+    enrichBanks: (banks) => enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, banks),
+  });
+}
+
 function craftPlanAuditLabels(sources = {}, materials = []) {
   const storage = Object.fromEntries((sources.storage ?? []).map((source) => [String(source.sourceId), String(source.label ?? source.sourceId)]));
   const players = Object.fromEntries((sources.players ?? []).map((source) => [String(source.playerId), String(source.label ?? source.playerId)]));
+  const playerBank = Object.fromEntries((sources.banks ?? []).map((source) => [String(source.sourceId), String(source.label ?? source.sourceId)]));
   const deployable = Object.fromEntries((sources.deployables ?? []).map((source) => [String(source.sourceId), String(source.label ?? source.sourceId)]));
   const gatheredItem = Object.fromEntries((materials ?? []).map((item) => {
     const key = String(item.key ?? `${item.kind === "cargo" || item.itemType === 1 ? "cargo" : "items"}:${item.id}`);
     return [key, String(item.name ?? key)];
   }));
-  return { storage, player_inventory: players, player_crafts: players, deployable, gathered_item: gatheredItem };
+  return { storage, player_inventory: players, player_crafts: players, player_bank: playerBank, deployable, gathered_item: gatheredItem };
 }
 
 
-const CRAFT_PLAN_CARGO_CATALOG_TTL_MS = 15 * 60 * 1000;
-const CRAFT_PLAN_ITEM_CATALOG_TTL_MS = 15 * 60 * 1000;
-let craftPlanCargoCatalogCache = { expiresAt: 0, rows: [] };
-let craftPlanItemCatalogCache = { expiresAt: 0, rows: [] };
-
-function unwrapRecipeDetailPayload(detail) {
-  return detail?.detail && typeof detail.detail === "object" ? detail.detail : detail;
-}
-
-function craftPlanStackTarget(stack = {}, display = {}) {
-  const id = String(stack.item_id ?? stack.itemId ?? stack.id ?? display.id ?? "").trim();
-  if (!id) return null;
-  const kind = String(stack.item_type ?? stack.itemType ?? display.itemType ?? display.kind) === "cargo" || String(stack.item_type ?? stack.itemType ?? display.itemType ?? display.kind) === "1" ? "cargo" : "items";
-  return {
-    id,
-    kind,
-    itemType: kind === "cargo" ? 1 : 0,
-    name: String(display.name ?? stack.name ?? `${kind === "cargo" ? "Cargo" : "Item"} #${id}`),
-    tier: display.tier ?? stack.tier ?? null,
-    tag: display.tag ?? stack.tag ?? null,
-    iconAssetName: display.iconAssetName ?? stack.iconAssetName ?? null,
-  };
-}
-
-function craftPlanPossibilityTargets(detail) {
-  const payload = unwrapRecipeDetailPayload(detail);
-  return (payload?.itemListPossibilities ?? []).map((possibility) => {
-    const target = possibility.targetItem ?? {};
-    const id = String(possibility.targetId ?? target.id ?? possibility.itemId ?? possibility.id ?? "").trim();
-    if (!id) return null;
-    const kind = possibility.isCargo === true || String(possibility.itemType ?? possibility.item_type) === "1" ? "cargo" : "items";
-    return { id, kind };
-  }).filter(Boolean);
-}
-
-function craftPlanDetailTarget(detail) {
-  const payload = unwrapRecipeDetailPayload(detail);
-  return recipeTargetFromDetail(payload, {});
-}
-
-function craftPlanDetailTier(detail) {
-  const target = craftPlanDetailTarget(detail);
-  const tier = Number(target?.tier);
-  return Number.isFinite(tier) && tier > 0 ? tier : null;
-}
-
-function craftPlanCargoCatalogRows(payload) {
-  return unwrap(payload, "cargos", []).filter((row) => row && typeof row === "object");
-}
-
-function craftPlanItemCatalogRows(payload) {
-  return unwrap(payload, "items", []).filter((row) => row && typeof row === "object");
-}
-
-function craftPlanHasItemListOutputs(row = {}) {
-  const itemListId = String(row.itemListId ?? row.item_list_id ?? "").trim();
-  return itemListId !== "" && itemListId !== "0";
-}
-
-function craftPlanCargoLooksLikeTransportPackage(row = {}) {
-  const tag = String(row.tag ?? "").trim();
-  const name = String(row.name ?? "").trim();
-  return /^package$/i.test(tag) || /\b(package|pack)\b/i.test(name);
-}
-
-async function craftPlanCargoCatalogRowsCached() {
-  const now = Date.now();
-  if (craftPlanCargoCatalogCache.expiresAt > now) return craftPlanCargoCatalogCache.rows;
-  const payload = await fetchBitjita("/cargo").catch(() => null);
-  const rows = craftPlanCargoCatalogRows(payload);
-  craftPlanCargoCatalogCache = { expiresAt: now + CRAFT_PLAN_CARGO_CATALOG_TTL_MS, rows };
-  return rows;
-}
-
-async function craftPlanItemCatalogRowsCached() {
-  const now = Date.now();
-  if (craftPlanItemCatalogCache.expiresAt > now) return craftPlanItemCatalogCache.rows;
-  const payload = await fetchBitjita("/items").catch(() => null);
-  const rows = craftPlanItemCatalogRows(payload);
-  craftPlanItemCatalogCache = { expiresAt: now + CRAFT_PLAN_ITEM_CATALOG_TTL_MS, rows };
-  return rows;
-}
-
-async function craftPlanItemProducerIdsFromCatalog(detailsByKey) {
-  const tiers = new Set([...detailsByKey.values()].map(craftPlanDetailTier).filter((tier) => tier != null));
-  if (!tiers.size) return [];
-  const rows = await craftPlanItemCatalogRowsCached();
-  const ids = new Set();
-  for (const row of rows) {
-    const id = String(row.id ?? "").trim();
-    const tier = Number(row.tier);
-    if (!/^\d+$/.test(id) || !Number.isFinite(tier) || !tiers.has(tier)) continue;
-    if (!craftPlanHasItemListOutputs(row)) continue;
-    if (craftPlanCargoLooksLikeTransportPackage(row)) continue;
-    ids.add(id);
-  }
-  return [...ids];
-}
-
-async function craftPlanCargoIdsFromCatalog(detailsByKey) {
-  const tiers = new Set([...detailsByKey.values()].map(craftPlanDetailTier).filter((tier) => tier != null));
-  if (!tiers.size) return [];
-  const rows = await craftPlanCargoCatalogRowsCached();
-  const ids = new Set();
-  for (const row of rows) {
-    const id = String(row.id ?? "").trim();
-    const tier = Number(row.tier);
-    if (!/^\d+$/.test(id) || !Number.isFinite(tier) || !tiers.has(tier)) continue;
-    if (craftPlanCargoLooksLikeTransportPackage(row)) continue;
-    ids.add(id);
-  }
-  return [...ids];
-}
-
-function craftPlanOutputPossibilityMatchesTargets(outputDetail, targetKeys) {
-  return craftPlanPossibilityTargets(outputDetail).some((target) => targetKeys.has(recipeCatalogKey(target.kind, target.id)));
-}
-
-function craftPlanCargoIdsFromSources(sources = []) {
-  const ids = new Set();
-  for (const source of sources) {
-    for (const item of source?.items ?? []) {
-      const kind = String(item.kind ?? (String(item.itemType ?? item.item_type) === "1" ? "cargo" : "items"));
-      const id = String(item.id ?? item.itemId ?? "").trim();
-      if (kind === "cargo" && /^\d+$/.test(id)) ids.add(id);
-    }
-  }
-  return [...ids];
-}
-
-async function addCraftPlanItemOutputDetails(detailsByKey) {
-  const targetKeys = new Set([...detailsByKey.values()].map((detail) => {
-    const target = craftPlanDetailTarget(detail);
-    return target.id ? recipeCatalogKey(target.kind, target.id) : null;
-  }).filter(Boolean));
-  if (!targetKeys.size) return detailsByKey;
-
-  for (const itemId of await craftPlanItemProducerIdsFromCatalog(detailsByKey)) {
-    const key = recipeCatalogKey("items", itemId);
-    if (detailsByKey.has(key)) continue;
-    const detail = recipeDetailFromCatalog({ id: itemId, kind: "items", itemType: 0 });
-    if (detail && craftPlanOutputPossibilityMatchesTargets(detail, targetKeys)) detailsByKey.set(key, detail);
-  }
-  return detailsByKey;
-}
-
-async function addCraftPlanCargoDerivationDetails(detailsByKey, sources = []) {
-  const targetKeys = new Set([...detailsByKey.values()].map((detail) => {
-    const target = craftPlanDetailTarget(detail);
-    return target.id ? recipeCatalogKey(target.kind, target.id) : null;
-  }).filter(Boolean));
-  if (!targetKeys.size) return detailsByKey;
-
-  const sourceCargoIds = new Set(craftPlanCargoIdsFromSources(sources));
-  const cargoIds = [...new Set([...sourceCargoIds, ...await craftPlanCargoIdsFromCatalog(detailsByKey)])];
-  for (const cargoId of cargoIds) {
-    const cargoKey = recipeCatalogKey("cargo", cargoId);
-    if (!/^\d+$/.test(cargoId)) continue;
-    let cargoDetail = detailsByKey.get(cargoKey);
-    if (!cargoDetail) {
-      const target = { id: cargoId, kind: "cargo", itemType: 1 };
-      cargoDetail = sourceCargoIds.has(cargoId)
-        ? await recipeDetailFromCatalogOrFetch(target).catch(() => null)
-        : recipeDetailFromCatalog(target);
-      if (!cargoDetail) continue;
-    }
-    const payload = unwrapRecipeDetailPayload(cargoDetail);
-    const recipes = [...(payload?.recipesUsingItem ?? []), ...(payload?.craftingRecipes ?? []), ...(payload?.extractionRecipes ?? [])];
-    let cargoIsRelevant = false;
-    for (const recipe of recipes) {
-      const outputs = Array.isArray(recipe?.craftedItemStacks) ? recipe.craftedItemStacks : [];
-      for (let index = 0; index < outputs.length; index += 1) {
-        const outputTarget = craftPlanStackTarget(outputs[index], Array.isArray(recipe?.craftedItems) ? recipe.craftedItems[index] : {});
-        if (!outputTarget || outputTarget.kind !== "items") continue;
-        const outputKey = recipeCatalogKey(outputTarget.kind, outputTarget.id);
-        let outputDetail = detailsByKey.get(outputKey);
-        if (!outputDetail) {
-          outputDetail = sourceCargoIds.has(cargoId)
-            ? await recipeDetailFromCatalogOrFetch(outputTarget).catch(() => null)
-            : recipeDetailFromCatalog(outputTarget);
-          if (outputDetail) detailsByKey.set(outputKey, outputDetail);
-        }
-        if (outputDetail && craftPlanOutputPossibilityMatchesTargets(outputDetail, targetKeys)) cargoIsRelevant = true;
-      }
-    }
-    if (cargoIsRelevant) detailsByKey.set(cargoKey, cargoDetail);
-  }
-  return detailsByKey;
-}
 async function computedCraftPlanResponse(claimId = getSettings().claimId, options = {}) {
   return (await computedCraftPlanWorkspace(claimId, options)).plan;
 }
@@ -2466,6 +2184,12 @@ async function craftPlanSourceResult(source, load) {
 
 async function computedCompactCraftPlanResponse(claimId = getSettings().claimId, options = {}) {
   return (await computedCraftPlanWorkspace(claimId, options)).compact();
+}
+
+function craftPlanCurrentSourceRevision(claimId) {
+  return ["members", "inventories", "crafts", "construction", "catalogs"]
+    .map((domain) => `${domain}:${currentStateRepository.read(String(claimId), domain)?.generation ?? 0}`)
+    .join("|");
 }
 
 function craftPlanBaselineChangeSince(claimId, since = "") {
@@ -2495,9 +2219,22 @@ async function computedCraftPlanWorkspace(claimId = getSettings().claimId, optio
   const cached = craftPlanResponseCache.get(normalizedClaimId);
   const forceRefresh = options.forceRefresh === true;
   const refreshId = String(options.refreshId ?? "");
-  if (cached && cached.expiresAt > now && (!forceRefresh || cached.refreshId === refreshId)) { plannerTelemetry.cacheHits += 1; return cached.workspace; }
+  let sourceRevision = craftPlanCurrentSourceRevision(normalizedClaimId);
+  if (cached && cached.expiresAt > now && cached.sourceRevision === sourceRevision && (!forceRefresh || cached.refreshId === refreshId)) { plannerTelemetry.cacheHits += 1; return cached.workspace; }
   const existing = craftPlanResponseInflight.get(normalizedClaimId);
-  if (existing?.generation === craftPlanResponseGeneration && (!forceRefresh || existing.refreshId === refreshId)) { plannerTelemetry.inflightReuse += 1; return existing.promise; }
+  if (existing?.generation === craftPlanResponseGeneration && existing?.sourceRevision === sourceRevision && (!forceRefresh || existing.refreshId === refreshId)) { plannerTelemetry.inflightReuse += 1; return existing.promise; }
+  if (forceRefresh && relayProviderStarted) {
+    try {
+      await relayProvider.refresh({
+        claimId: normalizedClaimId,
+        domains: ["inventories", "crafts"],
+        reason: "manual",
+      });
+    } catch {
+      // The calculation below deliberately uses the durable last-good generation.
+    }
+    sourceRevision = craftPlanCurrentSourceRevision(normalizedClaimId);
+  }
   const generation = craftPlanResponseGeneration;
   const startedAt = Date.now();
   plannerTelemetry.freshCalculations += 1;
@@ -2505,14 +2242,27 @@ async function computedCraftPlanWorkspace(claimId = getSettings().claimId, optio
     const workspace = createCraftPlanResponseWorkspace(plan);
     plannerTelemetry.lastDurationMs = Date.now() - startedAt;
     plannerTelemetry.lastCompletedAt = new Date().toISOString();
-    if (generation === craftPlanResponseGeneration) {
-      craftPlanResponseCache.set(normalizedClaimId, { workspace, expiresAt: Date.now() + CRAFT_PLAN_RESPONSE_CACHE_TTL_MS, refreshId: forceRefresh ? refreshId : "" });
+    if (
+      generation === craftPlanResponseGeneration
+      && craftPlanCurrentSourceRevision(normalizedClaimId) === sourceRevision
+    ) {
+      craftPlanResponseCache.set(normalizedClaimId, {
+        workspace,
+        sourceRevision,
+        expiresAt: Date.now() + CRAFT_PLAN_RESPONSE_CACHE_TTL_MS,
+        refreshId: forceRefresh ? refreshId : "",
+      });
     }
     return workspace;
   }).finally(() => {
     if (craftPlanResponseInflight.get(normalizedClaimId)?.promise === promise) craftPlanResponseInflight.delete(normalizedClaimId);
   });
-  craftPlanResponseInflight.set(normalizedClaimId, { generation, promise, refreshId: forceRefresh ? refreshId : "" });
+  craftPlanResponseInflight.set(normalizedClaimId, {
+    generation,
+    sourceRevision,
+    promise,
+    refreshId: forceRefresh ? refreshId : "",
+  });
   return promise;
 }
 
@@ -2525,11 +2275,11 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
     return plan;
   }
   try {
-    const buildingsPayload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}/buildings`, { forceRefresh });
+    const buildingsPayload = currentClaimBuildingsProjection(claimId);
     const reconciled = reconcileCraftPlanBuildingProgress(config, buildingsPayload);
     config = reconciled.changed ? saveCraftPlanConfig(reconciled.config) : reconciled.config;
   } catch {
-    // Keep prior baselines and observed completions when BitJita building discovery is unavailable.
+    // Keep prior baselines and observed completions while the first Relay building generation loads.
   }
   const catalogTargets = craftPlanCatalogTargets(config);
   const { detailsByKey, warnings: catalogWarnings } = collectLocalCatalogCraftPlanDetails(
@@ -2540,52 +2290,29 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
     [],
     { requireValidatedProbabilities: true },
   );
-  const [inventoriesResult, publicCraftsResult, membersPayload] = await Promise.all([
+  const [inventoriesResult, craftsResult, membersPayload] = await Promise.all([
     craftPlanSourceResult(
       { sourceId: String(claimId), label: "Settlement inventories", type: "Settlement storage" },
-      () => fetchBitjita(`/claims/${encodeURIComponent(claimId)}/inventories`, { forceRefresh }),
+      () => currentInventoryProjection(claimId),
     ),
     craftPlanSourceResult(
-      { sourceId: String(claimId), label: "Settlement active crafts", type: "Tracked crafts" },
-      () => fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { forceRefresh }),
+      { sourceId: String(claimId), label: "Settlement crafts", type: "Tracked crafts" },
+      () => currentCraftPlanProjection(claimId),
     ),
-    fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`, { forceRefresh }).catch(() => ({ members: [] })),
+    Promise.resolve().then(() => currentMembersProjection(claimId)).catch(() => ({ members: [] })),
   ]);
   const inventoriesPayload = inventoriesResult.value ?? { buildings: [] };
-  const publicCraftsPayload = publicCraftsResult.value ?? { craftResults: [] };
-  const sourceFailures = [inventoriesResult, publicCraftsResult]
+  const craftsPayload = craftsResult.value ?? { craftResults: [] };
+  if (Array.isArray(craftsPayload.warnings)) {
+    catalogWarnings.push(...craftsPayload.warnings);
+  }
+  const sourceFailures = [inventoriesResult, craftsResult]
     .filter((result) => result.error)
     .map((result) => ({ ...result.source, error: result.error }));
   const memberNames = new Map(unwrap(membersPayload, "members", []).map((member) => {
     const playerId = String(member.playerEntityId ?? member.entityId ?? "");
     return [playerId, String(member.userName ?? member.username ?? playerId)];
   }));
-  const [playerCraftResults, playerPassiveCraftResults] = await Promise.all([
-    Promise.all(config.sourceRules.craftPlayerIds.map(async (playerId) => {
-      try {
-        const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=all`, { timeoutMs: 6000, forceRefresh });
-        return { playerId, payload, error: "" };
-      } catch (error) {
-        return { playerId, payload: { craftResults: [] }, error: error instanceof Error ? error.message : String(error) };
-      }
-    })),
-    Promise.all(config.sourceRules.craftPlayerIds.map(async (playerId) => {
-      try {
-        const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/passive-crafts?status=all`, { timeoutMs: 6000, forceRefresh });
-        return { playerId, playerName: memberNames.get(String(playerId)) ?? String(playerId), payload, error: "" };
-      } catch (error) {
-        return { playerId, playerName: memberNames.get(String(playerId)) ?? String(playerId), payload: { craftResults: [] }, error: error instanceof Error ? error.message : String(error) };
-      }
-    })),
-  ]);
-  const craftPayloads = [publicCraftsPayload, ...playerCraftResults.map((result) => result.payload)];
-  const craftSourceErrors = playerCraftResults
-    .filter((result) => result.error)
-    .map((result) => ({ sourceId: String(result.playerId), label: `${result.playerId} crafts`, type: "Tracked crafts", error: result.error }));
-  const passiveCraftSourceErrors = playerPassiveCraftResults
-    .filter((result) => result.error)
-    .map((result) => ({ sourceId: String(result.playerId), label: `${result.playerName} passive crafts`, type: "Tracked passive crafts", error: result.error }));
-  sourceFailures.push(...craftSourceErrors, ...passiveCraftSourceErrors);
   const storageSources = settlementStorageSourcesFromInventories(inventoriesPayload, config.sourceRules.storageContainerIds);
   const playerSources = [];
   const bankSources = [];
@@ -2595,14 +2322,22 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
   for (const playerId of selectedPlayerInventoryIds(config.sourceRules)) {
     const label = memberNames.get(playerId) ?? playerId;
     try {
-      const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/inventories`, { timeoutMs: 6000, forceRefresh });
-      const sources = playerInventoryContainerSources(playerId, label, payload, config.sourceRules.deployableContainerIds);
+      const envelope = await relayPlayerDataService.inventory({
+        configuredClaimId: currentClaimId(),
+        claimId: String(claimId),
+        playerId,
+        forceRefresh,
+      });
+      catalogWarnings.push(...envelope.warnings.map((warning) => `${label} inventories: ${warning}`));
+      const sources = playerInventoryContainerSources(playerId, label, envelope.data, config.sourceRules.deployableContainerIds);
       if (inventoryPlayerIds.has(playerId)) {
         playerSources.push(enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, sources.inventory, catalogWarnings));
       }
-      if (bankPlayerIds.has(playerId)) {
-        bankSources.push(...enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, sources.banks, catalogWarnings));
-      }
+      bankSources.push(...enrichCraftPlanSourcesFromLocalCatalog(
+        gameCatalogRepository,
+        filterSelectedPlayerBankSources(config.sourceRules, sources.banks),
+        catalogWarnings,
+      ));
       deployableSources.push(...enrichCraftPlanSourcesFromLocalCatalog(gameCatalogRepository, sources.deployables, catalogWarnings));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2615,8 +2350,11 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
       if (inventoryPlayerIds.has(playerId)) {
         playerSources.push({ sourceId: playerId, label: `${label} inventory`, type: "Player inventory", unavailable: true, error: message, items: [] });
       }
+      const exactBankIds = config.sourceRules.bankContainerIds.filter((sourceId) => bankSourceBelongsToPlayer(sourceId, playerId));
       if (bankPlayerIds.has(playerId)) {
         bankSources.push({ sourceId: `${playerId}:banks`, label: `${label} banks`, type: "Player bank", playerId, playerName: label, unavailable: true, error: message, items: [] });
+      } else {
+        bankSources.push(...exactBankIds.map((sourceId) => ({ sourceId, label: sourceId, type: "Player bank", playerId, playerName: label, unavailable: true, error: message, items: [] })));
       }
       if (config.sourceRules.deployableContainerIds.length) {
         deployableSources.push({ sourceId: `${playerId}:deployables`, label: `${label} deployables`, type: "Player deployable", playerId, playerName: label, unavailable: true, error: message, items: [] });
@@ -2631,11 +2369,16 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
     playerSources,
     bankSources,
     deployableSources,
-    activeCrafts: [
-      ...trackedCraftPlanOutputs(craftPayloads, detailsByKey, claimId),
-      ...trackedPassiveCraftPlanOutputs(playerPassiveCraftResults, detailsByKey),
-    ],
-    craftSourceErrors: [...craftSourceErrors, ...passiveCraftSourceErrors],
+    activeCrafts: trackedRelayCraftPlanOutputs(
+      craftsPayload,
+      detailsByKey,
+      claimId,
+      config.sourceRules.craftPlayerIds,
+    ),
+    craftSourceErrors: craftsResult.error ? [{
+      ...craftsResult.source,
+      error: craftsResult.error,
+    }] : [],
   });
   const storedEffortModelVersion = Number(statements.getSetting.get("game_catalog_effort_model_version")?.value ?? 0);
   if (storedEffortModelVersion !== CRAFT_PLAN_EFFORT_MODEL_VERSION) {
@@ -2678,21 +2421,20 @@ async function computedCraftPlanResponseFresh(claimId = getSettings().claimId, o
   }));
   sourceStatus.push(
     { ...inventoriesResult.source, available: !inventoriesResult.error, error: inventoriesResult.error },
-    { ...publicCraftsResult.source, available: !publicCraftsResult.error, error: publicCraftsResult.error },
-    ...playerCraftResults.map((result) => ({
-      sourceId: String(result.playerId),
-      label: `${memberNames.get(String(result.playerId)) ?? result.playerId} crafts`,
+    { ...craftsResult.source, available: !craftsResult.error, error: craftsResult.error },
+    ...config.sourceRules.craftPlayerIds.flatMap((playerId) => [{
+      sourceId: `${String(playerId)}:crafts`,
+      label: `${memberNames.get(String(playerId)) ?? playerId} crafts`,
       type: "Tracked crafts",
-      available: !result.error,
-      error: result.error,
-    })),
-    ...playerPassiveCraftResults.map((result) => ({
-      sourceId: String(result.playerId),
-      label: `${result.playerName} passive crafts`,
+      available: !craftsResult.error,
+      error: craftsResult.error,
+    }, {
+      sourceId: `${String(playerId)}:passive-crafts`,
+      label: `${memberNames.get(String(playerId)) ?? playerId} passive crafts`,
       type: "Tracked passive crafts",
-      available: !result.error,
-      error: result.error,
-    })),
+      available: !craftsResult.error,
+      error: craftsResult.error,
+    }]),
   );
 
   const capturedAt = new Date().toISOString();
@@ -2773,23 +2515,63 @@ async function craftPlanDiscordReport(profession = "") {
   }
 }
 
-async function sendCraftPlanDiscordReport({ profession = "", channelId } = {}) {
-  const settings = getDiscordSettingsRaw();
-  const targetChannelId = String(channelId ?? "").trim();
-  if (!settings.enabled || !settings.botToken) throw new Error("Discord notifications are not fully configured.");
-  if (!validDiscordId(targetChannelId)) throw new Error("Choose a valid Discord channel.");
-  const report = await craftPlanDiscordReport(profession);
-  const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(report), settings, targetChannelId);
-  recordDiscordDeliverySafe({
-    status: "sent",
-    eventType: "craft_plan_report",
-    channelId: targetChannelId,
-    channelKey: "craftPlanReports",
-    summary: report.title,
-    metadata: { profession: report.profession || "overview", test: true },
-    response: { id: response?.id, channel_id: response?.channel_id },
+async function manualDiscordSandboxMessage(payload, settings, requestedChannelId = "") {
+  assertDiscordNetworkEnabled();
+  return sendDiscordManualSandboxMessage({
+    apiOrigin: discordApiOrigin,
+    configuredChannelId: configuredDiscordSandboxChannelId,
+    fetchImpl: fetch,
+    payload,
+    requestedChannelId,
+    settings,
   });
-  return { report, response: { id: response?.id, channel_id: response?.channel_id } };
+}
+
+function discordDeliveryResponse(response) {
+  return {
+    id: response?.id,
+    channel_id: response?.channel_id,
+    ...(response?.recorded === true ? { recorded: true } : {}),
+  };
+}
+
+async function sendCraftPlanDiscordReport({ profession = "", requestedChannelId = "" } = {}) {
+  const settings = getDiscordSettingsRaw();
+  const metadata = {
+    profession: profession || "overview",
+    test: true,
+    manualSandboxTest: true,
+    deliveryMode: configuredDiscordDeliveryMode,
+  };
+  try {
+    const report = await craftPlanDiscordReport(profession);
+    const response = await manualDiscordSandboxMessage(
+      buildCraftPlanDiscordEmbed(report),
+      settings,
+      requestedChannelId,
+    );
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType: "craft_plan_report",
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary: report.title,
+      metadata: { ...metadata, profession: report.profession || metadata.profession },
+      response: discordDeliveryResponse(response),
+    });
+    return { report, response: discordDeliveryResponse(response) };
+  } catch (error) {
+    recordDiscordDeliverySafe({
+      status: "failed",
+      eventType: "craft_plan_report",
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary: "Craft Planner report sandbox test",
+      error: error instanceof Error ? error.message : String(error),
+      metadata,
+    });
+    throw error;
+  }
 }
 
 let craftPlanReportDispatcherRunning = false;
@@ -2844,13 +2626,6 @@ async function dispatchScheduledCraftPlanReports() {
     craftPlanReportDispatcherRunning = false;
   }
 }
-const bitjitaProxyCache = createBitjitaProxyCache({
-  appIdentifier,
-  defaultTtlMs: UPSTREAM_CACHE_TTL_MS,
-  staleIfErrorMs: UPSTREAM_STALE_IF_ERROR_MS,
-  maxEntries: UPSTREAM_CACHE_MAX_ENTRIES,
-  timeoutMs: BITJITA_PROXY_TIMEOUT_MS,
-});
 const manualRefreshGuard = createManualRefreshGuard();
 
 function visitorSecuritySettings(includeSecrets = false) {
@@ -3312,7 +3087,7 @@ function recordVisitorSecurityEvent(req, pathname, statusCode) {
   if (!shouldLogVisitor(pathname)) return;
   const nowIso = new Date().toISOString();
   if (Date.now() - lastVisitorSecurityPruneAt > 60 * 60 * 1000) pruneVisitorSecurityEvents();
-  const ip = normalizeIpAddress(requestAddress(req));
+  const ip = normalizeIpAddress(clientAddress(req));
   const anonymized = anonymizeIpAddress(ip);
   const userAgent = String(req.headers["user-agent"] ?? "").slice(0, 500);
   const userAgentHash = userAgent ? createHash("sha256").update(userAgent).digest("hex") : null;
@@ -3441,7 +3216,7 @@ function requireAdminMutation(req, res, user) {
   return Boolean(user);
 }
 
-function createSession(userId) {
+function createAdminSessionFromTimbersteelOAuth(userId) {
   const session = createHttpSession({
     cookieName: ADMIN_SESSION_COOKIE_NAME,
     maxAgeSeconds: ADMIN_SESSION_MAX_AGE_SECONDS,
@@ -3466,7 +3241,9 @@ function originFromRequest(req) {
 
 function discordOAuthConfig(req) {
   return resolveDiscordOAuthConfig({
-    env: process.env,
+    env: deploymentRuntime.mode === "canonical"
+      ? { ...process.env, DISCORD_OAUTH_REDIRECT_URI: deploymentRuntime.oauthCallbackUrl }
+      : process.env,
     discordSettings: getDiscordSettingsRaw(),
     storedClientSecret: statements.getSecret.get("discord_oauth_client_secret")?.value,
     origin: originFromRequest(req),
@@ -3507,10 +3284,12 @@ function clearBrowserCookie(name) {
 
 function authStatus(req) {
   const user = getAppUser(req);
+  const publicUser = publicAppUser(user);
   const config = discordOAuthConfig(req);
   const acceptance = user ? statements.currentUserLegalAcceptance.get(user.id) : null;
   return {
-    user: publicAppUser(user),
+    user: publicUser,
+    featurebaseJwt: createFeaturebaseJwt({ secret: featurebaseJwtSecret, user: publicUser }),
     csrfToken: user ? appUserCsrfToken(req) : null,
     discordLoginEnabled: config.enabled,
     legal: user
@@ -3571,7 +3350,7 @@ function createAdminSessionForDiscordProfile(profile, loginAt) {
   );
   statements.insertLoginEvent.run(username, 1, loginAt, "discord-oauth");
   audit({ id: admin.id, username }, "admin.discord_login", { discordId });
-  return createSession(admin.id);
+  return createAdminSessionFromTimbersteelOAuth(admin.id);
 }
 
 function oauthStateSecret() {
@@ -3821,7 +3600,7 @@ function requireRecentAppUserReauthentication(req, res, user, now = new Date()) 
 }
 
 function adminStatus(req) {
-  const setupRequired = toNumber(statements.adminCount.get()?.count) === 0;
+  const setupRequired = !smokeAdminReviewMode.enabled && toNumber(statements.adminCount.get()?.count) === 0;
   const user = getSessionUser(req);
   const discordConfig = discordOAuthConfig(req);
   return {
@@ -3912,8 +3691,6 @@ const analyticsEvents = new Set([
   "member_details_opened",
   "market_tab_viewed",
   "market_member_filter_used",
-  "price_finder_search",
-  "price_finder_region_changed",
   "public_craft_map_opened",
   "public_craft_skill_filter_used",
   "public_craft_region_filter_used",
@@ -3987,16 +3764,37 @@ function analyticsDashboard(days = 30) {
   return { days: selectedDays, retentionDays: analyticsRetentionDays, totals, pages, features, daily };
 }
 
-function addActivity(claimId, eventType, summary, occurredAt, metadata = {}, sourceKey = null, { processDiscordImmediately = true } = {}) {
+function addActivity(claimId, eventType, summary, occurredAt, metadata = {}, sourceKey = null, {
+  processDiscordImmediately = true,
+  enqueueDiscord = true,
+} = {}) {
   const result = sourceKey
     ? statements.insertSourcedActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata), sourceKey)
     : statements.insertActivity.run(claimId, eventType, summary, occurredAt, JSON.stringify(metadata));
-  if (result.changes > 0) queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata, { processImmediately: processDiscordImmediately });
+  if (result.changes > 0 && enqueueDiscord) {
+    queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata, {
+      processImmediately: processDiscordImmediately,
+    });
+  }
   return result.changes > 0;
 }
 
 function formatGold(value) {
   return `${Math.round(toNumber(value)).toLocaleString()}g`;
+}
+
+function formatExactInteger(value) {
+  const normalized = String(value ?? "0").trim();
+  return /^\d+$/.test(normalized)
+    ? BigInt(normalized).toLocaleString("en-GB")
+    : "0";
+}
+
+function formatExactGold(value) {
+  const normalized = String(value ?? "").trim();
+  const match = normalized.match(/^(\d+)(\.5)?$/);
+  if (!match) return "Unknown";
+  return `${BigInt(match[1]).toLocaleString("en-GB")}${match[2] ?? ""}g`;
 }
 
 function formatDaysAndHours(days) {
@@ -4012,7 +3810,7 @@ function formatDaysAndHours(days) {
 function supplyRunwayMetadata(claim, supplies = toNumber(claim?.supplies)) {
   const hourlyUpkeep = toNumber(claim?.upkeepCost) || toNumber(claim?.tileCost) * toNumber(claim?.numTiles);
   const dailyUpkeep = hourlyUpkeep * 24;
-  const runOutDate = bitjitaTimestampIso(claim?.suppliesRunOut);
+  const runOutDate = gameTimestampIso(claim?.suppliesRunOut);
   const runwayDays = runOutDate && new Date(runOutDate).getTime() > Date.now()
     ? (new Date(runOutDate).getTime() - Date.now()) / (24 * 60 * 60 * 1000)
     : dailyUpkeep > 0 ? supplies / dailyUpkeep : 0;
@@ -4027,6 +3825,7 @@ function supplyRunwayMetadata(claim, supplies = toNumber(claim?.supplies)) {
 
 function discordEnabledFor(eventType, settings, metadata) {
   if (!settings.enabled || !settings.botToken) return false;
+  if (eventType === "canonical_cutover") return Boolean(String(settings.channels?.announcements ?? "").trim());
   if (eventType === "craft_plan_report") return settings.craftPlanReports.scheduledEnabled && Boolean(String(metadata?.channelId ?? "").trim());
   if (eventType === "market_new_listing") return false;
   if (eventType === "market_sale" || eventType === "market_sale_confirmed") {
@@ -4069,7 +3868,7 @@ function productionNotificationSkipReason(eventType, metadata = {}, settings = g
   const allowedUsers = String(settings.productionUsers ?? "").split(/[\n,]/).map((name) => name.trim().toLowerCase()).filter(Boolean);
   if (allowedUsers.length) {
     const crafter = String(metadata.crafterName ?? "").trim().toLowerCase();
-    if (!crafter) return `Allowed crafters are set, but BitJita did not provide a crafter name for this craft`;
+    if (!crafter) return "Allowed crafters are set, but the craft has no attributed crafter";
     if (!allowedUsers.includes(crafter)) return `Crafter "${metadata.crafterName}" is not in allowed crafters: ${settings.productionUsers}`;
   }
   return "";
@@ -4088,6 +3887,7 @@ function youtubeChannelSelection(settings = getDiscordSettingsRaw()) {
 }
 
 function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (eventType === "canonical_cutover") return String(settings.channels?.announcements ?? "").trim();
   if (eventType === "craft_plan_report") return String(metadata.channelId ?? "").trim();
   if (eventType === "market_new_listing") return "";
   if ((eventType === "market_sale" || eventType === "market_sale_confirmed") && settings.marketSalesDelivery === "dm") return "";
@@ -4110,6 +3910,7 @@ function discordChannelForEvent(eventType, metadata = {}, settings = getDiscordS
 }
 
 function discordChannelKeyForEvent(eventType, metadata = {}, settings = getDiscordSettingsRaw()) {
+  if (eventType === "canonical_cutover") return "announcements";
   if (eventType === "craft_plan_report") return "craftPlanReports";
   if (eventType === "production_started" || eventType === "production_completed") {
     const selectionKey = eventType === "production_started" ? "productionStarted" : "productionCompleted";
@@ -4200,9 +4001,9 @@ async function sendDiscordCharacterLinkRequest(userRow, metadata = {}, settings 
       channelKey,
       summary: `Character link requested: ${characterName}`,
       metadata: diagnostics,
-      response: { id: response?.id, channel_id: response?.channel_id },
+      response: discordDeliveryResponse(response),
     });
-    return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
+    return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     recordDiscordDeliverySafe({
@@ -4265,7 +4066,7 @@ async function sendDiscordCharacterLinkAdminAction(userRow, action, administrato
       channelKey,
       summary,
       metadata,
-      response: { id: response?.id, channel_id: response?.channel_id },
+      response: discordDeliveryResponse(response),
     });
     return { ok: true, skipped: false };
   } catch (error) {
@@ -4317,7 +4118,7 @@ async function sendDiscordCharacterLinkUserNotice(userRow, action, administrator
       channelKey: "dm",
       summary,
       metadata,
-      response: { id: response?.id, channel_id: response?.channel_id },
+      response: discordDeliveryResponse(response),
     });
     return { ok: true, skipped: false, response: { id: response?.id, channelId: response?.channel_id } };
   } catch (error) {
@@ -4397,7 +4198,7 @@ function isMarketSaleDiscordEvent(eventType) {
   return eventType === "market_sale" || eventType === "market_sale_confirmed";
 }
 
-async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw(), diagnostics = {}) {
+async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw(), diagnostics = {}, deliveryLease = null) {
   const decision = marketSaleDiscordRecipientDecision(metadata, statements.listUserAccounts.all());
   const recipients = decision.recipients;
   if (!recipients.length) {
@@ -4411,8 +4212,8 @@ async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredA
   };
   const responses = [];
   for (const recipientId of recipients) {
-    const response = await sendDiscordDirectMessage(recipientId, payload, settings);
-    responses.push({ recipientId, id: response?.id, channel_id: response?.channel_id });
+    const response = await sendDiscordDirectMessage(recipientId, payload, settings, deliveryLease);
+    responses.push({ recipientId, ...discordDeliveryResponse(response) });
   }
   recordDiscordDeliverySafe({
     status: "sent",
@@ -4425,7 +4226,7 @@ async function sendDiscordMarketSaleDirectMessages(eventType, summary, occurredA
   return { ok: true, skipped: false, channelKey: "dm", response: { count: responses.length } };
 }
 
-async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw()) {
+async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}, settings = getDiscordSettingsRaw(), deliveryLease = null) {
   const channelId = discordChannelForEvent(eventType, metadata, settings);
   const channelKey = discordChannelKeyForEvent(eventType, metadata, settings);
   const diagnostics = discordDiagnosticContext(eventType, metadata, settings);
@@ -4437,17 +4238,22 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
       : eventType === "youtube_video" ? "YouTube notifications are disabled or the announcements channel is not configured"
       : eventType === "market_new_listing" ? "Market listing Discord notifications are disabled"
       : "Notification disabled or below configured threshold";
-    recordDiscordDeliverySafe({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata: diagnostics });
+    if (eventType !== "canonical_cutover") recordDiscordDeliverySafe({ status: "skipped", eventType, channelId, channelKey, summary, reason, metadata: diagnostics });
     return { ok: true, skipped: true, reason, channelId, channelKey };
   }
   try {
+    if (eventType === "canonical_cutover") {
+      const delivery = canonicalCutoverDiscordDelivery({ summary, revision: metadata.admittedRevision, settings });
+      const response = await sendDiscordMessage(delivery.payload, settings, delivery.channelId, deliveryLease);
+      return { ok: true, skipped: false, channelId: delivery.channelId, channelKey: delivery.channelKey, response: discordDeliveryResponse(response) };
+    }
     if (eventType === "craft_plan_report") {
-      const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(metadata.report), settings, channelId);
-      recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
-      return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
+      const response = await sendDiscordMessage(buildCraftPlanDiscordEmbed(metadata.report), settings, channelId, deliveryLease);
+      recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: discordDeliveryResponse(response) });
+      return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
     }
     if (isMarketSaleDiscordEvent(eventType) && settings.marketSalesDelivery === "dm") {
-      return await sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata, settings, diagnostics);
+      return await sendDiscordMarketSaleDirectMessages(eventType, summary, occurredAt, metadata, settings, diagnostics, deliveryLease);
     }
     const role = craftWatchRole(metadata, settings);
     const response = await sendDiscordMessage({
@@ -4455,13 +4261,13 @@ async function sendDiscordActivity(eventType, summary, occurredAt, metadata = {}
       embeds: [discordEmbedForActivity(eventType, summary, occurredAt, metadata, settings)],
       components: discordCraftWatchComponents(eventType, metadata),
       allowed_mentions: { roles: role ? [role.roleId] : [], parse: [] },
-    }, settings, channelId);
-    recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: { id: response?.id, channel_id: response?.channel_id } });
+    }, settings, channelId, deliveryLease);
+    recordDiscordDeliverySafe({ status: "sent", eventType, channelId, channelKey, summary, metadata: diagnostics, response: discordDeliveryResponse(response) });
     if (eventType === "supplies") statements.upsertSetting.run("discord_last_low_supplies_at", new Date().toISOString(), new Date().toISOString());
-    return { ok: true, skipped: false, channelId, channelKey, response: { id: response?.id, channel_id: response?.channel_id } };
+    return { ok: true, skipped: false, channelId, channelKey, response: discordDeliveryResponse(response) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    recordDiscordDeliverySafe({ status: "failed", eventType, channelId, channelKey, summary, error: message, metadata: diagnostics });
+    if (eventType !== "canonical_cutover") recordDiscordDeliverySafe({ status: "failed", eventType, channelId, channelKey, summary, error: message, metadata: diagnostics });
     throw error;
   }
 }
@@ -4471,7 +4277,7 @@ function discordOutboxSourceKey(eventType, summary, occurredAt, metadata = {}) {
   return `${eventType}:${String(stable || `${summary}:${occurredAt}`).slice(0, 240)}`;
 }
 
-async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata = {}, options = {}) {
+function enqueueDiscordActivityRow(eventType, summary, occurredAt, metadata = {}, options = {}) {
   const now = new Date().toISOString();
   const sourceKey = String(options.sourceKey ?? discordOutboxSourceKey(eventType, summary, occurredAt, metadata));
   statements.enqueueDiscordNotification.run(sourceKey, eventType, summary, occurredAt, JSON.stringify(metadata ?? {}), now, now, now);
@@ -4479,8 +4285,43 @@ async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata =
   return { ok: true, queued: true, sourceKey };
 }
 
+function operationalHistoryRetentionSettings() {
+  return normalizeOperationalHistoryRetentionSettings({
+    enabled: statements.getSetting.get("operational_history_retention_enabled")?.value === "true",
+    days: Number(statements.getSetting.get("operational_history_retention_days")?.value ?? 365),
+    tables: safeJson(statements.getSetting.get("operational_history_retention_tables_json")?.value, []),
+  }, { approvedTables: new Set(APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES) });
+}
+
+async function enqueueDiscordActivity(eventType, summary, occurredAt, metadata = {}, options = {}) {
+  return enqueueDiscordActivityRow(eventType, summary, occurredAt, metadata, options);
+}
+
 function kickDiscordNotificationOutbox() {
+  if (!discordNotificationOutboxProcessingEnabled) return;
   void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
+}
+
+function kickMarketTransitionDispatcher(claimId = currentClaimId()) {
+  if (!marketTransitionDispatcherEnabled) return;
+  void processMarketTransitionOutbox({ claimId }).catch((error) => console.warn(
+    `Market transition dispatcher failed: ${errorMessage(error)}`,
+  ));
+}
+
+async function processMarketTransitionOutbox({ claimId = currentClaimId(), limit = 25 } = {}) {
+  if (!marketTransitionDispatcherEnabled) {
+    return { skipped: true, reason: "Market transition dispatcher is held" };
+  }
+  if (marketTransitionDispatcherRunning) {
+    return { skipped: true, reason: "Market transition dispatcher already running" };
+  }
+  marketTransitionDispatcherRunning = true;
+  try {
+    return await marketTransitionDispatcher.drain({ claimId, limit: Math.min(25, limit) });
+  } finally {
+    marketTransitionDispatcherRunning = false;
+  }
 }
 
 function discordNotificationRetryAt(attempts) {
@@ -4489,43 +4330,89 @@ function discordNotificationRetryAt(attempts) {
 }
 
 async function processDiscordNotificationOutbox({ limit = 10 } = {}) {
+  if (!discordNotificationOutboxProcessingEnabled) {
+    return { skipped: true, reason: "Discord notification outbox processing is held" };
+  }
   if (discordNotificationOutboxRunning) return { skipped: true, reason: "Discord notification outbox already running" };
   discordNotificationOutboxRunning = true;
   let sent = 0;
   let skipped = 0;
   let failed = 0;
+  let checked = 0;
   try {
-    const rows = statements.pendingDiscordNotifications.all(discordNotificationMaxAttempts, new Date().toISOString(), limit);
-    for (const row of rows) {
+    discordOutboxLeaser.recoverExpiredLeases(new Date().toISOString());
+    for (let index = 0; index < limit; index += 1) {
+      const row = discordOutboxLeaser.claimNext({ maxAttempts: discordNotificationMaxAttempts });
+      if (!row) break;
+      checked += 1;
       const metadata = safeJson(row.metadata_json, {});
+      const canonicalCutoverAttempt = row.event_type === "canonical_cutover";
       try {
-        const result = await sendDiscordActivity(row.event_type, row.summary, row.occurred_at, metadata);
+        const deliveryLease = {
+          beforeRequest() {
+            return discordOutboxLeaser.renewLease({
+              id: row.id,
+              leaseToken: row.leaseToken,
+              leaseMs: discordNotificationLeaseMs,
+            });
+          },
+        };
+        const result = await sendDiscordActivity(
+          row.event_type,
+          row.summary,
+          row.occurred_at,
+          metadata,
+          getDiscordSettingsRaw(),
+          deliveryLease,
+        );
         const finishedAt = new Date().toISOString();
         if (result?.skipped) {
-          statements.markDiscordNotificationSkipped.run(finishedAt, result.reason ?? "Notification skipped by sender", finishedAt, row.id);
-          if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+          const completed = discordOutboxLeaser.markSkipped({
+            id: row.id,
+            leaseToken: row.leaseToken,
+            reason: result.reason ?? "Notification skipped by sender",
+            finishedAt,
+          });
+          if (completed && row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
             statements.updateDiscordCraftPlanReportOccurrence.run("skipped", null, redactServerHealthText(result.reason ?? "Notification skipped").slice(0, 500), finishedAt, metadata.ruleId, metadata.occurrenceKey);
           }
-          skipped += 1;
+          if (completed) skipped += 1;
         } else {
-          statements.markDiscordNotificationSent.run(finishedAt, JSON.stringify(result ?? {}), finishedAt, row.id);
-          if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+          const completed = discordOutboxLeaser.markSent({
+            id: row.id,
+            leaseToken: row.leaseToken,
+            response: result ?? {},
+            finishedAt,
+          });
+          if (completed && row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
             statements.updateDiscordCraftPlanReportOccurrence.run("sent", String(result?.response?.id ?? ""), null, finishedAt, metadata.ruleId, metadata.occurrenceKey);
           }
-          if (row.event_type === "app_update" && (metadata.announcementKey || metadata.version || metadata.releaseKey)) statements.upsertSetting.run("discord_last_announced_version", String(metadata.announcementKey || metadata.version || metadata.releaseKey), finishedAt);
-          sent += 1;
+          if (completed && row.event_type === "app_update" && (metadata.announcementKey || metadata.version || metadata.releaseKey)) statements.upsertSetting.run("discord_last_announced_version", String(metadata.announcementKey || metadata.version || metadata.releaseKey), finishedAt);
+          if (completed) sent += 1;
         }
       } catch (error) {
         const failedAt = new Date().toISOString();
         const message = error instanceof Error ? error.message : String(error);
-        statements.markDiscordNotificationFailed.run(discordNotificationMaxAttempts, discordNotificationRetryAt(toNumber(row.attempts)), failedAt, message, failedAt, row.id);
-        if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
-          statements.updateDiscordCraftPlanReportOccurrence.run("failed", null, redactServerHealthText(message).slice(0, 500), failedAt, metadata.ruleId, metadata.occurrenceKey);
+        const completed = completeDiscordOutboxFailure({
+          leaser: discordOutboxLeaser,
+          row,
+          error: message,
+          retryAt: discordNotificationRetryAt(toNumber(row.attempts) - 1),
+          finishedAt: failedAt,
+          canonicalCutoverAttempt,
+          afterCompletion() {
+            if (row.event_type === "craft_plan_report" && metadata.ruleId && metadata.occurrenceKey) {
+              statements.updateDiscordCraftPlanReportOccurrence.run("failed", null, redactServerHealthText(message).slice(0, 500), failedAt, metadata.ruleId, metadata.occurrenceKey);
+            }
+          },
+        });
+        if (completed) {
+          if (canonicalCutoverAttempt) skipped += 1;
+          else failed += 1;
         }
-        failed += 1;
       }
     }
-    return { checked: rows.length, sent, skipped, failed };
+    return { checked, sent, skipped, failed };
   } finally {
     discordNotificationOutboxRunning = false;
   }
@@ -4541,29 +4428,33 @@ function queueDiscordActivity(claimId, eventType, summary, occurredAt, metadata 
   }).catch((error) => console.warn(`Discord notification enqueue failed: ${error instanceof Error ? error.message : String(error)}`));
 }
 
-async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId) {
+async function sendDiscordMessage(payload, settings = getDiscordSettingsRaw(), channelId = settings.channelId, deliveryLease = null) {
   if (!settings.enabled || !settings.botToken || !channelId) throw new Error("Discord integration is not fully configured");
-  const response = await fetch(`${discordApiOrigin}/channels/${encodeURIComponent(channelId)}/messages`, {
+  if (configuredDiscordDeliveryMode === "record") return recordedDiscordResponse(channelId, payload);
+  assertDiscordNetworkEnabled();
+  const response = await fetchDiscordWithLease(`${discordApiOrigin}/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
+    signal: AbortSignal.timeout(discordRequestTimeoutMs),
     headers: {
       authorization: `Bot ${settings.botToken}`,
       "content-type": "application/json",
     },
     body: JSON.stringify(payload),
-  });
+  }, { deliveryLease });
   if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
   return response.json();
 }
 
-async function sendDiscordDirectMessage(userId, payload, settings = getDiscordSettingsRaw()) {
+async function sendDiscordDirectMessage(userId, payload, settings = getDiscordSettingsRaw(), deliveryLease = null) {
   if (!settings.enabled || !settings.botToken || !/^\d+$/.test(String(userId))) throw new Error("Discord integration is not fully configured");
+  if (configuredDiscordDeliveryMode === "record") return recordedDiscordResponse(`dm:${userId}`, payload);
   const channel = await discordApiRequest("/users/@me/channels", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ recipient_id: String(userId) }),
-  }, settings);
+  }, settings, deliveryLease);
   if (!channel?.id) throw new Error("Discord did not return a DM channel.");
-  return sendDiscordMessage(payload, settings, channel.id);
+  return sendDiscordMessage(payload, settings, channel.id, deliveryLease);
 }
 
 async function editDiscordMessage(channelId, messageId, payload, settings = getDiscordSettingsRaw()) {
@@ -4644,15 +4535,17 @@ async function postDiscordColourSelector(settings = getDiscordSettingsRaw()) {
   return response;
 }
 
-async function discordApiRequest(pathname, options = {}, settings = getDiscordSettingsRaw()) {
+async function discordApiRequest(pathname, options = {}, settings = getDiscordSettingsRaw(), deliveryLease = null) {
+  assertDiscordNetworkEnabled();
   if (!settings.botToken) throw new Error("Discord bot token is not configured");
-  const response = await fetch(`${discordApiOrigin}${pathname}`, {
+  const response = await fetchDiscordWithLease(`${discordApiOrigin}${pathname}`, {
     ...options,
+    signal: options.signal ?? AbortSignal.timeout(discordRequestTimeoutMs),
     headers: {
       authorization: `Bot ${settings.botToken}`,
       ...(options.headers ?? {}),
     },
-  });
+  }, { deliveryLease });
   if (!response.ok) throw new Error(`Discord HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
   if (response.status === 204) return null;
   const text = await response.text();
@@ -4930,6 +4823,9 @@ async function discordGuildDiscovery(settings = getDiscordSettingsRaw()) {
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
   return {
+    available: true,
+    reason: null,
+    message: "",
     guild: { id: guildId, name: String(guild?.name ?? guildId) },
     bot: { id: botUserId, username: String(botUser?.username ?? "Bot"), highestRolePosition: botHighestRolePosition },
     channels: sortedChannels,
@@ -5036,7 +4932,7 @@ async function sendDiscordAnnouncement(body, settings = getDiscordSettingsRaw())
   const message = String(body.message ?? "").trim();
   if (!channelId || !message) throw new Error("Announcement needs a channel and message.");
   const response = await sendDiscordMessage({ embeds: [discordCommandEmbed(title, message, [], 0xf0c64f)] }, settings, channelId);
-  recordDiscordDeliverySafe({ status: "sent", eventType: "announcement", channelId, channelKey: "announcement", summary: title, response: { id: response?.id, channel_id: response?.channel_id } });
+  recordDiscordDeliverySafe({ status: "sent", eventType: "announcement", channelId, channelKey: "announcement", summary: title, response: discordDeliveryResponse(response) });
   return response;
 }
 
@@ -5048,7 +4944,7 @@ async function updateDiscordPinnedInfo(body, settings = getDiscordSettingsRaw())
   if (!channelId || !message) throw new Error("Pinned info needs a channel and message.");
   const { response, action } = await sendOrUpdateDiscordMessage(channelId, messageId, { embeds: [discordCommandEmbed(title, message, [], 0x5865f2)] }, settings);
   if (response?.id) await discordApiRequest(`/channels/${encodeURIComponent(channelId)}/pins/${encodeURIComponent(response.id)}`, { method: "PUT" }, settings).catch(() => null);
-  recordDiscordDeliverySafe({ status: "sent", eventType: "pinned_info", channelId, channelKey: "pinnedInfo", summary: `${action === "updated" ? "Updated" : "Posted"} pinned info`, response: { id: response?.id, channel_id: response?.channel_id } });
+  recordDiscordDeliverySafe({ status: "sent", eventType: "pinned_info", channelId, channelKey: "pinnedInfo", summary: `${action === "updated" ? "Updated" : "Posted"} pinned info`, response: discordDeliveryResponse(response) });
   return { response, action };
 }
 
@@ -5535,28 +5431,55 @@ async function currentAppUpdateDetails() {
   };
 }
 
-async function sendDiscordTestNotification(kind = "basic") {
+async function sendDiscordTestNotification(kind = "basic", { requestedChannelId = "" } = {}) {
   const settings = getDiscordSettingsRaw();
-  if (kind === "basic") {
-    const summary = "Discord integration test from Timbersteel Trade.";
-    try {
-      const response = await sendDiscordMessage({
-        content: summary,
-        allowed_mentions: { parse: [] },
-      }, settings, settings.channelId);
-      recordDiscordDeliverySafe({ status: "sent", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, metadata: discordDiagnosticContext("test_basic", {}, settings), response: { id: response?.id, channel_id: response?.channel_id } });
-      return response;
-    } catch (error) {
-      recordDiscordDeliverySafe({ status: "failed", eventType: "test_basic", channelId: settings.channelId, channelKey: "notifications", summary, error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("test_basic", {}, settings) });
-      throw error;
-    }
-  }
-  const sample = discordTestEvents[kind];
+  const sample = kind === "basic" ? {
+    eventType: "test_basic",
+    summary: "Discord integration test from Timbersteel Trade.",
+    metadata: {},
+  } : discordTestEvents[kind];
   if (!sample) throw new Error("Unknown Discord test notification");
   const updateDetails = sample.eventType === "app_update" ? await currentAppUpdateDetails() : null;
   const summary = updateDetails?.summary ?? sample.summary;
   const metadata = updateDetails ? { ...sample.metadata, changeNotes: updateDetails.changeNotes } : sample.metadata;
-  return sendDiscordActivity(sample.eventType, summary, new Date().toISOString(), metadata, settings);
+  const payload = kind === "basic"
+    ? { content: summary, allowed_mentions: { parse: [] } }
+    : {
+        embeds: [discordEmbedForActivity(sample.eventType, summary, new Date().toISOString(), metadata, settings)],
+        allowed_mentions: { parse: [] },
+      };
+  try {
+    const response = await manualDiscordSandboxMessage(payload, settings, requestedChannelId);
+    recordDiscordDeliverySafe({
+      status: "sent",
+      eventType: sample.eventType,
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary,
+      metadata: {
+        ...discordDiagnosticContext(sample.eventType, metadata, settings),
+        manualSandboxTest: true,
+        deliveryMode: configuredDiscordDeliveryMode,
+      },
+      response: discordDeliveryResponse(response),
+    });
+    return response;
+  } catch (error) {
+    recordDiscordDeliverySafe({
+      status: "failed",
+      eventType: sample.eventType,
+      channelId: configuredDiscordSandboxChannelId,
+      channelKey: "manualSandbox",
+      summary,
+      error: error instanceof Error ? error.message : String(error),
+      metadata: {
+        ...discordDiagnosticContext(sample.eventType, metadata, settings),
+        manualSandboxTest: true,
+        deliveryMode: configuredDiscordDeliveryMode,
+      },
+    });
+    throw error;
+  }
 }
 
 async function announceDiscordAppUpdateIfNeeded({ recordAlreadyAnnounced = true } = {}) {
@@ -5613,7 +5536,7 @@ async function sendScheduledSupplyReportIfDue(claim) {
       embeds: [discordSupplyEmbed(claim)],
       allowed_mentions: { parse: [] },
     }, settings, channelId);
-    recordDiscordDeliverySafe({ status: "sent", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings), response: { id: response?.id, channel_id: response?.channel_id } });
+    recordDiscordDeliverySafe({ status: "sent", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings), response: discordDeliveryResponse(response) });
   } catch (error) {
     recordDiscordDeliverySafe({ status: "failed", eventType: "supply_report", channelId, channelKey, summary: "Scheduled supply report", error: error instanceof Error ? error.message : String(error), metadata: discordDiagnosticContext("supply_report", { claimId: claim.entityId ?? claim.id, supplies: claim.supplies }, settings) });
     throw error;
@@ -5632,237 +5555,55 @@ function isDeployableStorage(building) {
 }
 
 
-function usedTradeIdsForListing(listingKey) {
-  const rows = db.prepare("SELECT trade_id FROM market_events WHERE listing_key = ? AND trade_id IS NOT NULL").all(listingKey);
-  return new Set(rows.flatMap((row) => String(row.trade_id).split(",")).filter(Boolean));
-}
-
-async function findConfirmedTrade(listing, minQuantity = 1) {
-  if (!listing.ownerEntityId) return null;
-  try {
-    const usedTradeIds = usedTradeIdsForListing(listing.key);
-    const matches = [];
-    let offset = 0;
-    while (offset < 1000) {
-      const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api/market/player/${listing.ownerEntityId}/trades`);
-      url.searchParams.set("type", "sell");
-      url.searchParams.set("limit", "200");
-      url.searchParams.set("offset", String(offset));
-      url.searchParams.set("orderEntityId", listing.key);
-      const response = await fetch(url, { headers: { accept: "application/json", "x-app-identifier": appIdentifier } });
-      if (!response.ok) return null;
-      const trades = unwrap(await response.json(), "trades", []);
-      matches.push(...trades.filter((trade) => tradeMatchesListing(trade, listing) && (!trade.id || !usedTradeIds.has(String(trade.id)))));
-      const matchedQuantity = matches.reduce((total, trade) => total + toNumber(trade.quantity), 0);
-      if (matchedQuantity >= minQuantity) {
-        const totalPrice = matches.reduce((total, trade) => total + toNumber(trade.totalPrice ?? trade.total_price ?? toNumber(trade.quantity) * toNumber(trade.price ?? trade.unitPrice)), 0);
-        return {
-          ...matches[0],
-          id: matches.map((trade) => trade.id).filter(Boolean).join(","),
-          quantity: matchedQuantity,
-          totalPrice,
-          matchedTrades: matches,
-        };
-      }
-      if (trades.length < 200) break;
-      offset += trades.length;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function findPendingMarketConfirmations(claimId) {
-  const confirmations = [];
-  for (const event of statements.pendingMarketEvents.all(claimId)) {
-    let raw = {};
-    try {
-      raw = JSON.parse(event.raw_json ?? "{}");
-    } catch {
-      raw = {};
-    }
-    const listing = {
-      key: event.listing_key,
-      itemName: event.item_name,
-      side: event.side ?? "sell",
-      owner: event.owner,
-      ownerEntityId: event.owner_entity_id ?? raw.ownerEntityId,
-      itemId: event.item_id ?? raw.itemId,
-      itemType: event.item_type ?? raw.itemType,
-      quantity: toNumber(event.quantity),
-      price: toNumber(event.price),
-      totalValue: toNumber(event.total_value),
-      tier: event.tier,
-      rarity: event.rarity,
-      raw,
-    };
-    const trade = await findConfirmedTrade(listing, listing.quantity);
-    if (!trade) continue;
-    confirmations.push({ event, listing, trade });
-  }
-  return confirmations;
-}
-
-function applyPendingMarketConfirmations(claimId, now, confirmations) {
-  for (const { event, listing, trade } of confirmations) {
-    const nextType = event.event_type === "partial_quantity_drop" ? "partial_sale" : "sale";
-    for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
-    statements.confirmMarketEvent.run(nextType, trade.id ?? null, JSON.stringify(trade), event.id);
-    addActivity(
-      claimId,
-      "market_sale_confirmed",
-      `Confirmed sale: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
-      now,
-      { ...listing, tradeId: trade.id ?? null },
-      `market_sale_confirmed:${listing.key}:${trade.id ?? ""}`,
-    );
-  }
-}
-
-function insertConfirmedMarketTrade(claimId, trade, listing = {}, importedAt = new Date().toISOString()) {
-  const tradeId = String(trade.id ?? "").trim();
-  if (!tradeId) return 0;
-  const quantity = toNumber(trade.quantity);
-  const unitPrice = toNumber(trade.unitPrice ?? trade.price ?? listing.price);
-  const totalPrice = toNumber(trade.totalPrice ?? trade.total_price) || quantity * unitPrice;
-  return Number(statements.insertMarketTrade.run(
-    tradeId,
-    claimId,
-    trade.orderEntityId == null ? String(listing.key ?? "") || null : String(trade.orderEntityId),
-    trade.sellerEntityId == null ? String(listing.ownerEntityId ?? "") || null : String(trade.sellerEntityId),
-    trade.sellerUsername ?? listing.owner ?? null,
-    trade.purchaserEntityId == null ? null : String(trade.purchaserEntityId),
-    trade.purchaserUsername ?? null,
-    trade.itemId == null ? (listing.itemId == null ? null : String(listing.itemId)) : String(trade.itemId),
-    trade.itemType == null ? (listing.itemType == null ? null : String(listing.itemType)) : String(trade.itemType),
-    String(trade.itemName ?? listing.itemName ?? "Unknown item"),
-    quantity,
-    unitPrice,
-    totalPrice,
-    trade.itemTier == null ? (listing.tier == null ? null : String(listing.tier)) : String(trade.itemTier),
-    trade.itemRarityStr ?? listing.rarity ?? null,
-    tradeOccurredAt(trade, importedAt),
-    importedAt,
-    JSON.stringify(trade),
-  ).changes);
-}
-
-function addMarketEvent(claimId, eventType, listing, occurredAt) {
-  const sourceKey = marketEventSourceKey(eventType, listing);
-  statements.insertMarketEvent.run(
-    claimId,
-    eventType,
-    listing.key,
-    listing.itemName,
-    listing.side,
-    listing.owner,
-    listing.ownerEntityId,
-    listing.itemId == null ? null : String(listing.itemId),
-    listing.itemType == null ? null : String(listing.itemType),
-    listing.quantity,
-    listing.price,
-    listing.totalValue,
-    listing.tier == null ? null : String(listing.tier),
-    listing.rarity,
-    occurredAt,
-    listing.tradeId,
-    sourceKey,
-    JSON.stringify(listing.raw),
-  );
-}
-
 function craftOutputCatalog(craftsPayload) {
-  return new Map([...(craftsPayload?.items ?? []), ...(craftsPayload?.cargos ?? [])].map((item) => [String(item.id), item]));
+  return new Map([...(craftsPayload?.items ?? []), ...(craftsPayload?.cargos ?? [])]
+    .map((item) => {
+      const kind = String(item?.kind ?? item?.itemType ?? "").toLowerCase() === "cargo" || Number(item?.itemType) === 1 ? "cargo" : "items";
+      const id = String(item?.targetId ?? item?.id ?? "").trim();
+      return [`${kind}:${id}`, item];
+    })
+    .filter(([key]) => key !== "items:" && key !== "cargo:"));
 }
 
 function craftPrimarySkill(craft) {
   return productionMetrics(craft).skillName;
 }
 
+function canonicalRelayIdentifier(value, label) {
+  if (typeof value !== "string" || !/^\d+$/.test(value.trim())) {
+    throw new Error(`${label} must be a decimal string identifier`);
+  }
+  return canonicalNonNegativeDecimal(value, label);
+}
+
 function craftExperiencePerProgress(craft) {
-  const skillId = toNumber(craft.levelRequirements?.[0]?.skill_id ?? craft.experiencePerProgress?.[0]?.skill_id);
-  const match = craft.experiencePerProgress?.find?.((entry) => toNumber(entry.skill_id) === skillId);
-  return toNumber(match?.quantity ?? craft.experiencePerProgress?.[0]?.quantity);
+  const skillId = canonicalRelayIdentifier(
+    craft.levelRequirements?.[0]?.skillId
+    ?? craft.levelRequirements?.[0]?.skill_id
+    ?? craft.experiencePerProgress?.[0]?.skillId
+    ?? craft.experiencePerProgress?.[0]?.skill_id,
+    "Relay craft skill id",
+  );
+  const match = craft.experiencePerProgress?.find?.(
+    (entry) => canonicalRelayIdentifier(
+      entry.skillId ?? entry.skill_id,
+      "Relay craft experience skill id",
+    ) === skillId,
+  );
+  return match?.quantity ?? craft.experiencePerProgress?.[0]?.quantity;
 }
 
 function craftContributionOutputItem(craft, catalog) {
-  const outputId = craft.craftedItem?.[0]?.item_id;
-  return catalog.get(String(outputId)) ?? {};
+  const output = craft.craftedItem?.[0] ?? {};
+  const kind = String(output.itemType ?? output.item_type ?? "").toLowerCase() === "cargo" || Number(output.itemType ?? output.item_type) === 1 ? "cargo" : "items";
+  const outputId = String(output.itemId ?? output.item_id ?? "").trim();
+  return catalog.get(`${kind}:${outputId}`) ?? {};
 }
 
-function craftContributionRecord(claimId, craft, contribution, catalog, observedAt) {
-  const craftId = String(craft.entityId ?? "").trim();
-  const contributorId = String(contribution.contributorEntityId ?? contribution.playerEntityId ?? contribution.entityId ?? "").trim();
-  if (!craftId || !contributorId) return null;
-  const item = craftContributionOutputItem(craft, catalog);
-  const progress = toNumber(contribution.totalProgressContributed ?? contribution.contributedProgress ?? contribution.progress);
-  const xpPerProgress = craftExperiencePerProgress(craft);
-  return {
-    key: `${claimId}:${craftId}:${contributorId}`,
-    claimId,
-    craftId,
-    contributorId,
-    contributorName: String(contribution.contributorUsername ?? contribution.username ?? contribution.userName ?? contributorId),
-    profession: craftPrimarySkill(craft),
-    craftLabel: String(item.name ?? craft.recipeName ?? craft.craftedItemName ?? "Unknown craft"),
-    structureName: String(craft.buildingName ?? craft.structureName ?? "Unknown structure"),
-    itemTier: item.tier == null ? (craft.tier == null ? null : String(craft.tier)) : String(item.tier),
-    progress,
-    xp: progress * xpPerProgress,
-    count: toNumber(contribution.contributionCount),
-    firstAt: contribution.firstContributedAt ?? null,
-    lastAt: contribution.lastContributedAt ?? null,
-    observedAt,
-    raw: contribution,
-  };
-}
-
-async function collectProductionContributionRecords(claimId, craftsPayload, contributionsByCraft, observedAt) {
-  const crafts = unwrap(craftsPayload, "craftResults", []).filter((craft) => craft?.entityId);
-  const catalog = craftOutputCatalog(craftsPayload);
-  const entries = await mapWithConcurrency(crafts, 4, async (craft) => {
-    const craftId = String(craft.entityId);
-    const contributions = Object.prototype.hasOwnProperty.call(contributionsByCraft ?? {}, craftId)
-      ? contributionsByCraft[craftId]
-      : await fetchCachedCraftContributions(craftId);
-    return (Array.isArray(contributions) ? contributions : [])
-      .map((contribution) => craftContributionRecord(claimId, craft, contribution, catalog, observedAt))
-      .filter(Boolean);
-  });
-  return entries.flat();
-}
-
-function persistProductionContributions(records) {
-  for (const record of records) {
-    statements.upsertProductionContribution.run(
-      record.key,
-      record.claimId,
-      record.craftId,
-      record.contributorId,
-      record.contributorName,
-      record.profession || null,
-      record.craftLabel,
-      record.structureName,
-      record.itemTier,
-      record.progress,
-      record.xp,
-      record.count,
-      record.firstAt,
-      record.lastAt,
-      record.observedAt,
-      record.observedAt,
-      JSON.stringify(record.raw),
-    );
-  }
-}
-
-function recordSettlementState(payload) {
+function recordSettlementState(summary, claim = {}) {
   const now = new Date().toISOString();
-  const summary = settlementStateSummary(payload);
   const claimId = summary.claimId;
   if (!claimId) throw new Error("Missing claim id");
-  const claim = payload.claim ?? {};
   const supplyMeta = supplyRunwayMetadata(claim, summary.supplies);
   runSettlementStateTransaction({
     db,
@@ -5884,117 +5625,6 @@ function recordSettlementState(payload) {
   return { ok: true, capturedAt: now };
 }
 
-async function syncMarketListingsForSnapshot(claimId, marketPayload, now) {
-  const market = unwrap(marketPayload, "listings", []);
-  const normalizedListings = market.map(normalizeListing);
-  const seen = new Set(normalizedListings.map((listing) => listing.key));
-  const existingListings = new Map(normalizedListings.map((listing) => [listing.key, statements.listingByKey.get(listing.key)]));
-  const partialCandidates = normalizedListings
-    .map((listing) => ({ listing, existing: existingListings.get(listing.key) }))
-    .filter(({ listing, existing }) => existing && listing.quantity < toNumber(existing.quantity))
-    .map(({ listing, existing }) => ({ listing, soldQuantity: toNumber(existing.quantity) - listing.quantity }));
-  const closedCandidates = statements.activeListings.all(claimId).filter((active) => !seen.has(active.listing_key)).map((active) => {
-    const raw = safeJson(active.raw_json);
-    return {
-      active,
-      listing: {
-        key: active.listing_key,
-        itemName: active.item_name,
-        side: active.side ?? "sell",
-        owner: active.owner,
-        ownerEntityId: active.owner_entity_id ?? raw.ownerEntityId,
-        itemId: active.item_id ?? raw.itemId,
-        itemType: active.item_type ?? raw.itemType,
-        quantity: toNumber(active.quantity),
-        price: toNumber(active.price),
-        totalValue: toNumber(active.total_value),
-        tier: active.tier,
-        rarity: active.rarity,
-        raw,
-      },
-    };
-  });
-  const [partialChecks, closedChecks, pendingConfirmations] = await Promise.all([
-    mapWithConcurrency(partialCandidates, 4, async ({ listing, soldQuantity }) => ({ listing, soldQuantity, trade: await findConfirmedTrade(listing, soldQuantity) })),
-    mapWithConcurrency(closedCandidates, 4, async ({ active, listing }) => ({ active, listing, trade: await findConfirmedTrade(listing, listing.quantity) })),
-    findPendingMarketConfirmations(claimId),
-  ]);
-  const partialResults = new Map(partialChecks.map((result) => [result.listing.key, result]));
-  const closedResults = new Map(closedChecks.map((result) => [result.listing.key, result]));
-
-  db.exec("BEGIN");
-  try {
-    for (const listing of normalizedListings) {
-      const existing = existingListings.get(listing.key);
-      statements.upsertListing.run(
-        listing.key,
-        claimId,
-        listing.itemName,
-        listing.side,
-        listing.owner,
-        listing.ownerEntityId,
-        listing.itemId == null ? null : String(listing.itemId),
-        listing.itemType == null ? null : String(listing.itemType),
-        listing.quantity,
-        listing.price,
-        listing.totalValue,
-        listing.tier == null ? null : String(listing.tier),
-        listing.rarity,
-        existing?.first_seen ?? listing.listedAt ?? now,
-        now,
-        JSON.stringify(listing.raw),
-      );
-      if (!existing) {
-        addMarketEvent(claimId, "new_listing", listing, now);
-        addActivity(
-          claimId,
-          "market_new_listing",
-          `New market listing: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
-          now,
-          listing,
-          `market_new_listing:${listing.key}`,
-        );
-      } else if (listing.quantity < toNumber(existing.quantity)) {
-        const { soldQuantity, trade } = partialResults.get(listing.key);
-        const partial = { ...listing, quantity: soldQuantity, totalValue: soldQuantity * listing.price, tradeId: trade?.id ?? null, raw: trade ?? listing.raw };
-        if (trade) for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
-        addMarketEvent(claimId, trade ? "partial_sale" : "partial_quantity_drop", partial, now);
-        addActivity(
-          claimId,
-          trade ? "market_sale" : "market_quantity_drop",
-          `${trade ? "Partial sale" : "Quantity dropped"}: ${listing.itemName} x${soldQuantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
-          now,
-          partial,
-          `${trade ? "market_sale" : "market_quantity_drop"}:${listing.key}:${trade?.id ?? `${soldQuantity}:${listing.quantity}`}`,
-        );
-      }
-    }
-
-    for (const { active, listing } of closedCandidates) {
-      const trade = closedResults.get(listing.key)?.trade;
-      const eventType = trade ? "sale" : "removed_or_cancelled";
-      const closedListing = { ...listing, tradeId: trade?.id ?? null, raw: trade ?? listing.raw };
-      if (trade) for (const fill of trade.matchedTrades ?? [trade]) insertConfirmedMarketTrade(claimId, fill, listing, now);
-      statements.markListingClosed.run(eventType, now, now, active.listing_key);
-      addMarketEvent(claimId, eventType, closedListing, now);
-      addActivity(
-        claimId,
-        trade ? "market_sale" : "market_removed_or_cancelled",
-        `${trade ? "Sold" : "Removed/cancelled"}: ${listing.itemName} x${listing.quantity.toLocaleString()} at ${listing.price.toLocaleString()}g`,
-        now,
-        closedListing,
-        `${trade ? "market_sale" : "market_removed_or_cancelled"}:${listing.key}:${trade?.id ?? ""}`,
-      );
-    }
-
-    applyPendingMarketConfirmations(claimId, now, pendingConfirmations);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-}
-
 async function syncProductionJobActivityForSnapshot(claimId, craftsPayload, now) {
   if (!craftsPayload) return { pendingNotifications: [], diagnostics: [] };
   db.exec("BEGIN");
@@ -6008,869 +5638,127 @@ async function syncProductionJobActivityForSnapshot(claimId, craftsPayload, now)
   }
 }
 
-async function syncProductionContributionsForSnapshot(claimId, craftsPayload, contributionsByCraft, now) {
-  if (!craftsPayload) return;
-  const liveContributionCount = Object.values(contributionsByCraft ?? {}).reduce((sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0), 0);
-  const productionContributionRecords = await collectProductionContributionRecords(claimId, craftsPayload, contributionsByCraft, now);
-  if (liveContributionCount > 0 && productionContributionRecords.length === 0) {
-    throw new Error("Live craft contributions were available but none could be persisted");
-  }
-  db.exec("BEGIN");
-  try {
-    persistProductionContributions(productionContributionRecords);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+function relayEmpireCurrentData(claimId = currentClaimId()) {
+  return currentStateRepository.read(claimId, "empires")?.data ?? null;
 }
 
-async function fetchBitjita(pathname, options = {}) {
-  if (!workerRequestCoordinator) return fetchBitjitaUncoordinated(pathname, options);
-  const cacheMode = options.cache === false ? "direct" : options.forceRefresh ? "forced" : "cached";
-  const key = `${cacheMode}:${Number(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS)}:${pathname}`;
-  return workerRequestCoordinator.run(key, () => fetchBitjitaUncoordinated(pathname, options));
-}
-
-async function fetchBitjitaUncoordinated(pathname, options = {}) {
-  // Central BitJita client used by collectors and local helper endpoints. Keep
-  // the identifying header here so upstream sees a consistent app identity, and
-  // prefer adding resilience here instead of duplicating fetch logic in callers.
-  const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api${pathname}`);
-  const timeoutMs = Math.max(0, toNumber(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS));
-  bitjitaTelemetry.requests += 1;
-  let response;
-  try {
-    if (options.cache === false) {
-      const fetchOptions = { headers: { accept: "application/json", "x-app-identifier": appIdentifier } };
-      if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
-      response = await fetch(url, fetchOptions);
-      if (!response.ok) {
-        const error = new Error(`${pathname}: HTTP ${response.status}`);
-        error.statusCode = response.status;
-        error.retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
-        throw error;
-      }
-      return response.json();
-    }
-    response = await bitjitaProxyCache.fetchUpstreamCached(url, { timeoutMs, forceRefresh: options.forceRefresh === true });
-  } catch (error) {
-    bitjitaTelemetry.failures += 1;
-    bitjitaTelemetry.lastFailureAt = new Date().toISOString();
-    if (Number(error?.statusCode) === 429) bitjitaTelemetry.rateLimits += 1;
-    if (timeoutMs > 0 && error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
-      bitjitaTelemetry.timeouts += 1;
-      throw new Error(`${pathname}: timed out after ${Math.round(timeoutMs / 1000)}s`);
-    }
-    if (error instanceof TypeError && String(error.message ?? "").toLowerCase().includes("fetch failed")) {
-      const cause = error.cause instanceof Error ? `: ${error.cause.message}` : "";
-      throw new Error(`${pathname}: BitJita network request failed${cause}`);
-    }
-    throw error;
-  }
-  if (response.status < 200 || response.status >= 300) throw new Error(`${pathname}: HTTP ${response.status}`);
-  try {
-    return JSON.parse(Buffer.from(response.body).toString("utf8"));
-  } catch {
-    throw new Error(`${pathname}: BitJita returned invalid JSON`);
-  }
-}
-
-async function postBitjita(pathname, body, options = {}) {
-  const timeoutMs = Math.max(0, toNumber(options.timeoutMs ?? BITJITA_FETCH_TIMEOUT_MS));
-  const key = `post:${timeoutMs}:${pathname}:${JSON.stringify(body)}`;
-  const request = async () => {
-    const url = new URL(`${process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com"}/api${pathname}`);
-    bitjitaTelemetry.requests += 1;
-    try {
-      const fetchOptions = {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "content-type": "application/json",
-          "x-app-identifier": appIdentifier,
-        },
-        body: JSON.stringify(body),
-      };
-      if (timeoutMs > 0) fetchOptions.signal = AbortSignal.timeout(timeoutMs);
-      const response = await fetch(url, fetchOptions);
-      if (!response.ok) {
-        const error = new Error(`${pathname}: HTTP ${response.status}`);
-        error.statusCode = response.status;
-        error.retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
-        throw error;
-      }
-      return response.json();
-    } catch (error) {
-      bitjitaTelemetry.failures += 1;
-      bitjitaTelemetry.lastFailureAt = new Date().toISOString();
-      if (Number(error?.statusCode) === 429) bitjitaTelemetry.rateLimits += 1;
-      if (timeoutMs > 0 && error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
-        bitjitaTelemetry.timeouts += 1;
-        throw new Error(`${pathname}: timed out after ${Math.round(timeoutMs / 1000)}s`);
-      }
-      throw error;
-    }
-  };
-  return workerRequestCoordinator ? workerRequestCoordinator.run(key, request) : request();
-}
-
-function globalMarketCatalog(payload) {
-  const rows = Array.isArray(payload?.data?.items) ? payload.data.items : [];
-  const catalog = new Map();
-  for (const row of rows) {
-    const itemId = Number(row?.itemId ?? row?.id);
-    if (!Number.isFinite(itemId) || itemId < 1) continue;
-    const itemType = row?.itemType === 1 || row?.itemType === "1" || row?.itemType === "cargo" ? "cargo" : "item";
-    catalog.set(`${itemType}:${itemId}`, {
-      itemType,
-      itemId,
-      name: String(row?.name ?? row?.itemName ?? `Unknown ${itemType}`),
-      iconAssetName: row?.iconAssetName ?? row?.itemIconAssetName ?? null,
-    });
-  }
-  return catalog;
-}
-
-function globalMarketRows(payload, keys) {
-  for (const key of keys) {
-    const rows = payload?.[key] ?? payload?.data?.[key];
-    if (Array.isArray(rows)) return rows;
-  }
-  return [];
-}
-
-async function globalMarketRecentActivity(mostTraded, regionId = "") {
-  const activity = [];
-  for (const row of mostTraded.slice(0, 8)) {
-    const itemId = Number(row?.itemId ?? row?.item_id ?? row?.id);
-    if (!Number.isFinite(itemId) || itemId < 1) continue;
-    const itemType = row?.itemType === 1 || row?.itemType === "1" || row?.itemType === "cargo" ? "cargo" : "item";
-    const historyType = itemType === "cargo" ? "cargo" : "items";
-    try {
-      const regionParam = regionId ? `&regionId=${encodeURIComponent(regionId)}` : "";
-      const history = await fetchBitjita(`/market/${historyType}/${itemId}/price-history?bucket=1%20hour&limit=2${regionParam}`, { cache: false });
-      const trades = globalMarketRows(history, ["recentTrades", "trades"]);
-      for (const trade of trades.slice(0, 4)) {
-        activity.push({
-          ...trade,
-          itemType,
-          itemId,
-          itemName: trade?.itemName ?? row?.itemName ?? row?.name ?? `Unknown ${itemType}`,
-          iconAssetName: trade?.iconAssetName ?? row?.iconAssetName ?? row?.itemIconAssetName ?? null,
-          regionId: regionId || (trade?.regionId ?? trade?.region_id ?? null),
-        });
-      }
-    } catch (error) {
-      console.warn(`Global market activity history unavailable for ${itemType}:${itemId}: ${errorMessage(error)}`);
-    }
-  }
-  return activity
-    .sort((left, right) => String(right?.createdAt ?? right?.timestamp ?? "").localeCompare(String(left?.createdAt ?? left?.timestamp ?? "")))
-    .slice(0, 50);
-}
-
-async function globalMarketHubLocations(hubs) {
-  const enriched = [];
-  for (const hub of hubs.slice(0, 20)) {
-    const claimId = String(hub?.claimId ?? hub?.claimEntityId ?? "");
-    if (!claimId) {
-      enriched.push(hub);
-      continue;
-    }
-    try {
-      const payload = await fetchBitjita(`/claims/${encodeURIComponent(claimId)}`, { cache: true });
-      const claim = payload?.claim ?? payload ?? {};
-      enriched.push({
-        ...hub,
-        locationX: claim?.locationX ?? claim?.location?.x ?? null,
-        locationZ: claim?.locationZ ?? claim?.location?.z ?? null,
-      });
-    } catch {
-      enriched.push(hub);
-    }
-  }
-  return enriched;
-}
-
-async function runGlobalMarketInsightsJob() {
-  const capturedAt = new Date().toISOString();
-  const catalogPayload = await fetchBitjita("/market?hasOrders=true", { cache: false });
-  const catalog = globalMarketCatalog(catalogPayload);
-  if (!catalog.size) throw new Error("BitJita returned no active global market items");
-
-  const { snapshots, failures: bulkFailures } = await collectMarketSnapshots({
-    keys: [...catalog.values()],
-    capturedAt,
-    catalog,
-    fetchBatch: (batch) => postBitjita("/market/prices/bulk", batch, { timeoutMs: 20000 }),
-  });
-  for (const failure of bulkFailures) console.warn(`Global market bulk-price batch skipped: ${failure}`);
-  if (!snapshots.length) throw new Error("BitJita returned no global market price summaries");
-
-  const previousOverview = safeJson(statements.getSetting.get("global_market_overview_json")?.value, {});
-  const staleModules = bulkFailures.length ? ["bulkPrices"] : [];
-  let topDeals = Array.isArray(previousOverview?.topDeals) ? previousOverview.topDeals : [];
-  let mostTraded = Array.isArray(previousOverview?.mostTraded) ? previousOverview.mostTraded : [];
-  let hubs = Array.isArray(previousOverview?.hubs) ? previousOverview.hubs : [];
-  let recentActivity = Array.isArray(previousOverview?.recentActivity) ? previousOverview.recentActivity : [];
-  try {
-    const dealsPayload = await fetchBitjita("/market/deals", { cache: false });
-    topDeals = globalMarketRows(dealsPayload, ["arbitrage", "deals"]);
-  } catch (error) {
-    staleModules.push("topDeals");
-    console.warn(`Global market deals aggregate retained from cache: ${errorMessage(error)}`);
-  }
-  try {
-    const tradeVolumePayload = await fetchBitjita("/stats/trade-volume?bucket=1%20day&limit=7", { cache: false });
-    mostTraded = globalMarketRows(tradeVolumePayload, ["items", "mostTraded"]);
-  } catch (error) {
-    staleModules.push("mostTraded");
-    console.warn(`Global market trade-volume aggregate retained from cache: ${errorMessage(error)}`);
-  }
-  try {
-    const hubsPayload = await fetchBitjita("/market/hubs", { cache: false });
-    hubs = await globalMarketHubLocations(globalMarketRows(hubsPayload, ["hubs", "markets"]));
-  } catch (error) {
-    staleModules.push("hubs");
-    console.warn(`Global market hubs aggregate retained from cache: ${errorMessage(error)}`);
-  }
-  try {
-    recentActivity = await globalMarketRecentActivity(mostTraded);
-  } catch (error) {
-    staleModules.push("recentActivity");
-    console.warn(`Global market recent activity retained from cache: ${errorMessage(error)}`);
-  }
-
-  const insertSnapshot = db.prepare(`
-    INSERT OR REPLACE INTO global_market_price_snapshots (
-      captured_at, item_type, item_id, item_name, icon_asset_name,
-      vwap24h, vwap7d, volume24h, lowest_sell_price, highest_buy_price
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const cutoff = snapshotRetentionCutoff(capturedAt);
-  db.exec("BEGIN");
-  try {
-    for (const row of snapshots) {
-      insertSnapshot.run(
-        row.capturedAt,
-        row.itemType,
-        row.itemId,
-        row.itemName,
-        row.iconAssetName,
-        row.vwap24h,
-        row.vwap7d,
-        row.volume24h,
-        row.lowestSellPrice,
-        row.highestBuyPrice,
-      );
-    }
-    db.prepare(`
-      DELETE FROM global_market_price_snapshots
-      WHERE rowid IN (
-        SELECT rowid FROM global_market_price_snapshots
-        WHERE captured_at < ?
-        ORDER BY captured_at ASC
-        LIMIT 5000
-      )
-    `).run(cutoff);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-
-  const overviewGeneratedAt = staleModules.length ? (previousOverview?.generatedAt ?? capturedAt) : capturedAt;
-  statements.upsertSetting.run("global_market_overview_json", JSON.stringify({
-    generatedAt: overviewGeneratedAt,
-    staleModules,
-    topDeals,
-    mostTraded,
-    hubs,
-    recentActivity,
-  }), capturedAt);
+function relayEmpireReadScope(claimId) {
+  const current = currentStateRepository.read(claimId, "empires");
+  const configuredRegionIds = configuredRegionalMarketRegionIds(claimId);
+  const activeRegionIds = relayEmpireRuntime.health().activeRegionIds;
+  const runtimeRegionIds = Array.isArray(activeRegionIds) ? activeRegionIds.map(String) : [];
   return {
-    generatedAt: overviewGeneratedAt,
-    staleModules,
-    catalogItems: catalog.size,
-    snapshotRows: snapshots.length,
-    deals: topDeals.length,
-    mostTraded: mostTraded.length,
-    hubs: hubs.length,
-    recentActivity: recentActivity.length,
+    current,
+    allowedRegionIds: configuredRegionIds.length ? configuredRegionIds : runtimeRegionIds,
   };
 }
 
-async function globalMarketOverview(regionId = "") {
-  const cache = safeJson(statements.getSetting.get("global_market_overview_json")?.value, {});
-  const generatedAt = String(cache?.generatedAt ?? "");
-  const latestCapture = db.prepare("SELECT MAX(captured_at) AS captured_at FROM global_market_price_snapshots").get()?.captured_at ?? null;
-  const currentRows = latestCapture
-    ? db.prepare(`
-        SELECT captured_at AS capturedAt, item_type AS itemType, item_id AS itemId, item_name AS itemName,
-          icon_asset_name AS iconAssetName, vwap24h, vwap7d, volume24h,
-          lowest_sell_price AS lowestSellPrice, highest_buy_price AS highestBuyPrice
-        FROM global_market_price_snapshots
-        WHERE captured_at = ?
-      `).all(latestCapture)
-    : [];
-  const priorTarget = latestCapture ? new Date(Date.parse(latestCapture) - 24 * 60 * 60 * 1000).toISOString() : null;
-  const priorCapture = priorTarget
-    ? db.prepare("SELECT MAX(captured_at) AS captured_at FROM global_market_price_snapshots WHERE captured_at <= ?").get(priorTarget)?.captured_at ?? null
+function relayEmpireResponse(view, current, regionId) {
+  const status = empireSnapshotStatus(current, regionId, {
+    staleAfterMs: relayEmpireRegionStaleMs,
+  });
+  const viewErrors = Array.isArray(view?.errors) ? view.errors.map(String) : [];
+  const errors = [...new Set([...viewErrors, ...status.errors])];
+  return {
+    ...view,
+    stale: status.stale,
+    partial: Boolean(view?.partial) || status.partial,
+    ageMs: status.ageMs,
+    updatedAt: status.updatedAt,
+    freshness: status.stale ? "stale" : "live",
+    errors,
+    serverFreshness: {
+      cacheState: status.stale ? "stored-stale-if-error" : "relay-live",
+      cachedAt: status.updatedAt,
+      stale: status.stale,
+    },
+  };
+}
+
+function relayEmpireRegionalClaims(claimId, regionId) {
+  const data = currentStateRepository.read(claimId, "region-claims")?.data ?? null;
+  return String(data?.regionId ?? "") === String(regionId) ? data : null;
+}
+
+function relayEmpireHexiteForView(empireId, empire, observedAt) {
+  const current = relayEmpireCurrentData();
+  const foundries = Array.isArray(current?.foundries)
+    ? current.foundries.filter((row) => String(row?.empireEntityId ?? "") === String(empireId))
     : null;
-  const priorRows = priorCapture
-    ? db.prepare(`
-        SELECT item_type AS itemType, item_id AS itemId, vwap24h
-        FROM global_market_price_snapshots
-        WHERE captured_at = ?
-      `).all(priorCapture)
+  const foundryCapsules = foundries == null
+    ? null
+    : foundries.reduce((total, row) => total + BigInt(String(row.hexiteCapsules)), 0n).toString();
+  const hexite = current?.hexite && typeof current.hexite === "object"
+    ? current.hexite
+    : null;
+  const inventoryRows = Array.isArray(hexite?.inventories)
+    ? hexite.inventories.filter(
+        (row) => String(row?.empireEntityId ?? "") === String(empireId),
+      )
+    : null;
+  const coverageRows = Array.isArray(hexite?.coverage)
+    ? hexite.coverage.filter(
+        (row) => String(row?.empireEntityId ?? "") === String(empireId),
+      )
     : [];
-  let mostTraded = Array.isArray(cache?.mostTraded) ? cache.mostTraded : [];
-  let recentActivity = Array.isArray(cache?.recentActivity) ? cache.recentActivity : [];
-  if (regionId) {
-    try {
-      const regionalTradeVolume = await fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=7&regionId=${encodeURIComponent(regionId)}`, { cache: true });
-      mostTraded = globalMarketRows(regionalTradeVolume, ["items", "mostTraded"]).map((row) => ({ ...row, regionId }));
-      recentActivity = await globalMarketRecentActivity(mostTraded, regionId);
-    } catch (error) {
-      console.warn(`Regional global-market overview data unavailable for R${regionId}: ${errorMessage(error)}`);
-    }
-  }
-  return buildMarketOverview({
-    generatedAt: generatedAt || latestCapture,
-    regionId,
-    currentRows,
-    priorRows,
-    topDeals: Array.isArray(cache?.topDeals) ? cache.topDeals : [],
-    mostTraded,
-    hubs: Array.isArray(cache?.hubs) ? cache.hubs : [],
-    recentActivity,
-    staleModules: Array.isArray(cache?.staleModules) ? cache.staleModules : [],
-  });
-}
-
-async function fetchAllClaimListings(claimId, options = {}) {
-  const side = String(options.side ?? "").toLowerCase();
-  const sideParam = side === "buy" || side === "sell" ? `&side=${side}` : "";
-  const base = `/claims/${claimId}/market/listings?limit=200${sideParam}`;
-  const first = await fetchBitjita(`${base}&page=1`, { cache: options.cache !== false });
-  const totalPages = Math.max(toNumber(first.totalPages) || 1, 1);
-  const pages = totalPages > 1
-    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`, { cache: options.cache !== false }))
+  const sumInventory = (sourceType, key) => inventoryRows == null
+    ? null
+    : inventoryRows
+        .filter((row) => row?.sourceType === sourceType)
+        .reduce((total, row) => total + BigInt(String(row?.[key] ?? "0")), 0n)
+        .toString();
+  const reserveBuildingCapsules = inventoryRows == null
+    ? null
+    : inventoryRows
+        .filter((row) => row?.reserveBuilding === true)
+        .reduce((total, row) => total + BigInt(String(row?.capsules ?? "0")), 0n)
+        .toString();
+  const coveredClaims = coverageRows.reduce(
+    (total, row) => total + Math.max(0, Number(row?.claimCount) || 0),
+    0,
+  );
+  const expectedPlayers = Math.max(0, Number(empire?.memberCount) || 0);
+  const expectedClaims = Math.max(0, Number(empire?.numClaims) || 0);
+  const missingRegionIds = Array.isArray(hexite?.missingRegionIds)
+    ? hexite.missingRegionIds
     : [];
-  return { ...first, listings: [first, ...pages].flatMap((page) => unwrap(page, "listings", [])), page: 1, totalPages };
-}
-
-async function fetchRegionClaimList(regionId, options = {}) {
-  const key = String(regionId);
-  const cached = regionClaimListCache.get(key);
-  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
-  const base = `/claims?regionId=${encodeURIComponent(key)}&limit=100&sort=supplies&order=desc`;
-  const first = await fetchBitjita(`${base}&page=1`, { forceRefresh: options.forceRefresh === true });
-  const totalPages = Math.max(Math.ceil(toNumber(first.count) / 100), 1);
-  const pages = totalPages > 1
-    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`, { forceRefresh: options.forceRefresh === true }))
-    : [];
-  const value = { ...first, claims: [first, ...pages].flatMap((page) => unwrap(page, "claims", [])), page: 1, totalPages };
-  regionClaimListCache.set(key, { expiresAt: Date.now() + 5 * 60 * 1000, value });
-  return value;
-}
-
-function empireCacheGet(key) {
-  const cached = empireScoutCache.get(key);
-  return cached && cached.expiresAt > Date.now() ? cached.value : null;
-}
-
-function empireCacheGetAny(key) {
-  return empireScoutCache.get(key)?.value ?? null;
-}
-
-async function empireCacheLoad(key, loader, options = {}) {
-  const cached = empireCacheGet(key);
-  if (!options.forceRefresh && cached) return cached;
-  const inflight = empireScoutInflight.get(key);
-  if (inflight) return inflight;
-  const stale = empireCacheGetAny(key);
-  const request = (async () => {
-    try {
-      const value = await loader();
-      empireScoutCache.set(key, { value, expiresAt: Date.now() + EMPIRE_SCOUT_CACHE_TTL_MS });
-      return value;
-    } catch (error) {
-      if (stale) {
-        return { ...stale, stale: true, partial: true, errors: [...(stale.errors ?? []), errorMessage(error)] };
-      }
-      throw error;
-    } finally {
-      empireScoutInflight.delete(key);
-    }
-  })();
-  empireScoutInflight.set(key, request);
-  return request;
-}
-
-function empireIdFromClaim(claim) {
-  return String(claim?.empireEntityId ?? claim?.empireId ?? claim?.empire?.entityId ?? "").trim();
-}
-
-function normalizeEmpireClaim(claim) {
-  const claimId = String(claim?.entityId ?? claim?.id ?? claim?.claimId ?? "").trim();
-  return {
-    claimId,
-    name: String(claim?.name ?? claim?.claimName ?? `Claim ${claimId}`),
-    ownerName: String(claim?.ownerPlayerUsername ?? claim?.ownerUsername ?? claim?.ownerName ?? claim?.owner ?? "Unknown"),
-    ownerEntityId: String(claim?.ownerEntityId ?? claim?.ownerPlayerEntityId ?? claim?.ownerId ?? ""),
-    regionId: String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? ""),
-    locationX: nestedCoordinate(claim, "x"),
-    locationZ: nestedCoordinate(claim, "z"),
-    tier: claim?.tier ?? claim?.claimTier ?? null,
-    supplies: toNumber(claim?.supplies),
-    treasury: toNumber(claim?.treasury),
-    numTiles: toNumber(claim?.numTiles ?? claim?.tiles ?? claim?.territoryChunks),
-    updatedAt: claim?.updatedAt ?? claim?.lastUpdatedAt ?? claim?.timestamp ?? null,
-  };
-}
-
-function knownClaimOwnerName(claim) {
-  const ownerName = String(claim?.ownerPlayerUsername ?? claim?.ownerUsername ?? claim?.ownerName ?? claim?.owner ?? "").trim();
-  return ownerName && ownerName.toLowerCase() !== "unknown" ? ownerName : "";
-}
-
-function claimEntityId(claim) {
-  return String(claim?.entityId ?? claim?.id ?? claim?.claimId ?? "").trim();
-}
-
-function mergeDefinedClaimFields(base, detail) {
-  return Object.fromEntries(Object.entries({ ...base, ...detail }).filter(([, value]) => value !== undefined && value !== null && value !== ""));
-}
-
-function memberDisplayName(member) {
-  return String(member?.username ?? member?.userName ?? member?.playerName ?? member?.name ?? "").trim();
-}
-
-async function enrichRegionalClaimOwners(claims) {
-  return mapWithConcurrency(claims, 4, async (claim) => {
-    if (!empireIdFromClaim(claim) || knownClaimOwnerName(claim)) return claim;
-    const id = claimEntityId(claim);
-    if (!id) return claim;
-    try {
-      const detailPayload = await fetchCachedClaimDetail(id);
-      const detail = detailPayload?.claim ?? detailPayload ?? {};
-      const enriched = mergeDefinedClaimFields(claim, detail);
-      if (knownClaimOwnerName(enriched)) return enriched;
-      const ownerEntityId = String(enriched?.ownerEntityId ?? enriched?.ownerPlayerEntityId ?? enriched?.ownerId ?? "").trim().toLowerCase();
-      if (!ownerEntityId) return enriched;
-      const membersPayload = await fetchBitjita(`/claims/${encodeURIComponent(id)}/members`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS) }).catch(() => ({ members: [] }));
-      const ownerMember = unwrap(membersPayload, "members", []).find((member) => memberLookupKeys(member).includes(ownerEntityId));
-      const ownerName = memberDisplayName(ownerMember);
-      return ownerName ? { ...enriched, ownerName } : enriched;
-    } catch {
-      return claim;
-    }
-  });
-}
-
-function normalizeEmpireOverviewRow(empire, regionalClaims) {
-  const entityId = String(empire?.entityId ?? empire?.id ?? "").trim();
-  const claims = regionalClaims.filter((claim) => empireIdFromClaim(claim) === entityId);
-  return {
-    entityId,
-    name: String(empire?.name ?? `Empire ${entityId}`),
-    leader: String(empire?.leader ?? empire?.leaderName ?? "Unknown"),
-    leaderEntityId: String(empire?.leaderEntityId ?? ""),
-    memberCount: toNumber(empire?.memberCount ?? empire?.membersCount),
-    territoryChunks: toNumber(empire?.territoryChunks),
-    numClaims: toNumber(empire?.numClaims),
-    regionalClaims: claims.length,
-    empireCurrencyTreasury: toNumber(empire?.empireCurrencyTreasury),
-    shardTreasury: toNumber(empire?.shardTreasury),
-    capitalBuildingEntityId: empire?.capitalBuildingEntityId ?? null,
-    locationX: empire?.locationX ?? null,
-    locationZ: empire?.locationZ ?? null,
-    locationDimension: empire?.locationDimension ?? null,
-    createdAt: empire?.createdAt ?? null,
-    updatedAt: empire?.updatedAt ?? null,
-    regionalClaimNames: claims.map((claim) => claim?.name).filter(Boolean).slice(0, 8),
-    claims: claims.map(normalizeEmpireClaim).filter((claim) => claim.claimId),
-  };
-}
-
-async function regionalEmpireOverview(regionId, options = {}) {
-  const key = `overview:${regionId}`;
-  const overview = await empireCacheLoad(key, async () => {
-    const [claimPayload, empirePayload] = await Promise.all([
-      fetchRegionClaimList(regionId, options),
-      fetchBitjita("/empires", { forceRefresh: options.forceRefresh === true }),
-    ]);
-    const claims = await enrichRegionalClaimOwners(unwrap(claimPayload, "claims", []));
-    const regionalEmpireIds = new Set(claims.map(empireIdFromClaim).filter(Boolean));
-    const allEmpires = Array.isArray(empirePayload) ? empirePayload : unwrap(empirePayload, "empires", []);
-    const empires = allEmpires
-      .filter((empire) => regionalEmpireIds.has(String(empire?.entityId ?? empire?.id ?? "")))
-      .map((empire) => normalizeEmpireOverviewRow(empire, claims))
-      .filter((empire) => empire.entityId)
-      .sort((a, b) => b.regionalClaims - a.regionalClaims || b.memberCount - a.memberCount || a.name.localeCompare(b.name));
-    const largestEmpire = [...empires].sort((a, b) => b.memberCount - a.memberCount || b.regionalClaims - a.regionalClaims)[0] ?? null;
-    return {
-      regionId: String(regionId),
-      fetchedAt: new Date().toISOString(),
-      totalRegionalClaims: claims.length,
-      empireClaimCount: claims.filter((claim) => empireIdFromClaim(claim)).length,
-      empires,
-      summary: {
-        empires: empires.length,
-        regionalClaims: claims.filter((claim) => empireIdFromClaim(claim)).length,
-        totalMembers: empires.reduce((sum, empire) => sum + toNumber(empire.memberCount), 0),
-        largestEmpireName: largestEmpire?.name ?? null,
+  const inventoryComplete = inventoryRows != null
+    && missingRegionIds.length === 0
+    && coveredClaims >= expectedClaims;
+  return liveEmpireHexiteProjection({
+    treasury: empire?.empireCurrencyTreasury,
+    foundryCapsules,
+    playerInventoryEnergy: sumInventory("player", "energy"),
+    sharedClaimInventoryEnergy: sumInventory("claim", "energy"),
+    playerInventoryCapsules: sumInventory("player", "capsules"),
+    sharedClaimInventoryCapsules: sumInventory("claim", "capsules"),
+    reserveBuildingCapsules,
+    inventoryCoverage: inventoryRows == null ? null : {
+      players: {
+        fresh: inventoryComplete ? expectedPlayers : 0,
+        reused: 0,
+        missing: inventoryComplete ? 0 : expectedPlayers,
+        total: expectedPlayers,
       },
-    };
-  }, options);
-  const activeSweep = empireHexiteRepository.activeSweep();
-  const bootstrapFailure = activeSweep ? null : empireHexiteRepository.latestBootstrapFailure();
-  return {
-    ...overview,
-    empires: overview.empires.map((empire) => {
-      const snapshot = empireHexiteRepository.snapshotForEmpire(empire.entityId);
-      let hexiteReserves = snapshot
-        ? { ...snapshot, refreshing: Boolean(activeSweep) }
-        : aggregateEmpireHexite({
-          treasury: empire.empireCurrencyTreasury,
-          capsuleEnergyCost: activeSweep?.capsuleEnergyCost ?? null,
-          players: [],
-          claims: [],
-          sweepStartedAt: activeSweep?.startedAt ?? null,
-          calculatedAt: null,
-          refreshing: Boolean(activeSweep),
-        });
-      if (!snapshot && bootstrapFailure) {
-        hexiteReserves = {
-          ...hexiteReserves,
-          status: "error",
-          sweepStartedAt: bootstrapFailure.startedAt,
-          errors: [bootstrapFailure.lastError].filter(Boolean),
-        };
-      }
-      return { ...empire, hexiteReserves };
-    }),
-  };
-}
-
-function lastLoginMs(value) {
-  const parsed = Date.parse(String(value ?? ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function leaderCandidates(empire, members) {
-  const leaderId = String(empire?.leaderEntityId ?? "");
-  const candidates = members.filter((member) => {
-    const memberId = String(member?.entityId ?? member?.playerEntityId ?? "");
-    const rankTitle = String(member?.rankTitle ?? member?.rank ?? "").trim().toLowerCase();
-    return memberId === leaderId || (rankTitle && rankTitle !== "citizen");
-  });
-  if (candidates.length) return candidates;
-  return members.filter((member) => String(member?.entityId ?? member?.playerEntityId ?? "") === leaderId).slice(0, 1);
-}
-
-function empireInactivity(empire, members, inactiveDays) {
-  const candidates = leaderCandidates(empire, members);
-  const thresholdMs = Date.now() - Math.max(1, toNumber(inactiveDays)) * 24 * 60 * 60 * 1000;
-  const latest = candidates.reduce((best, member) => Math.max(best, lastLoginMs(member?.lastLoginTimestamp)), 0);
-  const activeLeaderCount = candidates.filter((member) => lastLoginMs(member?.lastLoginTimestamp) >= thresholdMs).length;
-  return {
-    inactiveRisk: candidates.length > 0 && activeLeaderCount === 0,
-    leaderCount: candidates.length,
-    activeLeaderCount,
-    lastLeaderLogin: latest ? new Date(latest).toISOString() : null,
-    inactivityReason: candidates.length ? (activeLeaderCount ? "Leader/noble activity found" : `No leader or noble login within ${inactiveDays} days`) : "No leader/noble data returned by BitJita",
-  };
-}
-
-function empireActivity(members) {
-  const now = Date.now();
-  const dayAgo = now - 24 * 60 * 60 * 1000;
-  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-  return {
-    onlineNow: members.filter((member) => member.signedIn).length,
-    activeToday: members.filter((member) => member.signedIn || lastLoginMs(member.lastLoginTimestamp) >= dayAgo).length,
-    activeThisWeek: members.filter((member) => member.signedIn || lastLoginMs(member.lastLoginTimestamp) >= weekAgo).length,
-  };
-}
-
-function nestedCoordinate(source, axis) {
-  const directKeys = axis === "x" ? ["locationX", "x", "coordX", "coordinateX", "worldX"] : ["locationZ", "z", "coordZ", "coordinateZ", "worldZ"];
-  for (const key of directKeys) {
-    if (source?.[key] != null) return source[key];
-  }
-  const nested = source?.location ?? source?.position ?? source?.coordinates ?? source?.coord ?? source?.coords;
-  if (Array.isArray(nested)) return axis === "x" ? nested[0] : nested[1];
-  if (nested && typeof nested === "object") {
-    for (const key of directKeys) {
-      if (nested[key] != null) return nested[key];
-    }
-  }
-  return null;
-}
-
-function normalizeEmpireMember(member) {
-  const permissions = parseMemberPermissions(member);
-  const rawHexiteAccess = member?.canAddHexite ?? member?.addHexitePermission ?? member?.hexitePermission ?? member?.canContributeHexite ?? member?.claimHexitePermission;
-  const canAddHexite = rawHexiteAccess != null ? Boolean(rawHexiteAccess === true || rawHexiteAccess === 1 || String(rawHexiteAccess).toLowerCase() === "true") : Boolean(permissions.coOwnerPermission || permissions.officerPermission || permissions.buildPermission);
-  const hasStorage = Boolean(permissions.inventoryPermission);
-  return {
-    entityId: String(member?.entityId ?? member?.playerEntityId ?? member?.id ?? ""),
-    username: String(member?.username ?? member?.userName ?? member?.playerName ?? "Unknown"),
-    rankTitle: String(member?.rankTitle ?? member?.rank ?? "Citizen"),
-    lastLoginTimestamp: member?.lastLoginTimestamp ?? member?.lastSeenAt ?? member?.lastSeen ?? null,
-    signedIn: member?.signedIn === true || member?.online === true,
-    hasStorage,
-    canAddHexite,
-    permissions,
-  };
-}
-
-function memberLookupKeys(member) {
-  return [member?.entityId, member?.playerEntityId, member?.id, member?.username, member?.userName, member?.playerName]
-    .map((value) => String(value ?? "").trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function memberMatchesClaimOwner(member, claim) {
-  const ownerEntityId = String(claim?.ownerEntityId ?? "").trim().toLowerCase();
-  const ownerName = String(claim?.ownerName ?? "").trim().toLowerCase();
-  const keys = memberLookupKeys(member);
-  return Boolean((ownerEntityId && keys.includes(ownerEntityId)) || (ownerName && keys.includes(ownerName)));
-}
-
-function normalizeClaimMember(member, claim, empireMemberLookup) {
-  const base = normalizeEmpireMember({ ...member, rankTitle: member?.rankTitle ?? member?.rank ?? null });
-  const empireMember = memberLookupKeys({ ...member, ...base }).map((key) => empireMemberLookup.get(key)).find(Boolean) ?? null;
-  const isOwner = memberMatchesClaimOwner({ ...member, ...base }, claim);
-  const claimRole = isOwner ? "Owner" : base.permissions.coOwnerPermission ? "Co-owner" : "Member";
-  return {
-    ...base,
-    rankTitle: null,
-    claimMemberTitle: member?.rankTitle ?? member?.rank ?? null,
-    empireRankTitle: empireMember?.rankTitle ?? null,
-    claimRole,
-    isClaimOwner: isOwner,
-    isClaimCoOwner: base.permissions.coOwnerPermission,
-  };
-}
-
-function compareEmpireMembers(a, b) {
-  if (Boolean(a.signedIn) !== Boolean(b.signedIn)) return a.signedIn ? -1 : 1;
-  return lastLoginMs(b.lastLoginTimestamp) - lastLoginMs(a.lastLoginTimestamp) || String(a.username).localeCompare(String(b.username));
-}
-
-function normalizeEmpireTower(tower, empire, inactivity) {
-  const siege = Array.isArray(tower?.siege) ? tower.siege : [];
-  const activeSiegeParticipants = siege.filter((entry) => entry?.active === true);
-  const locationX = nestedCoordinate(tower, "x");
-  const locationZ = nestedCoordinate(tower, "z");
-  return {
-    id: String(tower?.entityId ?? tower?.id ?? ""),
-    towerId: String(tower?.entityId ?? tower?.id ?? ""),
-    empireId: empire.entityId,
-    empireName: empire.name,
-    nickname: String(tower?.nickname ?? tower?.name ?? "Watchtower"),
-    locationX,
-    locationZ,
-    locationDimension: tower?.locationDimension ?? tower?.dimension ?? tower?.location?.dimension ?? null,
-    energy: toNumber(tower?.energy),
-    upkeep: toNumber(tower?.upkeep),
-    active: tower?.active === true,
-    underSiege: activeSiegeParticipants.length > 0,
-    siegeCount: activeSiegeParticipants.length,
-    activeSiegeParticipants,
-    inactiveRisk: inactivity.inactiveRisk,
-    lastLeaderLogin: inactivity.lastLeaderLogin,
-    inactivityReason: inactivity.inactivityReason,
-  };
-}
-
-async function regionalEmpireDetails(empireId, regionId, inactiveDays = 14, options = {}) {
-  const days = Math.max(1, Math.min(365, toNumber(inactiveDays) || 14));
-  const key = `details:${regionId}:${empireId}:${days}`;
-  return empireCacheLoad(key, async () => {
-    const overview = await regionalEmpireOverview(regionId, options);
-    const regionalEmpire = overview.empires.find((entry) => String(entry.entityId) === String(empireId));
-
-    const [detailResult, towerResult] = await Promise.allSettled([
-      fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
-      fetchBitjita(`/empires/${encodeURIComponent(empireId)}/towers`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
-    ]);
-    if (!regionalEmpire && detailResult.status === "rejected") return null;
-
-    const errors = [];
-    const detailPayload = detailResult.status === "fulfilled" ? detailResult.value : null;
-    const towerPayload = towerResult.status === "fulfilled" ? towerResult.value : null;
-    if (detailResult.status === "rejected") errors.push(`Empire members unavailable: ${errorMessage(detailResult.reason)}`);
-    if (towerResult.status === "rejected") errors.push(`Watchtowers unavailable: ${errorMessage(towerResult.reason)}`);
-
-    const rawDetailEmpire = detailPayload?.empire ?? (detailPayload?.entityId ? detailPayload : null);
-    const baseEmpire = regionalEmpire ?? normalizeEmpireOverviewRow(rawDetailEmpire, []);
-    if (!baseEmpire.entityId) return null;
-    const detailEmpire = rawDetailEmpire ?? baseEmpire;
-    const rawMembers = detailPayload ? unwrap(detailPayload, "members", []) : [];
-    const members = rawMembers.map(normalizeEmpireMember).sort(compareEmpireMembers);
-    const inferredLeader = rawMembers.find((member) => toNumber(member?.rank) === 0);
-    const inferredLeaderName = memberDisplayName(inferredLeader);
-    const knownLeader = String(detailEmpire?.leader ?? baseEmpire.leader ?? "").trim();
-    const claims = baseEmpire.claims?.length
-      ? baseEmpire.claims
-      : detailEmpire?.capitalClaimId
-        ? [normalizeEmpireClaim({
-            entityId: detailEmpire.capitalClaimId,
-            name: detailEmpire.capitalClaimName,
-            regionId: detailEmpire.capitalRegionId,
-            locationX: detailEmpire.locationX,
-            locationZ: detailEmpire.locationZ,
-            empireEntityId: baseEmpire.entityId,
-          })]
-        : [];
-    const empire = {
-      ...baseEmpire,
-      leader: knownLeader && knownLeader.toLowerCase() !== "unknown" ? knownLeader : inferredLeaderName || "Unknown",
-      leaderEntityId: String(detailEmpire?.leaderEntityId ?? baseEmpire.leaderEntityId ?? "").trim() || String(inferredLeader?.entityId ?? ""),
-      memberCount: Math.max(toNumber(baseEmpire.memberCount), toNumber(detailPayload?.count), members.length),
-      claims,
-    };
-    const inactivity = empireInactivity(empire, members, days);
-    const rawTowers = Array.isArray(towerPayload) ? towerPayload : unwrap(towerPayload, "towers", []);
-    const towers = rawTowers.map((tower) => normalizeEmpireTower(tower, empire, inactivity)).filter((tower) => tower.towerId);
-    return {
-      empire: { ...empire, ...inactivity },
-      members,
-      claims: empire.claims ?? [],
-      towers,
-      activity: empireActivity(members),
-      errors,
-      partial: errors.length > 0,
-      fetchedAt: new Date().toISOString(),
-    };
-  }, options);
-}
-
-async function regionalEmpireClaimMembers(claimId, options = {}) {
-  const key = `claim-members:${claimId}`;
-  return empireCacheLoad(key, async () => {
-    const [claimPayload, membersPayload] = await Promise.all([
-      fetchBitjita(`/claims/${encodeURIComponent(claimId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
-      fetchBitjita(`/claims/${encodeURIComponent(claimId)}/members`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }).catch((error) => ({ members: [], errors: [errorMessage(error)] })),
-    ]);
-    const rawClaim = claimPayload?.claim ?? claimPayload ?? { entityId: claimId };
-    const claim = normalizeEmpireClaim(rawClaim);
-    const errors = Array.isArray(membersPayload?.errors) ? [...membersPayload.errors] : [];
-    const empireId = String(rawClaim?.empireEntityId ?? rawClaim?.empireId ?? "").trim();
-    const empireMembersPayload = empireId ? await fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }).catch((error) => {
-      errors.push(`Empire ranks unavailable: ${errorMessage(error)}`);
-      return null;
-    }) : null;
-    const empireMemberLookup = new Map();
-    for (const member of unwrap(empireMembersPayload, "members", [])) {
-      const normalized = normalizeEmpireMember(member);
-      for (const key of memberLookupKeys({ ...member, ...normalized })) empireMemberLookup.set(key, normalized);
-    }
-    const members = unwrap(membersPayload, "members", []).map((member) => normalizeClaimMember(member, claim, empireMemberLookup)).sort(compareEmpireMembers);
-    return {
-      claim,
-      members,
-      errors,
-      fetchedAt: new Date().toISOString(),
-    };
-  }, options);
-}
-
-async function regionalEmpireWatchtowers(regionId, inactiveDays = 14, options = {}) {
-  const days = Math.max(1, Math.min(365, toNumber(inactiveDays) || 14));
-  const key = `watchtowers:${regionId}:${days}`;
-  return empireCacheLoad(key, async () => {
-    const overview = await regionalEmpireOverview(regionId, options);
-    const errors = [];
-    const startedAt = Date.now();
-    const deadlineMs = Math.max(5000, Math.min(BITJITA_FETCH_TIMEOUT_MS - 1500, 14_000));
-    let deadlineHit = false;
-    const empireRows = await mapWithConcurrency(overview.empires, 2, async (empire) => {
-      if (Date.now() - startedAt > deadlineMs) {
-        deadlineHit = true;
-        return { ...empire, inactiveRisk: false, leaderCount: 0, activeLeaderCount: 0, lastLeaderLogin: null, inactivityReason: "Skipped because the watchtower scan deadline was reached", members: [], accessMembers: [], towerCount: 0, towers: [] };
-      }
-      try {
-        const [detailPayload, towerPayload] = await Promise.all([
-          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
-          fetchBitjita(`/empires/${encodeURIComponent(empire.entityId)}/towers`, { timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS), forceRefresh: options.forceRefresh === true }),
-        ]);
-        const detailEmpire = detailPayload?.empire ?? empire;
-        const members = unwrap(detailPayload, "members", []);
-        const towers = Array.isArray(towerPayload) ? towerPayload : unwrap(towerPayload, "towers", []);
-        const inactivity = empireInactivity({ ...empire, ...detailEmpire }, members, days);
-        const normalizedMembers = members.map(normalizeEmpireMember).sort(compareEmpireMembers);
-        const accessMembers = normalizedMembers.filter((member) => member.hasStorage || member.canAddHexite);
-        return {
-          ...empire,
-          ...inactivity,
-          members: normalizedMembers,
-          accessMembers,
-          towerCount: towers.length,
-          towers: towers.map((tower) => normalizeEmpireTower(tower, empire, inactivity)).filter((tower) => tower.towerId),
-        };
-      } catch (error) {
-        errors.push(`${empire.name}: ${error instanceof Error ? error.message : String(error)}`);
-        return { ...empire, inactiveRisk: false, leaderCount: 0, activeLeaderCount: 0, lastLeaderLogin: null, inactivityReason: "Empire detail unavailable", members: [], accessMembers: [], towerCount: 0, towers: [] };
-      }
-    });
-    if (deadlineHit) errors.push("Watchtower scan stopped early to avoid timing out. Showing partial results; retry after the cache refreshes.");
-    const towers = empireRows.flatMap((empire) => empire.towers);
-    return {
-      regionId: String(regionId),
-      inactiveDays: days,
-      fetchedAt: new Date().toISOString(),
-      partial: deadlineHit,
-      unclaimedAvailable: false,
-      unclaimedMessage: "Unclaimed watchtowers are not exposed by the current BitJita public API.",
-      empires: empireRows,
-      towers,
-      errors,
-      summary: {
-        towerCount: towers.length,
-        inactiveRiskEmpires: empireRows.filter((empire) => empire.inactiveRisk).length,
-        underSiege: towers.filter((tower) => tower.underSiege).length,
-        activeTowers: towers.filter((tower) => tower.active).length,
+      claims: {
+        fresh: Math.min(coveredClaims, expectedClaims),
+        reused: 0,
+        missing: Math.max(0, expectedClaims - coveredClaims),
+        total: expectedClaims,
       },
-    };
-  }, options);
-}
-function buyOrderKey(listing) {
-  return String(listing.entityId ?? listing.id ?? `${listing.claimEntityId ?? "claim"}:${listing.itemType ?? ""}:${listing.itemId ?? ""}:${listing.ownerEntityId ?? ""}:${listing.price ?? ""}`);
+    },
+    inventoryComplete,
+    memberCount: empire?.memberCount,
+    claimCount: empire?.numClaims,
+    observedAt,
+  });
 }
 
-function normalizeRegionalBuyOrder(listing, regionId, regionName, fallbackClaim = {}) {
-  const quantity = toNumber(listing.quantity);
-  const unitPrice = toNumber(listing.priceThreshold ?? listing.unitPrice ?? listing.price);
-  const marketClaimId = String(listing.claimEntityId ?? fallbackClaim.entityId ?? fallbackClaim.claimId ?? "").trim();
-  const itemTypeRaw = listing.itemType ?? listing.item_type;
-  const itemType = String(itemTypeRaw === "cargo" ? 1 : itemTypeRaw === "item" ? 0 : itemTypeRaw ?? 0);
-  const listedAt = listing.timestamp ?? listing.createdAt ?? listing.updatedAt ?? null;
+function relayEmpireViewOptions(claimId, regionId, extra = {}) {
   return {
-    orderKey: buyOrderKey(listing),
-    regionId: String(listing.regionId ?? regionId ?? "").trim(),
-    regionName: String(listing.regionName ?? regionName ?? ""),
-    marketClaimId,
-    marketClaimName: String(listing.claimName ?? listing.claim?.name ?? fallbackClaim.name ?? fallbackClaim.claimName ?? "Unknown settlement"),
-    buyerEntityId: String(listing.ownerEntityId ?? listing.ownerId ?? ""),
-    buyerName: String(listing.ownerUsername ?? listing.ownerName ?? listing.owner ?? "Unknown buyer"),
-    itemId: String(listing.itemId ?? listing.item_id ?? ""),
-    itemType,
-    itemName: String(listing.itemName ?? listing.name ?? "Unknown item"),
-    tier: listing.itemTier ?? listing.tier ?? null,
-    rarity: listing.itemRarityStr ?? listing.rarityStr ?? listing.itemRarity ?? listing.rarity ?? null,
-    iconAssetName: listing.iconAssetName ?? null,
-    quantity,
-    unitPrice,
-    totalValue: quantity * unitPrice,
-    storedCoins: toNumber(listing.storedCoins),
-    listedAt,
-    raw: listing,
+    regionalClaims: relayEmpireRegionalClaims(claimId, regionId),
+    hexiteForEmpire: relayEmpireHexiteForView,
+    ...extra,
   };
 }
 
@@ -6900,625 +5788,193 @@ function dealWatchRow(row) {
   };
 }
 
-function normalizeRegionalSellListing(listing, regionId, regionName, fallbackClaim = {}) {
-  const base = normalizeListing(listing);
-  const marketClaimId = String(listing.claimEntityId ?? listing.claimId ?? fallbackClaim.entityId ?? fallbackClaim.claimId ?? "").trim();
-  const itemTypeRaw = listing.itemType ?? listing.item_type ?? base.itemType ?? 0;
-  const itemType = String(itemTypeRaw === "cargo" ? 1 : itemTypeRaw === "item" ? 0 : itemTypeRaw ?? 0);
-  return {
-    listingKey: base.key,
-    regionId: String(listing.regionId ?? regionId ?? "").trim(),
-    regionName: String(listing.regionName ?? regionName ?? ""),
-    marketClaimId,
-    marketClaimName: String(listing.claimName ?? listing.claim?.name ?? fallbackClaim.name ?? fallbackClaim.claimName ?? "Unknown settlement"),
-    sellerName: String(listing.ownerUsername ?? listing.ownerName ?? listing.owner ?? "Unknown seller"),
-    itemId: String(listing.itemId ?? listing.item_id ?? base.itemId ?? "").trim(),
-    itemType,
-    itemName: base.itemName,
-    tier: base.tier,
-    rarity: base.rarity,
-    iconAssetName: listing.iconAssetName ?? null,
-    quantity: base.quantity,
-    unitPrice: base.price,
-    totalValue: base.totalValue,
-    listedAt: base.listedAt,
-    raw: listing,
-  };
+function currentDealWatchStillEligible(watch) {
+  const latest = statements.dealWatchByIdForUser.get(watch.id, watch.user_id);
+  return sameEnabledDealWatchRevision(watch, latest);
 }
 
-function priceHistoryWindowAverage(payload, windowDays, minSales) {
-  const buckets = unwrap(payload, "buckets", []);
-  const stats = payload?.priceStats && typeof payload.priceStats === "object" ? payload.priceStats : {};
-  const statsAverage = toNumber(windowDays === 7 ? stats.avg7d : stats.avg30d);
-  const statsSales = toNumber(stats.totalTrades ?? stats.salesCount ?? stats.tradeCount);
-  if (statsAverage > 0 && statsSales >= minSales) {
-    return { averageUnitPrice: statsAverage, salesCount: statsSales, windowDays, raw: { source: `priceStats.avg${windowDays}d`, priceStats: stats } };
-  }
-  const relevantBuckets = windowDays === 7 ? buckets.slice(-7) : buckets.slice(-30);
-  let salesCount = 0;
-  let unitsSold = 0;
-  let totalValue = 0;
-  for (const bucket of relevantBuckets) {
-    const totals = priceHistoryBucketTotals(bucket);
-    salesCount += totals.salesCount;
-    unitsSold += totals.unitsSold;
-    totalValue += totals.totalValue;
-  }
-  if (salesCount < minSales || unitsSold <= 0 || totalValue <= 0) return null;
-  return {
-    averageUnitPrice: totalValue / unitsSold,
-    salesCount,
-    unitsSold,
-    totalValue,
-    windowDays,
-    firstBucketAt: relevantBuckets[0]?.bucket ?? relevantBuckets[0]?.date ?? relevantBuckets[0]?.start ?? null,
-    lastBucketAt: relevantBuckets.at(-1)?.bucket ?? relevantBuckets.at(-1)?.date ?? relevantBuckets.at(-1)?.start ?? null,
-    raw: { source: "bucketTotals", bucketCount: relevantBuckets.length, priceStats: stats },
-  };
+let pendingMarketDealWatchEvaluation = null;
+let marketDealWatchEvaluationDrain = null;
+
+function queueMarketDealWatchEvaluation(input = {}) {
+  pendingMarketDealWatchEvaluation = pendingMarketDealWatchEvaluation
+    ? {
+        ...pendingMarketDealWatchEvaluation,
+        ...input,
+        jobKey: input.jobKey ?? pendingMarketDealWatchEvaluation.jobKey,
+      }
+    : input;
+  if (marketDealWatchEvaluationDrain) return marketDealWatchEvaluationDrain;
+  marketDealWatchEvaluationDrain = (async () => {
+    let result = null;
+    while (pendingMarketDealWatchEvaluation) {
+      const next = pendingMarketDealWatchEvaluation;
+      pendingMarketDealWatchEvaluation = null;
+      result = await runMarketDealWatchJob(next);
+    }
+    return result;
+  })().catch((error) => {
+    console.warn("[deal-watch] Live Relay evaluation failed:", errorMessage(error));
+    throw error;
+  }).finally(() => {
+    marketDealWatchEvaluationDrain = null;
+    if (pendingMarketDealWatchEvaluation) {
+      void queueMarketDealWatchEvaluation().catch(() => {});
+    }
+  });
+  return marketDealWatchEvaluationDrain;
 }
 
-async function dealBaselineForItem(regionId, itemId, itemType, minSales) {
-  const historyKind = marketPriceHistoryKind(itemType);
-  const payload = await fetchBitjita(`/market/${historyKind}/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=30&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: 10000 });
-  return priceHistoryWindowAverage(payload, 7, minSales) ?? priceHistoryWindowAverage(payload, 30, minSales);
-}
-
-async function runMarketDealWatchJob({ jobKey } = {}) {
+async function runMarketDealWatchJob({ jobKey, claimId: requestedClaimId, snapshot, observedAt } = {}) {
   const settings = getSettings();
   const dealSettings = settings.marketDealWatch ?? marketDealWatchSettings();
-  const watches = statements.listEnabledDealWatches.all();
+  const activeClaimId = currentClaimId();
+  const claimId = String(requestedClaimId ?? activeClaimId);
+  if (claimId !== activeClaimId) {
+    return {
+      checked: 0,
+      alerts: 0,
+      regions: 0,
+      reason: `Ignored superseded claim generation ${claimId}`,
+    };
+  }
+  const watches = statements.listEnabledDealWatches.all()
+    .filter((watch) => String(watch.claim_id) === claimId);
   if (!watches.length) return { checked: 0, alerts: 0, regions: 0, reason: "No enabled deal watches" };
-  const byRegion = new Map();
-  for (const watch of watches) {
-    const key = `${watch.claim_id}:${watch.region_id}`;
-    if (!byRegion.has(key)) byRegion.set(key, []);
-    byRegion.get(key).push(watch);
+  const stored = snapshot == null
+    ? currentStateRepository.read(claimId, "regional-market")
+    : null;
+  const currentData = snapshot ?? stored?.data;
+  const currentObservedAt = String(
+    observedAt
+      ?? stored?.provenance?.receivedAt
+      ?? new Date().toISOString(),
+  );
+  if (!currentData || typeof currentData !== "object" || Array.isArray(currentData)) {
+    const message = "Live Relay regional market has not loaded yet";
+    const now = new Date().toISOString();
+    for (const watch of watches) {
+      statements.updateDealWatchChecked.run(now, null, null, message, now, watch.id);
+    }
+    return {
+      checked: watches.length,
+      alerts: 0,
+      regions: new Set(watches.map((watch) => String(watch.region_id))).size,
+      failures: [message],
+    };
   }
+  if (jobKey) {
+    updateScheduledJobProgress(jobKey, {
+      step: "Reconciling live Relay order generation",
+      checked: 0,
+      alerts: 0,
+    });
+  }
+  const evaluated = evaluateLiveDealWatches(currentData, watches, {
+    minActiveListings: dealSettings.minActiveListings,
+    maxRegionAgeMs: relayRegionalMarketStaleMs,
+    observedAt: currentObservedAt,
+  });
+  const watchesById = new Map(watches.map((watch) => [String(watch.id), watch]));
   const now = new Date().toISOString();
-  let checked = 0;
+  const failures = [];
+  for (const check of evaluated.checks) {
+    const watch = watchesById.get(String(check.watchId));
+    if (!watch) continue;
+    if (!check.baseline) failures.push(`${watch.item_name}: ${check.error}`);
+    statements.updateDealWatchChecked.run(
+      now,
+      check.baseline ? 0 : null,
+      check.baseline?.unitPrice ?? null,
+      check.error,
+      now,
+      watch.id,
+    );
+  }
   let alerts = 0;
-  const failures = [];
-  for (const [groupKey, groupWatches] of byRegion.entries()) {
-    const [, regionId] = groupKey.split(":");
-    if (jobKey) updateScheduledJobProgress(jobKey, { step: `Loading R${regionId} markets`, regionId, checked, alerts });
-    let claimPayload;
-    try {
-      claimPayload = await fetchRegionClaimList(regionId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      failures.push(`R${regionId}: ${message}`);
-      for (const watch of groupWatches) statements.updateDealWatchChecked.run(now, null, null, message, now, watch.id);
+  for (const opportunity of evaluated.opportunities) {
+    const watch = watchesById.get(String(opportunity.watchId));
+    if (!watch) continue;
+    if (!currentDealWatchStillEligible(watch)) {
+      void queueMarketDealWatchEvaluation().catch(() => {});
       continue;
     }
-    const claims = unwrap(claimPayload, "claims", []);
-    const regionName = claims.find((claim) => claim.regionName)?.regionName ?? `R${regionId}`;
-    const watchedKeys = new Set(groupWatches.map((watch) => `${watch.item_type}:${watch.item_id}`));
-    let completedClaims = 0;
-    const listingPages = await mapWithConcurrency(claims, 3, async (claim) => {
-      const marketClaimId = String(claim.entityId ?? claim.claimId ?? "").trim();
-      if (!marketClaimId) return [];
-      try {
-        const payload = await fetchAllClaimListings(marketClaimId, { side: "sell" });
-        completedClaims += 1;
-        if (jobKey) updateScheduledJobProgress(jobKey, { step: `Scanning R${regionId} markets`, regionId, current: completedClaims, total: claims.length, checked, alerts });
-        return unwrap(payload, "listings", [])
-          .map((listing) => normalizeRegionalSellListing(listing, regionId, regionName, claim))
-          .filter((listing) => watchedKeys.has(`${listing.itemType}:${listing.itemId}`));
-      } catch (error) {
-        failures.push(`${claim.name ?? marketClaimId}: ${error instanceof Error ? error.message : String(error)}`);
-        completedClaims += 1;
-        return [];
-      }
+    const createdAt = new Date().toISOString();
+    const rawJson = JSON.stringify({
+      listing: opportunity.raw,
+      baseline: opportunity.baseline,
     });
-    const listings = listingPages.flat();
-    const baselineCache = new Map();
-    for (const watch of groupWatches) {
-      checked += 1;
-      const baselineKey = `${watch.region_id}:${watch.item_type}:${watch.item_id}`;
-      let baseline = baselineCache.get(baselineKey);
-      try {
-        if (!baselineCache.has(baselineKey)) {
-          baseline = await dealBaselineForItem(watch.region_id, watch.item_id, watch.item_type, dealSettings.minConfirmedSales);
-          baselineCache.set(baselineKey, baseline ?? null);
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        statements.updateDealWatchChecked.run(now, null, null, message, now, watch.id);
-        failures.push(`${watch.item_name}: ${message}`);
+    const result = statements.insertDealAlert.run(
+      watch.id, watch.user_id, watch.discord_id, watch.claim_id, watch.region_id, watch.item_id, watch.item_type, watch.item_name,
+      watch.tier, watch.rarity, watch.icon_asset_name,
+      opportunity.listingKey, opportunity.marketClaimId, opportunity.marketClaimName, opportunity.sellerName,
+      opportunity.quantity, opportunity.unitPrice, opportunity.totalValue,
+      0, opportunity.baseline.unitPrice, opportunity.baseline.sampleCount,
+      opportunity.discountPercent, "pending", null, createdAt, rawJson,
+    );
+    if (!result.changes) continue;
+    alerts += 1;
+    statements.updateDealWatchAlerted.run(createdAt, createdAt, watch.id);
+    const alert = publicDealAlertRow({
+      id: result.lastInsertRowid,
+      watch_id: watch.id,
+      user_id: watch.user_id,
+      discord_id: watch.discord_id,
+      claim_id: watch.claim_id,
+      region_id: watch.region_id,
+      item_id: watch.item_id,
+      item_type: watch.item_type,
+      item_name: watch.item_name,
+      tier: watch.tier,
+      rarity: watch.rarity,
+      icon_asset_name: watch.icon_asset_name,
+      listing_key: opportunity.listingKey,
+      market_claim_id: opportunity.marketClaimId,
+      market_claim_name: opportunity.marketClaimName,
+      seller_name: opportunity.sellerName,
+      quantity: opportunity.quantity,
+      unit_price: opportunity.unitPrice,
+      total_value: opportunity.totalValue,
+      baseline_window_days: 0,
+      baseline_average: opportunity.baseline.unitPrice,
+      sales_count: opportunity.baseline.sampleCount,
+      discount_percent: opportunity.discountPercent,
+      dm_status: "pending",
+      dm_error: null,
+      created_at: createdAt,
+      read_at: null,
+      raw_json: rawJson,
+    });
+    if (dealSettings.discordDmEnabled) {
+      if (
+        !currentDealWatchStillEligible(watch)
+        || getSettings().marketDealWatch?.discordDmEnabled === false
+      ) {
+        statements.updateDealAlertDm.run("skipped", "Watch or delivery setting changed before Discord delivery", result.lastInsertRowid);
+        void queueMarketDealWatchEvaluation().catch(() => {});
         continue;
       }
-      if (!baseline) {
-        statements.updateDealWatchChecked.run(now, null, null, `Not enough confirmed regional sales (${dealSettings.minConfirmedSales}+ required)`, now, watch.id);
-        continue;
+      try {
+        await sendDiscordDirectMessage(watch.discord_id, dealAlertDiscordPayload(alert));
+        statements.updateDealAlertDm.run("sent", null, result.lastInsertRowid);
+      } catch (error) {
+        statements.updateDealAlertDm.run("failed", error instanceof Error ? error.message : String(error), result.lastInsertRowid);
+        recordDiscordDeliverySafe({ status: "failed", eventType: "market_deal_watch", summary: `Deal alert: ${watch.item_name}`, error: error instanceof Error ? error.message : String(error), metadata: { userId: watch.discord_id, regionId: watch.region_id, itemId: watch.item_id } });
       }
-      statements.updateDealWatchChecked.run(now, baseline.windowDays, baseline.averageUnitPrice, null, now, watch.id);
-      const maxPrice = baseline.averageUnitPrice * (1 - (toNumber(watch.threshold_percent) || dealSettings.thresholdPercent) / 100);
-      for (const listing of listings.filter((entry) => entry.itemId === String(watch.item_id) && entry.itemType === String(watch.item_type) && toNumber(entry.unitPrice) > 0 && toNumber(entry.unitPrice) <= maxPrice)) {
-        const discountPercent = Math.max(0, ((baseline.averageUnitPrice - listing.unitPrice) / baseline.averageUnitPrice) * 100);
-        const createdAt = new Date().toISOString();
-        const result = statements.insertDealAlert.run(
-          watch.id, watch.user_id, watch.discord_id, watch.claim_id, watch.region_id, watch.item_id, watch.item_type, watch.item_name,
-          watch.tier ?? listing.tier, watch.rarity ?? listing.rarity, watch.icon_asset_name ?? listing.iconAssetName,
-          listing.listingKey, listing.marketClaimId, listing.marketClaimName, listing.sellerName, listing.quantity, listing.unitPrice, listing.totalValue,
-          baseline.windowDays, baseline.averageUnitPrice, baseline.salesCount, discountPercent, "pending", null, createdAt,
-          JSON.stringify({ listing: listing.raw, baseline: baseline.raw }),
-        );
-        if (!result.changes) continue;
-        alerts += 1;
-        statements.updateDealWatchAlerted.run(createdAt, createdAt, watch.id);
-        const alert = publicDealAlertRow({
-          id: result.lastInsertRowid,
-          watch_id: watch.id,
-          user_id: watch.user_id,
-          discord_id: watch.discord_id,
-          claim_id: watch.claim_id,
-          region_id: watch.region_id,
-          item_id: watch.item_id,
-          item_type: watch.item_type,
-          item_name: watch.item_name,
-          tier: watch.tier ?? listing.tier,
-          rarity: watch.rarity ?? listing.rarity,
-          icon_asset_name: watch.icon_asset_name ?? listing.iconAssetName,
-          listing_key: listing.listingKey,
-          market_claim_id: listing.marketClaimId,
-          market_claim_name: listing.marketClaimName,
-          seller_name: listing.sellerName,
-          quantity: listing.quantity,
-          unit_price: listing.unitPrice,
-          total_value: listing.totalValue,
-          baseline_window_days: baseline.windowDays,
-          baseline_average: baseline.averageUnitPrice,
-          sales_count: baseline.salesCount,
-          discount_percent: discountPercent,
-          dm_status: "pending",
-          dm_error: null,
-          created_at: createdAt,
-          read_at: null,
-          raw_json: JSON.stringify({ listing: listing.raw, baseline: baseline.raw }),
-        });
-        if (dealSettings.discordDmEnabled) {
-          try {
-            await sendDiscordDirectMessage(watch.discord_id, dealAlertDiscordPayload(alert));
-            statements.updateDealAlertDm.run("sent", null, result.lastInsertRowid);
-          } catch (error) {
-            statements.updateDealAlertDm.run("failed", error instanceof Error ? error.message : String(error), result.lastInsertRowid);
-            recordDiscordDeliverySafe({ status: "failed", eventType: "market_deal_watch", summary: `Deal alert: ${watch.item_name}`, error: error instanceof Error ? error.message : String(error), metadata: { userId: watch.discord_id, regionId: watch.region_id, itemId: watch.item_id } });
-          }
-        } else {
-          statements.updateDealAlertDm.run("skipped", "Discord DM alerts disabled", result.lastInsertRowid);
-        }
-      }
+    } else {
+      statements.updateDealAlertDm.run("skipped", "Discord DM alerts disabled", result.lastInsertRowid);
     }
   }
-  return { checked, alerts, regions: byRegion.size, failures: failures.slice(0, 20) };
-}
-async function fetchRegionalBuyOrders(claimId, regionIds) {
-  const uniqueRegionIds = [...new Set(regionIds.map((id) => String(id ?? "").trim()).filter((id) => /^\d+$/.test(id)))];
-  const failures = [];
-  const orders = [];
-  for (const [regionIndex, regionId] of uniqueRegionIds.entries()) {
-    collectorProgress("buyOrders", `Loading R${regionId} settlements`, { current: regionIndex + 1, total: uniqueRegionIds.length });
-    let claimPayload;
-    try {
-      claimPayload = await fetchRegionClaimList(regionId);
-    } catch (error) {
-      failures.push(`R${regionId} claims: ${error instanceof Error ? error.message : String(error)}`);
-      continue;
-    }
-    const claims = unwrap(claimPayload, "claims", []);
-    const regionName = claims.find((claim) => claim.regionName)?.regionName ?? `R${regionId}`;
-    let completedClaims = 0;
-    const pages = await mapWithConcurrency(claims, 3, async (claim) => {
-      const marketClaimId = String(claim.entityId ?? claim.claimId ?? "").trim();
-      if (!marketClaimId) {
-        completedClaims += 1;
-        collectorProgress("buyOrders", `Scanning R${regionId} markets`, { current: completedClaims, total: claims.length });
-        return [];
-      }
-      try {
-        const payload = await fetchAllClaimListings(marketClaimId, { side: "buy" });
-        completedClaims += 1;
-        collectorProgress("buyOrders", `Scanning R${regionId} markets`, { current: completedClaims, total: claims.length });
-        return unwrap(payload, "listings", []).map((listing) => normalizeRegionalBuyOrder(listing, regionId, regionName, claim));
-      } catch (error) {
-        failures.push(`${claim.name ?? marketClaimId}: ${error instanceof Error ? error.message : String(error)}`);
-        completedClaims += 1;
-        collectorProgress("buyOrders", `Scanning R${regionId} markets`, { current: completedClaims, total: claims.length });
-        return [];
-      }
-    });
-    orders.push(...pages.flat());
-  }
   return {
-    regions: uniqueRegionIds,
-    orders,
-    saleAverages: [],
-    failures: failures.slice(0, 50),
-    partialError: failures.length ? `${failures.length} regional buy-order market request${failures.length === 1 ? "" : "s"} failed` : null,
-  };
-}
-
-function regionalSaleAverageKey(order) {
-  const regionId = String(order.regionId ?? "").trim();
-  const itemId = String(order.itemId ?? "").trim();
-  const itemType = String(order.itemType ?? 0).trim() || "0";
-  return regionId && itemId ? `${regionId}:${itemType}:${itemId}` : "";
-}
-
-function currentMonitoredRegionId(claimId) {
-  const id = String(claimId ?? "").trim();
-  if (!id) return "";
-  const rowsByDomain = readDomainPayloadMap(id);
-  const claimPayload = rowsByDomain.claim?.data ?? {};
-  const claimData = claimPayload.claim ?? claimPayload;
-  const directRegionId = String(claimData.regionId ?? claimData.region_id ?? claimData.region ?? "").trim();
-  if (/^\d+$/.test(directRegionId)) return directRegionId;
-  const regionPayload = rowsByDomain.region?.data ?? {};
-  const regionClaims = unwrap(regionPayload, "claims", []);
-  const monitoredRegionClaim = regionClaims.find((claim) => String(claim.entityId ?? claim.id ?? claim.claimId ?? "") === id);
-  const fallbackRegionId = String(monitoredRegionClaim?.regionId ?? monitoredRegionClaim?.region_id ?? "").trim();
-  return /^\d+$/.test(fallbackRegionId) ? fallbackRegionId : "";
-}
-
-function priceHistoryBucketTotals(bucket) {
-  const unitsSold = toNumber(bucket.quantity ?? bucket.unitsSold ?? bucket.volume ?? bucket.totalQuantity);
-  const totalValue = toNumber(bucket.totalPrice ?? bucket.totalValue ?? bucket.value ?? bucket.revenue);
-  const salesCount = toNumber(bucket.salesCount ?? bucket.tradeCount ?? bucket.trades ?? bucket.count) || unitsSold;
-  return { unitsSold, totalValue, salesCount };
-}
-
-function marketPriceHistoryKind(itemType) {
-  return toNumber(itemType) === 1 || String(itemType ?? "").toLowerCase() === "cargo" ? "cargo" : "items";
-}
-
-async function fetchRegionalBuyOrderSaleAverages(claimId, orders, failures = [], options = {}) {
-  const now = Date.now();
-  const staleBefore = new Date(now - 6 * 60 * 60 * 1000).toISOString();
-  const useCache = options.useCache !== false;
-  const progressKey = Object.hasOwn(options, "progressKey") ? options.progressKey : "buyOrders";
-  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
-  const onAverage = typeof options.onAverage === "function" ? options.onAverage : null;
-  const requestTimeoutMs = Math.max(1000, Math.min(toNumber(options.requestTimeoutMs ?? process.env.REGIONAL_SALE_BASELINE_REQUEST_TIMEOUT_MS) || 10000, 60000));
-  const uniqueOrders = [...new Map(orders
-    .filter((order) => regionalSaleAverageKey(order))
-    .map((order) => [regionalSaleAverageKey(order), order])).values()];
-  let completed = 0;
-  const reportProgress = async (extra = {}) => {
-    if (progressKey) collectorProgress(progressKey, "Calculating 7-day sales baselines", { current: completed, total: uniqueOrders.length });
-    if (onProgress) await onProgress({ current: completed, total: uniqueOrders.length, ...extra });
-  };
-  const averages = await mapWithConcurrency(uniqueOrders, 3, async (order) => {
-    const regionId = String(order.regionId ?? "").trim();
-    const itemId = String(order.itemId ?? "").trim();
-    const itemType = String(order.itemType ?? 0).trim() || "0";
-    const currentItem = order.itemName ?? itemId;
-    const cached = useCache ? db.prepare(`
-      SELECT * FROM market_regional_sale_averages_current
-      WHERE claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ? AND updated_at >= ?
-    `).get(String(claimId), regionId, itemId, itemType, staleBefore) : null;
-    await reportProgress({ currentItem, currentRegionId: regionId, phase: "checking" });
-    if (cached) {
-      completed += 1;
-      const average = {
-        regionId,
-        itemId,
-        itemType,
-        itemName: cached.item_name,
-        averageUnitPrice: toNumber(cached.average_unit_price),
-        salesCount: toNumber(cached.sales_count),
-        unitsSold: toNumber(cached.units_sold),
-        totalValue: toNumber(cached.total_value),
-        windowDays: toNumber(cached.window_days) || 7,
-        firstBucketAt: cached.first_bucket_at,
-        lastBucketAt: cached.last_bucket_at,
-        raw: safeJson(cached.raw_json, {}),
-      };
-      if (onAverage) await onAverage(average, { current: completed, total: uniqueOrders.length });
-      await reportProgress({ currentItem, currentRegionId: regionId, phase: "cached" });
-      return average;
-    }
-    try {
-      await reportProgress({ currentItem, currentRegionId: regionId, phase: "fetching" });
-      const historyKind = marketPriceHistoryKind(itemType);
-      const payload = await fetchBitjita(`/market/${historyKind}/${encodeURIComponent(itemId)}/price-history?bucket=1%20day&limit=30&regionId=${encodeURIComponent(regionId)}`, { timeoutMs: requestTimeoutMs });
-      const buckets = unwrap(payload, "buckets", []);
-      const stats = payload?.priceStats && typeof payload.priceStats === "object" ? payload.priceStats : {};
-      let salesCount = 0;
-      let unitsSold = 0;
-      let totalValue = 0;
-      for (const bucket of buckets) {
-        const totals = priceHistoryBucketTotals(bucket);
-        salesCount += totals.salesCount;
-        unitsSold += totals.unitsSold;
-        totalValue += totals.totalValue;
-      }
-      const statsAverage = toNumber(stats.avg7d);
-      const statsSalesCount = toNumber(stats.totalTrades ?? stats.salesCount ?? stats.tradeCount);
-      const statsUnitsSold = toNumber(stats.totalVolume ?? stats.unitsSold ?? stats.volume ?? stats.totalQuantity);
-      if (statsAverage > 0) {
-        salesCount = statsSalesCount || salesCount;
-        unitsSold = statsUnitsSold || unitsSold;
-        totalValue = unitsSold > 0 ? statsAverage * unitsSold : totalValue;
-      }
-      completed += 1;
-      if (salesCount <= 0 || (statsAverage <= 0 && (unitsSold <= 0 || totalValue <= 0))) {
-        db.prepare(`
-          DELETE FROM market_regional_sale_averages_current
-          WHERE claim_id = ? AND region_id = ? AND item_id = ? AND item_type = ?
-        `).run(String(claimId), regionId, itemId, itemType);
-        await reportProgress({ currentItem, currentRegionId: regionId, phase: "no_sales" });
-        return null;
-      }
-      const average = {
-        regionId,
-        itemId,
-        itemType,
-        itemName: order.itemName ?? null,
-        averageUnitPrice: statsAverage > 0 ? statsAverage : unitsSold > 0 ? totalValue / unitsSold : 0,
-        salesCount,
-        unitsSold,
-        totalValue,
-        windowDays: 7,
-        firstBucketAt: buckets[0]?.bucket ?? buckets[0]?.date ?? buckets[0]?.start ?? null,
-        lastBucketAt: buckets.at(-1)?.bucket ?? buckets.at(-1)?.date ?? buckets.at(-1)?.start ?? null,
-        raw: {
-          priceStats: stats,
-          bucketCount: buckets.length,
-          source: statsAverage > 0 ? "priceStats.avg7d" : "bucketTotals",
-        },
-      };
-      if (onAverage) await onAverage(average, { current: completed, total: uniqueOrders.length });
-      await reportProgress({ currentItem, currentRegionId: regionId, phase: "saved" });
-      return average;
-    } catch (error) {
-      failures.push(`R${regionId} ${order.itemName ?? itemId} sales history: ${error instanceof Error ? error.message : String(error)}`);
-      completed += 1;
-      await reportProgress({ currentItem, currentRegionId: regionId, phase: "failed", lastFailure: failures.at(-1) });
-      return null;
-    }
-  });
-  return averages.filter(Boolean);
-}
-
-async function runRegionalBuyOrderSaleBaselineRefreshJob({ jobKey } = {}) {
-  const claimId = String(getSettings().claimId ?? "").trim();
-  if (!claimId) return { refreshed: false, reason: "No claim ID configured", orderCount: 0, averageCount: 0 };
-  const regionId = currentMonitoredRegionId(claimId);
-  if (!regionId) return { refreshed: false, reason: "No monitored region is known yet", orderCount: 0, averageCount: 0 };
-  const cleanupAt = new Date().toISOString();
-  db.prepare("UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ? AND region_id <> ?").run(cleanupAt, claimId, regionId);
-  db.prepare("DELETE FROM market_regional_sale_averages_current WHERE claim_id = ? AND region_id <> ?").run(claimId, regionId);
-  db.prepare(`
-    DELETE FROM market_regional_sale_averages_current
-    WHERE claim_id = ? AND region_id = ?
-      AND (
-        average_unit_price <= 0 OR sales_count <= 0 OR units_sold <= 0 OR total_value <= 0
-        OR raw_json LIKE '%"buckets":[]%'
-      )
-  `).run(claimId, regionId);
-  const rows = db.prepare(`
-    SELECT *
-    FROM market_buy_orders_current
-    WHERE claim_id = ? AND active = 1 AND region_id = ?
-    ORDER BY region_id ASC, item_name ASC
-  `).all(claimId, regionId);
-  const orders = rows.map((row) => ({
-    orderKey: row.order_key,
-    regionId: row.region_id,
-    itemId: row.item_id,
-    itemType: row.item_type,
-    itemName: row.item_name,
-  }));
-  if (!orders.length) return { refreshed: true, orderCount: 0, averageCount: 0, failures: [] };
-  const failures = [];
-  let written = 0;
-  const uniqueItemCount = [...new Set(orders.map((order) => regionalSaleAverageKey(order)).filter(Boolean))].length;
-  const progressBase = {
-    orderCount: orders.length,
-    uniqueItemCount,
-    regionId,
-    averageCount: 0,
-    failureCount: 0,
-    stage: "fetching_sale_baselines",
-  };
-  updateScheduledJobProgress(jobKey, { ...progressBase, current: 0, total: uniqueItemCount });
-  await fetchRegionalBuyOrderSaleAverages(claimId, orders, failures, {
-    useCache: false,
-    progressKey: null,
-    onAverage: async (average) => {
-      const refreshedAt = new Date().toISOString();
-      db.exec("BEGIN");
-      try {
-        written += persistRegionalSaleAverages(claimId, [average], refreshedAt);
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-      updateScheduledJobProgress(jobKey, {
-        ...progressBase,
-        averageCount: written,
-        failureCount: failures.length,
-      });
-    },
-    onProgress: async ({ current, total }) => {
-      updateScheduledJobProgress(jobKey, {
-        ...progressBase,
-        current,
-        total,
-        averageCount: written,
-        failureCount: failures.length,
-      });
-    },
-  });
-  return {
-    refreshed: true,
-    orderCount: orders.length,
-    uniqueItemCount,
-    averageCount: written,
-    failureCount: failures.length,
+    checked: evaluated.checks.length,
+    alerts,
+    regions: new Set(watches.map((watch) => String(watch.region_id))).size,
     failures: failures.slice(0, 20),
+    source: "relay-live-generation",
+    observedAt: currentObservedAt,
   };
 }
 
-function marketTradeBackfillKey(claimId, playerId) {
-  return `market_trade_backfill:${claimId}:${playerId}`;
-}
-
-function collectorResumeSettingKey(jobKey, claimId) {
-  return `collector_resume:${jobKey}:${claimId}`;
-}
-
-function readCollectorResume(jobKey, claimId) {
-  return safeJson(statements.getSetting.get(collectorResumeSettingKey(jobKey, claimId))?.value, {});
-}
-
-function writeCollectorResume(jobKey, claimId, metadata = {}) {
-  const updatedAt = new Date().toISOString();
-  statements.upsertSetting.run(collectorResumeSettingKey(jobKey, claimId), JSON.stringify({ ...metadata, updatedAt }), updatedAt);
-}
-
-async function fetchOrderTrades(playerId, orderEntityId) {
-  const trades = [];
-  let offset = 0;
-  while (true) {
-    const payload = await fetchBitjita(`/market/player/${playerId}/trades?type=sell&limit=200&offset=${offset}&orderEntityId=${encodeURIComponent(String(orderEntityId))}`, { cache: false });
-    const page = unwrap(payload, "trades", []);
-    trades.push(...page);
-    if (page.length < 200) break;
-    offset += page.length;
-  }
-  return trades;
-}
-
-async function fetchMemberSettlementSellTrades(claimId, member) {
-  const playerId = String(member.playerEntityId ?? member.entityId ?? "").trim();
-  if (!playerId) return null;
-  const key = marketTradeBackfillKey(claimId, playerId);
-  const isBackfilled = statements.getSetting.get(key)?.value === "complete";
-  const claimOrders = [];
-  let offset = 0;
-  while (true) {
-    const payload = await fetchBitjita(`/market/player/${playerId}/history?type=sell&status=COMPLETED&limit=200&offset=${offset}`, { cache: false });
-    const page = unwrap(payload, "sellOrderHistory", []);
-    claimOrders.push(...page.filter((order) => String(order.claimEntityId ?? "") === String(claimId)));
-    if (isBackfilled || page.length < 200 || offset + page.length >= toNumber(payload.totalSellOrders)) break;
-    offset += page.length;
-  }
-  const tradePages = await mapWithConcurrency(claimOrders, 3, (order) => fetchOrderTrades(playerId, order.entityId));
-  return { key, member, trades: tradePages.flat(), isBackfilled };
-}
-
-function tradeOccurredAt(trade, importedAt) {
-  const parsed = new Date(String(trade.createdAt ?? ""));
-  return Number.isNaN(parsed.getTime()) ? importedAt : parsed.toISOString();
-}
-
-function shouldNotifyImportedMarketTrade(importResult, trade, importedAt) {
-  if (importResult?.isBackfilled) return true;
-  const occurredMs = new Date(tradeOccurredAt(trade, importedAt)).getTime();
-  const importedMs = new Date(importedAt).getTime();
-  if (!Number.isFinite(occurredMs) || !Number.isFinite(importedMs)) return false;
-  return importedMs - occurredMs <= marketTradeNotificationRecoveryWindowMs;
-}
-
-function memberTradeImportKey(member) {
-  return String(member.playerEntityId ?? member.entityId ?? "").trim();
-}
-
-async function importMemberSellTrades(claimId, members, options = {}) {
-  const budget = normalizeJobBudget(options.budget ?? {}, marketTradeJobBudget);
-  const uniqueMembers = [...new Map(members
-    .filter((member) => memberTradeImportKey(member))
-    .map((member) => [memberTradeImportKey(member), member])).values()]
-    .sort((a, b) => memberTradeImportKey(a).localeCompare(memberTradeImportKey(b)));
-  const resume = readCollectorResume("marketTrades", claimId);
-  const batch = selectResumeBatch(uniqueMembers, {
-    cursor: resume.nextCursor,
-    batchSize: budget.batchSize,
-    getKey: memberTradeImportKey,
-  });
-  const startedAtMs = Date.now();
-  const imports = [];
-  const processedMembers = [];
-  for (const member of batch.items) {
-    if (!jobBudgetAllowsMore(startedAtMs, budget, processedMembers.length)) break;
-    processedMembers.push(member);
-    try {
-      imports.push(await fetchMemberSettlementSellTrades(claimId, member));
-    } catch (error) {
-      console.warn(`BitCraft market trade import failed for ${member.userName ?? member.playerEntityId}: ${error instanceof Error ? error.message : String(error)}`);
-      imports.push(null);
-    }
-  }
-  const importedAt = new Date().toISOString();
-  let inserted = 0;
-  db.exec("BEGIN");
-  try {
-    for (const result of imports.filter(Boolean)) {
-      for (const trade of result.trades) {
-        const listing = { owner: result.member.userName ?? result.member.username, ownerEntityId: result.member.playerEntityId ?? result.member.entityId };
-        const changed = insertConfirmedMarketTrade(claimId, trade, listing, importedAt);
-        inserted += changed;
-        if (changed > 0 && shouldNotifyImportedMarketTrade(result, trade, importedAt)) {
-          const quantity = toNumber(trade.quantity);
-          const unitPrice = toNumber(trade.unitPrice ?? trade.price);
-          const occurredAt = tradeOccurredAt(trade, importedAt);
-          const itemName = String(trade.itemName ?? "Unknown item");
-          const metadata = {
-            itemName,
-            itemId: trade.itemId == null ? null : String(trade.itemId),
-            itemType: trade.itemType == null ? null : String(trade.itemType),
-            owner: trade.sellerUsername ?? listing.owner,
-            ownerEntityId: trade.sellerEntityId == null ? listing.ownerEntityId : String(trade.sellerEntityId),
-            sellerName: trade.sellerUsername ?? listing.owner,
-            sellerEntityId: trade.sellerEntityId == null ? listing.ownerEntityId : String(trade.sellerEntityId),
-            purchaserName: trade.purchaserUsername ?? null,
-            purchaserEntityId: trade.purchaserEntityId == null ? null : String(trade.purchaserEntityId),
-            quantity,
-            price: unitPrice,
-            unitPrice,
-            totalValue: toNumber(trade.totalPrice ?? trade.total_price) || quantity * unitPrice,
-            tradeId: String(trade.id ?? ""),
-            tier: trade.itemTier == null ? null : String(trade.itemTier),
-            rarity: trade.itemRarityStr ?? null,
-            raw: trade,
-          };
-          addActivity(
-            claimId,
-            "market_sale_confirmed",
-            `Confirmed sale: ${itemName} x${quantity.toLocaleString()} at ${unitPrice.toLocaleString()}g`,
-            occurredAt,
-            metadata,
-            `market_sale_confirmed:trade:${trade.id ?? ""}`,
-          );
-        }
-      }
-      statements.upsertSetting.run(result.key, "complete", importedAt);
-    }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-  const complete = batch.complete && processedMembers.length === batch.items.length;
-  const nextCursor = complete ? null : (processedMembers.length ? memberTradeImportKey(processedMembers[processedMembers.length - 1]) : (resume.nextCursor ?? null));
-  writeCollectorResume("marketTrades", claimId, {
-    nextCursor,
-    complete,
-    processed: processedMembers.length,
-    total: uniqueMembers.length,
-    inserted,
-    budget,
-  });
-  return {
-    inserted,
-    requested: uniqueMembers.length,
-    processed: processedMembers.length,
-    complete,
-    nextCursor,
-  };
-}
 async function mapWithConcurrency(values, concurrency, mapper) {
   const results = new Array(values.length);
   let next = 0;
@@ -7531,742 +5987,6 @@ async function mapWithConcurrency(values, concurrency, mapper) {
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
   return results;
-}
-
-function storageActivityBuildingKey(building) {
-  return String(building.entityId ?? "").trim();
-}
-
-async function collectStorageActivity(claimId, inventories, options = {}) {
-  const budget = normalizeJobBudget(options.budget ?? {}, storageActivityJobBudget);
-  const buildings = unwrap(inventories, "buildings", [])
-    .filter((building) => building.entityId && !isDeployableStorage(building))
-    .sort((a, b) => storageActivityBuildingKey(a).localeCompare(storageActivityBuildingKey(b)));
-  const resume = readCollectorResume("storageActivity", claimId);
-  const batch = selectResumeBatch(buildings, {
-    cursor: resume.nextCursor,
-    batchSize: budget.batchSize,
-    getKey: storageActivityBuildingKey,
-  });
-  const startedAtMs = Date.now();
-  const failures = [];
-  const responses = [];
-  const processedBuildings = [];
-  for (const building of batch.items) {
-    if (!jobBudgetAllowsMore(startedAtMs, budget, processedBuildings.length)) break;
-    processedBuildings.push(building);
-    try {
-      responses.push({ building, payload: await fetchBitjita(`/logs/storage?buildingEntityId=${building.entityId}&limit=40`) });
-    } catch (error) {
-      failures.push(`${storageContainerName(building)}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  let inserted = 0;
-  db.exec("BEGIN");
-  try {
-    for (const result of responses) {
-      const items = [...(result.payload.items ?? []), ...(result.payload.cargos ?? [])];
-      const catalog = new Map(items.map((item) => [String(item.id), item]));
-      const containerName = storageContainerName(result.building);
-      for (const log of result.payload.logs ?? []) {
-        const event = log.data ?? {};
-        const eventAction = String(event.type ?? "storage").replaceAll("_", " ").toLowerCase();
-        const action = eventAction.includes("withdraw") ? "withdrew" : eventAction.includes("deposit") ? "deposited" : eventAction;
-        const item = catalog.get(String(event.item_id));
-        const actorName = String(log.subjectName ?? "Member");
-        const summary = `${actorName} ${action} ${toNumber(event.quantity).toLocaleString()} ${item?.name ?? `item #${event.item_id ?? "?"}`} ${action === "withdrew" ? "from" : "to"} ${containerName}`;
-        const metadata = {
-          actorName,
-          containerName,
-          buildingId: String(result.building.entityId),
-          itemName: item?.name ?? null,
-          quantity: toNumber(event.quantity),
-        };
-        inserted += Number(statements.insertSourcedActivity.run(
-          claimId,
-          "storage",
-          summary,
-          log.timestamp ?? new Date().toISOString(),
-          JSON.stringify(metadata),
-          `storage:${result.building.entityId}:${log.id ?? `${log.timestamp}:${event.type}:${event.item_id}:${event.quantity}:${actorName}`}`,
-        ).changes);
-      }
-    }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-  const complete = batch.complete && processedBuildings.length === batch.items.length;
-  const nextCursor = complete ? null : (processedBuildings.length ? storageActivityBuildingKey(processedBuildings[processedBuildings.length - 1]) : (resume.nextCursor ?? null));
-  writeCollectorResume("storageActivity", claimId, {
-    nextCursor,
-    complete,
-    processed: processedBuildings.length,
-    total: buildings.length,
-    inserted,
-    failures: failures.slice(0, 20),
-    budget,
-  });
-  return {
-    requested: buildings.length,
-    processed: processedBuildings.length,
-    inserted,
-    complete,
-    nextCursor,
-    failures,
-  };
-}
-async function fetchCachedClaimDetail(claimId) {
-  const cached = claimDetailCache.get(String(claimId));
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  const value = await fetchBitjita(`/claims/${claimId}`);
-  claimDetailCache.set(String(claimId), { value, expiresAt: Date.now() + 10 * 60 * 1000 });
-  return value;
-}
-
-async function fetchCachedPlayerDetail(playerId, options = {}) {
-  const key = String(playerId);
-  const cached = playerDetailCache.get(key);
-  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
-  const payload = await fetchBitjita(`/players/${encodeURIComponent(key)}`, { forceRefresh: options.forceRefresh === true });
-  const value = payload.player ?? payload;
-  playerDetailCache.set(key, { value, expiresAt: Date.now() + 60 * 1000 });
-  return value;
-}
-
-function fallbackPlayerFromMember(member, error) {
-  const playerId = String(member?.playerEntityId ?? member?.entityId ?? member?.playerId ?? "").trim();
-  return {
-    entityId: playerId,
-    playerEntityId: playerId,
-    username: member?.userName ?? member?.username ?? member?.playerUsername ?? member?.name ?? playerId,
-    userName: member?.userName ?? member?.username ?? member?.playerUsername ?? member?.name ?? playerId,
-    signedIn: false,
-    detailAvailable: false,
-    detailError: error instanceof Error ? error.message : String(error ?? "Player detail unavailable"),
-  };
-}
-
-async function fetchCachedCraftContributions(craftId, options = {}) {
-  const key = String(craftId);
-  const cached = craftContributionCache.get(key);
-  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
-  const payload = await fetchBitjita(`/crafts/${encodeURIComponent(key)}/contributions`, { forceRefresh: options.forceRefresh === true });
-  const value = payload.contributions ?? [];
-  craftContributionCache.set(key, { value, expiresAt: Date.now() + 15 * 1000 });
-  return value;
-}
-
-async function fetchAllRegionClaims(regionId, options = {}) {
-  const base = `/claims?regionId=${encodeURIComponent(regionId)}&limit=100&sort=supplies&order=desc`;
-  const first = await fetchBitjita(`${base}&page=1`, { forceRefresh: options.forceRefresh === true });
-  const totalPages = Math.max(Math.ceil(toNumber(first.count) / 100), 1);
-  const pages = totalPages > 1
-    ? await mapWithConcurrency(Array.from({ length: totalPages - 1 }, (_, index) => index + 2), 4, (page) => fetchBitjita(`${base}&page=${page}`, { forceRefresh: options.forceRefresh === true }))
-    : [];
-  const claims = [first, ...pages].flatMap((page) => unwrap(page, "claims", []));
-  const details = await mapWithConcurrency(claims, 8, async (claim) => {
-    try {
-      return await fetchCachedClaimDetail(claim.entityId);
-    } catch {
-      return null;
-    }
-  });
-  return {
-    ...first,
-    claims: claims.map((claim, index) => {
-      const detail = details[index];
-      return detail ? { ...claim, ...(detail.claim ?? detail) } : claim;
-    }),
-  };
-}
-
-async function fetchCachedRegionClaims(regionId, options = {}) {
-  const key = String(regionId);
-  const cached = regionCache.get(key);
-  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
-  const value = await fetchAllRegionClaims(key, options);
-  regionCache.set(key, { expiresAt: Date.now() + 10 * 60 * 1000, value });
-  return value;
-}
-
-
-function normalizeRegionRow(row, source = "bitjita") {
-  const regionId = String(row?.regionId ?? row?.id ?? "").trim();
-  if (!/^\d+$/.test(regionId)) return null;
-  return {
-    regionId,
-    regionName: String(row?.regionName ?? row?.name ?? `Region ${regionId}`),
-    active: row?.active !== false,
-    syncing: row?.syncing === true,
-    signedInPlayers: toNumber(row?.signedInPlayers ?? row?.playersOnline ?? row?.onlinePlayers),
-    playersInQueue: toNumber(row?.playersInQueue ?? row?.queuedPlayers),
-    updatedAt: row?.updatedAt ?? null,
-    source,
-  };
-}
-
-function claimRegionIdFromKnownData(claim, regionStatusPayload, previousRegionPayload, claimId) {
-  const directRegionId = String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? "").trim();
-  if (/^\d+$/.test(directRegionId)) return directRegionId;
-  const claimRegionName = String(claim?.regionName ?? claim?.region_name ?? "").trim().toLowerCase();
-  if (claimRegionName) {
-    for (const region of unwrap(regionStatusPayload, "regions", [])) {
-      const regionName = String(region?.regionName ?? region?.name ?? "").trim().toLowerCase();
-      const regionId = String(region?.regionId ?? region?.id ?? region?.entityId ?? "").trim();
-      if (regionName && regionName === claimRegionName && /^\d+$/.test(regionId)) return regionId;
-    }
-  }
-  for (const regionClaim of unwrap(previousRegionPayload, "claims", [])) {
-    const regionClaimId = String(regionClaim?.entityId ?? regionClaim?.id ?? regionClaim?.claimId ?? "").trim();
-    const regionId = String(regionClaim?.regionId ?? regionClaim?.region_id ?? "").trim();
-    if (regionClaimId === String(claimId ?? "") && /^\d+$/.test(regionId)) return regionId;
-  }
-  return "";
-}
-
-async function fetchCachedActiveRegions(extraRegionIds = [], options = {}) {
-  const settings = getSettings();
-  const overrideIds = parseRegionIds(settings.additionalActiveRegions);
-  const includeIds = parseRegionIds(extraRegionIds.join(","));
-  const cacheKey = [...overrideIds, ...includeIds].sort((a, b) => toNumber(a) - toNumber(b)).join(",");
-  if (!options.forceRefresh && activeRegionsCache && activeRegionsCache.key === cacheKey && activeRegionsCache.expiresAt > Date.now()) return activeRegionsCache.value;
-  const [statusPayload, regionsPayload] = await Promise.all([
-    fetchBitjita("/regions/status", { forceRefresh: options.forceRefresh === true }).catch(() => ({ regions: [] })),
-    fetchBitjita("/regions", { forceRefresh: options.forceRefresh === true }).catch(() => []),
-  ]);
-  const byId = new Map();
-  for (const row of unwrap(statusPayload, "regions", [])) {
-    const normalized = normalizeRegionRow(row, "status");
-    if (normalized) byId.set(normalized.regionId, normalized);
-  }
-  for (const row of unwrap(regionsPayload, "regions", Array.isArray(regionsPayload) ? regionsPayload : [])) {
-    const normalized = normalizeRegionRow(row, "regions");
-    if (!normalized) continue;
-    byId.set(normalized.regionId, { ...normalized, ...byId.get(normalized.regionId), regionName: byId.get(normalized.regionId)?.regionName ?? normalized.regionName });
-  }
-  for (const regionId of [...overrideIds, ...includeIds]) {
-    byId.set(regionId, {
-      regionId,
-      regionName: byId.get(regionId)?.regionName ?? `Region ${regionId}`,
-      active: true,
-      syncing: byId.get(regionId)?.syncing ?? false,
-      signedInPlayers: byId.get(regionId)?.signedInPlayers ?? 0,
-      playersInQueue: byId.get(regionId)?.playersInQueue ?? 0,
-      updatedAt: byId.get(regionId)?.updatedAt ?? null,
-      source: byId.has(regionId) ? byId.get(regionId).source : "admin",
-    });
-  }
-  const value = {
-    regions: [...byId.values()]
-      .filter((region) => region.active !== false)
-      .sort((a, b) => toNumber(a.regionId) - toNumber(b.regionId)),
-    overrideRegionIds: overrideIds,
-    updatedAt: new Date().toISOString(),
-  };
-  activeRegionsCache = { key: cacheKey, expiresAt: Date.now() + 5 * 60 * 1000, value };
-  return value;
-}
-
-async function fetchMapCatalog() {
-  if (mapCatalogCache && mapCatalogCache.expiresAt > Date.now()) return mapCatalogCache.value;
-  const [resources, creatures] = await Promise.all([
-    fetchBitjita("/resources"),
-    fetchBitjita("/creatures"),
-  ]);
-  const value = { resources: unwrap(resources, "resources", []), creatures: unwrap(creatures, "creatures", []) };
-  mapCatalogCache = { expiresAt: Date.now() + 10 * 60 * 1000, value };
-  return value;
-}
-
-function passiveCraftTimestamp(value) {
-  const parsed = new Date(String(value ?? ""));
-  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-}
-
-function summarizePassiveCrafts(payload) {
-  const catalog = new Map(
-    [...(payload?.items ?? []), ...(payload?.cargos ?? [])].map((item) => [String(item.id), item]),
-  );
-  const summaries = new Map();
-  for (const craft of payload?.craftResults ?? []) {
-    const output = craft.craftedItem?.[0] ?? {};
-    const item = catalog.get(String(output.item_id)) ?? {};
-    const outputName = item.name ?? "crafted item";
-    const recipe = String(craft.recipeName ?? "Craft {0}")
-      .replace(/\s*\{\d+\}/g, ` ${outputName}`)
-      .replace(/\s+/g, " ")
-      .trim();
-    const key = [recipe, craft.buildingName, craft.status, item.id ?? output.item_id].join("|");
-    const current = summaries.get(key);
-    const timestamp = passiveCraftTimestamp(craft.timestamp);
-    if (current) {
-      current.quantity += toNumber(output.quantity) || 1;
-      if (timestamp > current.sortTimestamp) {
-        current.timestamp = craft.timestamp;
-        current.sortTimestamp = timestamp;
-      }
-      continue;
-    }
-    summaries.set(key, {
-      recipe,
-      status: craft.status ?? "unknown",
-      structure: craft.buildingName ?? "Unknown structure",
-      timestamp: craft.timestamp,
-      sortTimestamp: timestamp,
-      quantity: toNumber(output.quantity) || 1,
-      tier: item.tier,
-    });
-  }
-  return Array.from(summaries.values()).sort((a, b) => b.sortTimestamp - a.sortTimestamp).slice(0, 8);
-}
-
-async function fetchCachedPassiveCrafts(member, options = {}) {
-  const playerId = String(member.playerEntityId ?? member.entityId ?? "").trim();
-  if (!playerId) return { ok: false, error: "Missing player id" };
-  const cached = passiveCraftsCache.get(playerId);
-  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
-  const payload = await fetchBitjita(`/players/${encodeURIComponent(playerId)}/passive-crafts?status=all`, { forceRefresh: options.forceRefresh === true });
-  const value = {
-    ok: true,
-    playerId,
-    memberName: member.userName ?? member.username ?? member.name ?? "Unknown member",
-    rows: summarizePassiveCrafts(payload),
-  };
-  passiveCraftsCache.set(playerId, { value, expiresAt: Date.now() + 60 * 1000 });
-  return value;
-}
-
-function withServerFreshness(value, cacheState, cachedAt, stale = false) {
-  const serverFreshness = { ...(value?.serverFreshness ?? {}), cacheState, cachedAt };
-  if (stale) serverFreshness.stale = true;
-  return { ...value, ...(stale ? { stale: true } : {}), serverFreshness };
-}
-
-async function loadHelperCached(cache, inflight, key, ttlMs, loader, options = {}) {
-  const now = Date.now();
-  const cached = cache.get(key);
-  if (!options.forceRefresh && cached && cached.expiresAt > now) return withServerFreshness(cached.value, "hit", cached.cachedAt);
-  const pending = !options.forceRefresh ? inflight.get(key) : null;
-  if (pending) {
-    const entry = await pending;
-    return withServerFreshness(entry.value, entry.stale ? "stale-if-error" : "deduped", entry.cachedAt, entry.stale);
-  }
-  const stale = !options.forceRefresh && cached && (cached.staleExpiresAt ?? cached.expiresAt) > now ? cached : null;
-  const request = (async () => {
-    try {
-      const value = await loader();
-      const cachedAt = new Date().toISOString();
-      const entry = {
-        value,
-        cachedAt,
-        expiresAt: Date.now() + ttlMs,
-        staleExpiresAt: Date.now() + ttlMs + LOCAL_HELPER_STALE_IF_ERROR_MS,
-      };
-      cache.set(key, entry);
-      return entry;
-    } catch (error) {
-      if (stale) {
-        const partialErrors = Array.isArray(stale.value?.partialErrors) ? stale.value.partialErrors : [];
-        return {
-          ...stale,
-          stale: true,
-          value: { ...stale.value, partialErrors: [...partialErrors, `Refresh failed: ${errorMessage(error)}`] },
-        };
-      }
-      throw error;
-    } finally {
-      inflight.delete(key);
-    }
-  })();
-  inflight.set(key, request);
-  const entry = await request;
-  return withServerFreshness(entry.value, entry.stale ? "stale-if-error" : "miss", entry.cachedAt, entry.stale);
-}
-
-function uniqueSummaryMembers(body, maxMembers) {
-  const members = Array.isArray(body?.members) ? body.members : [];
-  return [...new Map(members
-    .filter((member) => member && (member.playerEntityId ?? member.entityId))
-    .slice(0, maxMembers)
-    .map((member) => [String(member.playerEntityId ?? member.entityId), member])).values()];
-}
-
-function summaryMemberCacheKey(members) {
-  return members.map((member) => String(member.playerEntityId ?? member.entityId ?? "")).filter(Boolean).sort().join(",") || "empty";
-}
-
-async function passiveCraftSummaries(body) {
-  const uniqueMembers = uniqueSummaryMembers(body, 50);
-  const cacheKey = summaryMemberCacheKey(uniqueMembers);
-  return loadHelperCached(passiveCraftSummariesCache, passiveCraftSummariesInflight, cacheKey, PASSIVE_CRAFT_SUMMARY_CACHE_TTL_MS, async () => {
-    const results = await mapWithConcurrency(uniqueMembers, 4, async (member) => {
-      try {
-        return await fetchCachedPassiveCrafts(member, { forceRefresh: body?.forceRefresh === true });
-      } catch (error) {
-        return {
-          ok: false,
-          playerId: String(member.playerEntityId ?? member.entityId ?? ""),
-          memberName: member.userName ?? member.username ?? member.name ?? "Unknown member",
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    });
-    const rows = results
-      .flatMap((result) => result.ok ? result.rows.map((row) => ({ ...row, playerId: result.playerId, memberName: result.memberName })) : [])
-      .sort((a, b) => b.sortTimestamp - a.sortTimestamp)
-      .slice(0, 18);
-    return {
-      rows,
-      requested: uniqueMembers.length,
-      failed: results.filter((result) => !result.ok).length,
-    };
-  }, { forceRefresh: body?.forceRefresh === true });
-}
-
-async function playerDetailSummaries(body) {
-  const uniqueMembers = uniqueSummaryMembers(body, 100);
-  const cacheKey = summaryMemberCacheKey(uniqueMembers);
-  return loadHelperCached(playerDetailSummariesCache, playerDetailSummariesInflight, cacheKey, PLAYER_DETAIL_SUMMARY_CACHE_TTL_MS, async () => {
-    const results = await mapWithConcurrency(uniqueMembers, 6, async (member) => {
-      const playerId = String(member.playerEntityId ?? member.entityId ?? "");
-      try {
-        const player = await fetchCachedPlayerDetail(playerId, { forceRefresh: body?.forceRefresh === true });
-        return { ok: true, player: { ...player, detailAvailable: true } };
-      } catch (error) {
-        return { ok: false, playerId, player: fallbackPlayerFromMember(member, error), error: error instanceof Error ? error.message : String(error) };
-      }
-    });
-    return {
-      players: results.map((result) => result.player),
-      requested: uniqueMembers.length,
-      failed: results.filter((result) => !result.ok).length,
-      failures: results.filter((result) => !result.ok).map((result) => ({ playerId: result.playerId, error: result.error })).slice(0, 20),
-    };
-  }, { forceRefresh: body?.forceRefresh === true });
-}
-function itemCatalogKey(item) {
-  const id = item?.id ?? item?.entityId ?? item?.itemId;
-  return id == null ? "" : String(id);
-}
-
-function mergeCraftCatalogs(payloads) {
-  const items = new Map();
-  const cargos = new Map();
-  const claims = new Map();
-  for (const payload of payloads) {
-    for (const item of unwrap(payload, "items", [])) {
-      const key = itemCatalogKey(item);
-      if (key) items.set(key, item);
-    }
-    for (const cargo of unwrap(payload, "cargos", [])) {
-      const key = itemCatalogKey(cargo);
-      if (key) cargos.set(key, cargo);
-    }
-    for (const claim of unwrap(payload, "claims", [])) {
-      const key = itemCatalogKey(claim);
-      if (key) claims.set(key, claim);
-    }
-  }
-  return {
-    items: [...items.values()],
-    cargos: [...cargos.values()],
-    claims: [...claims.values()],
-  };
-}
-
-function craftClaimId(craft) {
-  return String(craft?.claimEntityId ?? craft?.claim_entity_id ?? craft?.claim?.entityId ?? craft?.claimId ?? "");
-}
-
-function productionCraftCacheKey(claimId, members) {
-  const ids = members.map((member) => String(member.playerEntityId ?? member.entityId ?? "")).filter(Boolean).sort();
-  return `${claimId}:${ids.join(",")}`;
-}
-
-async function settlementProductionCrafts(body) {
-  const claimId = String(body?.claimId ?? "").trim();
-  if (!claimId) return withServerFreshness({ craftResults: [], items: [], cargos: [], claims: [], count: 0, publicCount: 0, privateCount: 0, failedMemberRequests: 0 }, "miss", new Date().toISOString());
-  const uniqueMembers = uniqueSummaryMembers(body, 50);
-  const cacheKey = productionCraftCacheKey(claimId, uniqueMembers);
-  return loadHelperCached(productionCraftsCache, productionCraftsInflight, cacheKey, PRODUCTION_CRAFT_CACHE_TTL_MS, async () => {
-    let publicFetchError = "";
-    const publicPayload = await fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(claimId)}&completed=false`, { timeoutMs: PRODUCTION_CRAFT_TIMEOUT_MS, cache: body?.forceRefresh !== true }).catch((error) => {
-      publicFetchError = error instanceof Error ? error.message : String(error);
-      return { craftResults: [] };
-    });
-    const publicCrafts = unwrap(publicPayload, "craftResults", []);
-    const publicIds = new Set(publicCrafts.map((craft) => String(craft.entityId ?? "")).filter(Boolean));
-    const memberResults = await mapWithConcurrency(uniqueMembers, 8, async (member) => {
-      const playerId = String(member.playerEntityId ?? member.entityId ?? "");
-      try {
-        return { ok: true, payload: await fetchBitjita(`/players/${encodeURIComponent(playerId)}/crafts?completed=false`, { timeoutMs: PRODUCTION_MEMBER_CRAFT_TIMEOUT_MS, cache: body?.forceRefresh !== true }) };
-      } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
-      }
-    });
-    const memberPayloads = memberResults.filter((result) => result.ok).map((result) => result.payload);
-    const merged = new Map();
-
-    for (const craft of publicCrafts) {
-      if (!craft?.entityId || craftClaimId(craft) !== claimId) continue;
-      merged.set(String(craft.entityId), { ...craft, isPublic: craft.isPublic !== false, visibilitySource: "claim-public" });
-    }
-
-    for (const payload of memberPayloads) {
-      for (const craft of unwrap(payload, "craftResults", [])) {
-        if (!craft?.entityId || craftClaimId(craft) !== claimId) continue;
-        const id = String(craft.entityId);
-        const existing = merged.get(id) ?? {};
-        const isPublic = craft.isPublic === false ? false : publicIds.has(id) || craft.isPublic === true;
-        merged.set(id, {
-          ...existing,
-          ...craft,
-          isPublic,
-          visibilitySource: isPublic ? existing.visibilitySource ?? "player-public" : "player-private",
-        });
-      }
-    }
-
-    const catalog = mergeCraftCatalogs([publicPayload, ...memberPayloads]);
-    const craftResults = [...merged.values()].sort((a, b) => toNumber(b.totalActionsRequired) - toNumber(a.totalActionsRequired));
-    const partialErrors = [
-      publicFetchError ? `Public craft refresh failed: ${publicFetchError}` : "",
-      ...memberResults.filter((result) => !result.ok).map((result) => `Member craft refresh failed: ${result.error}`),
-    ].filter(Boolean);
-    if (publicFetchError && !memberPayloads.length) {
-      throw new Error(`Production refresh failed: ${publicFetchError}`);
-    }
-    return {
-      craftResults,
-      ...catalog,
-      count: craftResults.length,
-      publicCount: craftResults.filter((craft) => craft.isPublic !== false).length,
-      privateCount: craftResults.filter((craft) => craft.isPublic === false).length,
-      failedMemberRequests: memberResults.filter((result) => !result.ok).length,
-      partialError: partialErrors[0] ?? null,
-      partialErrors,
-    };
-  }, { forceRefresh: body?.forceRefresh === true });
-}
-function storedDashboardDataFallback(claimId, error) {
-  const rowsByDomain = readDomainPayloadMap(claimId);
-  if (!Object.keys(rowsByDomain).length) return null;
-  const value = domainRowsToAppData(claimId, rowsByDomain);
-  const message = error instanceof Error ? error.message : String(error);
-  const partialErrors = Array.isArray(value.partialErrors) ? value.partialErrors : [];
-  return {
-    ...value,
-    stale: true,
-    partialErrors: [...new Set([...partialErrors, `Dashboard refresh failed: ${message}`])],
-    serverFreshness: {
-      ...(value.serverFreshness ?? {}),
-      cacheState: "stored-stale-if-error",
-      cachedAt: value.serverFreshness?.lastSuccessAt ?? value.serverFreshness?.collectedAt ?? null,
-      stale: true,
-      lastError: message,
-    },
-  };
-}
-async function dashboardData(claimId, options = {}) {
-  const id = String(claimId ?? "").trim();
-  if (!/^\d{8,}$/.test(id)) {
-    const error = new Error("Choose a valid BitCraft settlement ID");
-    error.statusCode = 400;
-    throw error;
-  }
-  const now = Date.now();
-  const cached = dashboardDataCache.get(id);
-  if (!options.forceRefresh && cached && cached.expiresAt > now) {
-    return { ...cached.value, serverFreshness: { ...(cached.value.serverFreshness ?? {}), cacheState: "hit", cachedAt: cached.cachedAt } };
-  }
-  const inflight = dashboardDataInflight.get(id);
-  if (!options.forceRefresh && inflight) return inflight;
-  const stale = cached && (cached.staleExpiresAt ?? cached.expiresAt) > now ? cached : null;
-  const request = (async () => {
-    try {
-      const value = await dashboardDataFresh(id, { forceRefresh: options.forceRefresh === true });
-      const cachedAt = new Date().toISOString();
-      dashboardDataCache.set(id, {
-        value,
-        cachedAt,
-        expiresAt: Date.now() + DASHBOARD_DATA_CACHE_TTL_MS,
-        staleExpiresAt: Date.now() + DASHBOARD_DATA_CACHE_TTL_MS + DASHBOARD_DATA_STALE_IF_ERROR_MS,
-      });
-      return { ...value, serverFreshness: { ...(value.serverFreshness ?? {}), cacheState: "miss", cachedAt } };
-    } catch (error) {
-      if (stale) {
-        const message = error instanceof Error ? error.message : String(error);
-        const partialErrors = Array.isArray(stale.value.partialErrors) ? stale.value.partialErrors : [];
-        return {
-          ...stale.value,
-          stale: true,
-          partialErrors: [...partialErrors, `Dashboard refresh failed: ${message}`],
-          serverFreshness: { ...(stale.value.serverFreshness ?? {}), cacheState: "stale-if-error", cachedAt: stale.cachedAt },
-        };
-      }
-      const storedFallback = storedDashboardDataFallback(id, error);
-      if (storedFallback) return storedFallback;
-      throw error;
-    } finally {
-      dashboardDataInflight.delete(id);
-    }
-  })();
-  dashboardDataInflight.set(id, request);
-  return request;
-}
-async function dashboardDataFresh(claimId, options = {}) {
-  const id = String(claimId ?? "").trim();
-  if (!/^\d{8,}$/.test(id)) {
-    const error = new Error("Choose a valid BitCraft settlement ID");
-    error.statusCode = 400;
-    throw error;
-  }
-  const forceRefresh = options.forceRefresh === true;
-  const [claimPayload, membersPayload, citizensPayload, buildingsPayload, constructionPayload, researchPayload, marketPayload, craftsPayload, regionStatus] = await Promise.all([
-    fetchBitjita(`/claims/${id}`, { forceRefresh }),
-    fetchBitjita(`/claims/${id}/members`, { forceRefresh }),
-    fetchBitjita(`/claims/${id}/citizens`, { forceRefresh }).catch(() => ({ citizens: [] })),
-    fetchBitjita(`/claims/${id}/buildings`, { forceRefresh }),
-    fetchBitjita(`/claims/${id}/construction`, { forceRefresh }).catch(() => ({ projects: [] })),
-    fetchBitjita(`/claims/${id}/research`, { forceRefresh }).catch(() => ({ research: [] })),
-    fetchAllClaimListings(id, { cache: !forceRefresh }).catch(() => ({ listings: [] })),
-    fetchBitjita(`/crafts?claimEntityId=${encodeURIComponent(id)}&completed=false`, { forceRefresh }).catch(() => ({ craftResults: [] })),
-    fetchBitjita("/regions/status", { forceRefresh }).catch(() => ({ regions: [] })),
-  ]);
-  const claim = claimPayload.claim ?? claimPayload;
-  const members = unwrap(membersPayload, "members", []);
-  const crafts = unwrap(craftsPayload, "craftResults", []);
-  const [playerPayload, contributionEntries, region, tradeVolume] = await Promise.all([
-    playerDetailSummaries({ members, forceRefresh }),
-    mapWithConcurrency(crafts.filter((craft) => craft.entityId), 4, async (craft) => {
-      try {
-        return [String(craft.entityId), await fetchCachedCraftContributions(craft.entityId, { forceRefresh })];
-      } catch {
-        return [String(craft.entityId), []];
-      }
-    }),
-    claim?.regionId ? fetchCachedRegionClaims(claim.regionId).catch(() => ({ claims: [] })) : Promise.resolve({ claims: [] }),
-    claim?.regionId ? fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(claim.regionId))}`, { forceRefresh }).catch(() => ({ buckets: [], items: [], regions: [] })) : Promise.resolve({ buckets: [], items: [], regions: [] }),
-  ]);
-  return {
-    claim: claimPayload,
-    members: membersPayload,
-    citizens: citizensPayload,
-    buildings: buildingsPayload,
-    construction: constructionPayload,
-    research: researchPayload,
-    market: marketPayload,
-    crafts: craftsPayload,
-    players: playerPayload.players ?? [],
-    playerDetailDiagnostics: {
-      requested: playerPayload.requested ?? 0,
-      failed: playerPayload.failed ?? 0,
-      failures: playerPayload.failures ?? [],
-    },
-    contributions: Object.fromEntries(contributionEntries),
-    region,
-    regionStatus,
-    tradeVolume,
-  };
-}
-
-async function craftContributionMap(crafts) {
-  const entries = await mapWithConcurrency(crafts.filter((craft) => craft?.entityId), 4, async (craft) => {
-    try {
-      return [String(craft.entityId), await fetchCachedCraftContributions(craft.entityId)];
-    } catch {
-      return [String(craft.entityId), []];
-    }
-  });
-  return Object.fromEntries(entries);
-}
-
-function currentStateCounts(data) {
-  return {
-    members: unwrap(data.members, "members", []).length,
-    citizens: unwrap(data.citizens, "citizens", []).length,
-    crafts: unwrap(data.crafts, "craftResults", []).length,
-    marketListings: unwrap(data.market, "listings", []).length,
-    players: Array.isArray(data.players) ? data.players.length : 0,
-  };
-}
-
-function domainPayloadFromData(data, domain) {
-  if (domain === "players") return { players: Array.isArray(data.players) ? data.players : [] };
-  if (domain === "playerDetailDiagnostics") return data.playerDetailDiagnostics ?? {};
-  return data[domain] ?? {};
-}
-
-function readDomainPayloadMap(claimId) {
-  // Domain payloads preserve the most recent background collection for history,
-  // diagnostics, and notifications. They are not intended to replace live
-  // page-driven BitJita reads for the main app.
-  return Object.fromEntries(statements.domainPayloadsByClaim.all(String(claimId ?? "")).map((row) => [row.domain, {
-    ...row,
-    data: safeJson(row.data_json, {}),
-  }]));
-}
-
-function rowData(row) {
-  return safeJson(row?.data_json, {});
-}
-
-function domainRowsToAppData(claimId, rowsByDomain) {
-  const payload = (domain, fallback) => rowsByDomain[domain]?.data ?? fallback;
-  const partialErrors = Object.values(rowsByDomain)
-    .flatMap((row) => {
-      const data = row.data && typeof row.data === "object" ? row.data : {};
-      return [...(Array.isArray(data.partialErrors) ? data.partialErrors : []), row.last_error].filter(Boolean);
-    })
-    .map((error) => String(error));
-  const lastSuccessValues = Object.values(rowsByDomain).map((row) => row.last_success_at ?? row.collected_at).filter(Boolean);
-  const lastAttemptValues = Object.values(rowsByDomain).map((row) => row.last_attempt_at).filter(Boolean);
-  const lastSuccessAt = lastSuccessValues.sort().at(-1) ?? null;
-  const lastAttemptAt = lastAttemptValues.sort().at(-1) ?? null;
-  const lastError = Object.values(rowsByDomain).map((row) => row.last_error).filter(Boolean).at(-1) ?? null;
-  const counts = currentStateCounts({
-    members: payload("members", { members: [] }),
-    citizens: payload("citizens", { citizens: [] }),
-    crafts: payload("crafts", { craftResults: [] }),
-    market: payload("market", { listings: [] }),
-    players: unwrap(payload("players", { players: [] }), "players", []),
-  });
-  const dataAgeSeconds = lastSuccessAt ? Math.max(Math.round((Date.now() - new Date(lastSuccessAt).getTime()) / 1000), 0) : null;
-  return {
-    claim: payload("claim", {}),
-    members: payload("members", { members: [] }),
-    citizens: payload("citizens", { citizens: [] }),
-    buildings: payload("buildings", { buildings: [] }),
-    construction: payload("construction", { projects: [] }),
-    research: payload("research", { research: [] }),
-    market: payload("market", { listings: [] }),
-    crafts: payload("crafts", { craftResults: [] }),
-    players: unwrap(payload("players", { players: [] }), "players", []),
-    playerDetailDiagnostics: payload("playerDetailDiagnostics", {}),
-    contributions: payload("contributions", {}),
-    region: payload("region", { claims: [] }),
-    regionStatus: payload("regionStatus", { regions: [] }),
-    tradeVolume: payload("tradeVolume", {}),
-    regionalBuyOrders: payload("regionalBuyOrders", { regions: [], orders: [] }),
-    inventories: payload("inventories", { buildings: [] }),
-    recruitment: payload("recruitment", { applications: [] }),
-    layout: payload("layout", {}),
-    skills: payload("skills", {}),
-    partialErrors: [...new Set(partialErrors)],
-    serverFreshness: {
-      claimId: String(claimId ?? ""),
-      collectedAt: lastSuccessAt,
-      lastAttemptAt,
-      lastSuccessAt,
-      lastError,
-      dataAgeSeconds,
-      stale: dataAgeSeconds != null ? dataAgeSeconds > serverRefreshIntervalMs() / 1000 * 2 : true,
-      counts,
-    },
-    collectorStatus: collectorStatusPayload(),
-  };
 }
 
 function meaningfulItemName(value) {
@@ -8312,313 +6032,8 @@ function inventoryStoredTotalsFromPayload(inventories) {
   return totals;
 }
 
-function persistRegionalBuyOrdersCurrent(claimId, payload, collectedAt) {
-  const claimIdText = String(claimId ?? "").trim();
-  if (!claimIdText || !payload || typeof payload !== "object") return 0;
-  const orders = Array.isArray(payload.orders) ? payload.orders : [];
-  const regions = [...new Set([
-    ...unwrap(payload, "regions", []),
-    ...orders.map((order) => order.regionId),
-  ].map((regionId) => String(regionId ?? "").trim()).filter((regionId) => /^\d+$/.test(regionId)))];
-  const upsertBuyOrder = db.prepare(`
-    INSERT INTO market_buy_orders_current (
-      claim_id, order_key, region_id, region_name, market_claim_id, market_claim_name,
-      buyer_entity_id, buyer_name, item_id, item_type, item_name, tier, rarity, icon_asset_name,
-      quantity, unit_price, total_value, stored_coins, listed_at, first_seen, last_seen, active,
-      raw_json, updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    ON CONFLICT(claim_id, order_key) DO UPDATE SET
-      region_id = excluded.region_id,
-      region_name = excluded.region_name,
-      market_claim_id = excluded.market_claim_id,
-      market_claim_name = excluded.market_claim_name,
-      buyer_entity_id = excluded.buyer_entity_id,
-      buyer_name = excluded.buyer_name,
-      item_id = excluded.item_id,
-      item_type = excluded.item_type,
-      item_name = excluded.item_name,
-      tier = excluded.tier,
-      rarity = excluded.rarity,
-      icon_asset_name = excluded.icon_asset_name,
-      quantity = excluded.quantity,
-      unit_price = excluded.unit_price,
-      total_value = excluded.total_value,
-      stored_coins = excluded.stored_coins,
-      listed_at = excluded.listed_at,
-      last_seen = excluded.last_seen,
-      active = 1,
-      raw_json = excluded.raw_json,
-      updated_at = excluded.updated_at
-  `);
-  let written = 0;
-  for (const regionId of regions) {
-    db.prepare("UPDATE market_buy_orders_current SET active = 0, updated_at = ? WHERE claim_id = ? AND region_id = ?").run(collectedAt, claimIdText, regionId);
-  }
-  for (const order of orders) {
-    const orderKey = String(order.orderKey ?? "").trim();
-    const regionId = String(order.regionId ?? "").trim();
-    const itemName = String(order.itemName ?? "").trim();
-    if (!orderKey || !regionId || !itemName) continue;
-    const quantity = toNumber(order.quantity);
-    const unitPrice = toNumber(order.unitPrice);
-    upsertBuyOrder.run(
-      claimIdText,
-      orderKey,
-      regionId,
-      order.regionName ?? null,
-      order.marketClaimId ?? null,
-      order.marketClaimName ?? null,
-      order.buyerEntityId ?? null,
-      order.buyerName ?? null,
-      order.itemId ?? null,
-      order.itemType ?? "0",
-      itemName,
-      order.tier ?? null,
-      order.rarity ?? null,
-      order.iconAssetName ?? null,
-      quantity,
-      unitPrice,
-      order.totalValue ?? quantity * unitPrice,
-      toNumber(order.storedCoins),
-      order.listedAt ?? null,
-      order.firstSeen ?? collectedAt,
-      collectedAt,
-      JSON.stringify(order.raw ?? order),
-      collectedAt,
-    );
-    written += 1;
-  }
-  return written;
-}
-
-function persistRegionalSaleAverages(claimId, averages, collectedAt) {
-  const claimIdText = String(claimId ?? "").trim();
-  const upsertRegionalSaleAverage = db.prepare(`
-    INSERT INTO market_regional_sale_averages_current (
-      claim_id, region_id, item_id, item_type, item_name, average_unit_price, sales_count,
-      units_sold, total_value, window_days, first_bucket_at, last_bucket_at, raw_json, updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(claim_id, region_id, item_id, item_type) DO UPDATE SET
-      item_name = excluded.item_name,
-      average_unit_price = excluded.average_unit_price,
-      sales_count = excluded.sales_count,
-      units_sold = excluded.units_sold,
-      total_value = excluded.total_value,
-      window_days = excluded.window_days,
-      first_bucket_at = excluded.first_bucket_at,
-      last_bucket_at = excluded.last_bucket_at,
-      raw_json = excluded.raw_json,
-      updated_at = excluded.updated_at
-  `);
-  let written = 0;
-  for (const average of Array.isArray(averages) ? averages : []) {
-    const regionId = String(average.regionId ?? "").trim();
-    const itemId = String(average.itemId ?? "").trim();
-    const itemType = String(average.itemType ?? 0).trim() || "0";
-    if (!claimIdText || !regionId || !itemId) continue;
-    upsertRegionalSaleAverage.run(
-      claimIdText,
-      regionId,
-      itemId,
-      itemType,
-      average.itemName ?? null,
-      toNumber(average.averageUnitPrice),
-      toNumber(average.salesCount),
-      toNumber(average.unitsSold),
-      toNumber(average.totalValue),
-      toNumber(average.windowDays) || 7,
-      average.firstBucketAt ?? null,
-      average.lastBucketAt ?? null,
-      JSON.stringify(average.raw ?? average),
-      collectedAt,
-    );
-    written += 1;
-  }
-  return written;
-}
-
-function persistDomainPayloads(claimId, data, attemptedAt, collectedAt, metrics = null, domains = domainPayloadKeys) {
-  const payloadWriteStartedAt = Date.now();
-  for (const domain of domains) {
-    const domainStartedAt = Date.now();
-    const payload = domainPayloadFromData(data, domain);
-    const domainError = payload && typeof payload === "object" && !Array.isArray(payload) ? payload.partialError : null;
-    statements.upsertDomainPayload.run(String(claimId), domain, JSON.stringify(payload), collectedAt, attemptedAt, collectedAt, domainError ? String(domainError) : null, collectedAt);
-    recordCollectorPayloadWrite(metrics, domain, Date.now() - domainStartedAt);
-  }
-  if (domains.includes("regionalBuyOrders")) persistRegionalBuyOrdersCurrent(claimId, data?.regionalBuyOrders, collectedAt);
-  if (metrics) metrics.domainPayloadWriteDurationMs = Math.max(Date.now() - payloadWriteStartedAt, 0);
-}
-
-function collectorDue(claimId, collectorKey, payloadDomain, options = {}) {
-  if (options.force) return true;
-  const settings = getCollectorSettings()[collectorKey] ?? { enabled: true, intervalSeconds: Math.round(serverRefreshIntervalMs() / 1000) };
-  const row = statements.domainPayload.get(String(claimId ?? ""), payloadDomain);
-  if (!row) return settings.enabled !== false;
-  if (settings.enabled === false) return false;
-  const lastSuccessAt = row.last_success_at ?? row.collected_at;
-  if (!lastSuccessAt) return true;
-  return Date.now() - new Date(lastSuccessAt).getTime() >= settings.intervalSeconds * 1000;
-}
-
-function previousPayload(previous, domain, fallback) {
-  return previous[domain]?.data ?? fallback;
-}
-
-async function fetchDomainPayload(previous, domain, fallback, label, load) {
-  try {
-    return await load();
-  } catch (error) {
-    const fallbackPayload = previousPayload(previous, domain, fallback);
-    const message = `${label} refresh failed: ${error instanceof Error ? error.message : String(error)}`;
-    if (!fallbackPayload || typeof fallbackPayload !== "object" || Array.isArray(fallbackPayload)) {
-      return { value: fallbackPayload, partialError: message, partialErrors: [message] };
-    }
-    return {
-      ...fallbackPayload,
-      partialError: message,
-      partialErrors: [...(Array.isArray(fallbackPayload.partialErrors) ? fallbackPayload.partialErrors : []), message],
-    };
-  }
-}
-
-async function buildCurrentClaimData(claimId, options = {}) {
-  const id = String(claimId ?? "").trim();
-  if (!/^\d{8,}$/.test(id)) {
-    const error = new Error("Choose a valid BitCraft settlement ID");
-    error.statusCode = 400;
-    throw error;
-  }
-  const metrics = options.metrics ?? null;
-  const previous = readDomainPayloadMap(id);
-  const claimPayload = collectorDue(id, "claim", "claim", options)
-    ? await timedCollectorFetch(metrics, "claim", "claim", () => fetchBitjita(`/claims/${id}`, { forceRefresh: options.force === true }))
-    : previousPayload(previous, "claim", {});
-  const claim = claimPayload.claim ?? claimPayload;
-  const membersPayload = collectorDue(id, "members", "members", options)
-    ? await timedCollectorFetch(metrics, "members", "members", () => fetchBitjita(`/claims/${id}/members`))
-    : previousPayload(previous, "members", { members: [] });
-  const members = unwrap(membersPayload, "members", []);
-
-  const [
-    citizensPayload,
-    buildingsPayload,
-    constructionPayload,
-    researchPayload,
-    marketPayload,
-    productionPayload,
-    playerPayload,
-    inventoriesPayload,
-    recruitmentPayload,
-    layoutPayload,
-    skillsPayload,
-    regionStatus,
-  ] = await Promise.all([
-    collectorDue(id, "professions", "citizens", options) ? fetchDomainPayload(previous, "citizens", { citizens: [] }, "Citizens", () => timedCollectorFetch(metrics, "professions", "citizens", () => fetchBitjita(`/claims/${id}/citizens`))) : Promise.resolve(previousPayload(previous, "citizens", { citizens: [] })),
-    collectorDue(id, "construction", "buildings", options) || collectorDue(id, "claim", "buildings", options) ? fetchDomainPayload(previous, "buildings", { buildings: [] }, "Buildings", () => timedCollectorFetch(metrics, "construction", "buildings", () => fetchBitjita(`/claims/${id}/buildings`))) : Promise.resolve(previousPayload(previous, "buildings", { buildings: [] })),
-    collectorDue(id, "construction", "construction", options) ? fetchDomainPayload(previous, "construction", { projects: [] }, "Construction", () => timedCollectorFetch(metrics, "construction", "construction", () => fetchBitjita(`/claims/${id}/construction`))) : Promise.resolve(previousPayload(previous, "construction", { projects: [] })),
-    collectorDue(id, "research", "research", options) ? fetchDomainPayload(previous, "research", { research: [] }, "Research", () => timedCollectorFetch(metrics, "research", "research", () => fetchBitjita(`/claims/${id}/research`))) : Promise.resolve(previousPayload(previous, "research", { research: [] })),
-    collectorDue(id, "market", "market", options) ? fetchDomainPayload(previous, "market", { listings: [] }, "Market", () => timedCollectorFetch(metrics, "market", "market listings", () => fetchAllClaimListings(id, { cache: options.force !== true }))) : Promise.resolve(previousPayload(previous, "market", { listings: [] })),
-    collectorDue(id, "production", "crafts", options)
-      ? timedCollectorFetch(metrics, "production", "production crafts", () => settlementProductionCrafts({ claimId: id, members, forceRefresh: true })).catch((error) => {
-        const fallback = previousPayload(previous, "crafts", { craftResults: [] });
-        return { ...fallback, partialError: error instanceof Error ? error.message : String(error) };
-      })
-      : Promise.resolve(previousPayload(previous, "crafts", { craftResults: [] })),
-    collectorDue(id, "players", "players", options) ? fetchDomainPayload(previous, "players", { players: [] }, "Player details", () => timedCollectorFetch(metrics, "players", "player details", () => playerDetailSummaries({ members }))) : Promise.resolve(previousPayload(previous, "players", { players: [] })),
-    collectorDue(id, "inventory", "inventories", options) ? fetchDomainPayload(previous, "inventories", { buildings: [] }, "Inventories", () => timedCollectorFetch(metrics, "inventory", "inventories", () => fetchBitjita(`/claims/${id}/inventories`))) : Promise.resolve(previousPayload(previous, "inventories", { buildings: [] })),
-    collectorDue(id, "inventory", "recruitment", options) ? fetchDomainPayload(previous, "recruitment", { applications: [] }, "Recruitment", () => timedCollectorFetch(metrics, "inventory", "recruitment", () => fetchBitjita(`/claims/${id}/recruitment`))) : Promise.resolve(previousPayload(previous, "recruitment", { applications: [] })),
-    collectorDue(id, "inventory", "layout", options) ? fetchDomainPayload(previous, "layout", {}, "Layout", () => timedCollectorFetch(metrics, "inventory", "layout", () => fetchBitjita(`/claims/${id}/layout`))) : Promise.resolve(previousPayload(previous, "layout", {})),
-    collectorDue(id, "mapCatalog", "skills", options) || collectorDue(id, "professions", "skills", options) ? fetchDomainPayload(previous, "skills", { skills: [] }, "Skills catalogue", () => timedCollectorFetch(metrics, collectorDue(id, "mapCatalog", "skills", options) ? "mapCatalog" : "professions", "skills catalogue", () => fetchBitjita("/skills"))) : Promise.resolve(previousPayload(previous, "skills", { skills: [] })),
-    collectorDue(id, "region", "regionStatus", options) ? fetchDomainPayload(previous, "regionStatus", { regions: [] }, "Region status", () => timedCollectorFetch(metrics, "region", "region status", () => fetchBitjita("/regions/status"))) : Promise.resolve(previousPayload(previous, "regionStatus", { regions: [] })),
-  ]);
-  const productionCrafts = unwrap(productionPayload, "craftResults", []);
-  const contributionEntries = collectorDue(id, "production", "contributions", options)
-    ? Object.entries(await timedCollectorFetch(metrics, "production", "craft contributions", () => craftContributionMap(productionCrafts)))
-    : Object.entries(previousPayload(previous, "contributions", {}));
-  const derivedRegionId = claimRegionIdFromKnownData(claim, regionStatus, previousPayload(previous, "region", { claims: [] }), id);
-  const claimPayloadWithRegion = derivedRegionId && !String(claim?.regionId ?? claim?.region_id ?? claim?.region ?? "").trim()
-    ? (claimPayload?.claim
-      ? { ...claimPayload, claim: { ...claimPayload.claim, regionId: derivedRegionId } }
-      : { ...claimPayload, regionId: derivedRegionId })
-    : claimPayload;
-  const [region, tradeVolume] = await Promise.all([
-    collectorDue(id, "region", "region", options) && derivedRegionId ? fetchDomainPayload(previous, "region", { claims: [] }, "Region claims", () => timedCollectorFetch(metrics, "region", "region claims", () => fetchCachedRegionClaims(derivedRegionId))) : Promise.resolve(previousPayload(previous, "region", { claims: [] })),
-    collectorDue(id, "market", "tradeVolume", options) && derivedRegionId ? fetchDomainPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] }, "Trade volume", () => timedCollectorFetch(metrics, "market", "trade volume", () => fetchBitjita(`/stats/trade-volume?bucket=1%20day&limit=30&regionId=${encodeURIComponent(String(derivedRegionId))}`))) : Promise.resolve(previousPayload(previous, "tradeVolume", { buckets: [], items: [], regions: [] })),
-  ]);
-  // Retained in the snapshot payload for non-destructive rollback only. The
-  // regional collector is retired; global buy orders now load live item-first.
-  const regionalBuyOrders = previousPayload(previous, "regionalBuyOrders", { regions: [], orders: [] });
-  const players = unwrap(playerPayload, "players", Array.isArray(playerPayload) ? playerPayload : []);
-  return {
-    claim: claimPayloadWithRegion,
-    members: membersPayload,
-    citizens: citizensPayload,
-    buildings: buildingsPayload,
-    construction: constructionPayload,
-    research: researchPayload,
-    market: marketPayload,
-    crafts: productionPayload,
-    players,
-    playerDetailDiagnostics: {
-      requested: playerPayload.requested ?? previousPayload(previous, "playerDetailDiagnostics", {}).requested ?? 0,
-      failed: playerPayload.failed ?? previousPayload(previous, "playerDetailDiagnostics", {}).failed ?? 0,
-      failures: playerPayload.failures ?? previousPayload(previous, "playerDetailDiagnostics", {}).failures ?? [],
-    },
-    contributions: Object.fromEntries(contributionEntries),
-    region,
-    regionStatus,
-    tradeVolume,
-    regionalBuyOrders,
-    inventories: inventoriesPayload,
-    recruitment: recruitmentPayload,
-    layout: layoutPayload,
-    skills: skillsPayload,
-  };
-}
-
-function readCurrentClaimState(claimId) {
-  const rowsByDomain = readDomainPayloadMap(claimId);
-  if (!Object.keys(rowsByDomain).length) return null;
-  return domainRowsToAppData(claimId, rowsByDomain);
-}
-
-async function refreshCurrentClaimState(claimId, options = {}) {
-  // Background collectors maintain local history and notification inputs. Page
-  // rendering intentionally still uses the BitJita proxy/live helper path so a
-  // broken cached domain table cannot blank the main UI.
-  const id = String(claimId ?? "").trim();
-  const attemptedAt = new Date().toISOString();
-  const metrics = blankCollectionMetrics();
-  const dueCollectors = Object.entries(collectorPrimaryPayloadDomain)
-    .filter(([key, domain]) => collectorDue(id, key, domain, options))
-    .map(([key]) => key);
-  const domainStartedAt = Object.fromEntries(dueCollectors.map((key) => [key, collectorAttempt(key)]));
-  try {
-    const data = await buildCurrentClaimData(id, { ...options, metrics });
-    const collectedAt = new Date().toISOString();
-    persistDomainPayloads(id, data, attemptedAt, collectedAt, metrics, payloadDomainsForCollectors(dueCollectors));
-    applyCollectionMetrics(metrics, dueCollectors, id, collectedAt);
-    for (const [key, startedAt] of Object.entries(domainStartedAt)) collectorSuccess(key, startedAt);
-    return readCurrentClaimState(id);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    for (const [key, startedAt] of Object.entries(domainStartedAt)) {
-      statements.updateDomainPayloadError.run(attemptedAt, message, attemptedAt, id, key);
-      collectorFailure(key, startedAt, error);
-    }
-    const cached = options.allowStaleOnError ? readCurrentClaimState(id) : null;
-    if (cached) return cached;
-    throw error;
-  }
-}
-
 function collectorStatusPayload() {
-  refreshCollectorStatusSettings();
   const intervalMs = serverRefreshIntervalMs();
-  const claimId = currentClaimId();
   pollStatus.intervalMs = intervalMs;
   const nextRunAt = pollStatus.running ? null : pollStatus.nextRunAt;
   return {
@@ -8629,16 +6044,7 @@ function collectorStatusPayload() {
     lastAttemptAt: pollStatus.lastAttemptAt,
     lastSuccessAt: pollStatus.lastSuccessAt,
     lastError: pollStatus.lastError,
-    lastRunMetrics: pollStatus.lastRunMetrics,
-    collectors: Object.fromEntries(Object.entries(pollStatus.collectors).map(([key, value]) => {
-      const domain = collectorPrimaryPayloadDomain[key];
-      const row = domain ? statements.domainPayload.get(claimId, domain) : null;
-      const lastSuccessAt = value.lastSuccessAt ?? row?.last_success_at ?? row?.collected_at ?? null;
-      const collectorNextRunAt = lastSuccessAt && value.enabled !== false
-        ? new Date(new Date(lastSuccessAt).getTime() + toNumber(value.intervalMs ?? intervalMs)).toISOString()
-        : value.nextRunAt ?? nextRunAt;
-      return [key, { ...value, lastSuccessAt, nextRunAt: collectorNextRunAt }];
-    })),
+    collectors: pollStatus.collectors,
   };
 }
 
@@ -8658,43 +6064,36 @@ function empireMembershipAdminPayload() {
   };
 }
 
-async function runMarketListingsCollector(claimId, currentData, force = false) {
-  if (!sideEffectCollectorDue("marketListings", force)) return;
-  const startedAt = collectorAttempt("marketListings");
-  try {
-    const marketPayload = await fetchAllClaimListings(claimId, { cache: false });
-    await syncMarketListingsForSnapshot(claimId, marketPayload, new Date().toISOString());
-    collectorSuccess("marketListings", startedAt);
-  } catch (error) {
-    collectorFailure("marketListings", startedAt, error);
-    throw error;
-  }
-}
-
-function claimEmpireId(claim) {
-  return String(claim?.empireEntityId ?? claim?.empireId ?? "").trim();
-}
-
-async function runEmpireMembershipCollector(claim, force = false) {
+async function syncEmpireMembershipFromRelaySnapshot({ claimId, currentData, observedAt }) {
   const key = "empireMembership";
-  if (!sideEffectCollectorDue(key, force)) return;
-  const startedAt = collectorAttempt(key, "Fetching current empire roster");
-  const observedAt = new Date().toISOString();
+  const startedAt = collectorAttempt(key, "Applying current Relay empire roster");
   try {
-    const empireId = claimEmpireId(claim);
-    if (!empireId) {
+    const observation = relayEmpireMembershipObservation(currentData, claimId);
+    if (observation.state === "waiting") {
+      setCollectorStatus(key, {
+        enabled: true,
+        running: false,
+        source: "relay-subscription",
+        currentStep: "Waiting for the primary Empire generation",
+      });
+      return;
+    }
+    if (observation.state === "none") {
       const stopped = empireMembershipRepository.stopTracking({ observedAt });
-      setCollectorStatus(key, { rowCount: 0, trackingStopped: stopped.stopped });
+      setCollectorStatus(key, {
+        enabled: true,
+        rowCount: 0,
+        trackingStopped: stopped.stopped,
+        source: "relay-subscription",
+      });
       collectorSuccess(key, startedAt);
       return;
     }
-    const payload = await fetchBitjita(`/empires/${encodeURIComponent(empireId)}`, {
-      timeoutMs: Math.min(8000, BITJITA_FETCH_TIMEOUT_MS),
-      forceRefresh: true,
-    });
-    const roster = normalizeEmpireMembershipRoster(payload, empireId);
+    const roster = observation.roster;
     const result = empireMembershipRepository.syncRoster({ ...roster, observedAt });
     setCollectorStatus(key, {
+      enabled: true,
+      source: "relay-subscription",
       rowCount: result.currentMembers,
       currentEmpireId: roster.empireId,
       currentEmpireName: roster.empireName,
@@ -8707,9 +6106,7 @@ async function runEmpireMembershipCollector(claim, force = false) {
     collectorSuccess(key, startedAt);
   } catch (error) {
     collectorFailure(key, startedAt, error);
-    console.warn(
-      `Empire membership collection failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw error;
   }
 }
 
@@ -8719,67 +6116,91 @@ async function runProductionActivityCollector(claimId, currentData) {
   await deliverProductionNotifications(productionResult.pendingNotifications ?? []);
 }
 
-async function runProductionContributionCollector(claimId, currentData, force = false) {
-  if (!sideEffectCollectorDue("productionContributions", force)) return;
-  const startedAt = collectorAttempt("productionContributions");
-  try {
-    await syncProductionContributionsForSnapshot(claimId, currentData.crafts, currentData.contributions, new Date().toISOString());
-    collectorSuccess("productionContributions", startedAt);
-  } catch (error) {
-    collectorFailure("productionContributions", startedAt, error);
-    throw error;
-  }
+function enrichRelayCraftsForSideEffects(crafts) {
+  const enriched = enrichCraftsForPlanning(
+    crafts,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
+  );
+  if (enriched.warnings.length) throw new Error(`Relay craft catalog input is partial: ${enriched.warnings[0]}`);
+  const catalog = Object.values(enriched.catalog ?? {});
+  return {
+    ...enriched,
+    items: catalog.filter((item) => item.kind !== "cargo" && Number(item.itemType) !== 1),
+    cargos: catalog.filter((item) => item.kind === "cargo" || Number(item.itemType) === 1),
+  };
 }
+
+function relayCraftContributionTargets(craftsPayload) {
+  const catalog = craftOutputCatalog(craftsPayload);
+  const targets = [];
+  const warnings = [];
+  for (const craft of unwrap(craftsPayload, "craftResults", [])) {
+    if (!craft?.entityId || craft.completed === true) continue;
+    try {
+      const craftEntityId = canonicalRelayIdentifier(
+        craft.entityId,
+        "Relay craft contribution target craft entity id",
+      );
+      const xpPerProgress = canonicalF32Decimal(
+        craftExperiencePerProgress(craft),
+        `Relay craft ${craftEntityId} experience per progress`,
+      );
+      const buildingEntityId = canonicalRelayIdentifier(
+        craft.buildingEntityId ?? craft.building_entity_id,
+        `Relay craft ${craftEntityId} building entity id`,
+      );
+      const recipeId = canonicalRelayIdentifier(
+        craft.recipeId ?? craft.recipe_id,
+        `Relay craft ${craftEntityId} recipe id`,
+      );
+      const item = craftContributionOutputItem(craft, catalog);
+      targets.push({
+        craftEntityId,
+        buildingEntityId,
+        recipeId,
+        profession: craftPrimarySkill(craft) || null,
+        craftLabel: String(item.name ?? craft.recipeName ?? craft.craftedItemName ?? "Unknown craft"),
+        structureName: String(craft.buildingName ?? craft.structureName ?? "Unknown structure"),
+        itemTier: item.tier == null
+          ? (craft.tier == null ? null : String(craft.tier))
+          : String(item.tier),
+        xpPerProgress,
+      });
+    } catch (error) {
+      warnings.push(errorMessage(error));
+    }
+  }
+  return { targets, warnings };
+}
+
+async function runScheduledSupplyReport(claimId) {
+  return sendScheduledSupplyReportIfDue(readRelayClaimForSupplyReport(
+    (id, domain) => currentStateRepository.read(id, domain),
+    claimId,
+  ));
+}
+
 async function collectServerSnapshot(force = false) {
-  // Polling is a side-effect loop: it records current settlement state, imports activity/trade
-  // history, and drives Discord notifications. Browser tabs should treat this as
-  // supporting data, not as their exclusive source for live settlement state.
+  // Polling remains only for maintenance and scheduled reports. Committed Relay
+  // generations own all current game data and contribution/market transitions.
   if ((!serverPollingEnabled && !force) || pollStatus.running) return;
   pollStatus.running = true;
   pollStatus.intervalMs = serverRefreshIntervalMs();
   pollStatus.lastAttemptAt = new Date().toISOString();
   try {
     const { claimId } = getSettings();
-    await processDiscordTempBans().catch((error) => console.warn(`Discord temporary ban processing failed: ${error instanceof Error ? error.message : String(error)}`));
-    await refreshCurrentClaimState(claimId, { force });
-    const currentData = domainRowsToAppData(claimId, readDomainPayloadMap(claimId));
-    const claim = currentData.claim?.claim ?? currentData.claim;
-    const members = unwrap(currentData.members, "members", []);
-    const buildings = unwrap(currentData.buildings, "buildings", []);
-    await sendScheduledSupplyReportIfDue(claim).catch((error) => console.warn(`Discord supply report failed: ${error instanceof Error ? error.message : String(error)}`));
-    recordSettlementState({
-      claimId,
-      claim,
-      membersCount: members.length,
-      buildingsCount: buildings.length,
-      market: currentData.market ?? { listings: [] },
+    const reconciliation = await runIndependentReconciliation({
+      runMaintenance: () => processDiscordTempBans(),
+      runSupplyReport: () => runScheduledSupplyReport(claimId),
     });
-    await runEmpireMembershipCollector(claim, force);
-    await runMarketListingsCollector(claimId, currentData, force);
-    await runProductionActivityCollector(claimId, currentData);
-    await runProductionContributionCollector(claimId, currentData, force);
-    const storageStartedAt = collectorAttempt("storageActivity");
-    pollStatus.storageLastAttemptAt = new Date().toISOString();
-    const storageResult = await collectStorageActivity(claimId, currentData.inventories ?? { buildings: [] }, { budget: storageActivityJobBudget });
-    pollStatus.storageRequests = storageResult.requested;
-    pollStatus.storageInserted = storageResult.inserted;
-    pollStatus.storageProcessed = storageResult.processed;
-    pollStatus.storageComplete = storageResult.complete;
-    pollStatus.storageLastError = storageResult.failures.length ? storageResult.failures.join("; ") : null;
-    pollStatus.storageLastSuccessAt = new Date().toISOString();
-    if (storageResult.failures.length) collectorFailure("storageActivity", storageStartedAt, new Error(storageResult.failures.join("; ")));
-    else collectorSuccess("storageActivity", storageStartedAt);
-    const marketStartedAt = collectorAttempt("marketTrades");
-    const marketTradeResult = await importMemberSellTrades(claimId, members, { budget: marketTradeJobBudget });
-    pollStatus.marketTradesProcessed = marketTradeResult.processed;
-    pollStatus.marketTradesInserted = marketTradeResult.inserted;
-    pollStatus.marketTradesComplete = marketTradeResult.complete;
-    collectorSuccess("marketTrades", marketStartedAt);
+    if (reconciliation.maintenanceError) console.warn(`Discord maintenance skipped: ${reconciliation.maintenanceError}`);
+    if (reconciliation.supplyError) console.warn(`Discord supply report skipped: ${reconciliation.supplyError}`);
     pollStatus.lastSuccessAt = new Date().toISOString();
-    pollStatus.lastError = null;
+    pollStatus.lastError = [reconciliation.maintenanceError, reconciliation.supplyError].filter(Boolean).join("; ") || null;
   } catch (error) {
     pollStatus.lastError = error instanceof Error ? error.message : String(error);
-    console.error(`BitCraft settlement collection failed: ${pollStatus.lastError}`);
+    console.error(`Relay reconciliation loop failed: ${pollStatus.lastError}`);
   } finally {
     pollStatus.running = false;
   }
@@ -8791,35 +6212,57 @@ function marketHistory(claimId, limit, owner = "") {
   const args = selectedOwner ? [claimId, selectedOwner] : [claimId];
   const tradeOwnerClause = selectedOwner ? " AND lower(COALESCE(seller_username, '')) = lower(?)" : "";
   const tradeArgs = selectedOwner ? [claimId, selectedOwner] : [claimId];
+  const marketRangeEndDate = new Date();
+  marketRangeEndDate.setUTCHours(0, 0, 0, 0);
+  marketRangeEndDate.setUTCDate(marketRangeEndDate.getUTCDate() + 1);
+  const marketRangeStartDate = new Date(marketRangeEndDate);
+  marketRangeStartDate.setUTCDate(marketRangeStartDate.getUTCDate() - MARKET_DAILY_HISTORY_LIMIT);
+  const marketRangeStart = marketRangeStartDate.toISOString();
+  const marketRangeEnd = marketRangeEndDate.toISOString();
   const eventLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
-  const liveListings = db.prepare(`SELECT listing_key, item_name, quantity, price, total_value, owner, owner_entity_id, item_id, item_type, tier, rarity, side, first_seen, last_seen, raw_json FROM market_listings WHERE claim_id = ? AND status = 'active'${ownerClause}`).all(...args);
+  const currentMarket = currentMarketProjection(claimId);
+  const liveListings = currentMarketListings(currentMarket.data, {
+    owner: selectedOwner,
+    observedAt: currentMarket.observedAt,
+  });
   const events = db.prepare(`SELECT * FROM market_events WHERE claim_id = ?${ownerClause} ORDER BY occurred_at DESC, id DESC LIMIT ?`).all(...args, eventLimit)
     .map((event) => event.event_type === "sold_or_removed" ? { ...event, event_type: "removed_or_cancelled" } : event);
   const sales = db.prepare(`
-    SELECT trade_id AS id, 'sale' AS event_type, order_entity_id AS listing_key, item_name, seller_username AS owner,
+    SELECT trade_id AS id, 'sale' AS event_type, order_entity_id AS listing_key,
+      item_id AS itemId, item_type AS itemType, item_name, seller_username AS owner,
+      purchaser_entity_id AS purchaserEntityId, purchaser_username AS purchaserUsername,
       quantity, unit_price AS price, total_price AS total_value, tier, rarity, occurred_at, raw_json
     FROM market_trades
     WHERE claim_id = ?${tradeOwnerClause}
+      AND occurred_at >= ? AND occurred_at < ?
     ORDER BY occurred_at DESC, trade_id DESC
-    LIMIT ?
-  `).all(...tradeArgs, eventLimit);
+  `).all(...tradeArgs, marketRangeStart, marketRangeEnd);
   const topItems = db.prepare(`
-    SELECT item_name AS itemName, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue,
+    SELECT item_id AS itemId, item_type AS itemType, item_name AS itemName,
+      COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue,
       SUM(total_price) / NULLIF(SUM(quantity), 0) AS avgUnitPrice, MAX(occurred_at) AS lastSoldAt
     FROM market_trades
     WHERE claim_id = ?${tradeOwnerClause}
-    GROUP BY item_name
+    GROUP BY item_type, item_id, item_name
     ORDER BY unitsSold DESC, totalValue DESC
     LIMIT 20
   `).all(...tradeArgs);
-  const daily = db.prepare(`
-    SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue
-    FROM market_trades
-    WHERE claim_id = ?${tradeOwnerClause}
-    GROUP BY day
-    ORDER BY day DESC
-    LIMIT ?
-  `).all(...tradeArgs, MARKET_DAILY_HISTORY_LIMIT).reverse();
+  const rollupDaily = selectedOwner ? null : readOperationalMarketTradeDailyReport(db, {
+    claimId,
+    startDay: marketRangeStart.slice(0, 10),
+    endDay: new Date(new Date(marketRangeEnd).getTime() - 1).toISOString().slice(0, 10),
+    onDiagnostic: (diagnostic) => console.warn(
+      `Operational market history diagnostic: ${diagnostic.code} claim=${diagnostic.claimId} day=${diagnostic.utcDay ?? "n/a"} rows=${diagnostic.rowCount ?? "n/a"}`,
+    ),
+  });
+  const daily = rollupDaily?.historyWarning ? [] : rollupDaily?.daily ?? db.prepare(`
+      SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS salesCount, SUM(quantity) AS unitsSold, SUM(total_price) AS totalValue
+      FROM market_trades
+      WHERE claim_id = ?${tradeOwnerClause}
+      GROUP BY day
+      ORDER BY day DESC
+      LIMIT ?
+    `).all(...tradeArgs, MARKET_DAILY_HISTORY_LIMIT).reverse();
   const lifecycleTotals = db.prepare(`
     SELECT
       SUM(CASE WHEN event_type = 'new_listing' THEN 1 ELSE 0 END) AS newListings,
@@ -8840,130 +6283,360 @@ function marketHistory(claimId, limit, owner = "") {
     ORDER BY occurred_at DESC
     LIMIT 30
   `).all(...args);
-  return { liveListings, events, sales, topItems, daily, totals, pending };
+  return {
+    liveListings,
+    events,
+    sales,
+    topItems,
+    daily,
+    totals,
+    pending,
+    observedSince: rollupDaily?.historyWarning ? null : rollupDaily?.observedSince ?? daily[0]?.day ?? null,
+    historyWarning: rollupDaily?.historyWarning ?? null,
+  };
 }
 
-function marketBuyOrders(claimId, params = {}) {
+function currentBuyOrderBaselineKeys(snapshot, regionId, allowedRegionIds) {
+  const allowed = new Set(allowedRegionIds.map(String));
+  const selected = String(regionId ?? "all").toLowerCase();
+  return new Set((Array.isArray(snapshot?.orders) ? snapshot.orders : [])
+    .filter((order) => String(order?.side ?? "buy").toLowerCase() !== "sell")
+    .filter((order) => {
+      const orderRegion = String(order?.regionId ?? "");
+      return (!allowed.size || allowed.has(orderRegion))
+        && (selected === "all" || orderRegion === selected);
+    })
+    .map((order) => buyOrderBaselineKey(
+      order.regionId,
+      order.itemType,
+      order.itemId,
+    )));
+}
+
+function marketBuyOrders(claimId, params = {}, allowedRegionIds = []) {
   const id = String(claimId ?? "").trim();
-  const requestedRegion = String(params.regionId ?? "").trim();
-  const regionId = requestedRegion && requestedRegion.toLowerCase() !== "all" ? requestedRegion : "";
-  const query = String(params.search ?? params.q ?? "").trim().toLowerCase();
-  const page = Math.max(1, Math.floor(Number(params.page) || 1));
-  const pageSize = [25, 50, 100].includes(Number(params.pageSize)) ? Number(params.pageSize) : 50;
-  const direction = String(params.direction ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
-  const sort = String(params.sort ?? "unitPrice");
-  const where = ["claim_id = ?", "active = 1"];
-  const args = [id];
-  if (regionId) {
-    where.push("region_id = ?");
-    args.push(regionId);
-  }
-  if (query) {
-    const pattern = `%${escapeSqlLike(query)}%`;
-    where.push(`(
-      lower(item_name) LIKE ? ESCAPE '\\'
-      OR lower(COALESCE(buyer_name, '')) LIKE ? ESCAPE '\\'
-      OR lower(COALESCE(market_claim_name, '')) LIKE ? ESCAPE '\\'
-      OR lower(COALESCE(region_name, '')) LIKE ? ESCAPE '\\'
-      OR lower(COALESCE(rarity, '')) LIKE ? ESCAPE '\\'
-    )`);
-    args.push(pattern, pattern, pattern, pattern, pattern);
-  }
-  const rows = db.prepare(`
-    SELECT * FROM market_buy_orders_current
-    WHERE ${where.join(" AND ")}
-    ORDER BY last_seen DESC
-  `).all(...args);
-  const salesByItem = new Map();
-  const salesArgs = [id];
-  const salesRegionClause = regionId ? " AND region_id = ?" : "";
-  if (regionId) salesArgs.push(regionId);
-  for (const row of db.prepare(`
-    SELECT region_id, item_id, item_type, sales_count AS salesCount, units_sold AS unitsSold, total_value AS totalValue, average_unit_price AS averageUnitPrice
-    FROM market_regional_sale_averages_current
-    WHERE claim_id = ? AND window_days = 7${salesRegionClause}
-  `).all(...salesArgs)) {
-    const units = toNumber(row.unitsSold);
-    const total = toNumber(row.totalValue);
-    if (!row.item_id || units <= 0 || toNumber(row.salesCount) < 3) continue;
-    salesByItem.set(`${row.region_id}:${row.item_type ?? 0}:${row.item_id}`, {
-      salesCount: toNumber(row.salesCount),
-      averageUnitPrice: toNumber(row.averageUnitPrice) || total / units,
-    });
-  }
-  const normalized = rows.map((row) => {
-    const raw = safeJson(row.raw_json, {});
-    const sales = salesByItem.get(`${row.region_id}:${row.item_type ?? 0}:${row.item_id}`) ?? null;
-    const averageUnitPrice = sales?.averageUnitPrice ?? null;
-    const premiumPercent = averageUnitPrice && averageUnitPrice > 0 ? ((toNumber(row.unit_price) - averageUnitPrice) / averageUnitPrice) * 100 : null;
-    return {
-      orderKey: row.order_key,
-      regionId: row.region_id,
-      regionName: row.region_name,
-      marketClaimId: row.market_claim_id,
-      marketClaimName: row.market_claim_name,
-      buyerEntityId: row.buyer_entity_id,
-      buyerName: row.buyer_name,
-      itemId: row.item_id,
-      itemType: row.item_type,
-      itemName: row.item_name,
-      tier: row.tier,
-      rarity: row.rarity,
-      rarityStr: row.rarity,
-      iconAssetName: row.icon_asset_name ?? raw.iconAssetName,
-      quantity: toNumber(row.quantity),
-      unitPrice: toNumber(row.unit_price),
-      totalValue: toNumber(row.total_value),
-      storedCoins: toNumber(row.stored_coins),
-      listedAt: row.listed_at,
-      firstSeen: row.first_seen,
-      lastSeen: row.last_seen,
-      averageUnitPrice,
-      salesCount: sales?.salesCount ?? 0,
-      premiumPercent,
-      opportunityEligible: premiumPercent != null && premiumPercent > 0,
-    };
-  });
-  const sorters = {
-    item: (row) => row.itemName ?? "",
-    tier: (row) => toNumber(row.tier),
-    rarity: (row) => row.rarity ?? "",
-    region: (row) => toNumber(row.regionId),
-    buyer: (row) => row.buyerName ?? "",
-    settlement: (row) => row.marketClaimName ?? "",
-    quantity: (row) => toNumber(row.quantity),
-    unitPrice: (row) => toNumber(row.unitPrice),
-    totalValue: (row) => toNumber(row.totalValue),
-    premium: (row) => row.premiumPercent ?? -Infinity,
-    lastSeen: (row) => new Date(row.lastSeen ?? row.listedAt ?? 0).getTime(),
+  const current = currentStateRepository.read(id, "regional-market");
+  const runtimeHealth = gameDataProviderHealth().regionalMarket;
+  let history = {
+    baselines: new Map(),
+    historyObservedSince: null,
+    warnings: [],
   };
-  const sorter = sorters[sort] ?? sorters.unitPrice;
-  normalized.sort((a, b) => {
-    const av = sorter(a);
-    const bv = sorter(b);
-    if (typeof av === "string" || typeof bv === "string") return direction === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
-    return direction === "asc" ? toNumber(av) - toNumber(bv) : toNumber(bv) - toNumber(av);
+  try {
+    history = readBuyOrderSaleBaselines(db, {
+      claimId: id,
+      allowedRegionIds,
+      itemKeys: currentBuyOrderBaselineKeys(
+        current?.data,
+        params.regionId,
+        allowedRegionIds,
+      ),
+    });
+  } catch (error) {
+    history.warnings = [
+      `Confirmed-sale history is temporarily unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    ];
+  }
+  const view = regionalBuyOrdersView(current?.data, {
+    ...params,
+    allowedRegionIds,
+    observedAt: current?.provenance?.receivedAt ?? null,
+    getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    saleBaselines: history.baselines,
+    historyObservedSince: history.historyObservedSince,
   });
-  const opportunities = normalized
-    .filter((row) => row.opportunityEligible)
-    .sort((a, b) => (b.premiumPercent ?? 0) - (a.premiumPercent ?? 0) || toNumber(b.totalValue) - toNumber(a.totalValue))
-    .slice(0, 5);
-  const offset = (page - 1) * pageSize;
-  const total = normalized.length;
-  const unfilteredRegionRows = rows.length;
+  const status = regionalMarketStatus(current, {
+    regionId: params.regionId,
+    allowedRegionIds,
+    runtimeHealth,
+    staleAfterMs: relayRegionalMarketStaleMs,
+  });
   return {
-    rows: normalized.slice(offset, offset + pageSize),
-    opportunities,
-    total,
-    unfilteredRegionRows,
-    page,
-    pageSize,
-    pageCount: Math.max(1, Math.ceil(total / pageSize)),
-    sort,
-    direction,
-    regionId: regionId || "all",
-    sortableFields: Object.keys(sorters),
-    collectorStatus: collectorStatusPayload().collectors.buyOrders,
+    ...view,
+    ...status,
+    warnings: [...new Set([
+      ...(view.warnings ?? []),
+      ...history.warnings,
+      ...(status.warnings ?? []),
+    ])],
+    generatedAt: current?.provenance?.receivedAt ?? null,
+    runtimeHealth,
+  };
+}
+
+function configuredRegionalMarketRegionIds(claimId) {
+  const settings = getSettings();
+  const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+  const claimRegionId = String(
+    claim.regionId ?? claim.region_id ?? claim.region ?? "",
+  ).trim();
+  return parseRegionIds(
+    `${claimRegionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+  );
+}
+
+function currentMapResourceRegions(claimId) {
+  const readiness = relayMapResourceReadiness.catalog();
+  const regionSnapshot = currentStateRepository.read(claimId, "region");
+  if (readiness) return nameMapResourceRegionCatalog({ catalog: readiness, regionSnapshot });
+  const fallback = mapResourceRegionCatalog({
+    providerHealth: gameDataProviderHealth(),
+    regionSnapshot,
+    fallbackRegionIds: configuredRegionalMarketRegionIds(claimId),
+  });
+  return fallback;
+}
+
+async function ensureCurrentMapResourceRegions(claimId) {
+  const settings = getSettings();
+  const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+  const configuredRegionIds = configuredRegionalMarketRegionIds(claimId);
+  const primaryRegionId = [
+    claim.regionId,
+    claim.region_id,
+    claim.region,
+    settings.defaultRegion,
+    configuredRegionIds[0],
+  ].map((value) => String(value ?? "").trim()).find((value) => /^\d+$/.test(value));
+  if (!primaryRegionId) return currentMapResourceRegions(claimId);
+  await relayMapResourceReadiness.ensure({ relayBaseUrl, primaryRegionId, configuredRegionIds });
+  return currentMapResourceRegions(claimId);
+}
+
+function currentMapResourceIds() {
+  return providerCatalogRepository.listDescriptions("resource")
+    .map((resource) => String(resource?.id ?? resource?.resourceId ?? "").trim())
+    .filter((resourceId) => /^\d+$/.test(resourceId));
+}
+
+function mapResourceAdmissionResponse(error, scope = null) {
+  if (!(error instanceof MapResourceAdmissionError) && Number(error?.statusCode) !== 429) return null;
+  const retryAfterSeconds = Math.max(1, Number(error?.retryAfterSeconds) || 1);
+  const reason = errorMessage(error);
+  return {
+    statusCode: 429,
+    headers: { "Retry-After": String(retryAfterSeconds) },
+    payload: scope ? {
+      provider: "relay",
+      generation: "0",
+      generatedAt: null,
+      freshness: "loading",
+      warnings: [reason],
+      partition: { regionId: scope.regionId, resourceId: scope.resourceId },
+      resources: [],
+      nextCursor: null,
+      complete: true,
+      retryAfterSeconds,
+      layerAvailability: { available: false, status: "loading", pending: true, reason },
+    } : { error: reason, pending: true, retryAfterSeconds },
+  };
+}
+
+function regionalMarketReadScope(claimId) {
+  const current = currentStateRepository.read(claimId, "regional-market");
+  const persistedActiveRegionIds = Array.isArray(current?.data?.activeRegionIds)
+    ? current.data.activeRegionIds.map(String)
+    : [];
+  const runtimeActiveRegionIds = relayRegionalMarketRuntime.health().activeRegionIds;
+  const configuredActiveRegionIds = configuredRegionalMarketRegionIds(claimId);
+  const allowedRegionIds = readyMarketRegionIds(gameDataProviderHealth(), [
+    ...runtimeActiveRegionIds,
+    ...persistedActiveRegionIds,
+    ...configuredActiveRegionIds,
+  ]);
+  return { current, allowedRegionIds };
+}
+
+function discordPriceRegionId(claimId, requestedRegion) {
+  const { allowedRegionIds } = regionalMarketReadScope(claimId);
+  const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+  const fallback = [
+    claim.regionId,
+    claim.region_id,
+    getSettings().defaultRegion,
+    allowedRegionIds[0],
+  ].map((value) => String(value ?? "").trim()).find((value) => /^\d+$/.test(value)) ?? "";
+  const regionId = String(requestedRegion ?? fallback).trim();
+  if (!/^\d+$/.test(regionId)) throw new Error("A numeric active region is required.");
+  if (allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+    throw new Error(`Region ${regionId} is outside the configured active-region scope.`);
+  }
+  return regionId;
+}
+
+function regionalMarketRegionRows(claimId) {
+  const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+  const data = current?.data && typeof current.data === "object" && !Array.isArray(current.data)
+    ? current.data
+    : {};
+  const metadata = new Map(
+    (Array.isArray(data.regions) ? data.regions : [])
+      .map((region) => [String(region?.regionId ?? ""), region])
+      .filter(([regionId]) => /^\d+$/.test(regionId)),
+  );
+  const names = new Map();
+  for (const order of Array.isArray(data.orders) ? data.orders : []) {
+    const regionId = String(order?.regionId ?? "");
+    const regionName = String(order?.regionName ?? "").trim();
+    if (/^\d+$/.test(regionId) && regionName && !names.has(regionId)) {
+      names.set(regionId, regionName);
+    }
+  }
+  return {
+    current,
+    regions: allowedRegionIds.map((regionId) => {
+      const status = regionalMarketStatus(current, {
+        regionId,
+        allowedRegionIds,
+        runtimeHealth: gameDataProviderHealth().regionalMarket,
+        staleAfterMs: relayRegionalMarketStaleMs,
+      });
+      return {
+        regionId,
+        regionName: names.get(regionId) ?? `Region ${regionId}`,
+        receivedAt: metadata.get(regionId)?.receivedAt ?? null,
+        freshness: status.freshness,
+        ageMs: status.ageMs,
+        warnings: status.warnings,
+      };
+    }),
+  };
+}
+
+function regionalMarketResponseStatus(current, regionId, allowedRegionIds) {
+  const orderStatus = regionalMarketStatus(current, {
+    regionId,
+    allowedRegionIds,
+    runtimeHealth: gameDataProviderHealth().regionalMarket,
+    staleAfterMs: relayRegionalMarketStaleMs,
+  });
+  return combinedMarketStatus(
+    orderStatus,
+    providerCatalogRepository.getSourceState(),
+    {
+      runtimeHealth: gameDataProviderHealth().globalCatalog,
+      staleAfterMs: relayGlobalCatalogStaleMs,
+    },
+  );
+}
+
+function favoriteQuoteRequestBody(value) {
+  const body = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const regionId = String(body.regionId ?? "all").trim().toLowerCase() || "all";
+  if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+    throw Object.assign(new Error("Region id must be numeric or all"), { statusCode: 400 });
+  }
+  if (!Array.isArray(body.items)) {
+    throw Object.assign(new Error("Items must be an array"), { statusCode: 400 });
+  }
+  if (body.items.length > 20) {
+    throw Object.assign(new Error("At most 20 favorite items may be requested"), { statusCode: 400 });
+  }
+  const seen = new Set();
+  const items = body.items.map((rawItem) => {
+    const item = rawItem && typeof rawItem === "object" && !Array.isArray(rawItem) ? rawItem : {};
+    const itemType = String(item.itemType ?? "").trim().toLowerCase();
+    const itemId = String(item.itemId ?? "").trim();
+    if ((itemType !== "item" && itemType !== "cargo") || !/^\d+$/.test(itemId)) {
+      throw Object.assign(new Error("Each favorite must have itemType item or cargo and a decimal itemId"), { statusCode: 400 });
+    }
+    const key = `${itemType}:${itemId}`;
+    if (seen.has(key)) {
+      throw Object.assign(new Error("Favorite typed identities must be unique"), { statusCode: 400 });
+    }
+    seen.add(key);
+    return { itemType, itemId };
+  });
+  return { regionId, items };
+}
+
+function regionalMarketObservedTrades(claimId, regionId, allowedRegionIds, options = {}) {
+  const allowed = new Set(allowedRegionIds.map(String));
+  const requestedItemId = String(options.itemId ?? "").trim();
+  const requestedItemType = String(options.itemType ?? "").trim().toLowerCase();
+  const itemScoped = /^\d+$/.test(requestedItemId)
+    && (requestedItemType === "item" || requestedItemType === "cargo");
+  const regionScope = regionId !== "all" ? [regionId] : [...allowed];
+  const regionClause = regionScope.length
+    ? ` AND region_id IN (${regionScope.map(() => "?").join(", ")})`
+    : "";
+  const query = itemScoped ? `
+    SELECT trade_id, region_id, item_id, item_type, quantity, unit_price, total_price,
+      occurred_at, raw_json
+    FROM market_trades
+    WHERE claim_id = ?${regionClause} AND item_id = ? AND item_type = ?
+    ORDER BY occurred_at DESC, trade_id DESC
+    LIMIT 5000
+  ` : `
+    SELECT trade_id, region_id, item_id, item_type, quantity, unit_price, total_price,
+      occurred_at, raw_json
+    FROM market_trades
+    WHERE claim_id = ?${regionClause}
+    ORDER BY occurred_at DESC, trade_id DESC
+    LIMIT 5000
+  `;
+  const queryArgs = itemScoped
+    ? [claimId, ...regionScope, requestedItemId, requestedItemType]
+    : [claimId, ...regionScope];
+  return db.prepare(query).all(...queryArgs).flatMap((row) => {
+    const raw = safeJson(row.raw_json, {});
+    const listing = raw?.listing && typeof raw.listing === "object"
+      ? raw.listing
+      : {};
+    const observedRegionId = String(row.region_id ?? "").trim();
+    if (!/^\d+$/.test(observedRegionId)) return [];
+    if (allowed.size && !allowed.has(observedRegionId)) return [];
+    if (regionId !== "all" && observedRegionId !== regionId) return [];
+    return [{
+      tradeId: String(row.trade_id),
+      regionId: observedRegionId,
+      claimEntityId: String(listing.claimEntityId ?? ""),
+      itemId: String(row.item_id),
+      itemType: String(row.item_type) === "cargo" ? "cargo" : "item",
+      quantity: String(row.quantity),
+      unitPrice: String(row.unit_price),
+      totalPrice: String(row.total_price),
+      occurredAt: String(row.occurred_at),
+    }];
+  });
+}
+
+function globalCatalogReadStatus() {
+  const source = providerCatalogRepository.getSourceState();
+  const runtime = gameDataProviderHealth().globalCatalog;
+  return {
+    ...globalCatalogStatus(source, {
+      runtimeHealth: runtime,
+      runtimeExpected: processRoleConfig.runBackgroundJobs
+        && !isTestRuntime
+        && process.env.ENABLE_RELAY_PROVIDER !== "false"
+        && process.env.ENABLE_RELAY_GLOBAL_CATALOG !== "false",
+      staleAfterMs: relayGlobalCatalogStaleMs,
+    }),
+    source,
+  };
+}
+
+function currentGameDataGenerationEvent(claimId, domains) {
+  const snapshots = generationSourceDomains(domains)
+    .map((domain) => [domain, currentStateRepository.read(claimId, domain)])
+    .filter(([, snapshot]) => snapshot);
+  const availableDomains = new Set(snapshots.map(([domain]) => domain));
+  return {
+    generation: snapshots.reduce(
+      (generation, [, snapshot]) => Math.max(generation, Number(snapshot.generation ?? 0)),
+      0,
+    ),
+    generatedAt: snapshots.reduce((latest, [, snapshot]) => {
+      const receivedAt = String(snapshot.provenance?.receivedAt ?? "");
+      return receivedAt > latest ? receivedAt : latest;
+    }, "") || null,
+    changedDomains: domains.filter((domain) => (
+      availableDomains.has(domain)
+      || (domain === "inventories" && availableDomains.has("inventory-banks"))
+    )),
   };
 }
 
@@ -9108,169 +6781,58 @@ function activityLeaderboard(claimId) {
 }
 
 function marketLeaderboard(claimId) {
-  const activeListings = db.prepare(`
-    SELECT owner, owner_entity_id, quantity, price, total_value, last_seen
-    FROM market_listings
-    WHERE claim_id = ? AND status = 'active'
-  `).all(claimId);
+  const historyStart = new Date(Date.now() - 365 * 86_400_000).toISOString();
+  const historyEnd = new Date().toISOString();
   const trades = db.prepare(`
     SELECT seller_username, seller_entity_id, quantity, total_price, occurred_at
     FROM market_trades
-    WHERE claim_id = ?
+    WHERE claim_id = ? AND occurred_at >= ? AND occurred_at < ?
     ORDER BY occurred_at DESC, trade_id DESC
-  `).all(claimId);
-  const members = new Map();
-  const getMember = (name, id = "") => {
-    const memberName = normalizedMemberName(name);
-    if (!memberName) return null;
-    const key = String(id || memberName).toLowerCase();
-    const current = members.get(key) ?? {
-      memberId: id || null,
-      name: memberName,
-      activeListings: 0,
-      activeListingValue: 0,
-      confirmedSales: 0,
-      confirmedSaleValue: 0,
-      unitsSold: 0,
-      lastSaleAt: null,
-    };
-    if (!current.memberId && id) current.memberId = id;
-    members.set(key, current);
-    return current;
-  };
-  for (const listing of activeListings) {
-    const member = getMember(listing.owner, listing.owner_entity_id);
-    if (!member) continue;
-    member.activeListings += 1;
-    member.activeListingValue += toNumber(listing.total_value) || toNumber(listing.quantity) * toNumber(listing.price);
-  }
-  for (const trade of trades) {
-    const member = getMember(trade.seller_username, trade.seller_entity_id);
-    if (!member) continue;
-    member.confirmedSales += 1;
-    member.confirmedSaleValue += toNumber(trade.total_price);
-    member.unitsSold += toNumber(trade.quantity);
-    const occurredAt = trade.occurred_at ?? "";
-    if (!member.lastSaleAt || String(occurredAt) > member.lastSaleAt) member.lastSaleAt = occurredAt;
-  }
-  const memberList = Array.from(members.values())
-    .sort((a, b) => b.confirmedSaleValue - a.confirmedSaleValue || b.activeListingValue - a.activeListingValue || String(a.name).localeCompare(String(b.name)));
-  return {
-    summary: {
-      memberCount: memberList.length,
-      activeListings: activeListings.length,
-      activeListingValue: memberList.reduce((sum, row) => sum + toNumber(row.activeListingValue), 0),
-      confirmedSales: trades.length,
-      confirmedSaleValue: memberList.reduce((sum, row) => sum + toNumber(row.confirmedSaleValue), 0),
-      unitsSold: memberList.reduce((sum, row) => sum + toNumber(row.unitsSold), 0),
-      lastSaleAt: trades[0]?.occurred_at ?? null,
-    },
-    members: memberList,
-  };
+  `).all(claimId, historyStart, historyEnd);
+  const currentMarket = currentMarketProjection(claimId);
+  return marketLeaderboardFromCurrent({
+    snapshot: currentMarket.data,
+    trades,
+    observedAt: currentMarket.observedAt,
+  });
 }
 
 function contributionLeaderboard(claimId) {
-  const rows = db.prepare(`
+  const storedRows = db.prepare(`
     SELECT *
     FROM production_contributions
     WHERE claim_id = ?
     ORDER BY last_contributed_at DESC, updated_at DESC
     LIMIT 5000
   `).all(claimId);
-  const contributors = new Map();
-  const professions = new Map();
-  for (const row of rows) {
-    const contributorKey = String(row.contributor_entity_id || row.contributor_name);
-    const profession = String(row.profession || "Unknown");
-    const contributor = contributors.get(contributorKey) ?? {
-      contributorId: row.contributor_entity_id,
-      name: row.contributor_name,
-      totalProgress: 0,
-      totalXp: 0,
-      contributionCount: 0,
-      craftCount: 0,
-      lastContributedAt: null,
-      professions: {},
-    };
-    contributor.totalProgress += toNumber(row.contributed_progress);
-    contributor.totalXp += toNumber(row.contributed_xp);
-    contributor.contributionCount += toNumber(row.contribution_count);
-    contributor.craftCount += 1;
-    if (!contributor.lastContributedAt || String(row.last_contributed_at ?? row.updated_at) > contributor.lastContributedAt) contributor.lastContributedAt = row.last_contributed_at ?? row.updated_at;
-    contributor.professions[profession] = {
-      progress: toNumber(contributor.professions[profession]?.progress) + toNumber(row.contributed_progress),
-      xp: toNumber(contributor.professions[profession]?.xp) + toNumber(row.contributed_xp),
-      crafts: toNumber(contributor.professions[profession]?.crafts) + 1,
-    };
-    contributors.set(contributorKey, contributor);
-
-    const professionRow = professions.get(profession) ?? {
-      profession,
-      totalProgress: 0,
-      totalXp: 0,
-      craftCount: 0,
-      contributorCount: new Set(),
-      topContributor: "",
-      topContributorProgress: 0,
-      contributors: new Map(),
-    };
-    professionRow.totalProgress += toNumber(row.contributed_progress);
-    professionRow.totalXp += toNumber(row.contributed_xp);
-    professionRow.craftCount += 1;
-    professionRow.contributorCount.add(contributorKey);
-    const professionContributor = toNumber(professionRow.contributors.get(contributorKey)?.progress) + toNumber(row.contributed_progress);
-    professionRow.contributors.set(contributorKey, { name: row.contributor_name, progress: professionContributor });
-    if (professionContributor > professionRow.topContributorProgress) {
-      professionRow.topContributor = row.contributor_name;
-      professionRow.topContributorProgress = professionContributor;
-    }
-    professions.set(profession, professionRow);
-  }
-  const contributorList = Array.from(contributors.values())
-    .map((entry) => ({ ...entry, professions: Object.entries(entry.professions).map(([profession, values]) => ({ profession, ...values })).sort((a, b) => b.progress - a.progress) }))
-    .sort((a, b) => b.totalProgress - a.totalProgress);
-  const professionList = Array.from(professions.values())
-    .map((entry) => ({
-      profession: entry.profession,
-      totalProgress: entry.totalProgress,
-      totalXp: entry.totalXp,
-      craftCount: entry.craftCount,
-      contributorCount: entry.contributorCount.size,
-      topContributor: entry.topContributor,
-      topContributorProgress: entry.topContributorProgress,
-    }))
-    .sort((a, b) => b.totalProgress - a.totalProgress);
-  const contribution = {
-    summary: {
-      contributorCount: contributorList.length,
-      professionCount: professionList.length,
-      totalProgress: contributorList.reduce((sum, row) => sum + row.totalProgress, 0),
-      totalXp: contributorList.reduce((sum, row) => sum + row.totalXp, 0),
-      recordedCrafts: new Set(rows.map((row) => row.craft_entity_id)).size,
-      lastContributedAt: rows[0]?.last_contributed_at ?? null,
-    },
-    contributors: contributorList.slice(0, 100),
-    professions: professionList,
-    recent: rows.slice(0, 50).map((row) => ({
-      contributorId: row.contributor_entity_id,
-      contributorName: row.contributor_name,
-      profession: row.profession,
-      craftLabel: row.craft_label,
-      structureName: row.structure_name,
-      itemTier: row.item_tier,
-      totalProgress: toNumber(row.contributed_progress),
-      totalXp: toNumber(row.contributed_xp),
-      contributionCount: toNumber(row.contribution_count),
-      firstContributedAt: row.first_contributed_at,
-      lastContributedAt: row.last_contributed_at,
-    })),
-  };
+  const contribution = projectCraftContributionLeaderboard(storedRows);
   return {
     ...contribution,
     contribution,
     market: marketLeaderboard(claimId),
     activity: activityLeaderboard(claimId),
   };
+}
+
+function currentCraftContributions(claimId) {
+  const storedRows = db.prepare(`
+    SELECT
+      craft_entity_id,
+      contributor_entity_id,
+      contributor_name,
+      attribution_confidence,
+      contributed_progress,
+      contributed_xp,
+      contribution_count,
+      first_contributed_at,
+      last_contributed_at
+    FROM production_contributions
+    WHERE claim_id = ?
+    ORDER BY last_contributed_at DESC, contributor_name
+  `).all(claimId);
+  return projectCraftContributionEnvelope(
+    partitionCraftContributionRows(storedRows).playerRows,
+  );
 }
 
 function dashboardHistory(claimId) {
@@ -9330,7 +6892,6 @@ function safeJson(value, fallback = {}) {
 
 function databaseStatus() {
   const countTables = {
-    market_listings: "market_listings",
     market_events: "market_events",
     market_trades: "market_trades",
     activity_events: "activity_events",
@@ -9342,47 +6903,116 @@ function databaseStatus() {
   ]));
   const discordLastDelivery = safeJson(statements.getSetting.get("discord_last_delivery_json")?.value, { status: "none" });
   const discordOutboxCounts = Object.fromEntries(statements.discordNotificationOutboxCounts.all().map((row) => [row.status, toNumber(row.count)]));
+  const discordDuplicateRisk = statements.discordNotificationOutboxDuplicateRisk.get(new Date().toISOString());
   const discordDeliveryLog = statements.recentDiscordDeliveries.all(80).map((row) => ({
     ...row,
     metadata: safeJson(row.metadata_json, {}),
     response: row.response_json ? safeJson(row.response_json, {}) : null,
   }));
+  const retentionSettings = operationalHistoryRetentionSettings();
+  const operationalHistory = operationalHistoryRetentionPreview(db, {
+    ...retentionSettings,
+    databasePath,
+  });
   return {
     version: appVersion,
     environment: isProduction ? "production" : "development",
     storageLabel: isProduction ? "Production persistent storage" : "Local development storage",
     databaseSize: existsSync(databasePath) ? statSync(databasePath).size : 0,
+    walSize: existsSync(`${databasePath}-wal`) ? statSync(`${databasePath}-wal`).size : 0,
     counts,
+    operationalHistory,
     polling: collectorStatusPayload(),
-    discord: { lastDelivery: discordLastDelivery, deliveryLog: discordDeliveryLog, outbox: discordOutboxCounts, gateway: { ...discordGatewayStatus } },
+    gameDataProvider: gameDataProviderHealth(),
+    discord: {
+      mode: configuredDiscordDeliveryMode,
+      lastDelivery: discordLastDelivery,
+      deliveryLog: discordDeliveryLog,
+      outbox: discordOutboxCounts,
+      deliveryGuarantee: {
+        semantics: "at-least-once",
+        unknownAcknowledgementWindow: true,
+        canonicalUnknownOutcomeSuppression: true,
+        requestTimeoutMs: discordRequestTimeoutMs,
+        completionWriteMarginMs: discordOutboxCompletionWriteMarginMs,
+        leaseMs: discordNotificationLeaseMs,
+        potentialDuplicateRows: toNumber(discordDuplicateRisk?.potential_duplicate_rows),
+        activeLeases: toNumber(discordDuplicateRisk?.active_leases),
+        expiredLeaseRows: toNumber(discordDuplicateRisk?.expired_lease_rows),
+        unknownOutcomeRows: toNumber(discordDuplicateRisk?.unknown_outcome_rows),
+      },
+      gateway: { ...discordGatewayStatus },
+    },
     settings: getSettings(),
   };
 }
 
 async function apiDiagnostics() {
   const { claimId } = getSettings();
+  const relayHttp = new RelayHttpClient({ baseUrl: relayBaseUrl });
   const checks = [
-    ["Settlement", `/claims/${claimId}`],
-    ["Members", `/claims/${claimId}/members`],
-    ["Structures", `/claims/${claimId}/buildings`],
-    ["Inventory", `/claims/${claimId}/inventories`],
-    ["Market", `/claims/${claimId}/market/listings?limit=5`],
-    ["Production", `/crafts?claimEntityId=${claimId}&completed=false`],
+    ["Relay health", "/health", () => relayHttp.health()],
+    ["Relay cache", "/cache-health", () => relayHttp.cacheHealth()],
+    ["Settlement", `/claim/${claimId}`, () => relayHttp.claim(claimId)],
+    ["Members", `/claim/${claimId}/members`, () => relayHttp.members(claimId)],
+    ["Inventory", `/claim/${claimId}/inventory`, () => relayHttp.inventory(claimId)],
+    ["Active production", `/claim/${claimId}/crafts?completed=false`, () => relayHttp.crafts(claimId, false)],
+    ["Completed production", `/claim/${claimId}/crafts?completed=true`, () => relayHttp.crafts(claimId, true)],
   ];
-  const timedCheck = async (label, endpoint) => {
+  const timedCheck = async (label, endpoint, load) => {
     const started = Date.now();
     try {
-      const value = await fetchBitjita(endpoint);
+      const value = await load();
       return { result: { label, endpoint, ok: true, durationMs: Date.now() - started, checkedAt: new Date().toISOString() }, value };
     } catch (error) {
       return { result: { label, endpoint, ok: false, durationMs: Date.now() - started, checkedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) }, value: null };
     }
   };
-  const core = await Promise.all(checks.map(([label, endpoint]) => timedCheck(label, endpoint)));
+  const core = await Promise.all(checks.map(([label, endpoint, load]) => timedCheck(label, endpoint, load)));
   const inventories = core.find((check) => check.result.label === "Inventory")?.value;
-  const storageBuildings = unwrap(inventories, "buildings", []).filter((building) => building.entityId && !isDeployableStorage(building));
-  const storage = await mapWithConcurrency(storageBuildings, 4, (building) => timedCheck(`Storage: ${storageContainerName(building)}`, `/logs/storage?buildingEntityId=${building.entityId}&limit=40`));
-  return [...core, ...storage].map((check) => check.result);
+  let storageBuildings = [];
+  let storageRegionId = String(
+    currentStateRepository.read(claimId, "claim")?.data?.regionId
+      ?? getSettings().defaultRegion
+      ?? "",
+  );
+  try {
+    const normalizedInventory = normalizeClaimInventory(inventories);
+    storageRegionId = normalizedInventory.claim.regionId;
+    storageBuildings = normalizedInventory.buildings
+      .filter((building) => building.entityId && !isDeployableStorage(building))
+      .slice(0, 25);
+  } catch {
+    // The failed inventory check already contains the actionable error.
+  }
+  const storage = await mapWithConcurrency(storageBuildings, 4, (building) => {
+    const endpoint = `/storage-logs?storageId=${building.entityId}&region=${storageRegionId}&limit=100`;
+    return timedCheck(
+      `Storage: ${storageContainerName(building)}`,
+      endpoint,
+      () => relayHttp.storageLogs({
+        storageId: building.entityId,
+        regionId: storageRegionId,
+        limit: 100,
+      }),
+    );
+  });
+  const unclassifiedContributionRecords = Number(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM production_contributions
+    WHERE claim_id = ? AND (profession IS NULL OR trim(profession) = '' OR lower(trim(profession)) = 'unknown')
+  `).get(claimId)?.count ?? 0);
+  return [
+    ...[...core, ...storage].map((check) => check.result),
+    {
+      label: "Contribution classification",
+      endpoint: "local durable contribution records",
+      ok: true,
+      durationMs: 0,
+      checkedAt: new Date().toISOString(),
+      unclassifiedRecordCount: unclassifiedContributionRecords,
+    },
+  ];
 }
 
 function csvValue(value) {
@@ -9443,12 +7073,65 @@ function backupNames() {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : [];
 }
 
+function sha256File(filePath) {
+  const hash = createHash("sha256");
+  const descriptor = openSync(filePath, "r");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    for (;;) {
+      const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+      if (!bytesRead) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+  return hash.digest("hex");
+}
+
 function createBackup() {
   const name = `bitcraft-local-${new Date().toISOString().replaceAll(":", "-").replace(/\.\d{3}Z$/, "Z")}.sqlite`;
   const filePath = path.join(backupDir, name);
   db.exec(`VACUUM INTO '${filePath.replaceAll("'", "''")}'`);
   const info = statSync(filePath);
-  return { name, size: info.size, createdAt: info.mtime.toISOString() };
+  const createdAt = info.mtime.toISOString();
+  const databaseSha256 = sha256File(filePath);
+  const manifest = JSON.stringify({ name, size: info.size, createdAt, databaseSha256 });
+  const manifestSha256 = createHash("sha256").update(manifest).digest("hex");
+  const manifestPath = `${filePath}.manifest.json`;
+  writeFileSync(manifestPath, manifest, { encoding: "utf8", flag: "wx" });
+  const restoredPath = `${filePath}.restore-verification-${process.pid}-${randomBytes(8).toString("hex")}`;
+  let integrityCheck = "unavailable";
+  let restoredDatabaseSha256 = "";
+  try {
+    copyFileSync(filePath, restoredPath);
+    restoredDatabaseSha256 = sha256File(restoredPath);
+    const restored = new DatabaseSync(restoredPath, { readOnly: true });
+    try {
+      integrityCheck = String(restored.prepare("PRAGMA integrity_check").get()?.integrity_check ?? "unavailable");
+    } finally {
+      restored.close();
+    }
+  } finally {
+    if (existsSync(restoredPath)) unlinkSync(restoredPath);
+  }
+  if (integrityCheck !== "ok") throw new Error(`Backup temporary restore integrity_check failed: ${integrityCheck}`);
+  const verifiedAt = new Date().toISOString();
+  const verification = recordOperationalHistoryBackupVerification(db, {
+    backupName: name,
+    backupCreatedAt: createdAt,
+    verifiedAt,
+    manifestSha256,
+    databaseSha256,
+    backupPath: filePath,
+    manifestPath,
+    restoredDatabaseSha256,
+    restoredManifestSha256: manifestSha256,
+    restoredTemporaryDatabase: true,
+    integrityCheck,
+    backupBytes: info.size,
+  });
+  return { name, size: info.size, createdAt, verification };
 }
 
 
@@ -9463,7 +7146,7 @@ const discordCommands = [
   },
   {
     name: "price",
-    description: "Look up recent BitJita sale pricing for an item.",
+    description: "Look up current Relay market orders for an item.",
     options: [
       { type: 3, name: "item", description: "Item name", required: true, autocomplete: true },
       { type: 4, name: "region", description: "Region number, defaults to settlement region", required: false },
@@ -9593,7 +7276,7 @@ function scheduleDiscordGatewayReconnect(delayMs = 15000) {
 }
 
 function startDiscordGateway() {
-  if (!discordStartupEnabled) {
+  if (!discordStartupEnabled || configuredDiscordDeliveryMode !== "live") {
     stopDiscordGateway();
     discordGatewayStatus.lastError = null;
     return;
@@ -9670,6 +7353,12 @@ async function handleDiscordInteraction(req) {
   }
   const interaction = JSON.parse(rawBody.toString("utf8") || "{}");
   if (interaction.type === 1) return { status: 200, body: { type: 1 } };
+  if (!settings.guildId || String(interaction.guild_id ?? "") !== settings.guildId) {
+    return {
+      status: 200,
+      body: discordResponse("This interaction is only available in the configured Timbersteel Discord server.", { ephemeral: true }),
+    };
+  }
   if (interaction.type === 4) return { status: 200, body: await discordAutocomplete(interaction) };
   if (interaction.type === 3) return { status: 200, body: await handleDiscordComponent(interaction) };
   if (interaction.type !== 2) return { status: 200, body: discordResponse("Unsupported Discord interaction.", { ephemeral: true }) };
@@ -9691,9 +7380,29 @@ async function discordAutocomplete(interaction) {
   const query = String(focused.value ?? "").trim();
   if (query.length < 2) return { type: 8, data: { choices: [] } };
   try {
-    const payload = await fetchBitjita(`/market?search=${encodeURIComponent(query)}`);
-    const entries = unwrap(payload, "items", []).slice(0, 20);
-    return { type: 8, data: { choices: entries.map((item) => ({ name: String(item.name ?? item.itemName ?? "Item").slice(0, 100), value: String(item.name ?? item.itemName ?? query).slice(0, 100) })) } };
+    const { claimId } = getSettings();
+    const regionId = discordPriceRegionId(claimId, discordOption(interaction, "region"));
+    const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+    const entries = regionalMarketCatalogView(
+      current?.data,
+      providerCatalogRepository.findEntities(query),
+      {
+        query,
+        regionId,
+        allowedRegionIds,
+        availableOnly: true,
+        limit: 20,
+      },
+    ).items;
+    return {
+      type: 8,
+      data: {
+        choices: entries.map((item) => ({
+          name: `${item.name} · ${item.itemType === "cargo" ? "Cargo" : "Item"}`.slice(0, 100),
+          value: `${item.itemType}:${item.itemId}`.slice(0, 100),
+        })),
+      },
+    };
   } catch {
     return { type: 8, data: { choices: [] } };
   }
@@ -9705,10 +7414,10 @@ function discordHelpCommand() {
     { name: "/supplies", value: "Current settlement supplies, upkeep and runway.", inline: false },
     { name: "/online", value: "Shows which settlement members are currently online.", inline: false },
     { name: "/crafts", value: "Lists current settlement crafts. Optional skill filter supported.", inline: false },
-    { name: "/price", value: "Looks up recent BitJita sale prices for an item.", inline: false },
+    { name: "/price", value: "Shows current Relay sell and buy orders for an item.", inline: false },
     { name: "/craftwatch", value: "Shows and clears your profession notification roles.", inline: false },
     { name: "/craft-plan", value: "Shows Craft Planner progress. Choose a profession for a focused report.", inline: false },
-    { name: "Links", value: `[App](${appUrl}) | [Feature requests](https://github.com/Red463/bitcraft-claim-monitor/issues)`, inline: false },
+    { name: "Links", value: `[App](${appUrl}) | [Feature requests](https://github.com/Red463/bitcraft-claim-monitor-relay/issues)`, inline: false },
   ], 0x5865f2);
 }
 
@@ -9724,6 +7433,7 @@ async function discordCraftPlanCommand(interaction) {
 async function deliverDeferredCraftPlanInteraction(interaction, profession = "") {
   const startedAt = Date.now();
   try {
+    assertDiscordNetworkEnabled();
     const report = await craftPlanDiscordReport(profession);
     const payload = buildCraftPlanDiscordEmbed(report);
     const response = await editDiscordInteractionOriginal({
@@ -10006,36 +7716,41 @@ async function discordCraftWatchCommand(interaction) {
 
 async function discordSuppliesCommand() {
   const { claimId } = getSettings();
-  const payload = await fetchBitjita(`/claims/${claimId}`);
-  const claim = payload.claim ?? payload;
+  const claim = readRelayClaimForSupplyReport(
+    (id, domain) => currentStateRepository.read(id, domain),
+    claimId,
+  );
   return discordSupplyEmbed(claim);
 }
 
 async function discordOnlineCommand() {
   const { claimId } = getSettings();
-  const membersPayload = await fetchBitjita(`/claims/${claimId}/members`);
-  const members = unwrap(membersPayload, "members", []);
-  const details = await mapWithConcurrency(members.slice(0, 80), 8, async (member) => {
-    const playerId = String(member.playerEntityId ?? member.entityId ?? "");
-    if (!playerId) return null;
-    try {
-      const payload = await fetchBitjita(`/players/${playerId}`);
-      const player = payload.player ?? payload;
-      return { name: player.username ?? member.userName ?? member.username ?? playerId, online: Boolean(player.signedIn ?? player.online) };
-    } catch {
-      return { name: member.userName ?? member.username ?? playerId, online: false };
-    }
-  });
-  const online = details.filter((entry) => entry?.online);
-  return discordCommandEmbed("Members Online", online.length ? `**${online.length}/${members.length}** settlement members are online.` : `No settlement members appear online right now.`, [
+  const tracked = readRelayOnlineMembers(
+    (id, domain) => currentStateRepository.read(id, domain),
+    claimId,
+  );
+  const online = tracked
+    .filter(({ player }) => player.signedIn === true)
+    .map(({ member, player }) => ({
+      name: player.username ?? member.userName ?? member.username ?? player.playerEntityId,
+    }));
+  return discordCommandEmbed("Members Online", online.length ? `**${online.length}/${tracked.length}** settlement members are online.` : `No settlement members appear online right now.`, [
     { name: "Online", value: online.length ? online.map((entry) => entry.name).join(", ").slice(0, 1024) : "None", inline: false },
-    { name: "Tracked members", value: String(members.length), inline: true },
+    { name: "Tracked members", value: String(tracked.length), inline: true },
   ], online.length ? 0x4ee28a : 0x838e9e);
 }
 
 async function discordCraftsCommand(skillFilter = "") {
   const { claimId } = getSettings();
-  const payload = await fetchBitjita(`/crafts?claimEntityId=${claimId}&completed=false`);
+  const committed = readRelayCraftsForDiscord(
+    (id, domain) => currentStateRepository.read(id, domain),
+    claimId,
+  );
+  const payload = enrichCraftsForPlanning(
+    committed,
+    (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+    (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
+  );
   const filter = skillFilter.trim().toLowerCase();
   const jobs = unwrap(payload, "craftResults", [])
     .filter((job) => !filter || JSON.stringify(job.levelRequirements ?? job.experiencePerProgress ?? "").toLowerCase().includes(filter) || String(job.recipeName ?? "").toLowerCase().includes(filter))
@@ -10055,36 +7770,77 @@ async function discordPriceCommand(itemName, regionOption) {
   const query = itemName.trim();
   if (query.length < 2) throw new Error("Enter an item name.");
   const { claimId } = getSettings();
-  const claimPayload = await fetchBitjita(`/claims/${claimId}`).catch(() => ({}));
-  const regionId = String(regionOption ?? (claimPayload.claim ?? claimPayload)?.regionId ?? "").trim();
-  const searchPayload = await fetchBitjita(`/market?search=${encodeURIComponent(query)}`);
-  const item = unwrap(searchPayload, "items", []).find((candidate) => String(candidate.name ?? candidate.itemName ?? "").toLowerCase() === query.toLowerCase()) ?? unwrap(searchPayload, "items", [])[0];
-  if (!item) return discordCommandEmbed("Price Finder", `No market item found for **${query}**.`, [], 0x838e9e);
-  const itemId = item.id ?? item.itemId;
-  const itemType = item.itemType ?? item.type ?? 0;
-  const historyPath = `/market/items/${encodeURIComponent(String(itemId))}/price-history?bucket=1%20day&limit=30${regionId ? `&regionId=${encodeURIComponent(regionId)}` : ""}`;
-  const history = await fetchBitjita(historyPath);
-  const buckets = unwrap(history, "buckets", []);
-  const avg = (days) => {
-    const selected = buckets.slice(-days).filter((bucket) => toNumber(bucket.quantity ?? bucket.unitsSold ?? bucket.volume));
-    const totalValue = selected.reduce((sum, bucket) => sum + toNumber(bucket.totalPrice ?? bucket.totalValue ?? bucket.value), 0);
-    const quantity = selected.reduce((sum, bucket) => sum + toNumber(bucket.quantity ?? bucket.unitsSold ?? bucket.volume), 0);
-    return quantity ? Math.round(totalValue / quantity) : 0;
-  };
-  const a1 = avg(1);
-  const a7 = avg(7);
-  const a30 = avg(30);
-  const suggested = a7 || a30 || a1;
-  return discordCommandEmbed("Price Finder", `**${item.name ?? item.itemName}**${regionId ? ` pricing in **R${regionId}**` : ""}`, [
-    { name: "24h average", value: a1 ? formatGold(a1) : "No sales", inline: true },
-    { name: "7d average", value: a7 ? formatGold(a7) : "No sales", inline: true },
-    { name: "30d average", value: a30 ? formatGold(a30) : "No sales", inline: true },
-    { name: "Suggested list price", value: suggested ? formatGold(suggested) : "Not enough sales data", inline: false },
-    { name: "Item type", value: String(itemType), inline: true },
-  ], suggested ? 0xf0c64f : 0x838e9e);
+  const regionId = discordPriceRegionId(claimId, regionOption);
+  const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+  const status = regionalMarketResponseStatus(current, regionId, allowedRegionIds);
+  if (status.freshness === "unavailable") {
+    return discordCommandEmbed(
+      "Live Market Price",
+      `Relay market data for **R${regionId}** has not loaded yet.`,
+      [{ name: "Status", value: status.warnings[0] ?? "Unavailable", inline: false }],
+      0x838e9e,
+    );
+  }
+  const keyMatch = query.match(/^(item|cargo):(\d+)$/i);
+  const matchedEntity = keyMatch
+    ? providerCatalogRepository.getEntity(`${keyMatch[1].toLowerCase() === "cargo" ? "cargo" : "items"}:${keyMatch[2]}`)
+    : null;
+  const catalogRows = matchedEntity
+    ? [matchedEntity]
+    : providerCatalogRepository.findEntities(query);
+  const items = regionalMarketCatalogView(current?.data, catalogRows, {
+    query: matchedEntity ? "" : query,
+    regionId,
+    allowedRegionIds,
+    availableOnly: true,
+    limit: 20,
+  }).items;
+  const item = items.find((candidate) => (
+    String(candidate.name).toLowerCase() === query.toLowerCase()
+  )) ?? items[0];
+  if (!item) {
+    return discordCommandEmbed(
+      "Live Market Price",
+      `No current market orders matched **${query}** in **R${regionId}**.`,
+      [],
+      0x838e9e,
+    );
+  }
+  const quote = regionalMarketPriceQuote(
+    current?.data,
+    providerCatalogRepository.getEntity(`${item.itemType === "cargo" ? "cargo" : "items"}:${item.itemId}`),
+    {
+      itemType: item.itemType,
+      itemId: item.itemId,
+      regionId,
+      allowedRegionIds,
+    },
+  );
+  const fields = [
+    { name: "Lowest sell", value: quote.sell.lowestUnitPrice ? formatExactGold(quote.sell.lowestUnitPrice) : "No sell orders", inline: true },
+    { name: "Sell median", value: quote.sell.medianUnitPrice ? formatExactGold(quote.sell.medianUnitPrice) : "No sell orders", inline: true },
+    { name: "Highest buy", value: quote.buy.highestUnitPrice ? formatExactGold(quote.buy.highestUnitPrice) : "No buy orders", inline: true },
+    { name: "Sell liquidity", value: `${quote.sell.orderCount.toLocaleString()} orders · ${formatExactInteger(quote.sell.totalQuantity)} units`, inline: true },
+    { name: "Buy demand", value: `${quote.buy.orderCount.toLocaleString()} orders · ${formatExactInteger(quote.buy.totalQuantity)} units`, inline: true },
+    {
+      name: "Data status",
+      value: status.freshness === "stale"
+        ? `Stale Relay last-good data${status.ageMs == null ? "" : ` · ${Math.max(0, Math.floor(status.ageMs / 1000)).toLocaleString()}s old`}${status.warnings.length ? `\n${status.warnings[0]}` : ""}`
+        : "Live Relay order book",
+      inline: false,
+    },
+  ];
+  return discordCommandEmbed(
+    "Live Market Price",
+    `**${quote.item.name}** current orders in **R${regionId}**`,
+    fields,
+    quote.sell.orderCount || quote.buy.orderCount ? 0xf0c64f : 0x838e9e,
+  );
 }
 
 async function registerDiscordCommands() {
+  requireLiveDiscord(configuredDiscordDeliveryMode, "Discord command registration");
+  assertDiscordNetworkEnabled();
   const settings = getDiscordSettingsRaw();
   if (!settings.botToken || !settings.applicationId) throw new Error("Discord bot token and application ID are required");
   const route = settings.guildId
@@ -10105,7 +7861,9 @@ async function serveBuiltFrontend(url, method, res) {
   const requestedPath = pathname === "/" ? "index.html" : pathname.slice(1);
   const assetPath = path.resolve(distDir, requestedPath);
   const isDistPath = assetPath === distDir || assetPath.startsWith(`${distDir}${path.sep}`);
-  const candidate = isDistPath && existsSync(assetPath) && statSync(assetPath).isFile() ? assetPath : path.join(distDir, "index.html");
+  const hasStaticFile = isDistPath && existsSync(assetPath) && statSync(assetPath).isFile();
+  if (!hasStaticFile && !shouldFallbackToFrontend(pathname)) return false;
+  const candidate = hasStaticFile ? assetPath : path.join(distDir, "index.html");
   if (!existsSync(candidate)) {
     send(res, 503, { error: "Frontend build is missing. Run the production build before starting the server." });
     return true;
@@ -10120,37 +7878,145 @@ async function serveBuiltFrontend(url, method, res) {
   return true;
 }
 
-async function proxyBitjita(req, url, res) {
-  // Browser pages call this local proxy instead of bitjita.com directly. The
-  // proxy centralises CORS avoidance, upstream caching, and rate limiting while
-  // preserving the old page-driven "fetch fresh data while viewing a page" model.
-  const upstream = new URL(process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com");
-  upstream.pathname = `/api/${url.pathname.slice("/api/bitjita/".length)}`;
-  upstream.search = url.search;
-  const refresh = manualRefreshAccess(req, res);
-  if (!refresh) return;
-  const { forceRefresh } = refresh;
-  if ((forceRefresh || !bitjitaProxyCache.hasFreshCache(upstream)) && !bitjitaProxyCache.hasInflight(upstream) && !rateLimit(req, res, "proxy", RATE_LIMITS.proxy)) return;
-  const response = await bitjitaProxyCache.fetchUpstreamCached(upstream, { forceRefresh });
-  if (upstream.pathname === "/api/stalls" && response.status >= 200 && response.status < 300) {
-    try {
-      const payload = JSON.parse(Buffer.from(response.body).toString("utf8"));
-      if (!Array.isArray(payload?.stalls)) throw new Error("Expected a stalls array");
-    } catch (error) {
-      const now = new Date().toISOString();
-      const message = `BitJita stalls feed shape changed: ${errorMessage(error)}`;
-      statements.upsertSetting.run("global_market_stalls_diagnostic", JSON.stringify({ recordedAt: now, message }), now);
-      if (!isTestRuntime) console.warn(message);
-    }
+function publicOAuthStateSecret() {
+  const keyName = "public_discord_oauth_state_secret";
+  const stored = String(statements.getSecret.get(keyName)?.value ?? "").trim();
+  if (stored) return stored;
+  const generated = randomBytes(32).toString("base64url");
+  statements.upsertSecret.run(keyName, generated, new Date().toISOString());
+  return generated;
+}
+
+const publicDataService = createPublicDataService({
+  http: new RelayHttpClient({ baseUrl: relayBaseUrl }),
+  normalizers: {
+    normalizeClaimPayload,
+    normalizeMembersPayload,
+    normalizeCitizensPayload,
+    normalizeClaimInventory,
+    normalizeClaimCraftPayloads,
+  },
+  topologyFromPayloads: relayTopologyFromPayloads,
+});
+const publicCatalogService = createPublicCatalogService({
+  searchEntities: (query, limit) => gameCatalogRepository.searchEntities(query, limit),
+  recipeDetail: recipeDetailFromLocalCatalog,
+});
+const publicDataApiRequest = createPublicApiRouter({
+  data: publicDataService,
+  catalog: publicCatalogService,
+  serveIcon: (pathname, res) => serveGameIconRequest(
+    pathname.replace("/api/public/game-icon/", "/api/local/game-icon/"),
+    res,
+    gameIconFallbackService,
+  ),
+});
+const configuredPublicFeatures = publicFeatureFlags();
+const resolvedPublicOAuthConfig = resolvePublicDiscordOAuthConfig(process.env);
+const publicAuthRequest = createPublicAuthRouter({
+  repository: publicIdentityRepository,
+  legalPolicy: claimMonitorLegalPolicy,
+  legalSnapshot: claimMonitorLegalSnapshot,
+  stateSecret: publicOAuthStateSecret(),
+  config: {
+    ...resolvedPublicOAuthConfig,
+    enabled: resolvedPublicOAuthConfig.enabled
+      && configuredPublicFeatures.publicCollaborationEnabled
+      && configuredPublicFeatures.publicLegalConfigurationConfirmed,
+  },
+  deletion: {
+    review: (userId) => publicAccountDeletionReview(db, userId),
+    deleteAccount: ({ userId, discordId, dispositions }) => coordinatePublicPrivacyDeletion({
+      ledgerPath: privacyLedgerPath,
+      key: privacyLedgerKey(),
+      discordId,
+      deleteAccount: (operationId) => deletePublicAccount(db, {
+        userId,
+        discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions,
+        randomUUID: () => operationId,
+      }),
+    }),
+  },
+});
+const configuredPublicPlanTokenHmacKey = String(process.env.PUBLIC_PLAN_TOKEN_HMAC_KEY ?? "").trim();
+const publicPlanRepository = configuredPublicFeatures.publicCollaborationEnabled && configuredPublicPlanTokenHmacKey
+  ? createPublicPlanRepository(db, { tokenHmacKey: configuredPublicPlanTokenHmacKey })
+  : null;
+const publicPlanComputation = publicPlanRepository
+  ? createPublicPlanComputationService({ data: publicDataService, catalog: publicCatalogService })
+  : null;
+const publicPlanRequest = publicPlanRepository && publicPlanComputation
+  ? createPublicPlanRouter({
+      repository: publicPlanRepository,
+      identityRepository: publicIdentityRepository,
+      legalSnapshot: claimMonitorLegalSnapshot,
+      computation: publicPlanComputation,
+    })
+  : null;
+const publicModerationRepository = createPublicModerationRepository(db);
+const publicAdminRequest = createPublicAdminRouter({
+  repository: publicModerationRepository,
+  privacy: {
+    review: (userId) => publicAccountDeletionReview(db, userId),
+    deleteAccount: ({ userId, discordId, dispositions }) => coordinatePublicPrivacyDeletion({
+      ledgerPath: privacyLedgerPath,
+      key: privacyLedgerKey(),
+      discordId,
+      deleteAccount: (operationId) => deletePublicAccount(db, {
+        userId,
+        discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions,
+        randomUUID: () => operationId,
+      }),
+    }),
+  },
+  hasPermission: adminHasPermission,
+  audit,
+  healthSnapshot: () => ({
+    cache: publicDataService.health(),
+    gate: {
+      profileEnabled: configuredPublicFeatures.publicProfileEnabled,
+      collaborationEnabled: configuredPublicFeatures.publicCollaborationEnabled,
+      legalConfigurationConfirmed: configuredPublicFeatures.publicLegalConfigurationConfirmed,
+    },
+    oauth: { enabled: resolvedPublicOAuthConfig.enabled },
+    rateTotals: {
+      publicReads: publicDataApiRequest.health(),
+      limiter: rateLimit.stats(),
+      routes: routePerformanceTelemetry.snapshot().rateLimits,
+    },
+  }),
+});
+async function publicApiRequest(request) {
+  const isLegalRequest = request.url.pathname === "/api/public/legal";
+  const isAuthRequest = request.url.pathname.startsWith("/api/public/auth/");
+  if (isLegalRequest || (isAuthRequest
+    && configuredPublicFeatures.publicCollaborationEnabled
+    && configuredPublicFeatures.publicLegalConfigurationConfirmed)) {
+    if (isAuthRequest
+      && request.url.pathname !== "/api/public/auth/session"
+      && !rateLimit(request.req, request.res, "auth", RATE_LIMITS.auth)) return true;
+    if (await publicAuthRequest(request)) return true;
   }
-  res.writeHead(response.status, securityHeaders({ ...response.headers, "x-bitjita-cache": response.cacheState, ...(response.stale ? { "x-bitjita-stale": "1", warning: '110 - "Response is stale because BitJita is currently unavailable"' } : {}) }));
-  res.end(response.body);
+  const isPlanRequest = request.url.pathname === "/api/public/plans"
+    || request.url.pathname.startsWith("/api/public/plans/")
+    || request.url.pathname.startsWith("/api/public/invites/")
+    || request.url.pathname.startsWith("/api/public/shared-plans/");
+  if (isPlanRequest
+    && configuredPublicFeatures.publicCollaborationEnabled
+    && configuredPublicFeatures.publicLegalConfigurationConfirmed
+    && publicPlanRequest
+    && await publicPlanRequest(request)) return true;
+  return publicDataApiRequest(request);
 }
 
 function manualRefreshAccess(req, res) {
   const rawHeader = req.headers[MANUAL_REFRESH_HEADER];
   const refreshId = String(Array.isArray(rawHeader) ? rawHeader[0] ?? "" : rawHeader ?? "").trim();
-  const decision = manualRefreshGuard.authorize(requestAddress(req), refreshId);
+  const decision = manualRefreshGuard.authorize(clientAddress(req), refreshId);
   if (decision.allowed) return { forceRefresh: decision.forceRefresh, refreshId };
   const status = decision.reason === "invalid-id" ? 400 : 429;
   const headers = decision.retryAfterSeconds ? { "retry-after": String(decision.retryAfterSeconds) } : {};
@@ -10169,24 +8035,60 @@ const server = createServer(async (req, res) => {
     // Route order matters: public health/proxy/config endpoints are handled
     // before authenticated admin routes, while static frontend fallback stays at
     // the end so API typos do not accidentally return index.html.
-    const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const hostProfile = resolveRequestHostProfile(req, {
+      isProduction,
+      allowDevelopmentHosts: !isProduction,
+      allowDirectLoopbackHealthHost:
+        isProduction
+        && req.method === "GET"
+        && url.pathname === "/api/local/health",
+    });
+    if (!hostProfile) return send(res, 421, { error: "Unknown host" });
+    if (await routeHostProfileRequest({
+      profile: hostProfile,
+      method: req.method,
+      url,
+      res,
+      send,
+      features: configuredPublicFeatures,
+      publicRequest: (request) => publicApiRequest({ ...request, req, address: clientAddress(req) }),
+    })) return;
+    const routeMeasurement = measuredRoutePaths.has(url.pathname)
+      ? routePerformanceTelemetry.observe(req, res, { path: url.pathname })
+      : null;
+    const requestLogTarget = mapRequestLogTarget(url);
     const requestStartedAt = Date.now();
     const slowRequestLogPolicy = requestLogPolicy(url.pathname, "slow");
     const closedRequestLogPolicy = requestLogPolicy(url.pathname, "closed");
     let requestFinished = false;
+    let mapResourcePageRows = null;
     res.once("finish", () => {
       requestFinished = true;
       const durationMs = Date.now() - requestStartedAt;
-      requestTelemetry.push({ at: Date.now(), path: url.pathname, status: res.statusCode, durationMs });
+      requestTelemetry.push({ at: Date.now(), path: normalizeRoutePerformancePath(url.pathname), status: res.statusCode, durationMs });
       if (requestTelemetry.length > 10_000) requestTelemetry.splice(0, requestTelemetry.length - 10_000);
+      if (url.pathname.startsWith("/api/local/map/") && shouldRecordMapRequestLatency(url.pathname)) {
+        mapPerformanceTelemetry.recordMapRequest({ durationMs, statusCode: res.statusCode });
+        if (url.pathname.startsWith("/api/local/map/tiles/")) {
+          mapPerformanceTelemetry.recordTileRequest({ durationMs, statusCode: res.statusCode });
+        }
+        if (mapResourcePageRows !== null) {
+          mapPerformanceTelemetry.recordResourcePage({
+            rows: mapResourcePageRows,
+            bytes: Number(res.getHeader("content-length") ?? 0),
+            statusCode: res.statusCode,
+          });
+        }
+      }
       if (!isTestRuntime && slowRequestLogPolicy.logGeneric && durationMs >= SLOW_REQUEST_LOG_MS) {
-        console.warn(`Slow request completed: ${req.method} ${url.pathname}${url.search} status=${res.statusCode} durationMs=${durationMs}`);
+        console.warn(`Slow request completed: ${req.method} ${requestLogTarget} status=${res.statusCode} durationMs=${durationMs}`);
       }
     });
     res.once("close", () => {
       if (requestFinished || isTestRuntime || !closedRequestLogPolicy.logGeneric) return;
       const durationMs = Date.now() - requestStartedAt;
-      console.warn(`Request connection closed before completion: ${req.method} ${url.pathname}${url.search} durationMs=${durationMs}`);
+      console.warn(`Request connection closed before completion: ${req.method} ${requestLogTarget} durationMs=${durationMs}`);
     });
     if (shouldLogVisitor(url.pathname)) {
       res.once("finish", () => {
@@ -10198,17 +8100,333 @@ const server = createServer(async (req, res) => {
       });
     }
     if (req.method === "OPTIONS") return send(res, 204, {});
-    if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, {
-      ok: true,
+    if (req.method === "GET" && url.pathname.startsWith("/api/local/game-icon/")) {
+      if (!rateLimit(req, res, "game-icon", RATE_LIMITS.proxy)) return;
+      if (await serveGameIconRequest(url.pathname, res, gameIconFallbackService)) return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/health") return send(res, 200, deploymentRuntime.health({
       version: appVersion,
-      buildId: currentAppBuildId(),
-      polling: collectorStatusPayload(),
-    });
+      buildSha: currentAppBuildId(),
+    }));
+    if (req.method === "GET" && url.pathname === "/api/local/map/health") {
+      const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
+      if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
+      const pointerReloadFailureCount = Number(terrainTileStore.health?.().pointerReloadFailureCount ?? 0)
+        + Number(roadTileStore.health?.().pointerReloadFailureCount ?? 0);
+      return send(res, 200, publicMapHealth({
+        resourceHealth: relayMapResourceRuntime.health(),
+        telemetry: mapPerformanceTelemetry.snapshot(),
+        tileHealth: { pointerReloadFailureCount },
+        eventLoopDelayMs: Number.isFinite(eventLoopHistogram.mean) ? eventLoopHistogram.mean / 1e6 : 0,
+        rssBytes: process.memoryUsage().rss,
+      }));
+    }
     if (req.method === "GET" && url.pathname === "/api/local/collector-status") return send(res, 200, collectorStatusPayload());
-    if (req.method === "GET" && url.pathname.startsWith("/api/bitjita/")) {
-      return proxyBitjita(req, url, res);
+    if (req.method === "GET" && url.pathname === "/api/local/game-data/generation") {
+      const claimId = String(url.searchParams.get("claimId") ?? "").trim();
+      const domains = parseDomainKeys(url.searchParams.get("domains"));
+      if (!claimId) return send(res, 400, { error: "claimId is required." });
+      if (claimId !== currentClaimId()) return send(res, 403, { error: "Requested claim is not the configured monitored claim." });
+      if (!domains.length) return send(res, 400, { error: "At least one valid domain is required." });
+      return send(res, 200, currentGameDataGenerationEvent(claimId, domains));
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/game-data/events") {
+      const claimId = String(url.searchParams.get("claimId") ?? "").trim();
+      const domains = parseDomainKeys(url.searchParams.get("domains"));
+      if (!claimId) return send(res, 400, { error: "claimId is required." });
+      if (claimId !== currentClaimId()) return send(res, 403, { error: "Requested claim is not the configured monitored claim." });
+      if (!domains.length) return send(res, 400, { error: "At least one valid domain is required." });
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.flushHeaders?.();
+      const listener = {
+        claimId,
+        domains: new Set(domains),
+        response: res,
+      };
+      gameDataGenerationListeners.add(listener);
+      res.write(`data: ${JSON.stringify(currentGameDataGenerationEvent(claimId, domains))}\n\n`);
+      const heartbeat = setInterval(() => {
+        if (!res.destroyed) res.write(": keep-alive\n\n");
+      }, 15_000);
+      req.once("close", () => {
+        clearInterval(heartbeat);
+        gameDataGenerationListeners.delete(listener);
+      });
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/game-data") {
+      if (!rateLimit(req, res, "gameDataRead", RATE_LIMITS.gameDataRead)) return;
+      const claimId = String(url.searchParams.get("claimId") ?? "").trim();
+      const domains = parseDomainKeys(url.searchParams.get("domains"));
+      if (!claimId) return send(res, 400, { error: "claimId is required." });
+      if (!domains.length) return send(res, 400, { error: "At least one valid domain is required." });
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      if (refresh.forceRefresh && relayProviderStarted) {
+        try {
+          await relayProvider.refresh({ claimId, domains, reason: "manual" });
+        } catch {
+          // The route below deliberately serves last-good envelopes when present.
+        }
+      }
+      if (refresh.forceRefresh && domains.includes("region-claims") && relayRegionClaimsStarted) {
+        try {
+          const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+          const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();
+          if (regionId) {
+            await relayRegionClaimsRuntime.reconcile({
+              claimId,
+              regionId,
+              force: true,
+            });
+          }
+        } catch {
+          // The route below deliberately serves last-good envelopes when present.
+        }
+      }
+      if (refresh.forceRefresh && domains.includes("empires") && relayEmpireStarted) {
+        try {
+          await relayEmpireRuntime.warmActiveRegions();
+        } catch {
+          // The route below deliberately serves last-good envelopes when present.
+        }
+      }
+      const compositionDependencies = createGameDataCompositionDependencies({
+        claimId,
+        repository: currentStateRepository,
+        catalogRepository: providerCatalogRepository,
+      });
+      const result = await runHeavyProjection(gameDataHeavyRouteGate, routeMeasurement, () => gameDataResponse({
+        configuredClaimId: currentClaimId(),
+        claimId,
+        domains,
+        repository: currentStateRepository,
+        liveForMs: Math.max(relayHttpRefreshMs * 3, 30_000),
+        transformDomain: (domain, data) => {
+          if (domain === "inventories") {
+            const bankSnapshot = currentStateRepository.read(claimId, "inventory-banks");
+            const bankWarnings = bankSnapshot
+              ? [
+                  ...bankSnapshot.warnings,
+                  ...(bankSnapshot.lastError ? [`Town Bank inventories: ${bankSnapshot.lastError}`] : []),
+                ]
+              : ["Town Bank inventories have not loaded yet."];
+            return {
+              data: enrichInventoryWithCatalog(
+                mergeClaimInventoryWithBanks(data, bankSnapshot?.data),
+                (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+              ),
+              ...(bankWarnings.length ? {
+                confidence: "partial",
+                warnings: bankWarnings,
+              } : {}),
+              dependencies: compositionDependencies.forDomain(domain, {
+                inventoryBankSnapshot: bankSnapshot,
+              }),
+            };
+          }
+          if (domain === "crafts") {
+            const publicCraftSnapshot = currentStateRepository.read(claimId, "public-crafts");
+            return {
+              ...enrichCraftsDomain(
+                data,
+                publicCraftSnapshot,
+                (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+                (recipeId) => providerCatalogRepository.getDescription("crafting_recipe", recipeId),
+              ),
+              dependencies: compositionDependencies.forDomain(domain, {
+                publicCraftSnapshot,
+              }),
+            };
+          }
+          if (domain === "contributions") {
+            const projected = currentCraftContributions(claimId);
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
+            };
+          }
+          if (domain === "public-crafts") {
+            const projected = enrichPublicCraftsWithCatalog(data, {
+              getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+              getDescription: (kind, id) => providerCatalogRepository.getDescription(kind, id),
+            });
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
+              dependencies: compositionDependencies.forDomain(domain),
+            };
+          }
+          if (domain === "market") {
+            const projected = enrichMarketWithCatalog(data, {
+              getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+              claim: currentStateRepository.read(currentClaimId(), "claim")?.data ?? null,
+            });
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
+              dependencies: compositionDependencies.forDomain(domain),
+            };
+          }
+          if (domain === "equipment") {
+            return {
+              data: enrichEquipmentWithCatalog(
+                data,
+                (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+                (kind, id) => providerCatalogRepository.getDescription(kind, id),
+              ),
+              dependencies: compositionDependencies.forDomain(domain),
+            };
+          }
+          if (domain === "construction") {
+            const projected = enrichConstructionWithCatalog(
+              data,
+              (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+              (kind, id) => providerCatalogRepository.getDescription(kind, id),
+            );
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
+              dependencies: compositionDependencies.forDomain(domain),
+            };
+          }
+          if (domain === "research") {
+            const projected = enrichResearchWithCatalog(
+              data,
+              providerCatalogRepository.listDescriptions("claim_tech"),
+            );
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
+              dependencies: compositionDependencies.forDomain(domain),
+            };
+          }
+          if (domain === "recruitment") {
+            const projected = enrichRecruitmentWithCatalog(
+              data,
+              providerCatalogRepository.listDescriptions("skill"),
+            );
+            return {
+              ...projected,
+              ...(projected.warnings.length ? { confidence: "partial" } : {}),
+              dependencies: compositionDependencies.forDomain(domain),
+            };
+          }
+          return { data };
+        },
+      }));
+      return send(res, result.status, result.body);
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/player-data") {
+      const claimId = String(url.searchParams.get("claimId") ?? "").trim();
+      const playerId = String(url.searchParams.get("playerId") ?? "").trim();
+      const domains = String(url.searchParams.get("domains") ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (!claimId) return send(res, 400, { error: "claimId is required." });
+      if (!playerId) return send(res, 400, { error: "playerId is required." });
+      const requestedDomains = [...new Set(domains)];
+      if (!requestedDomains.length || requestedDomains.some((domain) => !["inventory", "housing"].includes(domain))) {
+        return send(res, 400, { error: "The player-data route supports the inventory and housing domains." });
+      }
+      const refresh = manualRefreshAccess(req, res);
+      if (!refresh) return;
+      const playerRequest = {
+        configuredClaimId: currentClaimId(),
+        claimId,
+        playerId,
+        forceRefresh: refresh.forceRefresh,
+      };
+      const results = await Promise.allSettled(requestedDomains.map(async (domain) => {
+        const envelope = domain === "inventory"
+          ? await relayPlayerDataService.inventory(playerRequest)
+          : await relayPlayerDataService.housing(playerRequest);
+        return { domain, envelope };
+      }));
+      const responseDomains = {};
+      const partialErrors = [];
+      let firstFailure = null;
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          responseDomains[result.value.domain] = result.value.envelope;
+          partialErrors.push(...result.value.envelope.warnings);
+        } else {
+          firstFailure ??= result.reason;
+          partialErrors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+        }
+      }
+      if (!Object.keys(responseDomains).length) {
+        const status = Number.isInteger(firstFailure?.statusCode) ? firstFailure.statusCode : 503;
+        return send(res, status, {
+          error: firstFailure instanceof Error ? firstFailure.message : "Relay player data has not loaded.",
+          source: "relay-player-data",
+        });
+      }
+      return send(res, 200, {
+        claimId,
+        playerId,
+        generatedAt: new Date().toISOString(),
+        domains: responseDomains,
+        partialErrors,
+      });
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/catalog/item-detail") {
+      const kind = String(url.searchParams.get("kind") ?? "item").toLowerCase() === "cargo"
+        ? "cargo"
+        : "item";
+      const id = String(url.searchParams.get("id") ?? "").trim();
+      if (!/^\d+$/.test(id)) return send(res, 400, { error: "Catalog item id is required." });
+      const catalogKey = `${kind === "cargo" ? "cargo" : "items"}:${id}`;
+      const entity = providerCatalogRepository.getEntity(catalogKey);
+      if (!entity) return send(res, 404, { error: "Catalog item has not loaded yet." });
+      return send(res, 200, buildCatalogItemDetail({
+        kind,
+        id,
+        entity,
+        recipes: providerCatalogRepository.listDescriptions("crafting_recipe"),
+        skills: providerCatalogRepository.listDescriptions("skill"),
+      }));
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/catalog/search") {
+      const query = String(url.searchParams.get("q") ?? "").trim();
+      if (query.length < 2) return send(res, 400, { error: "Catalog search requires at least two characters." });
+      const limit = Math.max(1, Math.min(50, Math.floor(Number(url.searchParams.get("limit") ?? 20) || 20)));
+      const rows = gameCatalogRepository.searchEntities(query, limit);
+      const item = (row) => ({
+        id: row.targetId,
+        kind: row.kind,
+        itemType: row.itemType,
+        name: row.name,
+        tag: row.tag,
+        tier: row.tier,
+        rarityStr: row.rarity,
+        iconAssetName: row.iconAssetName,
+      });
+      return send(res, 200, {
+        query,
+        generatedAt: new Date().toISOString(),
+        provider: "relay",
+        source: providerCatalogRepository.getSourceState(),
+        items: rows.filter((row) => row.kind === "items").map(item),
+        cargos: rows.filter((row) => row.kind === "cargo").map(item),
+      });
     }
     if (req.method === "GET" && url.pathname === "/api/local/config") return send(res, 200, getSettings());
+    if (req.method === "GET" && url.pathname === "/api/local/bootstrap") {
+      const auth = authStatus(req);
+      return send(res, 200, {
+        config: publicBootstrapConfig(),
+        auth: { ...auth, authenticated: Boolean(auth.user), featurebaseJwt: auth.featurebaseJwt ?? null },
+        legal: { ...legalPolicy, ...legalDigests, acceptanceRequired: auth.legal.requiresAcceptance },
+        build: { version: appVersion, buildSha: currentAppBuildId() },
+      }, { "cache-control": "no-store" });
+    }
     if (req.method === "GET" && url.pathname === "/api/local/popups") return send(res, 200, { popups: publicPopups(appPopupConfig()) });
     if (req.method === "GET" && url.pathname === "/api/local/catalog/probabilities.xlsx") {
       if (!rateLimit(req, res, "probability-workbook", RATE_LIMITS.expensiveLocal)) return;
@@ -10259,8 +8477,6 @@ const server = createServer(async (req, res) => {
         const kind = String(url.searchParams.get("kind") ?? "items") === "cargo" ? "cargo" : "items";
         const id = String(url.searchParams.get("id") ?? "").trim();
         if (!/^\d+$/.test(id)) return send(res, 400, { error: "Recipe item id is required" });
-        const cached = statements.getRecipeCatalogEntry.get(recipeCatalogKey(kind, id));
-        if (!cached && !rateLimit(req, res, "recipe-detail", RATE_LIMITS.expensiveLocal)) return;
         const target = {
           id,
           kind,
@@ -10271,15 +8487,17 @@ const server = createServer(async (req, res) => {
           tag: url.searchParams.get("tag") ?? undefined,
           iconAssetName: url.searchParams.get("iconAssetName") ?? undefined,
         };
-        return send(res, 200, await recipeDetailFromCatalogOrFetch(target));
+        return send(res, 200, recipeDetailFromLocalCatalog(target));
       } catch (error) {
-        return send(res, error?.statusCode ?? 502, { error: error instanceof Error ? error.message : "Unable to load recipe detail" });
+        return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Unable to load recipe detail" });
       }
     }
     if (req.method === "GET" && url.pathname === "/api/local/legal") {
       return send(res, 200, { ...legalPolicy, ...legalDigests });
     }
-    if (req.method === "GET" && url.pathname === "/api/local/auth/me") return send(res, 200, authStatus(req));
+    if (req.method === "GET" && url.pathname === "/api/local/auth/me") {
+      return send(res, 200, authStatus(req), { "cache-control": "no-store" });
+    }
     if (req.method === "GET" && url.pathname === "/api/local/access-control/effective") return send(res, 200, publicEffectiveAccess(accessControlConfig(), accessControlSubject(req)));
     if (req.method === "GET" && url.pathname === "/api/local/auth/discord/start") {
       if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
@@ -10534,6 +8752,9 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { user: publicAppUser(getAppUser(req)) });
     }
     if (req.method === "POST" && url.pathname === "/api/discord/interactions") {
+      if (!discordNetworkEnabled) {
+        return send(res, 503, { error: "Discord interactions are disabled during maintenance" });
+      }
       if (!rateLimit(req, res, "discord-interaction", RATE_LIMITS.discordInteraction)) return;
       const result = await handleDiscordInteraction(req);
       if (typeof result.afterResponse === "function") {
@@ -10553,26 +8774,400 @@ const server = createServer(async (req, res) => {
         return send(res, error?.statusCode ?? (message === "Analytics consent is required" ? 403 : 400), { error: message });
       }
     }
-    if (req.method === "GET" && url.pathname === "/api/local/region/claims") {
-      if (!rateLimit(req, res, "region-claims", RATE_LIMITS.expensiveLocal)) return;
-      const refresh = manualRefreshAccess(req, res);
-      if (!refresh) return;
-      const { forceRefresh } = refresh;
-      const regionId = String(url.searchParams.get("regionId") ?? "").trim();
-      if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
-      return send(res, 200, await fetchCachedRegionClaims(regionId, { forceRefresh }));
-    }
     if (req.method === "GET" && url.pathname === "/api/local/regions/active") {
       if (!rateLimit(req, res, "regions-active", RATE_LIMITS.expensiveLocal)) return;
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
-      const { forceRefresh } = refresh;
-      const include = parseRegionIds(url.searchParams.get("include"));
-      return send(res, 200, await fetchCachedActiveRegions(include, { forceRefresh }));
+      const settings = getSettings();
+      const claimId = currentClaimId();
+      const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+      return send(res, 200, relayActiveRegions({
+        claimRegionId: claim.regionId ?? claim.region_id ?? claim.region,
+        defaultRegionId: settings.defaultRegion,
+        additionalRegionIds: parseRegionIds(settings.additionalActiveRegions),
+        requestedIncludeRegionIds: parseRegionIds(url.searchParams.get("include")),
+        regionSnapshot: currentStateRepository.read(claimId, "region"),
+        providerHealth: {
+          ...gameDataProviderHealth(),
+          globalCatalog: globalRegionSubscriptionHealth(),
+        },
+        staleAfterMs: relayGlobalCatalogStaleMs,
+      }));
     }
+    if (req.method === "GET" && await serveLocalMapTile(url.pathname, res, terrainTileStore, undefined, relayTerrainRuntime.health(), roadTileStore)) return;
     if (req.method === "GET" && url.pathname === "/api/local/map/catalog") {
       if (!rateLimit(req, res, "map-catalog", RATE_LIMITS.expensiveLocal)) return;
-      return send(res, 200, await fetchMapCatalog());
+      const status = globalCatalogReadStatus();
+      const payload = {
+        provider: "relay",
+        generatedAt: status.source?.receivedAt ?? null,
+        freshness: status.freshness,
+        confidence: status.confidence,
+        ageMs: status.ageMs,
+        warnings: status.warnings,
+        source: status.source,
+        resources: providerCatalogRepository.listDescriptions("resource"),
+        creatures: providerCatalogRepository.listDescriptions("enemy"),
+      };
+      return send(res, status.freshness === "unavailable" ? 503 : 200, payload);
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/map/regions") {
+      if (!rateLimit(req, res, "map-regions", RATE_LIMITS.expensiveLocal)) return;
+      const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
+      if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
+      const claimId = currentClaimId();
+      const payload = await ensureCurrentMapResourceRegions(claimId);
+      return send(res, payload.regionIds.length ? 200 : 503, payload);
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/map/resource-partition") {
+      if (!rateLimit(req, res, "map-snapshot", RATE_LIMITS.mapSnapshot)) return;
+      const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
+      if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
+      const claimId = currentClaimId();
+      const readyRegions = await ensureCurrentMapResourceRegions(claimId);
+      let scope;
+      try {
+        scope = parseMapResourceBinaryScope(url.searchParams, {
+          allowedRegionIds: readyRegions.regionIds,
+          allowedResourceIds: currentMapResourceIds(),
+        });
+      } catch (error) {
+        const statusCode = error instanceof MapResourceBinaryRouteError ? error.statusCode : 422;
+        return send(res, statusCode, { error: error instanceof Error ? error.message : "Invalid map resource request" });
+      }
+      let requestClosed = false;
+      let lease = null;
+      req.once("close", () => { requestClosed = true; });
+      const releaseLease = bindMapLeaseRelease(req, res, async () => lease?.release());
+      try {
+        lease = await acquireMapLeaseUnlessClosed(
+          () => relayMapResourceRuntime.acquire({ regionId: scope.regionId, resourceId: scope.resourceId }),
+          () => requestClosed,
+          "Map resource partition request closed during lease acquisition.",
+        );
+        let partition = lease.current(scope.generation);
+        if (!partition && !lease.current()) {
+          await lease.waitForSnapshot(MAP_SPATIAL_INITIAL_WAIT_MS);
+          partition = lease.current(scope.generation);
+        }
+        const latest = lease.current();
+        const response = partition
+          ? binaryPartitionResponse({ scope, partition, ifNoneMatch: req.headers["if-none-match"] })
+          : binaryPartitionRecoveryResponse({ scope, latest });
+        if (response.statusCode === 200 || response.statusCode === 304) {
+          const headers = { ...response.headers };
+          const contentType = headers["content-type"] ?? "application/octet-stream";
+          delete headers["content-type"];
+          return sendBinary(res, response.statusCode, response.body, contentType, headers);
+        }
+        return send(res, response.statusCode, response.body, response.headers);
+      } catch (error) {
+        if (requestClosed) return;
+        const admission = mapResourceAdmissionResponse(error);
+        if (admission) return send(res, admission.statusCode, admission.payload, admission.headers);
+        return send(res, 503, { error: "Map resource partition is unavailable" });
+      } finally {
+        await releaseLease();
+      }
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/map/resources") {
+      if (!rateLimit(req, res, "map-snapshot", RATE_LIMITS.mapSnapshot)) return;
+      const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
+      if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
+      const claimId = currentClaimId();
+      const readyRegions = await ensureCurrentMapResourceRegions(claimId);
+      let scope;
+      try {
+        scope = parseMapResourcePartitionScope(url.searchParams, { allowedRegionIds: readyRegions.regionIds, allowedResourceIds: currentMapResourceIds() });
+      } catch (error) {
+        return send(res, error instanceof MapResourcePageError ? error.statusCode : 422, { error: error instanceof Error ? error.message : String(error) });
+      }
+      let requestClosed = false;
+      let lease = null;
+      req.once("close", () => { requestClosed = true; });
+      const releaseLease = bindMapLeaseRelease(req, res, async () => lease?.release());
+      try {
+        lease = await acquireMapLeaseUnlessClosed(
+          () => relayMapResourceRuntime.acquire({ regionId: scope.regionId, resourceId: scope.resourceId }),
+          () => requestClosed,
+          "Map resource partition request closed during lease acquisition.",
+        );
+        await lease.waitForSnapshot(MAP_SPATIAL_INITIAL_WAIT_MS);
+        const resourceCollection = combineMapResourceLeases([lease]);
+        const payload = buildMapResourcePartitionPayload({ scope, resourceCollection, cursorCodec: mapResourceCursorCodec });
+        const statusCode = payload.layerAvailability.status === "unavailable" ? 503 : 200;
+        mapResourcePageRows = payload.resources.length;
+        return send(res, statusCode, payload);
+      } catch (error) {
+        if (requestClosed) return;
+        const admission = mapResourceAdmissionResponse(error, scope);
+        if (admission) return send(res, admission.statusCode, admission.payload, admission.headers);
+        const statusCode = error instanceof MapResourcePageError ? error.statusCode : 503;
+        return send(res, statusCode, { error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        await releaseLease();
+      }
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/map/resource-events") {
+      if (!rateLimit(req, res, "map-events", RATE_LIMITS.mapEvents)) return;
+      const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
+      if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
+      const claimId = currentClaimId();
+      const readyRegions = await ensureCurrentMapResourceRegions(claimId);
+      let scope;
+      try {
+        scope = parseMapResourceSelectionScope(url.searchParams, { allowedRegionIds: readyRegions.regionIds, allowedResourceIds: currentMapResourceIds() });
+      } catch (error) {
+        return send(res, error instanceof MapResourcePageError ? error.statusCode : 422, { error: error instanceof Error ? error.message : String(error) });
+      }
+      let requestClosed = false;
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.flushHeaders?.();
+      const writeResourceEvent = (event) => {
+        if (requestClosed || res.destroyed) return;
+        res.write(`data: ${JSON.stringify(publicMapResourcePartitionEvent(event))}\n\n`);
+      };
+      res.write(`data: ${JSON.stringify({ type: "stream-ready" })}\n\n`);
+      const leasePlan = mapResourceSelectionLeasePlan(scope);
+      const acquisition = createMapResourceEventLeaseAcquisition({
+        inputs: leasePlan.inputs,
+        concurrency: leasePlan.concurrency,
+        acquire: ({ regionId, resourceId }) => relayMapResourceRuntime.acquire({ regionId, resourceId }),
+        isClosed: () => requestClosed,
+        onEvent: ({ regionId, resourceId }, event, lease) => {
+          const key = mapResourceScopeKey(regionId, resourceId);
+          if (event.type === "partition-delta" && event.additions.length + event.removals.length > 4_096) {
+            const current = lease.current();
+            if (current) writeResourceEvent({
+              type: "partition-ready",
+              key,
+              generation: current.generation,
+              pointCount: current.pointCount,
+              encodedBytes: current.encodedBytes,
+              receivedAt: current.receivedAt,
+              freshness: current.freshness,
+            });
+            return;
+          }
+          writeResourceEvent(event);
+        },
+        onInitial: ({ regionId, resourceId }, lease) => {
+          writeResourceEvent(initialMapResourcePartitionEvent(mapResourceScopeKey(regionId, resourceId), lease.current()));
+        },
+        onUnavailable: ({ regionId, resourceId }, error) => {
+          writeResourceEvent({
+            type: "partition-unavailable",
+            key: mapResourceScopeKey(regionId, resourceId),
+            warning: "Map resource partition is temporarily unavailable",
+            ...(error instanceof MapResourceAdmissionError
+              ? { retryAfterSeconds: error.retryAfterSeconds }
+              : {}),
+          });
+        },
+      });
+      const releaseLeases = () => acquisition.release();
+      const heartbeat = setInterval(() => { if (!res.destroyed) res.write(": keep-alive\n\n"); }, 15_000);
+      req.once("close", () => {
+        requestClosed = true;
+        clearInterval(heartbeat);
+        void releaseLeases();
+      });
+      void relayClaimScopeFence.run(claimId, async () => {
+        await acquisition.run();
+      }).then(async (acquiredForCurrentClaim) => {
+        if (acquiredForCurrentClaim && currentClaimId() === claimId) return;
+        requestClosed = true;
+        clearInterval(heartbeat);
+        await releaseLeases();
+        if (!res.destroyed) res.end();
+      }).catch(async () => {
+        requestClosed = true;
+        clearInterval(heartbeat);
+        await releaseLeases();
+        if (!res.destroyed) res.end();
+      });
+      return;
+    }
+    if (req.method === "GET" && ["/api/local/map/snapshot", "/api/local/map/events"].includes(url.pathname)) {
+      if (url.pathname === "/api/local/map/snapshot" && !rateLimit(req, res, "map-snapshot", RATE_LIMITS.mapSnapshot)) return;
+      if (url.pathname === "/api/local/map/events" && !rateLimit(req, res, "map-events", RATE_LIMITS.mapEvents)) return;
+      const access = mapRequestAccess(accessControlConfig(), accessControlSubject(req));
+      if (!access.allowed) return send(res, 403, { error: access.reason || "Map access is restricted." });
+      const claimId = currentClaimId();
+      const readyMapRegions = mapRequestNeedsResourceReadiness(url.pathname, url.searchParams)
+        ? await ensureCurrentMapResourceRegions(claimId)
+        : currentMapResourceRegions(claimId);
+      const readyMapRegionIds = readyMapRegions.regionIds;
+      let scope;
+      try {
+        scope = parseMapScope(url.searchParams, {
+          allowedRegionIds: [...new Set([...configuredRegionalMarketRegionIds(claimId), ...readyMapRegionIds])],
+          allowedPlayerRegionIds: readyMapRegionIds,
+          allowedResourceIds: currentMapResourceIds(),
+        });
+      } catch (error) {
+        const statusCode = error instanceof MapSnapshotError ? error.statusCode : 422;
+        return send(res, statusCode, { error: error instanceof Error ? error.message : String(error) });
+      }
+      const memberSnapshot = currentStateRepository.read(claimId, "members");
+      const playerSnapshot = currentStateRepository.read(claimId, "players");
+      const memberRows = Array.isArray(memberSnapshot?.data) ? memberSnapshot.data : [];
+      const playerRows = Array.isArray(playerSnapshot?.data) ? playerSnapshot.data : [];
+      const permittedPlayerIds = authorizedMapPlayerIds({
+        selectedPlayerIds: scope.playerIds,
+        excludedMemberIds: getSettings().excludedMemberIds,
+        members: memberRows,
+        players: playerRows,
+        mobileIdentityVerified: MAP_PLAYER_MOBILE_IDENTITY_VERIFIED,
+      });
+      const permittedEnemyTypes = MAP_ENEMY_IDENTITY_VERIFIED ? scope.enemyTypes : [];
+      const spatialInputs = MAP_SPATIAL_COLLECTION_VERIFIED
+        ? mapSpatialLeaseInputs(scope, { playerIds: permittedPlayerIds, enemyTypes: permittedEnemyTypes })
+        : [];
+      const resourceInputs = mapResourceLeaseInputs(scope);
+      const spatialLeases = new Array(spatialInputs.length);
+      const resourceLeases = new Array(resourceInputs.length);
+      let requestClosed = false;
+      const releaseMapLeases = bindMapLeaseRelease(req, res, () => Promise.allSettled([
+        ...spatialLeases.filter(Boolean).map((lease) => lease.release()),
+        ...resourceLeases.filter(Boolean).map((lease) => lease.release()),
+      ]));
+      req.once("close", () => {
+        requestClosed = true;
+      });
+      try {
+        const acquiredForCurrentClaim = await relayClaimScopeFence.run(claimId, async () => {
+          const acquisitionTasks = [
+            ...spatialInputs.map((spatialInput, index) => async () => {
+              if (requestClosed) throw new Error("Map request closed during spatial scope acquisition.");
+              const lease = await acquireMapLeaseUnlessClosed(
+                () => relayMapSpatialScopeManager.acquire({
+                  relayBaseUrl,
+                  claimId,
+                  scope: { claimId, regionId: spatialInput.regionId, playerIds: spatialInput.playerIds, resourceIds: [], enemyTypes: spatialInput.enemyTypes, includeClaims: spatialInput.includeClaims },
+                }),
+                () => requestClosed,
+                "Map request closed during spatial scope acquisition.",
+              );
+              spatialLeases[index] = lease;
+              if (requestClosed) {
+                spatialLeases[index] = undefined;
+                await lease.release();
+                throw new Error("Map request closed during spatial scope acquisition.");
+              }
+            }),
+            ...resourceInputs.map((resourceInput, index) => async () => {
+              if (requestClosed) throw new Error("Map request closed during resource scope acquisition.");
+              const lease = await acquireMapLeaseUnlessClosed(
+                () => relayMapResourceRuntime.acquire(resourceInput),
+                () => requestClosed,
+                "Map request closed during resource scope acquisition.",
+              );
+              resourceLeases[index] = lease;
+              if (requestClosed) {
+                resourceLeases[index] = undefined;
+                await lease.release();
+                throw new Error("Map request closed during resource scope acquisition.");
+              }
+            }),
+          ];
+          await runWithConcurrency(acquisitionTasks, MAP_RESOURCE_LEASE_ACQUISITION_LIMIT);
+        });
+        if (!acquiredForCurrentClaim || currentClaimId() !== claimId) {
+          await releaseMapLeases();
+          if (requestClosed) return;
+          return send(res, 409, { error: "Map scope changed during lease acquisition." });
+        }
+      } catch (error) {
+        await releaseMapLeases();
+        if (requestClosed) return;
+        const admission = mapResourceAdmissionResponse(error);
+        if (admission) return send(res, admission.statusCode, admission.payload, admission.headers);
+        return send(res, 503, { error: error instanceof Error ? error.message : String(error) });
+      }
+      if (url.pathname === "/api/local/map/events") {
+        const domains = mapGenerationDomainsForLayers(scope.layers);
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        res.flushHeaders?.();
+        const listener = {
+          claimId,
+          domains: new Set(domains),
+          mapSpatialScopeKeys: new Set(spatialInputs.map((spatialInput) => mapSpatialScopeKey({
+            claimId,
+            regionId: spatialInput.regionId,
+            playerIds: spatialInput.playerIds,
+            resourceIds: [],
+            enemyTypes: spatialInput.enemyTypes,
+            includeClaims: spatialInput.includeClaims,
+          }))),
+          mapResourceScopeKeys: new Set(resourceLeases.map((lease) => lease.key)),
+          response: res,
+        };
+        gameDataGenerationListeners.add(listener);
+        res.write(`data: ${JSON.stringify({ ...currentGameDataGenerationEvent(claimId, domains), scope, initial: true })}\n\n`);
+        const heartbeat = setInterval(() => {
+          if (!res.destroyed) res.write(": keep-alive\n\n");
+        }, 15_000);
+        req.once("close", () => {
+          clearInterval(heartbeat);
+          gameDataGenerationListeners.delete(listener);
+          void releaseMapLeases();
+        });
+        return;
+      }
+      await Promise.all(spatialLeases
+        .filter((_lease, index) => mapSpatialLeaseNeedsInitialWait(spatialInputs[index]))
+        .map((lease) => lease.waitForSnapshot(MAP_SPATIAL_INITIAL_WAIT_MS)));
+      await Promise.all(resourceLeases
+        .filter((lease) => lease.state().snapshot == null)
+        .map((lease) => lease.waitForSnapshot(MAP_SPATIAL_INITIAL_WAIT_MS)));
+      try {
+        const regionClaims = currentStateRepository.read(claimId, "region-claims");
+        const market = currentStateRepository.read(claimId, "market");
+        const empires = currentStateRepository.read(claimId, "empires");
+        const spatial = combineMapSpatialSnapshots(spatialLeases.map((lease, index) => ({ regionId: spatialInputs[index].regionId, snapshot: lease.snapshot() })));
+        const resourceCollection = combineMapResourceLeases(resourceLeases);
+        const payload = buildMapSnapshot({
+          scope,
+          excludedMemberIds: getSettings().excludedMemberIds,
+          regionClaims,
+          market,
+          empires,
+          members: memberRows,
+          players: playerRows,
+          spatial,
+          resourceCollection,
+          mobileIdentityVerified: MAP_PLAYER_MOBILE_IDENTITY_VERIFIED,
+          enemyIdentityVerified: MAP_ENEMY_IDENTITY_VERIFIED,
+          resourceCoordinatesVerified: MAP_RESOURCE_COORDINATES_VERIFIED,
+          waystoneCoordinatesVerified: MAP_WAYSTONE_COORDINATES_VERIFIED,
+        });
+        const statusCode = mapSnapshotStatusCode({
+          scope,
+          layerAvailability: payload.layerAvailability,
+          regionClaims,
+          market,
+          empires,
+          spatial,
+          resourceCollection,
+        });
+        return send(res, statusCode, statusCode === 200 ? payload : { ...payload, freshness: "unavailable" });
+      } catch (error) {
+        const statusCode = error instanceof MapSnapshotError ? error.statusCode : 500;
+        return send(res, statusCode, { error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        await releaseMapLeases();
+      }
     }
     if (req.method === "GET" && url.pathname.startsWith("/api/local/branding/")) {
       const type = url.pathname.slice("/api/local/branding/".length);
@@ -10580,46 +9175,14 @@ const server = createServer(async (req, res) => {
       if (!asset) return send(res, 404, { error: "Brand asset not configured" });
       return sendBinary(res, 200, await readFile(asset.filePath), asset.contentType);
     }
+    const smokeReviewRejection = smokeAdminReviewMutationRejection({ method: req.method, url: url.pathname }, smokeAdminReviewMode);
+    if (smokeReviewRejection) return send(res, 403, { error: smokeReviewRejection });
     if (req.method === "GET" && url.pathname === "/api/local/admin/me") return send(res, 200, adminStatus(req));
     if (req.method === "POST" && url.pathname === "/api/local/admin/setup") {
-      if (!legacyAdminPasswordAuth) return send(res, 410, { error: "Password administrator setup has been replaced by Discord administrator access" });
-      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
-      if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator setup rejected" });
-      if (toNumber(statements.adminCount.get()?.count) > 0) return send(res, 409, { error: "Admin user already exists" });
-      const body = await readJson(req, BODY_LIMITS.auth);
-      if (isProduction && !adminSetupKey) return send(res, 503, { error: "Admin setup is disabled until ADMIN_SETUP_KEY is configured on the server" });
-      if (isProduction && String(body.setupKey ?? "") !== adminSetupKey) return send(res, 403, { error: "Invalid server setup key" });
-      const username = String(body.username ?? "admin").trim();
-      if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
-      const password = String(body.password ?? "");
-      if (!validLegacyAdminPassword(password)) return send(res, 400, { error: "Password must be at least 12 characters" });
-      const createdAt = new Date().toISOString();
-      const result = statements.insertAdmin.run(username, await hashPassword(password), "owner", createdAt);
-      statements.updateLastLogin.run(createdAt, result.lastInsertRowid);
-      audit({ id: result.lastInsertRowid, username }, "admin.setup", { username });
-      const session = createSession(result.lastInsertRowid);
-      return send(res, 200, adminStatus({ headers: { cookie: session.cookie } }), { "set-cookie": session.cookie });
+      return send(res, 410, { error: "Administrator sign-in now uses Discord. Sign in with an approved Discord admin account." });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/login") {
-      if (!legacyAdminPasswordAuth) return send(res, 410, { error: "Administrator sign-in now uses Discord. Sign in with an approved Discord admin account." });
-      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
-      if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator sign-in rejected" });
-      const body = await readJson(req, BODY_LIMITS.auth);
-      const username = String(body.username ?? "admin").trim();
-      const attemptKey = loginAttemptKey(requestAddress(req), username);
-      if (adminLoginAttempts.blocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
-      const user = statements.adminByUsername.get(username);
-      const successful = Boolean(user && await verifyPassword(String(body.password ?? ""), user.password_hash));
-      statements.insertLoginEvent.run(username, successful ? 1 : 0, new Date().toISOString(), requestAddress(req));
-      if (!successful) {
-        adminLoginAttempts.recordFailure(attemptKey);
-        return send(res, 401, { error: "Invalid username or password" });
-      }
-      adminLoginAttempts.clear(attemptKey);
-      statements.updateLastLogin.run(new Date().toISOString(), user.id);
-      audit(user, "admin.login");
-      const session = createSession(user.id);
-      return send(res, 200, adminStatus({ headers: { cookie: session.cookie } }), { "set-cookie": session.cookie });
+      return send(res, 410, { error: "Administrator sign-in now uses Discord. Sign in with an approved Discord admin account." });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/logout") {
       const user = requireAdmin(req, res);
@@ -10633,6 +9196,7 @@ const server = createServer(async (req, res) => {
       if (!requireAdminMutation(req, res, user)) return;
       const requiredPermission = adminPermissionFor(req.method, url.pathname);
       if (!requireAdminPermission(req, res, user, requiredPermission)) return;
+      if (await publicAdminRequest({ req, res, user, method: req.method, url })) return;
       if (req.method === "GET" && url.pathname === "/api/local/admin/status") return send(res, 200, databaseStatus());
       if (req.method === "GET" && url.pathname === "/api/local/admin/empire-membership") {
         return send(res, 200, empireMembershipAdminPayload());
@@ -10728,23 +9292,28 @@ const server = createServer(async (req, res) => {
         return send(res, 200, discordYouTubeStatus({ result }));
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/discord/discovery") {
-        const discovery = await discordGuildDiscovery();
+        const settings = getDiscordSettingsRaw();
+        const discovery = !settings.botToken
+          ? unavailableDiscordDiscovery("token_missing", "Add a bot token in Setup.")
+          : !discordStartupEnabled
+            ? unavailableDiscordDiscovery("startup_disabled", "Discord startup is disabled in this environment.")
+            : await discordGuildDiscovery(settings);
         audit(user, "discord.discovery", { channels: discovery.channels.length, roles: discovery.roles.length, emojis: discovery.emojis.length, members: discovery.memberCount });
         return send(res, 200, discovery);
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/test") {
         const body = await readJson(req);
         const kind = String(body.kind ?? "basic");
-        const result = await sendDiscordTestNotification(kind);
-        audit(user, "discord.test_message", { kind, status: result?.skipped ? "skipped" : "sent" });
+        const result = await sendDiscordTestNotification(kind, { requestedChannelId: body.channelId });
+        audit(user, "discord.test_message", { kind, channelId: result?.channel_id, status: "sent", sandbox: true });
         return send(res, 200, { ok: true, result });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/craft-plan-report/test") {
         const body = await readJson(req, BODY_LIMITS.settings);
         const profession = body.reportType === "profession" ? normalizeCraftPlanReportProfession(body.profession) : "";
         if (body.reportType === "profession" && !profession) return send(res, 400, { error: "Choose a valid profession." });
-        const result = await sendCraftPlanDiscordReport({ profession, channelId: body.channelId });
-        audit(user, "discord.craft_plan_report.test", { profession: profession || "overview", channelId: body.channelId, messageId: result.response?.id });
+        const result = await sendCraftPlanDiscordReport({ profession, requestedChannelId: body.channelId });
+        audit(user, "discord.craft_plan_report.test", { profession: profession || "overview", channelId: result.response?.channel_id, messageId: result.response?.id, sandbox: true });
         return send(res, 200, { ok: true, result });
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/discord/colour-roles/post") {
@@ -10922,8 +9491,7 @@ const server = createServer(async (req, res) => {
         const refreshSeconds = Number(body.refreshSeconds ?? 30);
         if (!validRefreshIntervalSeconds(refreshSeconds)) return send(res, 400, { error: "Display refresh interval must be between 15 and 300 seconds" });
         const serverRefreshSeconds = Number(body.serverRefreshSeconds ?? refreshSeconds);
-        if (!validRefreshIntervalSeconds(serverRefreshSeconds)) return send(res, 400, { error: "Server collection interval must be between 15 and 300 seconds" });
-        const collectorSettings = normalizeCollectorSettings(body.collectorSettings ?? {});
+        if (!validRefreshIntervalSeconds(serverRefreshSeconds)) return send(res, 400, { error: "Reconciliation cadence must be between 15 and 300 seconds" });
         const defaultPage = String(body.defaultPage ?? DEFAULT_APP_PAGE);
         if (!validAppPage(defaultPage)) return send(res, 400, { error: "Unknown default page" });
         const defaultRegion = String(body.defaultRegion ?? "").trim();
@@ -10960,7 +9528,6 @@ const server = createServer(async (req, res) => {
         statements.upsertSetting.run("theme_json", JSON.stringify(nextTheme), updatedAt);
         statements.upsertSetting.run("refresh_seconds", String(refreshSeconds), updatedAt);
         statements.upsertSetting.run("server_refresh_seconds", String(serverRefreshSeconds), updatedAt);
-        statements.upsertSetting.run("collector_settings_json", JSON.stringify(collectorSettings), updatedAt);
         statements.upsertSetting.run("default_page", defaultPage, updatedAt);
         statements.upsertSetting.run("default_region", defaultRegion, updatedAt);
         statements.upsertSetting.run("active_region_overrides", additionalActiveRegions, updatedAt);
@@ -10975,13 +9542,12 @@ const server = createServer(async (req, res) => {
         if (youtubeJob) statements.updateScheduledJobSettings.run(youtubeSchedule, youtubeJob.enabled === 0 ? 0 : 1, nextScheduledRunIso(youtubeSchedule), updatedAt, "youtube_channel_monitor");
         if (discordToken) statements.upsertSecret.run("discord_bot_token", discordToken, updatedAt);
         if (body.discord?.clearBotToken === true) statements.deleteSecret.run("discord_bot_token");
-        activeRegionsCache = null;
         pollStatus.intervalMs = serverRefreshSeconds * 1000;
         scheduleServerPolling(serverRefreshSeconds * 1000);
-        refreshCollectorStatusSettings();
-        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, collectorCount: Object.keys(collectorSettings).length, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
+        audit(user, "settings.update", { claimId: nextClaimId, refreshSeconds, serverRefreshSeconds, defaultPage, defaultRegion, additionalActiveRegions, excludedMemberCount: excludedMemberIds.length, visitorSecurity: { fullIpRetentionDays: visitorSecurity.fullIpRetentionDays, statsRetentionDays: visitorSecurity.statsRetentionDays, geoipProvider: visitorSecurity.geoipProvider, geoipConfigured: visitorSecurity.geoipProvider === "ipapi" || Boolean(visitorSecurity.geoipSourceUrl) }, discordEnabled: discordSettings.enabled });
         startDiscordGateway();
         void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
+        requestRelayRuntimeRefresh?.("manual");
         return send(res, 200, getSettings());
       }
       if (req.method === "POST" && url.pathname === "/api/local/admin/branding") {
@@ -11017,21 +9583,6 @@ const server = createServer(async (req, res) => {
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/access-control") {
         return send(res, 200, adminAccessControlResponse());
-      }
-      if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/catalog-refresh") {
-        return send(res, 200, craftPlanCatalogRefreshStatus());
-      }
-      if (req.method === "POST" && url.pathname === "/api/local/admin/craft-plan/catalog-refresh") {
-        const key = "recipe_catalog_refresh";
-        recoverStaleScheduledJobs();
-        const row = statements.getScheduledJob.get(key);
-        if (!row) return send(res, 404, { error: "Scheduled job is not configured", ...craftPlanCatalogRefreshStatus() });
-        if (row.running) return send(res, 409, { error: "Scheduled job is already running", ...craftPlanCatalogRefreshStatus() });
-        audit(user, "craft_plan.catalog_refresh_started", { key });
-        void runScheduledJob(key, { manual: true })
-          .then((result) => audit(user, "craft_plan.catalog_refresh_completed", { key, metadata: result.metadata }))
-          .catch((error) => console.warn(`Manual scheduled job ${key} failed: ${error instanceof Error ? error.message : String(error)}`));
-        return send(res, 202, { ...craftPlanCatalogRefreshStatus(), result: { ok: true, key, started: true } });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/progress-audit") {
         const claimId = getSettings().claimId;
@@ -11072,6 +9623,11 @@ const server = createServer(async (req, res) => {
       if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan") {
         return send(res, 200, await craftPlanAdminResponse(getSettings().claimId));
       }
+      if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/player-banks") {
+        const playerId = String(url.searchParams.get("playerId") ?? "").trim();
+        const result = await craftPlanPlayerBankResponse(playerId, getSettings().claimId);
+        return send(res, result.status, result.body);
+      }
       if (req.method === "GET" && url.pathname === "/api/local/admin/craft-plan/workstation-preset") {
         try {
           return send(res, 200, await resolveCraftPlanWorkstationPreset(url.searchParams.get("tier")));
@@ -11084,10 +9640,10 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req, BODY_LIMITS.settings);
         let submittedConfig = normalizeCraftPlanConfig(body);
         try {
-          const buildingsPayload = await fetchBitjita(`/claims/${encodeURIComponent(getSettings().claimId)}/buildings`);
+          const buildingsPayload = currentClaimBuildingsProjection(getSettings().claimId);
           submittedConfig = reconcileCraftPlanBuildingProgress(submittedConfig, buildingsPayload).config;
         } catch {
-          // Leave newly added building targets pending until a successful building discovery request.
+          // Leave newly added building targets pending until a complete Relay building generation commits.
         }
         const config = saveCraftPlanConfig(submittedConfig);
         const response = await craftPlanAdminResponse(getSettings().claimId);
@@ -11095,7 +9651,7 @@ const server = createServer(async (req, res) => {
         audit(user, "craft_plan.update", {
           targets: config.targets.length,
           players: config.sourceRules.playerIds.length,
-          banks: config.sourceRules.bankPlayerIds.length,
+          banks: config.sourceRules.bankContainerIds.length + config.sourceRules.bankPlayerIds.length,
           deployables: config.sourceRules.deployableContainerIds.length,
           changes: auditDetails.changes,
           otherSettingsChanged: auditDetails.otherSettingsChanged,
@@ -11352,9 +9908,14 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req);
         const userId = Number(body.userId);
         const active = Boolean(body.active);
-        if (userId === user.id && !active) return send(res, 400, { error: "You cannot disable your current account" });
-        const target = db.prepare("SELECT id, username FROM admin_users WHERE id = ?").get(userId);
+        const target = db.prepare("SELECT id, username, role, active FROM admin_users WHERE id = ?").get(userId);
         if (!target) return send(res, 404, { error: "Admin user not found" });
+        const targetIsActiveOwner = normalizeAdminRole(target.role) === "owner" && Boolean(target.active);
+        if (targetIsActiveOwner && !active) {
+          if (normalizeAdminRole(user.role) !== "owner") return send(res, 403, { error: "Only active owners can revoke owner access" });
+          if (toNumber(statements.activeOwnerCount.get()?.count) <= 1) return send(res, 409, { error: "At least one active owner must remain" });
+        }
+        if (userId === user.id && !active) return send(res, 400, { error: "You cannot disable your current account" });
         statements.updateAdminActive.run(active ? 1 : 0, userId);
         if (!active) statements.deleteUserSessions.run(userId);
         audit(user, "user.status", { id: target.id, username: target.username, active });
@@ -11365,9 +9926,16 @@ const server = createServer(async (req, res) => {
         const userId = Number(body.userId);
         const role = normalizeAdminRole(body.role);
         if (!userId) return send(res, 400, { error: "Select an administrator and role" });
-        if (userId === user.id && role !== "owner") return send(res, 400, { error: "You cannot remove owner access from your current account" });
-        const target = db.prepare("SELECT id, username, role FROM admin_users WHERE id = ?").get(userId);
+        const target = db.prepare("SELECT id, username, role, active FROM admin_users WHERE id = ?").get(userId);
         if (!target) return send(res, 404, { error: "Admin user not found" });
+        const targetIsOwner = normalizeAdminRole(target.role) === "owner";
+        if ((role === "owner" || targetIsOwner) && normalizeAdminRole(user.role) !== "owner") {
+          return send(res, 403, { error: "Only active owners can grant or revoke owner access" });
+        }
+        if (targetIsOwner && role !== "owner" && Boolean(target.active) && toNumber(statements.activeOwnerCount.get()?.count) <= 1) {
+          return send(res, 409, { error: "At least one active owner must remain" });
+        }
+        if (userId === user.id && role !== "owner") return send(res, 400, { error: "You cannot remove owner access from your current account" });
         statements.updateAdminRole.run(role, userId);
         statements.deleteUserSessions.run(userId);
         audit(user, "user.role", { id: target.id, username: target.username, previousRole: normalizeAdminRole(target.role), role });
@@ -11403,6 +9971,49 @@ const server = createServer(async (req, res) => {
         return send(res, 200, { removed });
       }
       if (req.method === "GET" && url.pathname === "/api/local/admin/tables") return send(res, 200, { tables: tableInfo() });
+      if (req.method === "GET" && url.pathname === "/api/local/admin/operational-history-retention") {
+        return send(res, 200, operationalHistoryRetentionPreview(db, {
+          ...operationalHistoryRetentionSettings(),
+          databasePath,
+        }));
+      }
+      if (req.method === "POST" && url.pathname === "/api/local/admin/operational-history-retention/dry-run") {
+        const result = runOperationalHistoryRetentionDryRunJob();
+        audit(user, "operational_history_retention.dry_run", { eligibleRows: result.eligibleRows, deletedRows: result.deletedRows });
+        return send(res, 200, {
+          result,
+          preview: operationalHistoryRetentionPreview(db, { ...operationalHistoryRetentionSettings(), databasePath }),
+        });
+      }
+      if (req.method === "PUT" && url.pathname === "/api/local/admin/operational-history-retention") {
+        const body = await readJson(req, BODY_LIMITS.settings);
+        try {
+          const next = normalizeOperationalHistoryRetentionSettings({
+            enabled: body.enabled === true,
+            days: body.days,
+            tables: body.tables,
+          }, { approvedTables: new Set(APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES) });
+          if (next.enabled) {
+            validateOperationalHistoryRetentionEnableGate({
+              now: new Date(),
+              approvedTables: new Set(APPROVED_OPERATIONAL_HISTORY_RETENTION_TABLES),
+              tables: next.tables,
+              explicitConfirmation: String(body.confirmation ?? ""),
+              backupVerification: latestOperationalHistoryBackupVerification(db),
+              approvedBackupRoot: operationalHistoryApprovedBackupRoot,
+              disallowedBackupRoots: [backupDir],
+            });
+          }
+          const updatedAt = new Date().toISOString();
+          statements.upsertSetting.run("operational_history_retention_enabled", next.enabled ? "true" : "false", updatedAt);
+          statements.upsertSetting.run("operational_history_retention_days", String(next.days), updatedAt);
+          statements.upsertSetting.run("operational_history_retention_tables_json", JSON.stringify(next.tables), updatedAt);
+          audit(user, "operational_history_retention.settings", { enabled: next.enabled, days: next.days, tables: next.tables });
+          return send(res, 200, operationalHistoryRetentionPreview(db, { ...next, databasePath }));
+        } catch (error) {
+          return send(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
+      }
       if (req.method === "GET" && url.pathname === "/api/local/admin/table") {
         const table = url.searchParams.get("name") ?? "";
         return send(res, 200, tableQuery(table, Object.fromEntries(url.searchParams.entries())));
@@ -11430,17 +10041,16 @@ const server = createServer(async (req, res) => {
         return sendBinary(res, 200, await readFile(path.join(backupDir, name)), "application/vnd.sqlite3", { "content-disposition": `attachment; filename="${name}"` });
       }
     }
-    if (req.method === "POST" && url.pathname === "/api/local/snapshot") {
-      if (!rateLimit(req, res, "local-snapshot", RATE_LIMITS.expensiveLocal)) return;
-      if (isProduction) return send(res, 403, { error: "Browser snapshot collection is disabled in production" });
-      return send(res, 200, recordSettlementState(await readJson(req, BODY_LIMITS.snapshot)));
-    }
     if (url.pathname === "/api/local/market/deal-watches") {
       const appUser = req.method === "GET"
         ? requireAppUserSession(req, res)
         : requireAppUser(req, res);
       if (!appUser) return;
-      const claimId = String(url.searchParams.get("claimId") ?? getSettings().claimId ?? "").trim();
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
       if (req.method === "GET") {
         const watches = statements.listDealWatchesForUser.all(appUser.id, claimId).map(dealWatchRow);
         return send(res, 200, { watches, settings: getSettings().marketDealWatch });
@@ -11452,14 +10062,17 @@ const server = createServer(async (req, res) => {
         if (count >= dealSettings.maxWatchesPerUser) return send(res, 409, { error: `Watch limit reached (${dealSettings.maxWatchesPerUser})` });
         const regionId = String(body.regionId ?? "").trim();
         const itemId = String(body.itemId ?? "").trim();
-        const itemType = String(body.itemType ?? 0).trim() || "0";
+        const rawItemType = String(body.itemType ?? 0).trim().toLowerCase() || "0";
+        const itemType = rawItemType === "cargo" ? "1" : rawItemType === "item" ? "0" : rawItemType;
         const itemName = String(body.itemName ?? "").trim();
         if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Choose a single region before watching an item" });
-        const activeRegions = await fetchCachedActiveRegions();
-        if (!activeRegions.regions.some((region) => String(region.regionId) === regionId)) {
-          return send(res, 400, { error: "That region is not currently active" });
+        if (!/^\d+$/.test(itemId)) return send(res, 400, { error: "Item id must be a decimal integer" });
+        if (itemType !== "0" && itemType !== "1") return send(res, 400, { error: "Item type must be item or cargo" });
+        const { allowedRegionIds } = regionalMarketReadScope(claimId);
+        if (!allowedRegionIds.includes(regionId)) {
+          return send(res, 400, { error: "That region is outside the configured active-region scope" });
         }
-        if (!itemId || !itemName) return send(res, 400, { error: "Item details are required" });
+        if (!itemName) return send(res, 400, { error: "Item details are required" });
         if (statements.dealWatchByUserItem.get(appUser.id, claimId, regionId, itemId, itemType)) return send(res, 409, { error: "This item is already on your deal watchlist for that region" });
         const nowIso = new Date().toISOString();
         const threshold = Math.min(Math.max(toNumber(body.thresholdPercent) || dealSettings.thresholdPercent, 1), 95);
@@ -11478,6 +10091,7 @@ const server = createServer(async (req, res) => {
           nowIso,
           nowIso,
         );
+        void queueMarketDealWatchEvaluation().catch(() => {});
         return send(res, 201, { watch: dealWatchRow(statements.dealWatchByIdForUser.get(result.lastInsertRowid, appUser.id)) });
       }
     }
@@ -11493,6 +10107,7 @@ const server = createServer(async (req, res) => {
         statements.updateDealWatch.run(enabled, threshold, new Date().toISOString(), id, appUser.id);
         const row = statements.dealWatchByIdForUser.get(id, appUser.id);
         if (!row) return send(res, 404, { error: "Watch not found" });
+        if (row.enabled) void queueMarketDealWatchEvaluation().catch(() => {});
         return send(res, 200, { watch: dealWatchRow(row) });
       }
       if (req.method === "DELETE") {
@@ -11514,95 +10129,193 @@ const server = createServer(async (req, res) => {
       if (!rateLimit(req, res, "empires", RATE_LIMITS.expensiveLocal)) return;
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
-      const { forceRefresh } = refresh;
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
-      try {
-        return send(res, 200, await regionalEmpireOverview(regionId, { forceRefresh }));
-      } catch (error) {
-        const cached = empireCacheGetAny(`overview:${regionId}`);
-        if (cached) return send(res, 200, { ...cached, stale: true, partial: true, errors: [...(cached.errors ?? []), errorMessage(error)] });
-        return send(res, 200, {
-          regionId,
-          fetchedAt: new Date().toISOString(),
-          stale: true,
-          partial: true,
-          totalRegionalClaims: 0,
-          empireClaimCount: 0,
-          empires: [],
-          errors: [errorMessage(error)],
-          summary: { empires: 0, regionalClaims: 0, totalMembers: 0, largestEmpireName: null },
-        });
+      if (refresh.forceRefresh && relayEmpireStarted) {
+        await relayEmpireRuntime.warmActiveRegions().catch(() => {});
       }
+      const claimId = currentClaimId();
+      const { current, allowedRegionIds } = relayEmpireReadScope(claimId);
+      if (!current?.data) return send(res, 503, { error: "Relay Empire data has not loaded yet." });
+      if (!allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      return send(res, 200, relayEmpireResponse(
+        empireOverviewView(
+          current.data,
+          regionId,
+          relayEmpireViewOptions(claimId, regionId),
+        ),
+        current,
+        regionId,
+      ));
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/details") {
       if (!rateLimit(req, res, "empire-details", RATE_LIMITS.expensiveLocal)) return;
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
-      const { forceRefresh } = refresh;
       const empireId = String(url.searchParams.get("empireId") ?? "").trim();
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!empireId) return send(res, 400, { error: "Empire id is required" });
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
       const inactiveDays = url.searchParams.get("inactiveDays") ?? 14;
-      try {
-        const details = await regionalEmpireDetails(empireId, regionId, inactiveDays, { forceRefresh });
-        return details ? send(res, 200, details) : send(res, 404, { error: "Empire not found in region" });
-      } catch (error) {
-        return send(res, 502, { error: "Empire details unavailable", errors: [errorMessage(error)] });
+      if (refresh.forceRefresh && relayEmpireStarted) {
+        await relayEmpireRuntime.warmActiveRegions().catch(() => {});
       }
+      const claimId = currentClaimId();
+      const { current, allowedRegionIds } = relayEmpireReadScope(claimId);
+      if (!current?.data) return send(res, 503, { error: "Relay Empire data has not loaded yet." });
+      if (!allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const details = empireDetailsView(
+        current.data,
+        regionId,
+        empireId,
+        inactiveDays,
+        relayEmpireViewOptions(claimId, regionId),
+      );
+      return details
+        ? send(res, 200, relayEmpireResponse(details, current, regionId))
+        : send(res, 404, { error: "Empire not found in region" });
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/claim-members") {
       if (!rateLimit(req, res, "empire-claim-members", RATE_LIMITS.expensiveLocal)) return;
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
-      const { forceRefresh } = refresh;
       const claimId = String(url.searchParams.get("claimId") ?? "").trim();
       if (!claimId) return send(res, 400, { error: "Claim id is required" });
-      try {
-        return send(res, 200, await regionalEmpireClaimMembers(claimId, { forceRefresh }));
-      } catch (error) {
-        return send(res, 502, { claim: { claimId, name: `Claim ${claimId}` }, members: [], errors: [errorMessage(error)], fetchedAt: new Date().toISOString() });
+      if (refresh.forceRefresh && relayEmpireStarted) {
+        await relayEmpireRuntime.warmActiveRegions().catch(() => {});
       }
+      const monitoredClaimId = currentClaimId();
+      const { current, allowedRegionIds } = relayEmpireReadScope(monitoredClaimId);
+      if (!current?.data) return send(res, 503, { error: "Relay Empire data has not loaded yet." });
+      const settlement = current.data.settlements?.find((row) => String(row?.claimEntityId) === claimId);
+      const regionId = String(settlement?.regionId ?? "");
+      if (!allowedRegionIds.includes(regionId)) {
+        return send(res, 404, { error: "Claim not found in configured active regions" });
+      }
+      const view = empireClaimMembersView(current.data, claimId, {
+        regionalClaims: relayEmpireRegionalClaims(monitoredClaimId, regionId),
+      });
+      return view
+        ? send(res, 200, relayEmpireResponse(view, current, regionId))
+        : send(res, 404, { error: "Claim not found in configured active regions" });
     }
     if (req.method === "GET" && url.pathname === "/api/local/empires/watchtowers") {
       if (!rateLimit(req, res, "empire-watchtowers", RATE_LIMITS.expensiveLocal)) return;
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
-      const { forceRefresh } = refresh;
       const regionId = String(url.searchParams.get("regionId") ?? "").trim();
       if (!/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id is required" });
       const inactiveDays = url.searchParams.get("inactiveDays") ?? 14;
-      try {
-        return send(res, 200, await regionalEmpireWatchtowers(regionId, inactiveDays, { forceRefresh }));
-      } catch (error) {
-        const days = Math.max(1, Math.min(365, toNumber(inactiveDays) || 14));
-        const cached = empireCacheGetAny(`watchtowers:${regionId}:${days}`);
-        if (cached) return send(res, 200, { ...cached, stale: true, errors: [...(cached.errors ?? []), errorMessage(error)] });
-        return send(res, 200, {
-          regionId,
-          inactiveDays: days,
-          fetchedAt: new Date().toISOString(),
-          stale: true,
-          partial: true,
-          unclaimedAvailable: false,
-          unclaimedMessage: "Unclaimed watchtowers are not exposed by the current BitJita public API.",
-          empires: [],
-          towers: [],
-          errors: [errorMessage(error)],
-          summary: { towerCount: 0, inactiveRiskEmpires: 0, underSiege: 0, activeTowers: 0 },
-        });
+      if (refresh.forceRefresh && relayEmpireStarted) {
+        await relayEmpireRuntime.warmActiveRegions().catch(() => {});
       }
+      const claimId = currentClaimId();
+      const { current, allowedRegionIds } = relayEmpireReadScope(claimId);
+      if (!current?.data) return send(res, 503, { error: "Relay Empire data has not loaded yet." });
+      if (!allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      return send(res, 200, relayEmpireResponse(
+        empireWatchtowersView(
+          current.data,
+          regionId,
+          inactiveDays,
+          relayEmpireViewOptions(claimId, regionId),
+        ),
+        current,
+        regionId,
+      ));
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/overview") {
       if (!rateLimit(req, res, "global-market-overview", RATE_LIMITS.expensiveLocal)) return;
-      const regionId = String(url.searchParams.get("regionId") ?? "").trim();
-      if (regionId && !/^\d+$/.test(regionId)) return send(res, 400, { error: "Region id must be numeric" });
-      const overview = await globalMarketOverview(regionId);
-      if (!overview.generatedAt && processRole === "worker") {
-        void runGlobalMarketInsightsJob().catch((error) => console.warn(`Initial global market insight refresh failed: ${errorMessage(error)}`));
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
       }
-      return send(res, 200, overview);
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const body = await runHeavyProjection(marketHeavyRouteGate, routeMeasurement, () => ({
+        ...regionalMarketOverviewView(current?.data, {
+          regionId,
+          allowedRegionIds,
+          getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+          observedTrades: regionalMarketObservedTrades(claimId, regionId, allowedRegionIds),
+        }),
+        ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      }));
+      return send(res, 200, body);
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/deals") {
+      if (!rateLimit(req, res, "global-market-deals", RATE_LIMITS.expensiveLocal)) return;
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      const requestedRegionIds = [...new Set(
+        String(url.searchParams.get("regions") ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+      )];
+      if (requestedRegionIds.some((regionId) => !/^\d+$/.test(regionId))) {
+        return send(res, 400, { error: "Region ids must be comma-separated decimal integers" });
+      }
+      if (requestedRegionIds.some((regionId) => !allowedRegionIds.includes(regionId))) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const scopedRegionIds = requestedRegionIds.length ? requestedRegionIds : allowedRegionIds;
+      return send(res, 200, {
+        ...regionalMarketDealsView(current?.data, {
+          regionId: "all",
+          allowedRegionIds: scopedRegionIds,
+          getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+          limit: 500,
+        }),
+        ...regionalMarketResponseStatus(current, "all", scopedRegionIds),
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      });
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/stalls") {
+      if (!rateLimit(req, res, "global-market-stalls", RATE_LIMITS.expensiveLocal)) return;
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      return send(res, 200, {
+        ...regionalMarketStallsView(current?.data, {
+          ...Object.fromEntries(url.searchParams.entries()),
+          query: url.searchParams.get("q") ?? url.searchParams.get("search") ?? "",
+          activeOnly: url.searchParams.get("activeOnly") ?? url.searchParams.get("hideEmpty") ?? "true",
+          regionId,
+          allowedRegionIds,
+          getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+        }),
+        ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      });
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/history") {
       const refresh = manualRefreshAccess(req, res);
@@ -11610,47 +10323,187 @@ const server = createServer(async (req, res) => {
       return send(res, 200, marketHistory(url.searchParams.get("claimId") ?? "", Number(url.searchParams.get("limit") ?? 100), url.searchParams.get("owner") ?? ""));
     }
     if (req.method === "GET" && url.pathname === "/api/local/market/buy-orders") {
-      return send(res, 200, marketBuyOrders(url.searchParams.get("claimId") ?? getSettings().claimId, Object.fromEntries(url.searchParams.entries())));
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const { allowedRegionIds } = regionalMarketReadScope(claimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      return send(
+        res,
+        200,
+        marketBuyOrders(
+          claimId,
+          {
+            ...Object.fromEntries(url.searchParams.entries()),
+            regionId,
+          },
+          allowedRegionIds,
+        ),
+      );
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/regions") {
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const { current, regions } = regionalMarketRegionRows(claimId);
+      return send(res, 200, {
+        claimId,
+        regions,
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      });
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/catalog") {
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const query = String(url.searchParams.get("q") ?? "").trim();
+      const catalogRows = query.length >= 2
+        ? providerCatalogRepository.findEntities(query)
+        : providerCatalogRepository.listEntities();
+      return send(res, 200, {
+        ...regionalMarketCatalogView(
+          current?.data,
+          catalogRows,
+          {
+            ...Object.fromEntries(url.searchParams.entries()),
+            query,
+            regionId,
+            allowedRegionIds,
+          },
+        ),
+        ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      });
+    }
+    if (req.method === "POST" && url.pathname === "/api/local/market/favorite-quotes") {
+      if (!rateLimit(req, res, "favoriteQuotesRead", RATE_LIMITS.favoriteQuotesRead)) return;
+      const { regionId, items } = favoriteQuoteRequestBody(await readJson(req, 16 * 1024));
+      const configuredClaimId = currentClaimId();
+      const { current, allowedRegionIds } = regionalMarketReadScope(configuredClaimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const body = await runHeavyProjection(marketHeavyRouteGate, routeMeasurement, () => ({
+        generation: current?.generation ?? 0,
+        ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
+        quotes: regionalMarketFavoriteQuotesView(current?.data, items, {
+          generation: current?.generation ?? 0,
+          regionId,
+          allowedRegionIds,
+        }),
+        items: regionalMarketFavoriteItemsView(items, {
+          getEntity: (catalogKey) => providerCatalogRepository.getEntity(catalogKey),
+        }),
+      }));
+      return send(res, 200, body);
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/order-book") {
+      if (!rateLimit(req, res, "orderBookRead", RATE_LIMITS.orderBookRead)) return;
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const requestedItemType = String(url.searchParams.get("itemType") ?? "").trim().toLowerCase();
+      if (requestedItemType !== "item" && requestedItemType !== "cargo") {
+        return send(res, 400, { error: "Item type must be item or cargo" });
+      }
+      const itemId = String(url.searchParams.get("itemId") ?? "").trim();
+      if (!/^\d+$/.test(itemId)) {
+        return send(res, 400, { error: "Item id must be numeric" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const catalogKey = `${requestedItemType === "cargo" ? "cargo" : "items"}:${itemId}`;
+      const body = await runHeavyProjection(marketHeavyRouteGate, routeMeasurement, () => ({
+        ...regionalMarketOrderBookView(
+          current?.data,
+          providerCatalogRepository.getEntity(catalogKey),
+          {
+            itemType: requestedItemType,
+            itemId,
+            regionId,
+            allowedRegionIds,
+          },
+        ),
+        ...regionalMarketResponseStatus(current, regionId, allowedRegionIds),
+        generatedAt: current?.provenance?.receivedAt ?? null,
+      }));
+      return send(res, 200, body);
+    }
+    if (req.method === "GET" && url.pathname === "/api/local/market/price-history") {
+      const configuredClaimId = currentClaimId();
+      const claimId = String(url.searchParams.get("claimId") ?? configuredClaimId).trim();
+      if (claimId !== configuredClaimId) {
+        return send(res, 403, { error: "Claim is outside the configured monitor scope" });
+      }
+      const regionId = String(url.searchParams.get("regionId") ?? "all").trim().toLowerCase() || "all";
+      if (regionId !== "all" && !/^\d+$/.test(regionId)) {
+        return send(res, 400, { error: "Region id must be numeric or all" });
+      }
+      const requestedItemType = String(url.searchParams.get("itemType") ?? "").trim().toLowerCase();
+      if (requestedItemType !== "item" && requestedItemType !== "cargo") {
+        return send(res, 400, { error: "Item type must be item or cargo" });
+      }
+      const itemId = String(url.searchParams.get("itemId") ?? "").trim();
+      if (!/^\d+$/.test(itemId)) {
+        return send(res, 400, { error: "Item id must be numeric" });
+      }
+      const { current, allowedRegionIds } = regionalMarketReadScope(claimId);
+      if (regionId !== "all" && allowedRegionIds.length && !allowedRegionIds.includes(regionId)) {
+        return send(res, 403, { error: "Region is outside the configured active-region scope" });
+      }
+      const range = String(url.searchParams.get("range") ?? "all").trim().toLowerCase();
+      if (!["24h", "7d", "30d", "all"].includes(range)) {
+        return send(res, 400, { error: "Range must be 24h, 7d, 30d, or all" });
+      }
+      return send(res, 200, {
+        ...regionalMarketPriceHistoryView(
+          regionalMarketObservedTrades(claimId, regionId, allowedRegionIds, {
+            itemType: requestedItemType,
+            itemId,
+          }),
+          {
+            itemType: requestedItemType,
+            itemId,
+            regionId,
+            allowedRegionIds,
+            range,
+          },
+        ),
+        currentAsOf: current?.provenance?.receivedAt ?? null,
+      });
     }
     if (req.method === "GET" && url.pathname === "/api/local/leaderboard") {
       const refresh = manualRefreshAccess(req, res);
       if (!refresh) return;
       return send(res, 200, contributionLeaderboard(url.searchParams.get("claimId") ?? ""));
-    }
-    if (req.method === "POST" && url.pathname === "/api/local/passive-crafts") {
-      if (!rateLimit(req, res, "passive-crafts", RATE_LIMITS.expensiveLocal)) return;
-      const refresh = manualRefreshAccess(req, res);
-      if (!refresh) return;
-      const { forceRefresh } = refresh;
-      const body = await readJson(req, BODY_LIMITS.json);
-      return send(res, 200, await passiveCraftSummaries({ ...body, forceRefresh }));
-    }
-    if (req.method === "POST" && url.pathname === "/api/local/player-details") {
-      if (!rateLimit(req, res, "player-details", RATE_LIMITS.expensiveLocal)) return;
-      const refresh = manualRefreshAccess(req, res);
-      if (!refresh) return;
-      const { forceRefresh } = refresh;
-      const body = await readJson(req, BODY_LIMITS.json);
-      return send(res, 200, await playerDetailSummaries({ ...body, forceRefresh }));
-    }
-    if (req.method === "POST" && url.pathname === "/api/local/production/crafts") {
-      if (!rateLimit(req, res, "production-crafts", RATE_LIMITS.expensiveLocal)) return;
-      const refresh = manualRefreshAccess(req, res);
-      if (!refresh) return;
-      const { forceRefresh } = refresh;
-      const body = await readJson(req, BODY_LIMITS.json);
-      return send(res, 200, await settlementProductionCrafts({ ...body, forceRefresh }));
-    }
-    if (req.method === "GET" && url.pathname === "/api/local/dashboard-data") {
-      if (!rateLimit(req, res, "dashboard-data", RATE_LIMITS.expensiveLocal)) return;
-      try {
-        const refresh = manualRefreshAccess(req, res);
-        if (!refresh) return;
-        const { forceRefresh } = refresh;
-        return send(res, 200, await dashboardData(url.searchParams.get("claimId") ?? "", { forceRefresh }));
-      } catch (error) {
-        return send(res, error?.statusCode ?? 500, { error: error instanceof Error ? error.message : "Unable to load dashboard data" });
-      }
     }
     if (req.method === "GET" && url.pathname === "/api/local/history") {
       const refresh = manualRefreshAccess(req, res);
@@ -11658,9 +10511,10 @@ const server = createServer(async (req, res) => {
       const include = String(url.searchParams.get("include") ?? "").split(",").map((part) => part.trim()).filter(Boolean);
       const allowed = new Set(["market", "activity", "dashboard"]);
       const sections = include.length ? new Set(include.filter((part) => allowed.has(part))) : null;
-      return send(res, 200, localHistory(url.searchParams.get("claimId") ?? "", sections, {
+      const body = runMeasuredProjection(routeMeasurement, () => localHistory(url.searchParams.get("claimId") ?? "", sections, {
         activityLimit: Number(url.searchParams.get("activityLimit") ?? 2000),
       }));
+      return send(res, 200, body);
     }
     if (req.method === "POST" && url.pathname === "/api/local/market/event/resolve") {
       if (isProduction) {
@@ -11683,6 +10537,7 @@ const server = createServer(async (req, res) => {
     if (!url.pathname.startsWith("/api/") && await serveBuiltFrontend(url, req.method, res)) return;
     send(res, 404, { error: "Not found" });
   } catch (error) {
+    if (sendHeavyRouteCapacityResponse(error, res, send)) return;
     const status = Number(error?.statusCode) || 500;
     const logPolicy = requestLogPolicy(req.url, "exception");
     if (!isTestRuntime) {
@@ -11690,7 +10545,7 @@ const server = createServer(async (req, res) => {
         logDiscordOAuthDiagnostic(logPolicy.discordDiagnostic);
       } else if (logPolicy.logGeneric) {
         const detail = error instanceof Error && error.stack ? error.stack : errorMessage(error);
-        console.warn(`Request failed: ${req.method} ${req.url ?? "/"} status=${status} ${detail}`);
+        console.warn(`Request failed: ${req.method} ${mapRequestLogTarget(req.url ?? "/")} status=${status} ${detail}`);
       }
     }
     if (logPolicy.discordDiagnostic) {
@@ -11708,7 +10563,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-const port = Number(process.env.APP_PORT ?? process.env.LOCAL_API_PORT ?? 18430);
+const port = Number(process.env.APP_PORT ?? process.env.LOCAL_API_PORT ?? 19430);
 const host = process.env.APP_HOST ?? "127.0.0.1";
 let serverPollTimer = null;
 
@@ -11718,9 +10573,6 @@ function scheduleServerPolling(delayMs = 0) {
   const intervalMs = serverRefreshIntervalMs();
   pollStatus.intervalMs = intervalMs;
   pollStatus.nextRunAt = new Date(Date.now() + delayMs).toISOString();
-  for (const key of Object.keys(pollStatus.collectors)) {
-    setCollectorStatus(key, { nextRunAt: pollStatus.nextRunAt });
-  }
   serverPollTimer = setTimeout(async () => {
     try {
       await collectServerSnapshot();
@@ -11728,22 +10580,390 @@ function scheduleServerPolling(delayMs = 0) {
       const message = error instanceof Error ? error.message : String(error);
       pollStatus.lastAttemptAt = new Date().toISOString();
       pollStatus.lastError = message;
-      if (!isTestRuntime) console.warn(`Server settlement collection failed: ${message}`);
+      if (!isTestRuntime) console.warn(`Relay reconciliation schedule failed: ${message}`);
     } finally {
       scheduleServerPolling(serverRefreshIntervalMs());
     }
   }, delayMs);
 }
 
+async function superviseRelayGlobalCatalog() {
+  const now = Date.now();
+  const runtime = relayGlobalCatalogRuntime.health();
+  const subscription = runtime.subscription ?? {};
+  const healthy = runtime.running
+    && runtime.claimId === currentClaimId()
+    && subscription.connected === true
+    && subscription.applied === true
+    && !subscription.lastError
+    && !runtime.lastError;
+  const applyingWithinGrace = runtime.running
+    && runtime.claimId === currentClaimId()
+    && subscription.applied !== true
+    && (subscription.state === "connecting" || subscription.state === "connected")
+    && !subscription.lastError
+    && !runtime.lastError
+    && now < relayGlobalCatalogApplyDeadlineAt;
+  const persistHealthIfDue = async (force = false) => {
+    if (!force && now - relayGlobalCatalogLastHealthPersistedAt < 10_000) return;
+    await persistGlobalRegionSubscriptionHealth();
+    relayGlobalCatalogLastHealthPersistedAt = Date.now();
+  };
+  if (healthy) {
+    relayGlobalCatalogReconnectAttempt = 0;
+    relayGlobalCatalogNextAttemptAt = 0;
+    relayGlobalCatalogApplyDeadlineAt = 0;
+    if (!relayGlobalCatalogReconcileInFlight) {
+      const reconcile = relayGlobalCatalogRuntime.reconcile({
+        relayBaseUrl,
+        claimId: currentClaimId(),
+      });
+      relayGlobalCatalogReconcileInFlight = reconcile;
+      try {
+        const restarted = await reconcile;
+        if (restarted) relayGlobalCatalogApplyDeadlineAt = Date.now() + 30_000;
+      } catch (error) {
+        if (!isTestRuntime) {
+          console.warn(`Relay global catalog topology reconcile failed: ${errorMessage(error)}`);
+        }
+      } finally {
+        if (relayGlobalCatalogReconcileInFlight === reconcile) {
+          relayGlobalCatalogReconcileInFlight = null;
+        }
+      }
+    }
+    await persistHealthIfDue();
+    return;
+  }
+  if (applyingWithinGrace) {
+    await persistHealthIfDue();
+    return;
+  }
+  if (relayGlobalCatalogReconcileInFlight || now < relayGlobalCatalogNextAttemptAt) {
+    await persistHealthIfDue();
+    return;
+  }
+  relayGlobalCatalogReconnectAttempt += 1;
+  relayGlobalCatalogNextAttemptAt = now + relayReconnectDelayMs(
+    relayGlobalCatalogReconnectAttempt,
+  );
+  const reconcile = relayGlobalCatalogRuntime.reconcile({
+    relayBaseUrl,
+    claimId: currentClaimId(),
+  });
+  relayGlobalCatalogReconcileInFlight = reconcile;
+  try {
+    await reconcile;
+    relayGlobalCatalogApplyDeadlineAt = Date.now() + 30_000;
+  } catch (error) {
+    if (!isTestRuntime) console.warn(`Relay global catalog reconcile failed: ${errorMessage(error)}`);
+  } finally {
+    if (relayGlobalCatalogReconcileInFlight === reconcile) {
+      relayGlobalCatalogReconcileInFlight = null;
+    }
+    await persistHealthIfDue(true).catch((error) => {
+      if (!isTestRuntime) console.warn(`Relay global region health persistence failed: ${errorMessage(error)}`);
+    });
+  }
+}
+
 function startBackgroundTasks() {
+  if (!isTestRuntime && process.env.ENABLE_RELAY_PROVIDER !== "false") {
+    const providerConfig = (claimId) => ({
+      relayBaseUrl,
+      claimId,
+      activeRegionIds: parseRegionIds(
+        `${getSettings().defaultRegion},${getSettings().additionalActiveRegions}`,
+      ),
+      topologyRefreshMs: 60_000,
+    });
+    const reconcilePrimaryRegion = async (claimId) => {
+      if (currentClaimId() !== claimId) return;
+      const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+      const members = currentStateRepository.read(claimId, "members")?.data ?? [];
+      const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();
+      if (!regionId) {
+        throw new Error("Relay regional sessions are waiting for a claim region");
+      }
+      if (terrainLiveRebuildEnabled) try {
+        const settings = getSettings();
+        const activeRegionIds = parseRegionIds(
+          `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+        ).slice(0, 4);
+        if (!relayTerrainStarted) {
+          await relayTerrainRuntime.start({ relayBaseUrl, activeRegionIds });
+          relayTerrainStarted = true;
+        } else {
+          await relayTerrainRuntime.reconcile({ relayBaseUrl, activeRegionIds });
+        }
+      } catch (error) {
+        if (!isTestRuntime) console.warn(`Relay terrain startup failed: ${errorMessage(error)}`);
+      }
+      if (!relayPublicCraftStarted) {
+        try {
+          const settings = getSettings();
+          const activeRegionIds = parseRegionIds(
+            `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+          );
+          await relayPublicCraftRuntime.start({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds,
+          });
+          relayPublicCraftStarted = true;
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay public-craft startup failed: ${errorMessage(error)}`);
+        }
+      } else {
+        try {
+          const settings = getSettings();
+          await relayPublicCraftRuntime.reconcile({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds: parseRegionIds(
+              `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+            ),
+          });
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay public-craft reconcile failed: ${errorMessage(error)}`);
+        }
+      }
+      if (!relayRegionalMarketStarted) {
+        try {
+          const activeRegionIds = readyMarketRegionIds(
+            relayProvider.health(),
+            configuredRegionalMarketRegionIds(claimId),
+          );
+          await relayRegionalMarketRuntime.start({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds,
+          });
+          relayRegionalMarketStarted = true;
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay regional-market startup failed: ${errorMessage(error)}`);
+        }
+      } else {
+        try {
+          await relayRegionalMarketRuntime.reconcile({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds: readyMarketRegionIds(
+              relayProvider.health(),
+              configuredRegionalMarketRegionIds(claimId),
+            ),
+          });
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay regional-market reconcile failed: ${errorMessage(error)}`);
+        }
+      }
+      try {
+        await persistRelayRuntimeDomainHeartbeats(
+          regionalMarketRuntimeHeartbeat(),
+          ["regional-market"],
+        );
+      } catch (error) {
+        if (!isTestRuntime) console.warn(`Relay regional-market heartbeat failed: ${errorMessage(error)}`);
+      }
+      if (!relayEmpireStarted) {
+        try {
+          const settings = getSettings();
+          const activeRegionIds = parseRegionIds(
+            `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+          );
+          await relayEmpireRuntime.start({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds,
+          });
+          relayEmpireStarted = true;
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay Empire startup failed: ${errorMessage(error)}`);
+        }
+      } else {
+        try {
+          const settings = getSettings();
+          await relayEmpireRuntime.reconcile({
+            relayBaseUrl,
+            claimId,
+            primaryRegionId: regionId,
+            activeRegionIds: parseRegionIds(
+              `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+            ),
+          });
+        } catch (error) {
+          if (!isTestRuntime) console.warn(`Relay Empire reconcile failed: ${errorMessage(error)}`);
+        }
+      }
+      try {
+        if (!relayClaimMarketStarted) {
+          await relayClaimMarketRuntime.start({
+            relayBaseUrl,
+            claimId,
+            regionId,
+          });
+          relayClaimMarketStarted = true;
+        } else {
+          await relayClaimMarketRuntime.reconcile({ claimId, regionId });
+        }
+      } catch (error) {
+        if (!isTestRuntime) console.warn(`Relay claim-market startup failed: ${errorMessage(error)}`);
+      } finally {
+        await persistRelayRuntimeDomainHeartbeats(
+          relayClaimMarketRuntime.health(),
+          ["market"],
+        );
+      }
+      try {
+        if (!relayRegionClaimsStarted) {
+          await relayRegionClaimsRuntime.start({
+            relayBaseUrl,
+            claimId,
+            regionId,
+          });
+          relayRegionClaimsStarted = true;
+        } else {
+          await relayRegionClaimsRuntime.reconcile({ claimId, regionId });
+        }
+      } catch (error) {
+        if (!isTestRuntime) console.warn(`Relay regional-claims startup failed: ${errorMessage(error)}`);
+      }
+      if (!Array.isArray(members) || members.length === 0) {
+        return;
+      }
+      let contributionTargets = [];
+      let contributionWarnings = [];
+      try {
+        const crafts = currentStateRepository.read(claimId, "crafts")?.data;
+        if (crafts) {
+          const contributionScope = relayCraftContributionTargets(
+            enrichRelayCraftsForSideEffects(crafts),
+          );
+          contributionTargets = contributionScope.targets;
+          contributionWarnings = contributionScope.warnings;
+        }
+      } catch (error) {
+        contributionWarnings = [`Relay craft-contribution targets unavailable: ${errorMessage(error)}`];
+        if (!isTestRuntime) {
+          console.warn(contributionWarnings[0]);
+        }
+      }
+      try {
+        if (!relayPrimaryRegionStarted) {
+          await relayPrimaryRegionRuntime.start({
+            relayBaseUrl,
+            claimId,
+            regionId,
+            members,
+            contributionTargets,
+            contributionWarnings,
+          });
+          relayPrimaryRegionStarted = true;
+        } else {
+          await relayPrimaryRegionRuntime.reconcile({
+            claimId,
+            regionId,
+            members,
+            contributionTargets,
+            contributionWarnings,
+          });
+        }
+      } finally {
+        await persistRelayRuntimeDomainHeartbeats(
+          relayPrimaryRegionRuntime.health(),
+          relayPrimaryRegionHeartbeatDomains,
+        );
+      }
+    };
+    const refreshRelay = async (reason = "scheduled") => {
+      const claimId = currentClaimId();
+      try {
+        await relayClaimScopeFence.reconcile(claimId);
+        await relayProvider.reconcile(providerConfig(claimId), currentStateRepository);
+        relayProviderStarted = true;
+        await relayProvider.refresh({
+          claimId,
+          domains: ["claim", "members", "citizens", "inventories", "crafts", "deposits"],
+          reason,
+        });
+        if (currentClaimId() !== claimId) return;
+        const reconciledCurrentClaim = await relayClaimScopeFence.run(claimId, async () => {
+          await reconcilePrimaryRegion(claimId);
+          if (relayPublicCraftStarted) {
+            await relayPublicCraftRuntime.warmActiveRegions();
+          }
+          if (relayEmpireStarted) {
+            await relayEmpireRuntime.warmActiveRegions();
+          }
+        });
+        if (!reconciledCurrentClaim || currentClaimId() !== claimId) return;
+        const claim = currentStateRepository.read(claimId, "claim")?.data ?? {};
+        const regionId = String(claim.regionId ?? getSettings().defaultRegion ?? "").trim();
+        const inventories = currentStateRepository.read(claimId, "inventories")?.data ?? { buildings: [] };
+        pollStatus.storageLastAttemptAt = new Date().toISOString();
+        void relayStorageActivityService.sync({
+          claimId,
+          regionId,
+          inventories,
+        }).then((result) => {
+          pollStatus.storageRequests = result.requested;
+          pollStatus.storageProcessed = result.processed;
+          pollStatus.storageInserted = result.insertedCandidates;
+          pollStatus.storageComplete = result.complete;
+          pollStatus.storageLastError = [...result.failures, ...result.warnings].join("; ") || null;
+          pollStatus.storageLastSuccessAt = new Date().toISOString();
+        }).catch((error) => {
+          pollStatus.storageLastError = errorMessage(error);
+        });
+      } catch (error) {
+        relayProviderStarted = relayProvider.health().running;
+        if (!isTestRuntime) console.warn(`Relay provider refresh failed: ${errorMessage(error)}`);
+      }
+    };
+    const relayRuntimeReconciler = createScheduledRelayReconciler({
+      reconcile: refreshRelay,
+    });
+    requestRelayRuntimeRefresh = (reason = "manual") => {
+      void relayRuntimeReconciler.request(reason);
+    };
+    void relayRuntimeReconciler.request("scheduled");
+    if (!relayProviderRefreshTimer) {
+      relayProviderRefreshTimer = setInterval(
+        () => void relayRuntimeReconciler.request("scheduled"),
+        relayHttpRefreshMs,
+      );
+      relayProviderRefreshTimer.unref?.();
+    }
+    if (process.env.ENABLE_RELAY_GLOBAL_CATALOG !== "false") {
+      void superviseRelayGlobalCatalog();
+      if (!relayGlobalCatalogSupervisorTimer) {
+        relayGlobalCatalogSupervisorTimer = setInterval(
+          () => void superviseRelayGlobalCatalog(),
+          1_000,
+        );
+        relayGlobalCatalogSupervisorTimer.unref?.();
+      }
+    }
+  }
   startDiscordGateway();
+  void processMarketTransitionOutbox().catch((error) => console.warn(`Market transition dispatcher failed: ${errorMessage(error)}`));
+  const marketTransitionTimer = setInterval(
+    () => void processMarketTransitionOutbox().catch((error) => console.warn(`Market transition dispatcher failed: ${errorMessage(error)}`)),
+    marketTransitionDispatcherIntervalMs,
+  );
+  marketTransitionTimer.unref?.();
   void processDiscordNotificationOutbox().catch((error) => console.warn(`Discord notification outbox failed: ${error instanceof Error ? error.message : String(error)}`));
   setInterval(processDiscordNotificationOutbox, discordNotificationOutboxIntervalMs);
   setTimeout(() => {
     void announceDiscordAppUpdateIfNeeded().catch((error) => console.warn(`Discord app update announcement failed: ${error instanceof Error ? error.message : String(error)}`));
   }, 5000);
   if (serverPollingEnabled) {
-    console.log(`Server settlement collection enabled every ${serverRefreshIntervalMs() / 1000} seconds`);
+    console.log(`Relay reconciliation enabled every ${serverRefreshIntervalMs() / 1000} seconds`);
     scheduleServerPolling(0);
   }
   if (scheduledJobsEnabled && !isTestRuntime) {
@@ -11785,7 +11005,36 @@ function replayCurrentPrivacyDeletionLedger() {
   });
 }
 
+function replayCurrentPublicPrivacyDeletionLedger() {
+  const key = privacyLedgerKey();
+  const keys = privacyLedgerVerificationKeys();
+  const records = readDeletionLedger(privacyLedgerPath, keys);
+  const accounts = db.prepare("SELECT id, discord_id AS discordId FROM public_user_accounts").all();
+  return replayPublicPrivacyDeletions({
+    records,
+    accounts,
+    key,
+    keys,
+    deleteAccount: (account) => {
+      const dispositions = publicAccountDeletionReview(db, account.id).ownedPlans
+        .map((plan) => ({ planId: plan.id, action: "delete" }));
+      return deletePublicAccount(db, {
+        userId: account.id,
+        discordId: account.discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions,
+      });
+    },
+  });
+}
+
+assertCanonicalDiscordGatewayReady(deploymentRuntime, {
+  settings: getDiscordSettingsRaw(),
+  webSocketAvailable: typeof WebSocket === "function",
+});
 replayCurrentPrivacyDeletionLedger();
+replayCurrentPublicPrivacyDeletionLedger();
+await relayClaimScopeFence.reconcile(currentClaimId());
 
 if (processRoleConfig.serveHttp) {
   server.listen(port, host, () => {

@@ -95,6 +95,37 @@ test("buildConstructionProjects uses consumed stacks as requirements and project
   assert.deepEqual(constructionNeededMaterials(projects), [["Exquisite Plant Roots", 1]]);
 });
 
+test("buildConstructionProjects overlays live storage onto normalized Relay materials", () => {
+  const projects = buildConstructionProjects({
+    projects: [{
+      entityId: "9",
+      name: "Sturdy Fishing Station",
+      materials: [{
+        type: "cargo",
+        itemId: "1202",
+        name: "Sturdy Timber",
+        required: "4",
+        contributed: "1",
+        stored: "0",
+      }],
+    }],
+  }, {
+    buildings: [{
+      inventory: [{
+        contents: {
+          itemType: "cargo",
+          itemId: "1202",
+          quantity: "3",
+        },
+      }],
+    }],
+  });
+
+  assert.equal(projects[0].materials[0].stored, "3");
+  assert.equal(projects[0].materials[0].required, "4");
+  assert.equal(projects[0].materials[0].contributed, "1");
+});
+
 test("toNumber safely parses common BitJita numeric formats", () => {
   assert.equal(toNumber("21,424"), 21424);
   assert.equal(toNumber(""), 0);

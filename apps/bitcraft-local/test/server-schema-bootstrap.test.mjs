@@ -11,6 +11,9 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE TABLE IF NOT EXISTS admin_users",
     "CREATE TABLE IF NOT EXISTS user_accounts",
     "CREATE TABLE IF NOT EXISTS user_legal_acceptances",
+    "CREATE TABLE IF NOT EXISTS public_user_accounts",
+    "CREATE TABLE IF NOT EXISTS public_user_sessions",
+    "CREATE TABLE IF NOT EXISTS public_user_legal_acceptances",
     "CREATE TABLE IF NOT EXISTS market_deal_alerts",
     "CREATE TABLE IF NOT EXISTS craft_plan_settings",
     "CREATE TABLE IF NOT EXISTS craft_plan_progress_audit_snapshots",
@@ -23,15 +26,31 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
     "CREATE TABLE IF NOT EXISTS discord_youtube_channels",
     "discord_channel_id TEXT",
     "CREATE TABLE IF NOT EXISTS discord_youtube_videos",
-    "CREATE TABLE IF NOT EXISTS empire_hexite_sweeps",
-    "CREATE TABLE IF NOT EXISTS empire_hexite_sweep_empires",
-    "CREATE TABLE IF NOT EXISTS empire_hexite_targets",
-    "CREATE TABLE IF NOT EXISTS empire_hexite_sources",
-    "CREATE TABLE IF NOT EXISTS empire_hexite_snapshots",
+    "CREATE TABLE IF NOT EXISTS provider_transition_outbox",
+    "CREATE TABLE IF NOT EXISTS operational_history_market_trade_daily",
+    "CREATE TABLE IF NOT EXISTS operational_history_market_event_daily",
+    "CREATE TABLE IF NOT EXISTS operational_history_activity_daily",
+    "CREATE TABLE IF NOT EXISTS operational_history_source_ingestion_ids",
+    "CREATE TABLE IF NOT EXISTS operational_history_source_mutations",
+    "CREATE INDEX IF NOT EXISTS idx_operational_history_source_mutations_coverage",
+    "CREATE TRIGGER IF NOT EXISTS operational_history_market_trade_ingestion_id",
+    "CREATE TRIGGER IF NOT EXISTS operational_history_market_trade_update",
+    "CREATE TRIGGER IF NOT EXISTS operational_history_market_trade_delete",
+    "CREATE TABLE IF NOT EXISTS operational_history_rollup_watermarks",
+    "CREATE TABLE IF NOT EXISTS operational_history_retention_runs",
+    "CREATE TABLE IF NOT EXISTS operational_history_backup_verifications",
+    "locked_by TEXT",
+    "lease_token TEXT",
+    "locked_at TEXT",
+    "lease_expires_at TEXT",
     "CREATE TABLE IF NOT EXISTS empire_membership_tracking",
     "CREATE TABLE IF NOT EXISTS empire_membership_periods",
     "CREATE INDEX IF NOT EXISTS idx_market_events_claim_time",
+    "CREATE INDEX IF NOT EXISTS idx_market_trades_claim_item_time",
+    "CREATE INDEX IF NOT EXISTS idx_market_trades_claim_region_item_time",
+    "CREATE INDEX IF NOT EXISTS idx_provider_transition_pending",
     "CREATE INDEX IF NOT EXISTS idx_user_legal_acceptances_user_time",
+    "CREATE INDEX IF NOT EXISTS idx_public_user_legal_acceptances_user_time",
     "CREATE INDEX IF NOT EXISTS idx_activity_claim_time",
     "CREATE INDEX IF NOT EXISTS idx_discord_notification_outbox_status",
     "CREATE INDEX IF NOT EXISTS idx_discord_craft_plan_report_occurrences_time",
@@ -49,6 +68,13 @@ test("schemaBootstrapSql preserves critical release tables and indexes", () => {
   }
   assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS snapshots/);
   assert.doesNotMatch(schemaBootstrapSql, /idx_snapshots_/);
+  assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_listings/);
+  assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_buy_orders_current/);
+  assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_regional_sale_averages_current/);
+  assert.doesNotMatch(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS empire_hexite_/);
+  assert.doesNotMatch(schemaBootstrapSql, /idx_provider_transition_lease/);
+  assert.match(schemaBootstrapSql, /CREATE TABLE IF NOT EXISTS market_trades[\s\S]*region_id TEXT/);
+  assert.doesNotMatch(schemaBootstrapSql, /operational_history_[\s\S]*raw_json/);
 });
 
 test("applySchemaBootstrap executes the complete bootstrap SQL once", () => {
@@ -58,6 +84,26 @@ test("applySchemaBootstrap executes the complete bootstrap SQL once", () => {
   applySchemaBootstrap(db);
 
   assert.deepEqual(statements, [schemaBootstrapSql]);
+});
+
+test("fresh Deal Watch history stores exact market amounts as text", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+
+  const watchColumns = new Map(
+    db.prepare("PRAGMA table_info(market_deal_watches)").all()
+      .map((column) => [column.name, column.type]),
+  );
+  const alertColumns = new Map(
+    db.prepare("PRAGMA table_info(market_deal_alerts)").all()
+      .map((column) => [column.name, column.type]),
+  );
+
+  assert.equal(watchColumns.get("last_baseline_average"), "TEXT");
+  for (const column of ["quantity", "unit_price", "total_value", "baseline_average"]) {
+    assert.equal(alertColumns.get(column), "TEXT");
+  }
+  db.close();
 });
 
 test("membership history schema is additive and preserves existing data", () => {
@@ -71,6 +117,46 @@ test("membership history schema is additive and preserves existing data", () => 
   assert.equal(db.prepare("SELECT value FROM app_settings WHERE key = 'claim_id'").get().value, "123");
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM empire_membership_tracking").get().count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM empire_membership_periods").get().count, 0);
+  db.close();
+});
+
+test("fresh Relay schema keeps market history without a duplicate current-listing table", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'market_listings'").get().count,
+    0,
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'market_events'").get().count,
+    1,
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM sqlite_schema WHERE type = 'table' AND name IN ('market_buy_orders_current', 'market_regional_sale_averages_current')").get().count,
+    0,
+  );
+  db.close();
+});
+
+test("fresh Relay subscription health starts explicitly disconnected", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+
+  db.prepare(`
+    INSERT INTO provider_subscription_health (
+      provider, source_key, domain, connected, updated_at
+    ) VALUES ('relay', 'global', 'region', 0, '2026-08-22T09:40:00.000Z')
+  `).run();
+
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT connected, runtime_state
+      FROM provider_subscription_health
+      WHERE provider = 'relay' AND source_key = 'global' AND domain = 'region'
+    `).get() },
+    { connected: 0, runtime_state: "disconnected" },
+  );
   db.close();
 });
 
@@ -94,5 +180,40 @@ test("legal acceptance schema enforces one exact document snapshot per user", ()
     () => insert.run(userId, "2026-07-25", "terms", "privacy", "2026-07-25T00:00:01.000Z"),
     /UNIQUE constraint failed/,
   );
+  db.close();
+});
+
+test("public identity schema is additive, isolated, and cascade-safe", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
+  applySchemaBootstrap(db);
+
+  const publicUserId = Number(db.prepare(`
+    INSERT INTO public_user_accounts (
+      discord_id, discord_username, discord_global_name, discord_avatar,
+      settings_json, created_at, last_login_at
+    ) VALUES ('same-discord-id', 'PublicUser', 'Public User', 'avatar', '{}', ?, ?)
+    RETURNING id
+  `).get("2026-08-25T00:00:00.000Z", "2026-08-25T00:00:00.000Z").id);
+  db.prepare("INSERT INTO public_user_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+    .run("public-token", publicUserId, "2026-09-24T00:00:00.000Z", "2026-08-25T00:00:00.000Z");
+  const acceptance = db.prepare(`
+    INSERT INTO public_user_legal_acceptances (
+      user_id, legal_version, terms_digest, privacy_digest,
+      age_confirmed, accepted_at, source
+    ) VALUES (?, '2026-08-25', 'public-terms', 'public-privacy', 1, ?, 'oauth')
+  `);
+  acceptance.run(publicUserId, "2026-08-25T00:00:00.000Z");
+
+  assert.throws(
+    () => acceptance.run(publicUserId, "2026-08-25T00:00:01.000Z"),
+    /UNIQUE constraint failed/,
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM user_accounts").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM admin_users").get().count, 0);
+
+  db.prepare("DELETE FROM public_user_accounts WHERE id = ?").run(publicUserId);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM public_user_sessions").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM public_user_legal_acceptances").get().count, 0);
   db.close();
 });

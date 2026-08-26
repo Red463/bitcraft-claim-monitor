@@ -27,22 +27,25 @@ test("Market page replaces the legacy MainPages bundle", () => {
   assert.match(marketPage, /export function Market\b/);
   assert.match(marketPage, /from "\.\/market\/MarketBrowse"/);
   assert.match(marketPage, /from "\.\/market\/MarketOverview"/);
-  assert.match(marketPage, /from "\.\/market\/MarketDeals"/);
+  assert.match(marketPage, /from "\.\/market\/MarketOpportunities"/);
+  assert.match(marketPage, /from "\.\/market\/MarketSaved"/);
   assert.match(marketPage, /from "\.\/market\/MarketStalls"/);
-  assert.match(marketPage, /from "\.\/market\/DealWatchlist"/);
   assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/MarketPage"\)/);
   assert.match(appShell, /React\.lazy\(\(\) => import\("\.\/pages\/SettlementMarketPage"\)/);
   assert.doesNotMatch(appShell, /from "\.\/pages\/MainPages"/);
 });
-test("Market page exposes a dedicated deal watchlist tool tab", () => {
+test("Market page groups alerts and opportunities into canonical workspaces", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
   const commandPalette = readFileSync(new URL("../src/components/main/CommandPalette.tsx", import.meta.url), "utf8");
 
-  assert.match(marketPage, /id: "deal-watch"/);
-  assert.match(marketPage, /label: "Deal Watch"/);
-  assert.match(marketPage, /<DealWatchlist[^>]*monitoredRegionId=\{regionId \|\| fallbackRegionId\}[^>]*onDiscordLogin=\{onDiscordLogin\}/);
-  assert.match(commandPalette, /deal-watch/);
-  assert.match(commandPalette, /Deal Watch/);
+  assert.match(marketPage, /id: "saved"/);
+  assert.match(marketPage, /label: "Saved"/);
+  assert.match(marketPage, /id: "opportunities"/);
+  assert.match(marketPage, /<MarketSaved[^\n]*monitoredRegionId=\{regionId\}/);
+  assert.match(marketPage, /<MarketSaved[^\n]*auth=\{auth\}[^\n]*onAuthInvalidated=\{onAuthInvalidated\}/);
+  assert.match(marketPage, /onDiscordLogin=\{onDiscordLogin\}/);
+  assert.match(commandPalette, /onNavigate\("market", "saved"\)/);
+  assert.match(commandPalette, /onNavigate\("market", "opportunities"\)/);
 });
 test("Market mini-stat values leave room for descenders", () => {
   const marketCss = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
@@ -56,14 +59,14 @@ test("global Market uses balanced desktop density with controlled responsive col
   const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
 
   assert.match(css, /\.global-market-page \.mini-stat\s*\{[^}]*min-height:\s*84px/s);
-  assert.match(css, /\.market-order-summary\s*\{[^}]*repeat\(6,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(css, /\.market-order-summary\s*\{[^}]*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(css, /\.market-price-location\s*\{[^}]*display:\s*grid/s);
   assert.match(css, /\.market-toggle-group\s*\{[^}]*display:\s*flex/s);
   assert.match(css, /\.market-specialized-filters\s*\{[^}]*repeat\(4,\s*minmax\(140px,\s*1fr\)\)/s);
   assert.match(css, /\.market-order-filters\s*\{[^}]*grid-template-columns:\s*auto\s+repeat\(4,\s*minmax\(130px,\s*1fr\)\)/s);
   assert.match(css, /\.market-overview-section > \.empty-state\.compact\s*\{[^}]*min-height:\s*0/s);
   assert.match(css, /\.market-stall-summary\s*\{[^}]*max-width:\s*720px/s);
-  assert.match(css, /@media \(max-width:\s*1280px\)[\s\S]*\.market-order-summary\s*\{[^}]*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(css, /\.market-depth-summary\s*\{[^}]*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
 });
 
 test("Market tool tabs accept app access-control decisions", () => {
@@ -78,7 +81,7 @@ test("Market tool tabs accept app access-control decisions", () => {
 test("Market summaries and form controls stack on phones", () => {
   const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
 
-  assert.match(css, /@media \(max-width:\s*700px\)[\s\S]*\.market-summary,[^{]*\.market-filter-grid,[^{]*\.opportunity-strip\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  assert.match(css, /@media \(max-width:\s*700px\)[\s\S]*\.market-summary,[^{]*\.market-filter-grid\s*\{[^}]*grid-template-columns:\s*1fr/s);
   assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.market-member-field\s*\{[^}]*grid-template-columns:\s*1fr/s);
   assert.match(css, /@media \(max-width:\s*700px\)[\s\S]*\.market-member-placeholder\s*\{[^}]*justify-content:\s*flex-start[^}]*white-space:\s*normal/s);
 });
@@ -101,4 +104,38 @@ test("Market header metadata wraps under text scaling on phones", () => {
   assert.match(css, /\.market-page > \*\s*\{[^}]*min-width:\s*0/s);
   assert.match(css, /\.market-topbar\s*\{[^}]*min-width:\s*0/s);
   assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.market-page \.dashboard-top-meta\s*\{[^}]*flex-wrap:\s*wrap/s);
+});
+
+test("Market separates real errors from recoverable freshness notices", () => {
+  const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
+
+  assert.match(marketPage, /marketStatus\.generatedAt/);
+  assert.match(marketPage, /marketStatus\.errors/);
+  assert.match(marketPage, /className="global-market-data-alert error"[^>]*role="alert"/);
+  assert.match(marketPage, /className="global-market-data-status"[^>]*role="status"/);
+  assert.match(marketPage, /Live data updating/);
+  assert.match(css, /\.global-market-data-alert\s*\{[^}]*border:[^}]*background:/s);
+  assert.match(css, /\.global-market-data-alert\.error\s*\{[^}]*border-color:/s);
+  assert.match(css, /\.global-market-data-status\s*\{[^}]*border:/s);
+  assert.match(css, /\.global-market-data-alert summary\s*\{[^}]*display:\s*grid[^}]*cursor:\s*pointer/s);
+  assert.match(marketPage, /className="global-market-mobile-nav"/);
+  assert.match(marketPage, /aria-label="Choose Global Market workspace"/);
+  assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*\.global-market-mobile-nav\s*\{[^}]*display:\s*grid/s);
+});
+
+test("Market selection and regional comparison remain explicit on desktop and phone", () => {
+  const browse = readFileSync(new URL("../src/pages/market/MarketBrowse.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles/market.css", import.meta.url), "utf8");
+  assert.match(browse, /className=\{`market-catalog-result[^`]*active/);
+  assert.match(browse, /aria-pressed=\{/);
+  assert.doesNotMatch(browse, /market-region-summaries/);
+  assert.match(css, /@media \(max-width:\s*720px\)[\s\S]*\.market-regional-book \.market-region-card\s*\{[^}]*display:\s*grid/s);
+  assert.doesNotMatch(css, /\.market-regional-book table\s*\{[^}]*min-width:\s*610px/s);
+  assert.match(css, /\.global-market-workspace\.market-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+  assert.match(css, /\.market-item-detail\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+  assert.match(css, /\.market-item-detail > \*\s*\{[^}]*min-width:\s*0/s);
+  assert.match(css, /@media \(max-width:\s*720px\)[\s\S]*\.market-item-heading\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+  assert.match(css, /@media \(max-width:\s*720px\)[\s\S]*\.market-back-results\s*\{[^}]*white-space:\s*nowrap/s);
+  assert.match(css, /@media \(max-width:\s*720px\)[\s\S]*\.market-regional-book table,\s*\.market-regional-book tbody\s*\{[^}]*min-width:\s*0/s);
 });

@@ -44,7 +44,7 @@ export function BotSectionNav({ active, onSelect }: { active: BotSection; onSele
         <div className="bot-nav-group" key={group}>
           <p>{group}</p>
           {BOT_SECTION_DEFINITIONS.filter((section) => section.group === group).map(({ id, label, icon, description }) => (
-            <button key={id} className={active === id ? "active" : ""} onClick={() => onSelect(id)}>
+            <button key={id} className={active === id ? "active" : ""} aria-current={active === id ? "page" : undefined} onClick={() => onSelect(id)}>
               {BOT_SECTION_ICONS[icon]}
               <span>
                 <strong>{label}</strong>

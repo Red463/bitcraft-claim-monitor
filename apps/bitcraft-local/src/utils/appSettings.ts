@@ -1,5 +1,4 @@
 import {
-  DEFAULT_COLLECTOR_SETTINGS,
   DEFAULT_COLOUR_ROLES,
   DEFAULT_CRAFT_CHANNELS,
   DEFAULT_CRAFT_EMOJIS,
@@ -119,22 +118,11 @@ export function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | 
   const defaultPage = configuredDefaultPage === "buildings" || !NAV.some(([id]) => id === configuredDefaultPage && id !== "admin")
     ? DEFAULT_SETTINGS.defaultPage
     : configuredDefaultPage as ActivePanel;
-  const savedCollectorSettings = (config as AnyRecord)?.collectorSettings && typeof (config as AnyRecord).collectorSettings === "object" && !Array.isArray((config as AnyRecord).collectorSettings)
-    ? (config as AnyRecord).collectorSettings as Record<string, AnyRecord>
-    : {};
   return {
     ...DEFAULT_SETTINGS,
     ...(config ?? {}),
     refreshSeconds: Math.min(Math.max(toNumber((config as AnyRecord)?.refreshSeconds) || DEFAULT_SETTINGS.refreshSeconds, 15), 300),
     serverRefreshSeconds: Math.min(Math.max(toNumber((config as AnyRecord)?.serverRefreshSeconds ?? (config as AnyRecord)?.refreshSeconds) || DEFAULT_SETTINGS.serverRefreshSeconds, 15), 300),
-    collectorSettings: Object.fromEntries(Object.entries(DEFAULT_COLLECTOR_SETTINGS).map(([key, defaults]) => {
-      const saved = savedCollectorSettings[key] ?? {};
-      return [key, {
-        label: String(saved.label ?? defaults.label),
-        enabled: saved.enabled !== false,
-        intervalSeconds: Math.min(Math.max(toNumber(saved.intervalSeconds) || defaults.intervalSeconds, 15), 3600),
-      }];
-    })),
     defaultPage,
     excludedMemberIds,
     additionalActiveRegions: String((config as AnyRecord)?.additionalActiveRegions ?? ""),
@@ -143,7 +131,11 @@ export function normalizeAppSettings(config: Partial<AppSettings> | AnyRecord | 
     marketDealWatch: {
       maxWatchesPerUser: Math.min(Math.max(toNumber((config as AnyRecord)?.marketDealWatch?.maxWatchesPerUser) || DEFAULT_SETTINGS.marketDealWatch.maxWatchesPerUser, 1), 100),
       thresholdPercent: Math.min(Math.max(toNumber((config as AnyRecord)?.marketDealWatch?.thresholdPercent) || DEFAULT_SETTINGS.marketDealWatch.thresholdPercent, 1), 95),
-      minConfirmedSales: Math.min(Math.max(toNumber((config as AnyRecord)?.marketDealWatch?.minConfirmedSales) || DEFAULT_SETTINGS.marketDealWatch.minConfirmedSales, 1), 100),
+      minActiveListings: Math.min(Math.max(
+        toNumber((config as AnyRecord)?.marketDealWatch?.minActiveListings ?? (config as AnyRecord)?.marketDealWatch?.minConfirmedSales)
+          || DEFAULT_SETTINGS.marketDealWatch.minActiveListings,
+        1,
+      ), 100),
       discordDmEnabled: (config as AnyRecord)?.marketDealWatch?.discordDmEnabled !== false,
     },
     branding: (config as AnyRecord)?.branding ?? {},

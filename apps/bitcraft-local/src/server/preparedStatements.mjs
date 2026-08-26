@@ -19,49 +19,11 @@ export function createPreparedStatements(db) {
       market_count = excluded.market_count,
       updated_at = excluded.updated_at
   `),
-  listingByKey: db.prepare("SELECT * FROM market_listings WHERE listing_key = ?"),
-  activeListings: db.prepare("SELECT listing_key, item_name, quantity, price, total_value, owner, owner_entity_id, item_id, item_type, tier, rarity, side, first_seen, last_seen, raw_json FROM market_listings WHERE claim_id = ? AND status = 'active'"),
-  upsertListing: db.prepare(`
-    INSERT INTO market_listings (listing_key, claim_id, item_name, side, owner, owner_entity_id, item_id, item_type, quantity, price, total_value, tier, rarity, first_seen, last_seen, status, sold_at, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?)
-    ON CONFLICT(listing_key) DO UPDATE SET
-      item_name = excluded.item_name,
-      side = excluded.side,
-      owner = excluded.owner,
-      owner_entity_id = excluded.owner_entity_id,
-      item_id = excluded.item_id,
-      item_type = excluded.item_type,
-      quantity = excluded.quantity,
-      price = excluded.price,
-      total_value = excluded.total_value,
-      tier = excluded.tier,
-      rarity = excluded.rarity,
-      last_seen = excluded.last_seen,
-      status = 'active',
-      sold_at = NULL,
-      raw_json = excluded.raw_json
-  `),
-  markListingClosed: db.prepare("UPDATE market_listings SET status = ?, sold_at = ?, last_seen = ? WHERE listing_key = ? AND status = 'active'"),
   insertMarketEvent: db.prepare(`
     INSERT OR IGNORE INTO market_events (claim_id, event_type, listing_key, item_name, side, owner, owner_entity_id, item_id, item_type, quantity, price, total_value, tier, rarity, occurred_at, trade_id, source_key, raw_json)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
-  pendingMarketEvents: db.prepare(`
-    SELECT * FROM market_events
-    WHERE claim_id = ?
-      AND event_type = 'partial_quantity_drop'
-      AND trade_id IS NULL
-    ORDER BY occurred_at DESC
-    LIMIT 50
-  `),
-  confirmMarketEvent: db.prepare("UPDATE market_events SET event_type = ?, trade_id = ?, raw_json = ? WHERE id = ?"),
   resolveMarketEvent: db.prepare("UPDATE market_events SET event_type = ?, raw_json = ? WHERE id = ? AND claim_id = ?"),
-  insertMarketTrade: db.prepare(`
-    INSERT OR IGNORE INTO market_trades (
-      trade_id, claim_id, order_entity_id, seller_entity_id, seller_username, purchaser_entity_id, purchaser_username,
-      item_id, item_type, item_name, quantity, unit_price, total_price, tier, rarity, occurred_at, imported_at, raw_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `),
   insertActivity: db.prepare(`
     INSERT INTO activity_events (claim_id, event_type, summary, occurred_at, metadata_json)
     VALUES (?, ?, ?, ?, ?)
@@ -217,54 +179,11 @@ export function createPreparedStatements(db) {
       raw_json = excluded.raw_json
   `),
   completeProductionJob: db.prepare("UPDATE production_jobs SET status = 'completed', last_seen = ? WHERE job_key = ? AND status = 'active'"),
-  upsertProductionContribution: db.prepare(`
-    INSERT INTO production_contributions (
-      contribution_key, claim_id, craft_entity_id, contributor_entity_id, contributor_name, profession, craft_label, structure_name,
-      item_tier, contributed_progress, contributed_xp, contribution_count, first_contributed_at, last_contributed_at, first_seen, updated_at, raw_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(contribution_key) DO UPDATE SET
-      contributor_name = excluded.contributor_name,
-      profession = excluded.profession,
-      craft_label = excluded.craft_label,
-      structure_name = excluded.structure_name,
-      item_tier = excluded.item_tier,
-      contributed_progress = max(production_contributions.contributed_progress, excluded.contributed_progress),
-      contributed_xp = max(production_contributions.contributed_xp, excluded.contributed_xp),
-      contribution_count = max(production_contributions.contribution_count, excluded.contribution_count),
-      first_contributed_at = CASE
-        WHEN production_contributions.first_contributed_at IS NULL THEN excluded.first_contributed_at
-        WHEN excluded.first_contributed_at IS NULL THEN production_contributions.first_contributed_at
-        WHEN excluded.first_contributed_at < production_contributions.first_contributed_at THEN excluded.first_contributed_at
-        ELSE production_contributions.first_contributed_at
-      END,
-      last_contributed_at = CASE
-        WHEN production_contributions.last_contributed_at IS NULL THEN excluded.last_contributed_at
-        WHEN excluded.last_contributed_at IS NULL THEN production_contributions.last_contributed_at
-        WHEN excluded.last_contributed_at > production_contributions.last_contributed_at THEN excluded.last_contributed_at
-        ELSE production_contributions.last_contributed_at
-      END,
-      updated_at = excluded.updated_at,
-      raw_json = excluded.raw_json
-  `),
   getSetting: db.prepare("SELECT value FROM app_settings WHERE key = ?"),
   upsertSetting: db.prepare(`
     INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
   `),
-  domainPayloadsByClaim: db.prepare("SELECT * FROM domain_payload_current WHERE claim_id = ?"),
-  domainPayload: db.prepare("SELECT * FROM domain_payload_current WHERE claim_id = ? AND domain = ?"),
-  upsertDomainPayload: db.prepare(`
-    INSERT INTO domain_payload_current (claim_id, domain, data_json, collected_at, last_attempt_at, last_success_at, last_error, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(claim_id, domain) DO UPDATE SET
-      data_json = excluded.data_json,
-      collected_at = excluded.collected_at,
-      last_attempt_at = excluded.last_attempt_at,
-      last_success_at = excluded.last_success_at,
-      last_error = excluded.last_error,
-      updated_at = excluded.updated_at
-  `),
-  updateDomainPayloadError: db.prepare("UPDATE domain_payload_current SET last_attempt_at = ?, last_error = ?, updated_at = ? WHERE claim_id = ? AND domain = ?"),
   getSecret: db.prepare("SELECT value FROM app_secrets WHERE key = ?"),
   upsertSecret: db.prepare(`
     INSERT INTO app_secrets (key, value, updated_at) VALUES (?, ?, ?)
@@ -290,30 +209,8 @@ export function createPreparedStatements(db) {
   markScheduledJobFailure: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = ?"),
   updateScheduledJobMetadata: db.prepare("UPDATE scheduled_jobs SET metadata_json = ?, updated_at = ? WHERE job_key = ?"),
   resetStaleScheduledJobs: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE running = 1 AND (last_run_at IS NULL OR last_run_at < ?)"),
-  resetStaleRecipeCatalogJob: db.prepare("UPDATE scheduled_jobs SET running = 0, last_error = ?, next_run_at = ?, metadata_json = ?, updated_at = ? WHERE job_key = 'recipe_catalog_refresh' AND running = 1 AND (updated_at IS NULL OR updated_at < ?)"),
-  getRecipeCatalogEntry: db.prepare("SELECT * FROM recipe_catalog_entries WHERE catalog_key = ?"),
-  listRecipeCatalogEntries: db.prepare("SELECT * FROM recipe_catalog_entries ORDER BY last_synced_at ASC, catalog_key ASC LIMIT ?"),
-  recipeCatalogCount: db.prepare("SELECT COUNT(*) AS count FROM recipe_catalog_entries"),
-  upsertRecipeCatalogEntry: db.prepare(`
-    INSERT INTO recipe_catalog_entries (
-      catalog_key, kind, target_id, item_type, name, tier, rarity, tag, icon_asset_name,
-      detail_json, source, last_synced_at, last_error, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
-    ON CONFLICT(catalog_key) DO UPDATE SET
-      item_type = excluded.item_type,
-      name = COALESCE(excluded.name, recipe_catalog_entries.name),
-      tier = COALESCE(excluded.tier, recipe_catalog_entries.tier),
-      rarity = COALESCE(excluded.rarity, recipe_catalog_entries.rarity),
-      tag = COALESCE(excluded.tag, recipe_catalog_entries.tag),
-      icon_asset_name = COALESCE(excluded.icon_asset_name, recipe_catalog_entries.icon_asset_name),
-      detail_json = excluded.detail_json,
-      source = excluded.source,
-      last_synced_at = excluded.last_synced_at,
-      last_error = NULL,
-      updated_at = excluded.updated_at
-  `),
-  updateRecipeCatalogError: db.prepare("UPDATE recipe_catalog_entries SET last_error = ?, updated_at = ? WHERE catalog_key = ?"),
   adminCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users"),
+  activeOwnerCount: db.prepare("SELECT COUNT(*) AS count FROM admin_users WHERE role = 'owner' AND active = 1"),
   adminByUsername: db.prepare("SELECT * FROM admin_users WHERE username = ? AND active = 1"),
   adminByDiscordId: db.prepare("SELECT * FROM admin_users WHERE discord_id = ? AND active = 1"),
   adminBySession: db.prepare(`
@@ -435,19 +332,42 @@ export function createPreparedStatements(db) {
       summary = excluded.summary,
       occurred_at = excluded.occurred_at,
       metadata_json = excluded.metadata_json,
-      status = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.status ELSE 'pending' END,
-      attempts = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.attempts ELSE 0 END,
-      next_attempt_at = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.next_attempt_at ELSE excluded.next_attempt_at END,
-      skipped_at = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.skipped_at ELSE NULL END,
-      failed_at = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.failed_at ELSE NULL END,
-      last_error = CASE WHEN discord_notification_outbox.status = 'sent' THEN discord_notification_outbox.last_error ELSE NULL END,
+      status = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.status ELSE 'pending' END,
+      attempts = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.attempts ELSE 0 END,
+      next_attempt_at = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.next_attempt_at ELSE excluded.next_attempt_at END,
+      locked_at = CASE WHEN discord_notification_outbox.status = 'sending' THEN discord_notification_outbox.locked_at ELSE NULL END,
+      locked_by = CASE WHEN discord_notification_outbox.status = 'sending' THEN discord_notification_outbox.locked_by ELSE NULL END,
+      lease_token = CASE WHEN discord_notification_outbox.status = 'sending' THEN discord_notification_outbox.lease_token ELSE NULL END,
+      lease_expires_at = CASE WHEN discord_notification_outbox.status = 'sending' THEN discord_notification_outbox.lease_expires_at ELSE NULL END,
+      skipped_at = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.skipped_at ELSE NULL END,
+      failed_at = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.failed_at ELSE NULL END,
+      last_error = CASE WHEN discord_notification_outbox.status IN ('sent', 'sending') THEN discord_notification_outbox.last_error ELSE NULL END,
       updated_at = excluded.updated_at
   `),
-  pendingDiscordNotifications: db.prepare("SELECT * FROM discord_notification_outbox WHERE status IN ('pending', 'failed') AND attempts < ? AND next_attempt_at <= ? ORDER BY created_at ASC, id ASC LIMIT ?"),
-  markDiscordNotificationSent: db.prepare("UPDATE discord_notification_outbox SET status = 'sent', sent_at = ?, response_json = ?, last_error = NULL, updated_at = ? WHERE id = ?"),
-  markDiscordNotificationSkipped: db.prepare("UPDATE discord_notification_outbox SET status = 'skipped', skipped_at = ?, last_error = ?, updated_at = ? WHERE id = ?"),
-  markDiscordNotificationFailed: db.prepare("UPDATE discord_notification_outbox SET status = CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END, attempts = attempts + 1, next_attempt_at = ?, failed_at = ?, last_error = ?, updated_at = ? WHERE id = ?"),
   discordNotificationOutboxCounts: db.prepare("SELECT status, COUNT(*) AS count FROM discord_notification_outbox GROUP BY status"),
+  discordNotificationOutboxDuplicateRisk: db.prepare(`
+    SELECT
+      SUM(CASE
+        WHEN attempts > 1
+          OR (status = 'sending' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?1)
+          OR last_error LIKE 'Delivery lease expired before completion;%'
+          OR last_error = 'Canonical announcement delivery outcome is unknown; automatic retry is suppressed'
+          OR last_error = 'Canonical announcement delivery was interrupted; automatic retry is suppressed'
+        THEN 1 ELSE 0
+      END) AS potential_duplicate_rows,
+      SUM(CASE WHEN status = 'sending' THEN 1 ELSE 0 END) AS active_leases,
+      SUM(CASE
+        WHEN (status = 'sending' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?1)
+          OR last_error LIKE 'Delivery lease expired before completion;%'
+        THEN 1 ELSE 0
+      END) AS expired_lease_rows,
+      SUM(CASE
+        WHEN last_error = 'Canonical announcement delivery outcome is unknown; automatic retry is suppressed'
+          OR last_error = 'Canonical announcement delivery was interrupted; automatic retry is suppressed'
+        THEN 1 ELSE 0
+      END) AS unknown_outcome_rows
+    FROM discord_notification_outbox
+  `),
   recentDiscordDeliveries: db.prepare("SELECT * FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT ?"),
   pruneDiscordDeliveries: db.prepare("DELETE FROM discord_delivery_log WHERE id NOT IN (SELECT id FROM discord_delivery_log ORDER BY occurred_at DESC, id DESC LIMIT 250)"),
   claimDiscordCraftPlanReportOccurrence: db.prepare(`

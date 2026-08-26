@@ -113,7 +113,7 @@ The palette is a dark operational shell with a restrained gold command accent an
 
 **The Operational Accent Rule.** Gold means active, selected, or primary. Do not use it as broad decoration.
 
-**The Data Honesty Rule.** If a value depends on BitJita availability or local cache freshness, the UI must label uncertainty plainly instead of over-styling it as exact truth.
+**The Data Honesty Rule.** If a value depends on provider availability or local generation freshness, the UI must label uncertainty plainly instead of over-styling it as exact truth.
 
 **The Theme Safety Rule.** Browser themes may customize operational surfaces, text, focus, and status roles only when their representative pairs meet WCAG contrast. The current dashboard supports dark command surfaces: some dense tables, domain-fidelity panels, and operational labels intentionally retain fixed dark or light colours for rapid scanning. Imported or saved light-surface themes are therefore rejected before activation when those real UI pairs fail contrast. Invalid imports and saves must leave the last valid theme active and name every failing role with its measured and required contrast.
 
@@ -186,7 +186,7 @@ Do:
 - Keep operational workflows dense, explicit, and fast to scan.
 - Prefer existing classes and CSS variables before adding new styling.
 - Preserve visible focus states and keyboard paths through modals.
-- Use BitJita API metadata as the source of truth for item names, tags, tiers, and item/cargo type.
+- Use normalized Relay catalog metadata as the source of truth for item names, tags, tiers, and item/cargo type.
 - Label admin controls clearly and keep ordinary user views read-only when the feature is admin-managed.
 
 Don't:

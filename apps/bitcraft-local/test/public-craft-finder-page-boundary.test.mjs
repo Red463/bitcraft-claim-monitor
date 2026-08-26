@@ -20,3 +20,10 @@ test("Public Craft Finder summary reflows while its results table remains scroll
   assert.match(css, /@media \(max-width:\s*560px\)[\s\S]*\.public-craft-summary\s*\{[^}]*grid-template-columns:\s*1fr/s);
   assert.match(css, /\.public-craft-finder \.table-wrap\s*\{[^}]*overflow-x:\s*auto/s);
 });
+
+test("Members profile uses only provider-neutral player data and live regional tasks", () => {
+  const source = readFileSync(new URL("../src/pages/MembersPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /domains:\s*"inventory,housing"/);
+  assert.match(source, /selectedMember\?\.player\?\.tasks/);
+  assert.doesNotMatch(source, /\/api\/bitjita|LEGACY_API|market-collections|traveler-tasks/i);
+});

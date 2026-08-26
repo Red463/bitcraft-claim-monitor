@@ -24,6 +24,29 @@ test("Empires renders a restricted state when every view is denied", () => {
   assert.match(empiresPage, /No empire views are available for your account\./);
 });
 
+test("Empires shows retained-data refresh progress only for manual cycles", () => {
+  assert.match(empiresPage, /pageRefreshShowsRetainedDataProgress/);
+  assert.match(empiresPage, /const showRefreshProgress = pageRefreshShowsRetainedDataProgress\(request\)/);
+  assert.match(empiresPage, /overview\.loading && overview\.data && showRefreshProgress/);
+  assert.match(empiresPage, /watchtowers\.loading && watchtowers\.data && showRefreshProgress/);
+  assert.match(empiresPage, /overview\.loading && showRefreshProgress \? "Refreshing\.\.\."/);
+  assert.match(empiresPage, /watchtowers\.loading && showRefreshProgress \? "Refreshing\.\.\."/);
+  assert.match(empiresPage, /state\.loading && state\.data && showRefreshProgress/);
+});
+
+test("Empires exposes live provider-neutral Hexite deposits without treating unknown rows as active", () => {
+  const depositsPanel = readFileSync(new URL("../src/pages/empires/DepositsPanel.tsx", import.meta.url), "utf8");
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.match(empiresPage, /id: "deposits" as const, label: "Hexite Deposits"/);
+  assert.match(empiresPage, /<DepositsPanel data=\{providerData\} loading=\{providerLoading\} error=\{providerError\} monitoredRegionId=\{monitoredRegionId\}/);
+  assert.match(appShell, /providerData=\{data\.raw\}/);
+  assert.doesNotMatch(depositsPanel, /fetch\(|loadGameData/);
+  assert.doesNotMatch(depositsPanel, /\/api\/bitjita|relay\.bitcraftsync\.app/i);
+  assert.match(depositsPanel, /Unknown does not mean active or harvestable/);
+  assert.match(depositsPanel, /scrollLabel="Hexite deposits table"/);
+});
+
 test("Empires contains wide tables on phones and names their keyboard scrollers", () => {
   const dataTable = readFileSync(new URL("../src/components/main/DataTable.tsx", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles/empires.css", import.meta.url), "utf8");
@@ -46,7 +69,7 @@ test("Empire overview presents one combined Hexite Reserves column", () => {
   assert.match(empiresPage, /presentHexiteReserveSummary\(row\.hexiteReserves\)\.sortValue/);
   assert.match(empiresPage, /<details className="hexite-reserve-details">/);
   assert.match(empiresPage, /<summary>Details<\/summary>/);
-  assert.match(empiresPage, /Known minimum from treasury and inventories; completed Foundry output is unavailable\./);
+  assert.match(empiresPage, /Live known minimum includes the Empire treasury, completed Foundry Capsules, and bounded configured-region player and claim inventories; incomplete regional coverage remains explicit\./);
   assert.match(empiresCss, /\.hexite-reserve-cell\s*\{[^}]*min-width:\s*230px/s);
   assert.match(empiresPage, /className=\{`hexite-reserve-cell \$\{presentation\.tone\}`\}/);
   assert.match(empiresCss, /\.hexite-reserve-cell\.danger\s*>\s*strong/);
@@ -139,6 +162,7 @@ test("watchtower popup exposes aligned claims and lazy claim member drilldown", 
 test("siege and empire details use shared accessible dialogs with complete drilldown states", () => {
   const siegeDialog = readFileSync(new URL("../src/pages/empires/SiegeDetailsDialog.tsx", import.meta.url), "utf8");
   const empireDialog = readFileSync(new URL("../src/pages/empires/EmpireDetailsDialog.tsx", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
 
   assert.match(siegeDialog, /<Dialog[\s\S]*open[\s\S]*title="Siege Details"/);
   assert.match(siegeDialog, /groupSiegeParticipants/);
@@ -147,6 +171,21 @@ test("siege and empire details use shared accessible dialogs with complete drill
   assert.match(siegeDialog, /Attacking Empire/);
   assert.match(siegeDialog, /Defending Empire/);
   assert.match(siegeDialog, /onViewEmpire/);
+  assert.match(siegeDialog, /siegeParticipantKey\(participant, "attacker", index\)/);
+  assert.match(siegeDialog, /Cancelled or removed sieges are unavailable from Relay/);
+  assert.match(page, /unmatchedTerminalStatus/);
+  assert.match(page, /removed_or_unknown/);
+  assert.match(page, /removed or unknown/);
+  assert.match(
+    readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8"),
+    /Recent Siege Outcomes/,
+  );
+  assert.match(
+    readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8"),
+    /attacker_won/,
+  );
+  assert.match(empiresCss, /\.siege-outcomes-panel/);
+  assert.match(empiresCss, /\.siege-outcome-list/);
 
   assert.match(empireDialog, /\/empires\/details\?/);
   assert.match(empireDialog, /AbortController/);

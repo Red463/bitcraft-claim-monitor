@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "declaration": false,
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "dist-server/game-data",
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "src/server/game-data",
+    "sourceMap": true,
+    "types": ["node"]
+  },
+  "include": ["src/server/game-data/**/*.ts"],
+  "exclude": [
+    "src/server/game-data/bindings/global/**",
+    "src/server/game-data/bindings/regional/**"
+  ]
+}

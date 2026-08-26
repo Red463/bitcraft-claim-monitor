@@ -5,18 +5,21 @@ import { ItemIcon, ItemLabel } from "../components/main/ItemDisplay";
 import { Dialog } from "../components/main/Dialog";
 import type { AnyRecord } from "../main-app-data";
 import { dateLabel, formatNumber, timeAgo } from "../utils/format";
+import { createDelayedRefreshTask } from "../refresh/pageRefresh.mjs";
+import { buildCraftPlanBankGroups, finalizeLegacyBankMigrations, initiallyExpandedBankPlayerIds, mergeLegacyBankDiscovery, runBankDiscoveryQueue } from "./craftPlanBankSelection.mjs";
 
 const LOCAL_API = "/api/local";
-const BITJITA_API = "/api/bitjita";
-const TABS = ["targets", "sources", "players", "routes", "buffers", "audit"] as const;
+const BANK_LOAD_CONCURRENCY = 3;
+const TABS = ["targets", "sources", "players", "banks", "routes", "buffers", "audit"] as const;
 type ManagerTab = typeof TABS[number];
 type ManagerOperation = "loading" | "refreshing" | "saving" | "preset" | null;
+type PlayerBankLoad = { status: "loading" | "loaded" | "error"; banks: AnyRecord[]; warnings: string[]; error?: string };
 
 type CraftPlanConfig = {
   enabled: boolean;
   name: string;
   targets: AnyRecord[];
-  sourceRules: { storageContainerIds: string[]; playerIds: string[]; craftPlayerIds: string[]; bankPlayerIds: string[]; deployableContainerIds: string[] };
+  sourceRules: { storageContainerIds: string[]; playerIds: string[]; craftPlayerIds: string[]; bankPlayerIds: string[]; bankContainerIds: string[]; deployableContainerIds: string[] };
   routeOverrides: Record<string, string>;
   sectionOverrides: Record<string, string>;
   rowNameOverrides: Record<string, string>;
@@ -26,7 +29,11 @@ type CraftPlanConfig = {
 };
 
 function emptyConfig(): CraftPlanConfig {
-  return { enabled: true, name: "Settlement craft plan", targets: [], sourceRules: { storageContainerIds: [], playerIds: [], craftPlayerIds: [], bankPlayerIds: [], deployableContainerIds: [] }, routeOverrides: {}, sectionOverrides: {}, rowNameOverrides: {}, multipliers: {}, gatheredItemKeys: [], buildingProgress: {} };
+  return { enabled: true, name: "Settlement craft plan", targets: [], sourceRules: { storageContainerIds: [], playerIds: [], craftPlayerIds: [], bankPlayerIds: [], bankContainerIds: [], deployableContainerIds: [] }, routeOverrides: {}, sectionOverrides: {}, rowNameOverrides: {}, multipliers: {}, gatheredItemKeys: [], buildingProgress: {} };
+}
+
+function managerConfigFromResult(result: AnyRecord): CraftPlanConfig {
+  return { ...emptyConfig(), ...(result.config ?? {}), sourceRules: { ...emptyConfig().sourceRules, ...(result.config?.sourceRules ?? {}) } };
 }
 
 function itemKind(item: AnyRecord) {
@@ -72,8 +79,8 @@ function itemTypeLabel(item: AnyRecord) {
   return kind === "building" ? "Workstation" : kind === "cargo" ? "Cargo" : "Item";
 }
 
-function itemPreview(items: AnyRecord[] = []) {
-  const top = items.slice().sort((a, b) => Number(b.quantity ?? 0) - Number(a.quantity ?? 0)).slice(0, 10);
+function itemPreview(items: AnyRecord[] = [], limit = 4) {
+  const top = items.slice().sort((a, b) => Number(b.quantity ?? 0) - Number(a.quantity ?? 0)).slice(0, limit);
   return top.length ? (
     <div className="craft-plan-source-items">
       {top.map((item) => <span key={`${itemKey(item)}:${item.quantity}`}><ItemLabel item={item} meta={itemTypeLabel(item)} /><strong>{formatNumber(Number(item.quantity) || 0, 0)}</strong></span>)}
@@ -101,13 +108,11 @@ function playerSourceCard(
   source: AnyRecord,
   inventoryChecked: boolean,
   craftsChecked: boolean,
-  banksChecked: boolean,
   onInventoryChange: (checked: boolean) => void,
   onCraftsChange: (checked: boolean) => void,
-  onBanksChange: (checked: boolean) => void,
 ) {
   return (
-    <article className={`craft-plan-source-card craft-plan-player-source-card${inventoryChecked || craftsChecked || banksChecked ? " is-included" : ""}`} key={source.playerId}>
+    <article className={`craft-plan-source-card craft-plan-player-source-card${inventoryChecked || craftsChecked ? " is-included" : ""}`} key={source.playerId}>
       <header>
         <div>
           <strong>{source.label}</strong>
@@ -116,7 +121,6 @@ function playerSourceCard(
         <div className="craft-plan-player-source-toggles">
           <label className="compact-toggle"><input type="checkbox" checked={inventoryChecked} onChange={(event) => onInventoryChange(event.target.checked)} /><span>Inventory</span></label>
           <label className="compact-toggle"><input type="checkbox" checked={craftsChecked} onChange={(event) => onCraftsChange(event.target.checked)} /><span>Crafts</span></label>
-          <label className="compact-toggle"><input type="checkbox" checked={banksChecked} onChange={(event) => onBanksChange(event.target.checked)} /><span>Banks</span></label>
         </div>
       </header>
     </article>
@@ -147,19 +151,12 @@ function routeOutputKey(step: AnyRecord) {
   return itemKey(step.output ?? step);
 }
 
-const CATALOG_REFRESH_POLL_MS = 4000;
-
-type CatalogRefreshStatus = {
-  scheduledJob: AnyRecord | null;
-  latestRun: AnyRecord | null;
-  recentRuns: AnyRecord[];
-};
-
 const CRAFT_PLAN_AUDIT_CATEGORY_LABELS: Record<string, string> = {
   public_board: "Visibility",
   storage: "Settlement storage",
   player_inventory: "Player inventory",
   player_crafts: "Player crafts",
+  player_bank: "Player bank",
   deployable: "Deployable",
   gathered_item: "Gathered item",
 };
@@ -170,33 +167,6 @@ function firstText(...values: unknown[]) {
     if (text) return text;
   }
   return "";
-}
-
-function firstCount(...values: unknown[]) {
-  for (const value of values) {
-    const count = Number(value);
-    if (Number.isFinite(count)) return count;
-  }
-  return 0;
-}
-
-function formatCatalogPhase(value: unknown) {
-  const text = firstText(value);
-  const labels: Record<string, string> = {
-    list_items: "Discovering items",
-    list_cargo: "Discovering cargo",
-    detail_items: "Loading item details",
-    detail_cargo: "Loading cargo details",
-    waiting_retry: "Waiting to retry",
-    retry_failures: "Retrying failed details",
-    complete: "Complete",
-  };
-  return labels[text] ?? (text ? text.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Idle");
-}
-
-function formatCatalogMoment(value: unknown) {
-  const text = firstText(value);
-  return text ? { summary: timeAgo(text), detail: dateLabel(text) } : { summary: "Never", detail: "Not available" };
 }
 
 function progressEventLabel(value: unknown) {
@@ -221,9 +191,6 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [operation, setOperation] = React.useState<ManagerOperation>(null);
-  const [catalogStatus, setCatalogStatus] = React.useState<CatalogRefreshStatus | null>(null);
-  const [catalogError, setCatalogError] = React.useState<string | null>(null);
-  const [catalogBusy, setCatalogBusy] = React.useState(false);
   const [auditRows, setAuditRows] = React.useState<AnyRecord[]>([]);
   const [auditLoaded, setAuditLoaded] = React.useState(false);
   const [auditLoading, setAuditLoading] = React.useState(false);
@@ -232,14 +199,17 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const [progressAuditError, setProgressAuditError] = React.useState<string | null>(null);
   const [auditDownloadRange, setAuditDownloadRange] = React.useState<string | null>(null);
   const [auditDownloadError, setAuditDownloadError] = React.useState<string | null>(null);
-  const catalogPollingActive = Boolean(
-    catalogStatus?.scheduledJob?.running
-    || catalogStatus?.scheduledJob?.metadata?.complete === false
-    || catalogStatus?.latestRun?.status === "running"
-    || catalogStatus?.latestRun?.status === "paused"
-  );
-
-  async function adminApi(path: string, options: RequestInit = {}) {
+  const [bankLoads, setBankLoads] = React.useState<Record<string, PlayerBankLoad>>({});
+  const [bankDiscoveryStarted, setBankDiscoveryStarted] = React.useState(false);
+  const [legacyBankMigrations, setLegacyBankMigrations] = React.useState<string[]>([]);
+  const [expandedBankPlayers, setExpandedBankPlayers] = React.useState<string[]>([]);
+  const [bankSearch, setBankSearch] = React.useState("");
+  const [trackedBanksOnly, setTrackedBanksOnly] = React.useState(false);
+  const [savedConfigSignature, setSavedConfigSignature] = React.useState("");
+  const [refreshConfirmationOpen, setRefreshConfirmationOpen] = React.useState(false);
+  const loadRequestId = React.useRef(0);
+  const draftDirty = Boolean(savedConfigSignature) && JSON.stringify(config) !== savedConfigSignature;
+  const adminApi = React.useCallback(async (path: string, options: RequestInit = {}) => {
     const headers = new Headers(options.headers);
     headers.set("content-type", "application/json");
     if (options.method && options.method !== "GET") headers.set("x-csrf-token", csrfToken);
@@ -247,41 +217,34 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
     return body;
-  }
+  }, [csrfToken]);
 
   const load = React.useCallback(async (mode: "loading" | "refreshing" = "loading") => {
+    const requestId = ++loadRequestId.current;
     setBusy(true);
     setOperation(mode);
     setError(null);
     try {
       const result = await adminApi("/admin/craft-plan");
+      if (requestId !== loadRequestId.current) return;
+      const loadedConfig = managerConfigFromResult(result);
       setState(result);
-      setConfig({ ...emptyConfig(), ...(result.config ?? {}), sourceRules: { ...emptyConfig().sourceRules, ...(result.config?.sourceRules ?? {}) } });
+      setConfig(loadedConfig);
+      setSavedConfigSignature(JSON.stringify(loadedConfig));
+      setRefreshConfirmationOpen(false);
+      setBankLoads({});
+      setBankDiscoveryStarted(false);
+      setLegacyBankMigrations([]);
+      setExpandedBankPlayers([]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (requestId === loadRequestId.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
-      setOperation(null);
+      if (requestId === loadRequestId.current) {
+        setBusy(false);
+        setOperation(null);
+      }
     }
-  }, [csrfToken]);
-
-  const loadCatalogStatus = React.useCallback(async (options: { silent?: boolean } = {}) => {
-    const silent = options.silent === true;
-    if (!silent) setCatalogBusy(true);
-    setCatalogError(null);
-    try {
-      const result = await adminApi("/admin/craft-plan/catalog-refresh");
-      setCatalogStatus({
-        scheduledJob: result.scheduledJob ?? null,
-        latestRun: result.latestRun ?? null,
-        recentRuns: Array.isArray(result.recentRuns) ? result.recentRuns : [],
-      });
-    } catch (err) {
-      setCatalogError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (!silent) setCatalogBusy(false);
-    }
-  }, [csrfToken]);
+  }, [adminApi]);
 
   const loadAudit = React.useCallback(async () => {
     setAuditLoading(true);
@@ -303,7 +266,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     }
     setAuditLoading(false);
     setAuditLoaded(true);
-  }, [csrfToken]);
+  }, [adminApi]);
 
   async function downloadProgressAudit(range: string) {
     setAuditDownloadRange(range);
@@ -333,12 +296,21 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   React.useEffect(() => {
     if (!open) return;
     void load();
-    void loadCatalogStatus();
-  }, [open, load, loadCatalogStatus]);
+  }, [open, load]);
 
   React.useEffect(() => {
     if (open) return;
+    loadRequestId.current += 1;
+    setState(null);
+    setConfig(emptyConfig());
+    setBusy(false);
+    setOperation(null);
+    setStatus(null);
+    setError(null);
     setActiveTab("targets");
+    setQuery("");
+    setSearchResults([]);
+    setActiveSearchResultIndex(-1);
     setAuditRows([]);
     setAuditLoaded(false);
     setAuditLoading(false);
@@ -347,6 +319,14 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setProgressAuditError(null);
     setAuditDownloadRange(null);
     setAuditDownloadError(null);
+    setBankLoads({});
+    setBankDiscoveryStarted(false);
+    setLegacyBankMigrations([]);
+    setExpandedBankPlayers([]);
+    setBankSearch("");
+    setTrackedBanksOnly(false);
+    setSavedConfigSignature("");
+    setRefreshConfirmationOpen(false);
   }, [open]);
 
   React.useEffect(() => {
@@ -354,28 +334,55 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     void loadAudit();
   }, [open, activeTab, auditLoaded, auditLoading, loadAudit]);
 
+  async function loadPlayerBanks(player: AnyRecord) {
+    const playerId = String(player.playerId ?? "");
+    if (!playerId) return;
+    const initiallyExpanded = initiallyExpandedBankPlayerIds(config.sourceRules).includes(playerId);
+    const wasLegacyTracked = config.sourceRules.bankPlayerIds.includes(playerId);
+    setBankLoads((current) => ({ ...current, [playerId]: { status: "loading", banks: current[playerId]?.banks ?? [], warnings: [] } }));
+    try {
+      const result = await adminApi(`/admin/craft-plan/player-banks?playerId=${encodeURIComponent(playerId)}`);
+      const banks = Array.isArray(result.banks) ? result.banks : [];
+      setBankLoads((current) => ({ ...current, [playerId]: { status: "loaded", banks, warnings: Array.isArray(result.warnings) ? result.warnings.map(String) : [] } }));
+      setConfig((current) => {
+        const sourceRules = mergeLegacyBankDiscovery(current.sourceRules, playerId, banks);
+        return sourceRules === current.sourceRules ? current : { ...current, sourceRules };
+      });
+      if (wasLegacyTracked) setLegacyBankMigrations((current) => current.includes(playerId) ? current : [...current, playerId]);
+      if (initiallyExpanded) setExpandedBankPlayers((current) => current.includes(playerId) ? current : [...current, playerId]);
+    } catch (err) {
+      setBankLoads((current) => ({ ...current, [playerId]: { status: "error", banks: current[playerId]?.banks ?? [], warnings: [], error: err instanceof Error ? err.message : String(err) } }));
+    }
+  }
+
   React.useEffect(() => {
-    if (!open || !catalogPollingActive) return;
-    const interval = window.setInterval(() => {
-      void loadCatalogStatus({ silent: true });
-    }, CATALOG_REFRESH_POLL_MS);
-    return () => window.clearInterval(interval);
-  }, [open, catalogPollingActive, loadCatalogStatus]);
+    if (open && activeTab === "banks") setBankDiscoveryStarted(true);
+  }, [open, activeTab]);
+
+  React.useEffect(() => {
+    if (!open || !bankDiscoveryStarted) return;
+    const players = Array.isArray(state?.sources?.players) ? state.sources.players : [];
+    if (!players.length) return;
+    let cancelled = false;
+    void runBankDiscoveryQueue(players, async (player: AnyRecord) => {
+      if (!cancelled) await loadPlayerBanks(player);
+    }, BANK_LOAD_CONCURRENCY);
+    return () => { cancelled = true; };
+  }, [open, bankDiscoveryStarted, state?.sources?.players]);
 
   React.useEffect(() => {
     const trimmed = query.trim();
     if (trimmed.length < 2) { setSearchResults([]); return; }
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      fetch(`${BITJITA_API}/market?search=${encodeURIComponent(trimmed)}`, { signal: controller.signal })
-        .then((response) => response.ok ? response.json() : { items: [], cargos: [] })
-        .then((body) => {
-          setSearchResults([...(body.items ?? []), ...(body.cargos ?? [])].slice(0, 16));
-          setActiveSearchResultIndex(-1);
-        })
-        .catch(() => setSearchResults([]));
-    }, 200);
-    return () => { window.clearTimeout(timer); controller.abort(); };
+    const refresh = createDelayedRefreshTask(() => fetch(`${LOCAL_API}/catalog/search?q=${encodeURIComponent(trimmed)}&limit=16`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`catalog search HTTP ${response.status}`))), 200);
+    void refresh.promise
+      .then((body) => {
+        setSearchResults([...(body.items ?? []), ...(body.cargos ?? [])].slice(0, 16));
+        setActiveSearchResultIndex(-1);
+      })
+      .catch(() => setSearchResults([]));
+    return () => { refresh.cancel(); controller.abort(); };
   }, [query]);
 
   function selectSearchResult(item: AnyRecord) {
@@ -408,7 +415,15 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     setConfig((current) => ({ ...current, ...patch }));
   }
 
-  function updateSource(kind: "storageContainerIds" | "playerIds" | "craftPlayerIds" | "bankPlayerIds" | "deployableContainerIds", id: string, checked: boolean) {
+  function requestRefresh() {
+    if (draftDirty) {
+      setRefreshConfirmationOpen(true);
+      return;
+    }
+    void load("refreshing");
+  }
+
+  function updateSource(kind: "storageContainerIds" | "playerIds" | "craftPlayerIds" | "bankPlayerIds" | "bankContainerIds" | "deployableContainerIds", id: string, checked: boolean) {
     setConfig((current) => {
       const currentValues = current.sourceRules[kind] ?? [];
       const nextValues = checked ? [...new Set([...currentValues, id])] : currentValues.filter((value) => value !== id);
@@ -447,34 +462,22 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
     }
   }
 
-  async function triggerCatalogRefresh() {
-    if (busy || catalogBusy || catalogStatus?.scheduledJob?.running) return;
-    setCatalogBusy(true);
-    setCatalogError(null);
-    try {
-      const result = await adminApi("/admin/craft-plan/catalog-refresh", { method: "POST", body: "{}" });
-      setCatalogStatus({
-        scheduledJob: result.scheduledJob ?? null,
-        latestRun: result.latestRun ?? null,
-        recentRuns: Array.isArray(result.recentRuns) ? result.recentRuns : [],
-      });
-      setStatus(result.result?.started ? "Planner catalog refresh started." : "Planner catalog status updated.");
-    } catch (err) {
-      setCatalogError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCatalogBusy(false);
-    }
-  }
-
   async function save() {
     setBusy(true);
     setOperation("saving");
     setError(null);
     setStatus(null);
     try {
-      const result = await adminApi("/admin/craft-plan", { method: "PUT", body: JSON.stringify(config) });
+      const submittedConfig = {
+        ...config,
+        sourceRules: finalizeLegacyBankMigrations(config.sourceRules, legacyBankMigrations),
+      };
+      const result = await adminApi("/admin/craft-plan", { method: "PUT", body: JSON.stringify(submittedConfig) });
+      const loadedConfig = managerConfigFromResult(result);
       setState(result);
-      setConfig({ ...emptyConfig(), ...(result.config ?? {}), sourceRules: { ...emptyConfig().sourceRules, ...(result.config?.sourceRules ?? {}) } });
+      setConfig(loadedConfig);
+      setSavedConfigSignature(JSON.stringify(loadedConfig));
+      setRefreshConfirmationOpen(false);
       setStatus("Craft plan saved.");
       setAuditLoaded(false);
       onSaved();
@@ -495,47 +498,11 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
   const tierPresets = state?.sources?.tierPresets ?? [];
   const workstationPresets = state?.sources?.workstationPresets ?? [];
   const routeSteps = Array.isArray(state?.plan?.steps) ? state.plan.steps : [];
-  const scheduledJob = catalogStatus?.scheduledJob ?? null;
-  const recentRuns = Array.isArray(catalogStatus?.recentRuns) ? catalogStatus.recentRuns : [];
-  const latestRun = catalogStatus?.latestRun ?? null;
-  const successfulRun = [latestRun, ...recentRuns].find((run) => run?.status === "completed" && firstText(run?.completedAt, run?.updatedAt)) ?? null;
-  const completedRun = [latestRun, ...recentRuns].find((run) => run?.status === "completed" && firstText(run?.completedAt, run?.updatedAt)) ?? null;
-  const catalogRunning = Boolean(scheduledJob?.running);
-  const catalogRetrying = !catalogRunning && latestRun?.phase === "waiting_retry" && scheduledJob?.metadata?.complete === false;
-  const catalogContinuing = !catalogRunning && !catalogRetrying && latestRun?.status === "paused" && scheduledJob?.metadata?.complete === false;
-  const catalogActive = catalogRunning || catalogRetrying || catalogContinuing;
-  const catalogPhase = formatCatalogPhase(firstText(latestRun?.phase, scheduledJob?.metadata?.phase, scheduledJob?.metadata?.stage, scheduledJob?.metadata?.step));
-  const processedCount = firstCount(latestRun?.processedCount, scheduledJob?.metadata?.processedCount, scheduledJob?.metadata?.current, scheduledJob?.metadata?.progressCurrent);
-  const totalCount = firstCount(latestRun?.totalCount, scheduledJob?.metadata?.totalCount, scheduledJob?.metadata?.total, scheduledJob?.metadata?.progressTotal);
-  const itemCount = firstCount(latestRun?.itemCount, successfulRun?.itemCount, scheduledJob?.metadata?.itemCount);
-  const cargoCount = firstCount(latestRun?.cargoCount, successfulRun?.cargoCount, scheduledJob?.metadata?.cargoCount);
-  const recipeCount = firstCount(latestRun?.recipeCount, successfulRun?.recipeCount, scheduledJob?.metadata?.recipeCount);
-  const byproductCount = firstCount(latestRun?.byproductCount, successfulRun?.byproductCount, scheduledJob?.metadata?.byproductCount);
-  const failureCount = firstCount(latestRun?.failureCount, completedRun?.failureCount, scheduledJob?.metadata?.failureCount);
-  const lastSuccessAt = firstText(scheduledJob?.lastSuccessAt, successfulRun?.completedAt, successfulRun?.updatedAt) || null;
-  const lastCompletedAt = firstText(completedRun?.completedAt, completedRun?.updatedAt) || null;
-  const nextRunAt = firstText(scheduledJob?.nextRunAt) || null;
-  const noCatalog = !lastSuccessAt && recipeCount <= 0 && byproductCount <= 0;
-  const catalogActionBusy = busy || catalogBusy || catalogActive;
-  const catalogStatusLabel = catalogRunning ? "Running" : catalogRetrying ? "Waiting to retry" : catalogContinuing ? "Continuing" : noCatalog ? "Refresh required" : latestRun?.status === "failed" ? "Attention" : "Ready";
-  const progressSummary = totalCount > 0 ? `${formatNumber(processedCount, 0)} / ${formatNumber(totalCount, 0)}` : processedCount > 0 ? formatNumber(processedCount, 0) : "Waiting";
-  const catalogSummary = catalogRunning
-    ? `${catalogPhase} in progress${totalCount > 0 ? `, ${progressSummary} processed.` : "."}`
-    : catalogRetrying
-      ? `BitJita is temporarily unavailable. Retrying automatically${nextRunAt ? ` at ${dateLabel(nextRunAt)}` : " shortly"}.`
-    : catalogContinuing
-      ? `Next batch queued${totalCount > 0 ? `, ${progressSummary} details loaded.` : "."}`
-    : noCatalog
-      ? "No planner catalog yet. Run a refresh to populate recipe diagnostics."
-      : latestRun?.status === "failed"
-        ? "The last refresh failed. Existing catalog data remains available until the next successful run."
-        : "Catalog diagnostics are ready for manual route and source review.";
-  const catalogSchedule = nextRunAt ? `Next scheduled run ${dateLabel(nextRunAt)}.` : (scheduledJob?.scheduleLabel ?? "Manual refresh only.");
-  const lastSuccess = formatCatalogMoment(lastSuccessAt);
-  const lastCompleted = formatCatalogMoment(lastCompletedAt);
-  const lastProgress = formatCatalogMoment(firstText(latestRun?.updatedAt, scheduledJob?.updatedAt));
-  const catalogPillClass = catalogActive ? "status-pill working" : catalogStatusLabel === "Ready" ? "status-pill complete" : "status-pill";
-  const pendingLabel = operation === "loading" ? "Loading plan data…" : operation === "refreshing" ? "Refreshing plan data…" : operation === "saving" ? "Saving plan…" : operation === "preset" ? "Loading workstation preset…" : catalogBusy ? "Refreshing catalog status…" : null;
+  const trackedBankIds = new Set(config.sourceRules.bankContainerIds.map(String));
+  const bankGroups = buildCraftPlanBankGroups({ players: playerSources, bankLoads, trackedBankIds: config.sourceRules.bankContainerIds, search: bankSearch, trackedOnly: trackedBanksOnly });
+  const loadedBankPlayers = Object.values(bankLoads).filter((entry) => entry.status === "loaded" || entry.status === "error").length;
+  const trackedBankCount = config.sourceRules.bankContainerIds.length;
+  const pendingLabel = operation === "loading" ? "Loading plan data…" : operation === "refreshing" ? "Refreshing plan data…" : operation === "saving" ? "Saving plan…" : operation === "preset" ? "Loading workstation preset…" : null;
 
   return (
     <Dialog open title="Craft plan manager" closeOnBackdrop={false} onClose={onClose} className="modal craft-plan-manager" backdropClassName="modal-backdrop craft-plan-manager-backdrop">
@@ -546,39 +513,16 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close craft plan manager"><X size={18} /></button>
         </header>
+        <fieldset className="craft-plan-manager-session" disabled={operation === "refreshing"} aria-busy={operation === "refreshing"}>
         <div className="craft-plan-manager-actions">
           <label className="field craft-plan-name-field"><span>Plan name</span><input value={config.name} onChange={(event) => patchConfig({ name: event.target.value })} /></label>
           <label className="craft-plan-public-toggle"><input type="checkbox" checked={config.enabled !== false} onChange={(event) => patchConfig({ enabled: event.target.checked })} /><span><strong>Public board</strong><small>{config.enabled !== false ? "Visible to users" : "Hidden from users"}</small></span></label>
           <div className="craft-plan-manager-buttons">
-            <button className="toolbar-button" type="button" onClick={() => void load("refreshing")} disabled={busy || catalogBusy}>{operation === "refreshing" ? <LoaderCircle className="is-spinning" size={14} /> : <RefreshCw size={14} />} {operation === "refreshing" ? "Refreshing…" : "Refresh"}</button>
+            <button className="toolbar-button" type="button" onClick={requestRefresh} disabled={busy}>{operation === "refreshing" ? <LoaderCircle className="is-spinning" size={14} /> : <RefreshCw size={14} />} {operation === "refreshing" ? "Refreshing…" : "Refresh"}</button>
             <button className="toolbar-button primary" type="button" onClick={save} disabled={busy}>{operation === "saving" ? <LoaderCircle className="is-spinning" size={14} /> : <Save size={14} />} {operation === "saving" ? "Saving…" : "Save Plan"}</button>
           </div>
-          <section className="craft-plan-catalog-band" aria-label="Planner catalog diagnostics">
-            <div className="craft-plan-catalog-summary">
-              <div>
-                <strong>Planner catalog diagnostics</strong>
-                <p className={noCatalog ? "craft-plan-catalog-empty" : undefined}>{catalogSummary}</p>
-                <small>{catalogSchedule}{catalogActive ? ` Last progress ${lastProgress.summary}.` : ""}</small>
-              </div>
-              <div className="craft-plan-catalog-controls">
-                <span className={catalogPillClass}>{catalogStatusLabel}</span>
-                <button className="toolbar-button" type="button" onClick={triggerCatalogRefresh} disabled={catalogActionBusy}>{catalogBusy || catalogActive ? <LoaderCircle className="is-spinning" size={14} /> : <RefreshCw size={14} />} {catalogBusy ? "Starting refresh…" : catalogActive ? "Refresh running…" : "Refresh planner catalog"}</button>
-              </div>
-            </div>
-            {catalogError ? <p className="craft-plan-catalog-error">{catalogError}</p> : null}
-            <div className="craft-plan-catalog-stats">
-              <div className="craft-plan-catalog-stat"><small>Status</small><strong>{catalogStatusLabel}</strong><span>{catalogPhase}</span></div>
-              <div className="craft-plan-catalog-stat"><small>Progress</small><strong>{progressSummary}</strong><span>{totalCount > 0 ? `${formatNumber(processedCount, 0)} processed of ${formatNumber(totalCount, 0)}` : "Waiting for a completed scan"}</span></div>
-              <div className="craft-plan-catalog-stat"><small>Last success</small><strong>{lastSuccess.summary}</strong><span>{lastSuccess.detail}</span></div>
-              <div className="craft-plan-catalog-stat"><small>Last full refresh</small><strong>{lastCompleted.summary}</strong><span>{lastCompleted.detail}</span></div>
-              <div className="craft-plan-catalog-stat"><small>Items</small><strong>{formatNumber(itemCount, 0)}</strong><span>Item entities</span></div>
-              <div className="craft-plan-catalog-stat"><small>Cargo</small><strong>{formatNumber(cargoCount, 0)}</strong><span>Cargo entities</span></div>
-              <div className="craft-plan-catalog-stat"><small>Recipes</small><strong>{formatNumber(recipeCount, 0)}</strong><span>Catalog recipes</span></div>
-              <div className="craft-plan-catalog-stat"><small>Byproducts</small><strong>{formatNumber(byproductCount, 0)}</strong><span>Output variants</span></div>
-              <div className={`craft-plan-catalog-stat${failureCount > 0 ? " is-problem" : ""}`}><small>Failures</small><strong>{formatNumber(failureCount, 0)}</strong><span>{failureCount > 0 ? (catalogActive ? "Automatic recovery is active" : "Unavailable entities were skipped") : "No failures recorded"}</span></div>
-            </div>
-          </section>
         </div>
+        {refreshConfirmationOpen ? <div className="alert warning craft-plan-refresh-confirmation" role="group" aria-labelledby="craft-plan-refresh-confirmation-title"><div><strong id="craft-plan-refresh-confirmation-title">Discard unsaved changes?</strong><span>Refreshing reloads the last saved plan and replaces your current edits.</span></div><div><button className="toolbar-button" type="button" onClick={() => setRefreshConfirmationOpen(false)}>Keep editing</button><button className="toolbar-button danger" type="button" onClick={() => { setRefreshConfirmationOpen(false); void load("refreshing"); }}>Discard and refresh</button></div></div> : null}
         {pendingLabel ? <div className="craft-plan-manager-pending" role="status" aria-live="polite"><LoaderCircle className="is-spinning" size={16} /><span>{pendingLabel}</span></div> : null}
         {error ? <div className="alert error">{error}</div> : null}
         {status ? <div className="alert success">{status}</div> : null}
@@ -587,34 +531,35 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             ["targets", <Target size={15} />, "Targets"],
             ["sources", <Package size={15} />, "Storage"],
             ["players", <Package size={15} />, "Players & Deployables"],
+            ["banks", <Package size={15} />, "Banks"],
             ["routes", <Route size={15} />, "Routes"],
             ["buffers", <SlidersHorizontal size={15} />, "Buffers"],
             ["audit", <History size={15} />, "Audit"],
           ].map(([id, icon, label]) => <button key={String(id)} type="button" className={activeTab === id ? "active" : ""} onClick={() => setActiveTab(id as ManagerTab)}>{icon}{label}</button>)}
         </nav>
-        <div className="craft-plan-manager-body" aria-busy={busy || catalogBusy}>
+        <div className="craft-plan-manager-body" aria-busy={busy}>
           {operation === "loading" && !state ? <div className="craft-plan-manager-loading"><LoaderCircle className="is-spinning" size={28} /><strong>Loading craft plan</strong><span>Fetching targets, inventories, players, deployables, routes, and presets.</span></div> : null}
           {activeTab === "targets" ? <section className="craft-plan-manager-panel">
             <div className="split-header"><div><h3>Target items</h3><p className="legend">Preset buttons add normal target rows. You can change quantities or remove them at any time.</p></div></div>
             <section className="craft-plan-tier-presets" aria-label="Tier upgrade presets">
               <div className="craft-plan-tier-presets-header">
-                <div><h4><Zap size={16} /> Tier upgrade presets</h4><p>Loaded from BitJita claim research. Click a tier to add its upgrade materials to the plan.</p></div>
+                <div><h4><Zap size={16} /> Tier upgrade presets</h4><p>Loaded from live settlement research. Click a tier to add its upgrade materials to the plan.</p></div>
                 <small>{tierPresets.length ? `${tierPresets.length} presets loaded` : "No presets loaded"}</small>
               </div>
               {tierPresets.length ? <div className="craft-plan-preset-grid">
                 {tierPresets.map((preset: AnyRecord) => <button className="craft-plan-preset-tier" type="button" aria-label={`Add upgrade materials for ${preset.label}`} key={preset.key} onClick={() => addTargets((preset.items ?? []).map((item: AnyRecord) => withQuantity(item, Number(item.quantity) || 1)), `Added ${preset.label} requirements.`)}>{preset.label}</button>)}
-              </div> : <div className="craft-plan-preset-empty"><strong>No tier presets loaded</strong><span>BitJita did not return tier upgrade research materials for this settlement.</span></div>}
+              </div> : <div className="craft-plan-preset-empty"><strong>No tier presets loaded</strong><span>Live settlement research has no tier upgrade materials available yet.</span></div>}
             </section>
             <section className="craft-plan-tier-presets craft-plan-workstation-presets" aria-label="Workstation tier presets">
               <div className="craft-plan-tier-presets-header">
-                <div><h4><Package size={16} /> Workstation presets</h4><p>Add one of every standard workstation at the selected tier. Construction requirements are loaded from BitJita.</p></div>
+                <div><h4><Package size={16} /> Workstation presets</h4><p>Add one of every standard workstation at the selected tier. Construction requirements come from the live Relay catalog.</p></div>
                 <small>{workstationPresets.length ? `${workstationPresets.length} tiers loaded` : "No presets loaded"}</small>
               </div>
               {workstationPresets.length ? <div className="craft-plan-preset-grid">
                 {workstationPresets.map((preset: AnyRecord) => <button className="craft-plan-preset-tier" type="button" aria-label={`Add workstation targets for ${preset.label}`} disabled={busy} key={preset.key} onClick={() => void addWorkstationPreset(preset)}>{preset.label}</button>)}
-              </div> : <div className="craft-plan-preset-empty"><strong>No workstation presets loaded</strong><span>BitJita did not return compatible workstation definitions.</span></div>}
+              </div> : <div className="craft-plan-preset-empty"><strong>No workstation presets loaded</strong><span>The live Relay catalog has no compatible workstation definitions yet.</span></div>}
             </section>
-            <label className="field craft-plan-target-search"><span>Add target manually</span><div className="search"><Search size={16} /><input value={query} role="combobox" aria-autocomplete="list" aria-expanded={searchResults.length > 0} aria-controls="craft-plan-target-suggestions" aria-activedescendant={activeSearchResultIndex >= 0 ? `craft-plan-target-suggestion-${activeSearchResultIndex}` : undefined} autoComplete="off" onKeyDown={handleSearchResultKeyDown} onChange={(event) => { setQuery(event.target.value); setActiveSearchResultIndex(-1); }} placeholder="Search BitJita items" /></div><small role="status" aria-live="polite">{query.trim().length < 2 ? "Type at least two characters to search." : `${searchResults.length} results available.`}</small></label>
+            <label className="field craft-plan-target-search"><span>Add target manually</span><div className="search"><Search size={16} /><input value={query} role="combobox" aria-autocomplete="list" aria-expanded={searchResults.length > 0} aria-controls="craft-plan-target-suggestions" aria-activedescendant={activeSearchResultIndex >= 0 ? `craft-plan-target-suggestion-${activeSearchResultIndex}` : undefined} autoComplete="off" onKeyDown={handleSearchResultKeyDown} onChange={(event) => { setQuery(event.target.value); setActiveSearchResultIndex(-1); }} placeholder="Search live catalog items" /></div><small role="status" aria-live="polite">{query.trim().length < 2 ? "Type at least two characters to search." : `${searchResults.length} results available.`}</small></label>
             {searchResults.length ? <div className="craft-plan-search-results" id="craft-plan-target-suggestions" role="listbox">{searchResults.map((item, index) => <button id={`craft-plan-target-suggestion-${index}`} role="option" aria-selected={activeSearchResultIndex === index} tabIndex={-1} className="toolbar-button" type="button" key={`${itemKind(item)}:${item.id}`} onMouseEnter={() => setActiveSearchResultIndex(index)} onClick={() => selectSearchResult(item)}><ItemIcon item={item} /> {item.name ?? item.id}</button>)}</div> : null}
             <div className="craft-plan-target-editor-list">
               {config.targets.length ? config.targets.map((target, index) => <div className="craft-plan-target-editor-row" key={itemKey(target)}>
@@ -633,9 +578,45 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             </div>
           </section> : null}
 
-          {activeTab === "sources" ? <section className="craft-plan-manager-panel"><h3>Settlement storage</h3><p className="legend">Inventory cards show the largest visible item stacks from each BitJita storage container.</p><div className="craft-plan-source-grid">{storageSources.length ? storageSources.map((source: AnyRecord) => sourceCard(source, config.sourceRules.storageContainerIds.includes(String(source.sourceId)), (checked) => updateSource("storageContainerIds", String(source.sourceId), checked))) : <p className="legend">No settlement storage sources found.</p>}</div></section> : null}
+          {activeTab === "sources" ? <section className="craft-plan-manager-panel"><h3>Settlement storage</h3><p className="legend">Inventory cards show the largest visible item stacks from each live Relay storage container.</p><div className="craft-plan-source-grid">{storageSources.length ? storageSources.map((source: AnyRecord) => sourceCard(source, config.sourceRules.storageContainerIds.includes(String(source.sourceId)), (checked) => updateSource("storageContainerIds", String(source.sourceId), checked))) : <p className="legend">No settlement storage sources found.</p>}</div></section> : null}
 
-          {activeTab === "players" ? <section className="craft-plan-manager-panel"><h3>Players & deployables</h3><p className="legend">Choose which player inventories, active crafts, and banks count toward the plan. Banks include all BitJita-visible settlement banks for that player, including banks in other settlements, as confirmed stock.</p><div className="craft-plan-source-grid compact">{playerSources.length ? playerSources.map((source: AnyRecord) => playerSourceCard(source, config.sourceRules.playerIds.includes(String(source.playerId)), config.sourceRules.craftPlayerIds.includes(String(source.playerId)), config.sourceRules.bankPlayerIds.includes(String(source.playerId)), (checked) => updateSource("playerIds", String(source.playerId), checked), (checked) => updateSource("craftPlayerIds", String(source.playerId), checked), (checked) => updateSource("bankPlayerIds", String(source.playerId), checked))) : <p className="legend">No settlement players found.</p>}</div><h4>Deployables</h4>{deployableGroups.length ? <div className="craft-plan-deployable-groups">{deployableGroups.map((group) => <section className="craft-plan-deployable-group" key={group.playerId}><header><strong>{group.playerName}</strong><small>{formatNumber(group.sources.length, 0)} deployables</small></header><div className="craft-plan-source-grid compact">{group.sources.map((source: AnyRecord) => sourceCard({ ...source, label: String(source.label ?? source.containerKind ?? "Deployable storage") }, config.sourceRules.deployableContainerIds.includes(String(source.sourceId)), (checked) => updateSource("deployableContainerIds", String(source.sourceId), checked)))}</div></section>)}</div> : <p className="legend">No deployables discovered for the selected players yet.</p>}</section> : null}
+          {activeTab === "players" ? <section className="craft-plan-manager-panel"><h3>Players & deployables</h3><p className="legend">Choose which player inventories and active crafts count toward the plan. Individual bank tracking is managed from the Banks tab.</p><div className="craft-plan-source-grid compact">{playerSources.length ? playerSources.map((source: AnyRecord) => playerSourceCard(source, config.sourceRules.playerIds.includes(String(source.playerId)), config.sourceRules.craftPlayerIds.includes(String(source.playerId)), (checked) => updateSource("playerIds", String(source.playerId), checked), (checked) => updateSource("craftPlayerIds", String(source.playerId), checked))) : <p className="legend">No settlement players found.</p>}</div><h4>Deployables</h4>{deployableGroups.length ? <div className="craft-plan-deployable-groups">{deployableGroups.map((group) => <section className="craft-plan-deployable-group" key={group.playerId}><header><strong>{group.playerName}</strong><small>{formatNumber(group.sources.length, 0)} deployables</small></header><div className="craft-plan-source-grid compact">{group.sources.map((source: AnyRecord) => sourceCard({ ...source, label: String(source.label ?? source.containerKind ?? "Deployable storage") }, config.sourceRules.deployableContainerIds.includes(String(source.sourceId)), (checked) => updateSource("deployableContainerIds", String(source.sourceId), checked)))}</div></section>)}</div> : <p className="legend">No deployables discovered for the selected players yet.</p>}</section> : null}
+
+          {activeTab === "banks" ? <section className="craft-plan-manager-panel craft-plan-bank-panel">
+            <div className="split-header"><div><h3>Player banks</h3><p className="legend">Track only the individual banks whose stock should count toward this plan. Empty untracked banks are hidden.</p></div><small>{formatNumber(trackedBankCount, 0)} tracked</small></div>
+            <div className="craft-plan-bank-toolbar">
+              <label className="search"><Search size={16} /><input value={bankSearch} onChange={(event) => setBankSearch(event.target.value)} placeholder="Search players, banks, or settlements" aria-label="Search player banks" /></label>
+              <label className="craft-plan-bank-filter"><input type="checkbox" checked={trackedBanksOnly} onChange={(event) => setTrackedBanksOnly(event.target.checked)} /><span>Tracked only</span></label>
+              <span className="craft-plan-bank-progress" role="status" aria-live="polite">{loadedBankPlayers < playerSources.length ? <><LoaderCircle className="is-spinning" size={14} /> Discovering banks {loadedBankPlayers}/{playerSources.length}</> : `${loadedBankPlayers} players checked`}</span>
+            </div>
+            {bankGroups.length ? <div className="craft-plan-bank-groups">{bankGroups.map((group: AnyRecord) => {
+              const expanded = Boolean(bankSearch.trim()) || expandedBankPlayers.includes(group.playerId);
+              return <section className={`craft-plan-bank-group${group.trackedCount ? " has-tracked" : ""}`} key={group.playerId}>
+                <button className="craft-plan-bank-group-toggle" type="button" aria-expanded={expanded} onClick={() => setExpandedBankPlayers((current) => current.includes(group.playerId) ? current.filter((id) => id !== group.playerId) : [...current, group.playerId])}>
+                  <span><strong>{group.playerName}</strong><small>{group.loadState?.status === "loaded" ? `${formatNumber(group.nonEmptyCount, 0)} non-empty banks · ${formatNumber(group.trackedCount, 0)} tracked` : group.loadState?.status === "error" ? "Bank discovery failed" : "Discovering banks…"}</small></span>
+                  <span>{expanded ? "Hide" : "Show"}</span>
+                </button>
+                {expanded ? <div className="craft-plan-bank-group-body">
+                  {group.loadState?.status === "loading" || !group.loadState ? <div className="craft-plan-bank-state"><LoaderCircle className="is-spinning" size={18} /><span>Loading {group.playerName}’s banks…</span></div> : null}
+                  {group.loadState?.status === "error" ? <div className="craft-plan-bank-state is-error"><span>{group.loadState.error}</span><button className="toolbar-button" type="button" onClick={() => void loadPlayerBanks({ playerId: group.playerId, label: group.playerName })}><RefreshCw size={14} /> Retry</button></div> : null}
+                  {group.loadState?.warnings?.length ? <div className="alert warning">{group.loadState.warnings.join(" ")}</div> : null}
+                  {group.loadState?.status === "loaded" && group.visibleBanks.length ? <div className="craft-plan-bank-grid">{group.visibleBanks.map((bank: AnyRecord) => {
+                    const sourceId = String(bank.sourceId);
+                    const tracked = trackedBankIds.has(sourceId);
+                    const items = Array.isArray(bank.items) ? bank.items : [];
+                    const itemCount = Number(bank.itemCount ?? items.length ?? 0);
+                    const unavailable = bank.unavailable === true;
+                    return <article className={`craft-plan-bank-card${tracked ? " is-included" : ""}`} key={sourceId}>
+                      <header><div><strong>{bank.label ?? sourceId}</strong><small>{unavailable ? "Unavailable — tracked" : itemCount > 0 ? `${formatNumber(itemCount, 0)} visible stacks` : "Empty — tracked"}</small></div><label className="compact-toggle"><input type="checkbox" checked={tracked} onChange={(event) => updateSource("bankContainerIds", sourceId, event.target.checked)} /><span>{tracked ? "Tracked" : "Track"}</span></label></header>
+                      {unavailable ? <div className="alert warning">This tracked bank is not present in the latest Relay data.</div> : itemCount > 0 ? itemPreview(items, 4) : <p className="legend">This tracked bank currently has no visible items.</p>}
+                      {items.length > 4 ? <details className="craft-plan-bank-items"><summary>Show all {formatNumber(items.length, 0)} stacks</summary>{itemPreview(items, items.length)}</details> : null}
+                    </article>;
+                  })}</div> : null}
+                  {group.loadState?.status === "loaded" && !group.visibleBanks.length ? <p className="legend">No banks match the current filters.</p> : null}
+                </div> : null}
+              </section>;
+            })}</div> : loadedBankPlayers >= playerSources.length ? <div className="craft-plan-audit-state compact"><Package size={22} /><strong>No banks to show</strong><span>No non-empty or tracked banks match the current filters.</span></div> : null}
+          </section> : null}
 
           {activeTab === "routes" ? <section className="craft-plan-manager-panel"><div className="split-header"><div><h3>Recipe routes in use</h3><p className="legend">These are the recipes currently pulled into the plan from your targets. Change a dropdown, then save the plan to recalculate needed materials.</p></div><small>{routeSteps.length ? `${routeSteps.length} recipe steps` : "No recipe steps"}</small></div>{routeSteps.length ? <div className="craft-plan-route-overview-list">{routeSteps.map((step: AnyRecord, index: number) => { const outputKey = routeOutputKey(step); const alternatives = Array.isArray(step.alternatives) ? step.alternatives : []; const selectedRecipeId = String(config.routeOverrides[outputKey] ?? step.selectedRecipeId ?? ""); return <article className="craft-plan-route-overview-card" key={`${outputKey}:${step.id ?? index}`}><div><strong><ItemLabel item={step.output ?? step} /></strong><small>{step.recipeName ?? "Selected recipe"}{step.buildingName ? ` - ${step.buildingName}` : ""}</small></div><label className="field compact-field"><span>Recipe</span><select value={selectedRecipeId} disabled={alternatives.length <= 1} onChange={(event) => setConfig((current) => ({ ...current, routeOverrides: { ...current.routeOverrides, [outputKey]: event.target.value } }))}>{alternatives.length ? alternatives.map((recipe: AnyRecord) => <option value={recipe.id} key={recipe.id}>{routeOptionLabel(recipe)}</option>) : <option value={selectedRecipeId}>{step.recipeName ?? "Default recipe"}</option>}</select></label>{config.routeOverrides[outputKey] ? <button className="toolbar-button danger" type="button" onClick={() => setConfig((current) => { const next = { ...current.routeOverrides }; delete next[outputKey]; return { ...current, routeOverrides: next }; })}><Trash2 size={14} /> Reset</button> : <span className="legend">Default</span>}</article>; })}</div> : <p className="legend">Add targets and save the plan to see the recipe chain used for the current goals.</p>}</section> : null}
 
@@ -693,6 +674,7 @@ export function CraftPlanManagerDialog({ open, onClose, csrfToken, onSaved }: { 
             </div> : null}
           </section> : null}
         </div>
+        </fieldset>
     </Dialog>
   );
 }

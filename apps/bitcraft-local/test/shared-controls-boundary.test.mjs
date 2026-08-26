@@ -60,7 +60,6 @@ test("every data table and custom horizontal table scroller has a durable keyboa
   for (const [path, className, label] of [
     ["../src/pages/PublicCraftFinderPage.tsx", "table-wrap", "Public craft jobs table"],
     ["../src/pages/RegionPage.tsx", "table-wrap", "Regional rankings table"],
-    ["../src/pages/market/BuyOrderFinder.tsx", "table-wrap", "Current buy orders table"],
     ["../src/pages/SkillsPage.tsx", "heatmap-wrap", "Profession skill levels table"],
     ["../src/pages/SkillsPage.tsx", "heatmap-wrap", "Adventure skill levels table"],
     ["../src/pages/CraftPlanningPage.tsx", "craft-plan-needs-scroll", "Craft plan needs board"],
@@ -72,7 +71,6 @@ test("every data table and custom horizontal table scroller has a durable keyboa
 
 for (const [name, relativePath] of [
   ["Craft Calculator", "../src/pages/CraftCalculatorPage.tsx"],
-  ["Price Finder", "../src/pages/market/PriceFinder.tsx"],
   ["Craft Plan Manager", "../src/pages/CraftPlanManagerDialog.tsx"],
 ]) {
   test(`${name} autocomplete exposes complete keyboard combobox semantics`, () => {

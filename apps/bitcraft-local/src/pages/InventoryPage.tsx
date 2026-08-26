@@ -10,15 +10,20 @@ import { PageHeader } from "../components/main/PageHeader";
 import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
-import { dateLabel, formatNumber, timeAgo } from "../utils/format";
+import { formatNumber } from "../utils/format";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
 import { displayItemName } from "./market/listingUtils";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
+import {
+  addDecimalQuantities,
+  formatDecimalQuantity,
+  inventoryStackKey,
+} from "../server/game-data/inventoryProjection";
 
-const API = "/api/bitjita";
+const LOCAL_API = "/api/local";
 
 const CORE_MATERIAL_GROUPS = [
   { label: "Ingots", matcher: (row: AnyRecord) => /^(?:Refined )?Ingot$/i.test(String(row.tag ?? "")) },
@@ -46,36 +51,41 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
       return;
     }
     const controller = new AbortController();
-    const resource = selectedItem.type === "Cargo" ? "cargo" : "items";
-    const refresh = fetch(`${API}/${resource}/${selectedItem.itemId}`, { headers: manualRefreshHeaders(request, "inventory"), signal: controller.signal })
+    const kind = selectedItem.type === "Cargo" ? "cargo" : "item";
+    const query = new URLSearchParams({ kind, id: String(selectedItem.itemId) });
+    const refresh = fetch(`${LOCAL_API}/catalog/item-detail?${query.toString()}`, { headers: manualRefreshHeaders(request, "inventory"), signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error(`item detail HTTP ${response.status}`)))
       .then(setItemDetail);
     void trackPromise("inventory-item-detail", refresh).catch(() => {});
     return () => controller.abort();
   }, [selectedItem?.itemId, selectedItem?.type, request?.sequence, trackPromise]);
-  const itemLookup = new Map([...(data.inventories.items ?? []), ...(data.inventories.cargos ?? [])].map((i: AnyRecord) => [String(i.id), i]));
+  const itemLookup = new Map<string, AnyRecord>(
+    Object.entries(data.inventories.catalog ?? {}).map(([key, value]) => [key, (value ?? {}) as AnyRecord]),
+  );
   const containers = ((data.inventories.buildings ?? []) as AnyRecord[]).map((building) => {
     const items = (building.inventory ?? []).map((slot: AnyRecord, index: number) => {
       const contents = slot.contents ?? {};
-      const lookup = itemLookup.get(String(contents.item_id)) ?? {};
-      const name = displayItemName(lookup.name) ?? displayItemName(lookup.tag) ?? displayItemName(contents.itemName) ?? displayItemName(contents.name) ?? `Item #${contents.item_id ?? "?"}`;
+      const itemId = contents.itemId ?? contents.item_id;
+      const itemType = contents.itemType ?? contents.item_type;
+      const lookup = itemId == null ? {} : itemLookup.get(inventoryStackKey({ itemId, itemType })) ?? {};
+      const name = displayItemName(lookup.name) ?? displayItemName(lookup.tag) ?? displayItemName(contents.itemName) ?? displayItemName(contents.name) ?? `${String(itemType).toLowerCase() === "cargo" ? "Cargo" : "Item"} #${itemId ?? "?"}`;
       const tag = displayItemName(lookup.tag);
       return {
-        id: `${building.entityId}-${contents.item_id}-${slot.slot ?? index}`,
-        building: building.buildingNickname ?? building.buildingName,
-        itemId: contents.item_id == null ? null : String(contents.item_id),
+        id: `${building.entityId}-${String(itemType)}-${itemId}-${slot.slot ?? index}`,
+        building: building.nickname ?? building.buildingNickname ?? building.name ?? building.buildingName,
+        itemId: itemId == null ? null : String(itemId),
         name,
         iconAssetName: lookup.iconAssetName,
         quantity: contents.quantity,
-        type: contents.item_type === "cargo" ? "Cargo" : "Item",
+        type: String(itemType).toLowerCase() === "cargo" ? "Cargo" : "Item",
         tier: lookup.tier,
-        rarity: lookup.rarityStr,
+        rarity: lookup.rarity ?? lookup.rarityStr,
         tag: tag && tag !== name ? tag : null,
       };
     });
     return {
       id: String(building.entityId ?? building.buildingName),
-      name: building.buildingNickname ?? building.buildingName ?? "Unknown Container",
+      name: building.nickname ?? building.buildingNickname ?? building.name ?? building.buildingName ?? "Unknown Container",
       locked: Boolean(building.locked),
       items,
     };
@@ -83,13 +93,13 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
   const allRows = containers.flatMap((container) => container.items);
   const materialSummary: AnyRecord[] = CORE_MATERIAL_GROUPS.map((group): AnyRecord => {
     const matches = allRows.filter((row: AnyRecord) => group.matcher(row));
-    const quantity = matches.reduce((total: number, row: AnyRecord) => total + toNumber(row.quantity), 0);
+    const quantity = addDecimalQuantities(matches.map((row: AnyRecord) => row.quantity));
     const containerCount = new Set(matches.map((row: AnyRecord) => row.building).filter(Boolean)).size;
     const tierBreakdown = Object.values(matches.reduce((acc: Record<string, AnyRecord>, row: AnyRecord) => {
       const tierNumber = toNumber(row.tier);
       const tierLabel = tierNumber > 0 ? `T${tierNumber}` : "Other";
-      const current = acc[tierLabel] ?? { tierLabel, tier: tierNumber, quantity: 0, item: row };
-      current.quantity += toNumber(row.quantity);
+      const current = acc[tierLabel] ?? { tierLabel, tier: tierNumber, quantity: "0", item: row };
+      current.quantity = addDecimalQuantities([current.quantity, row.quantity]);
       if (!current.item?.iconAssetName && row.iconAssetName) current.item = row;
       acc[tierLabel] = current;
       return acc;
@@ -122,7 +132,7 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
   const buildings = unique(allRows.map((row: AnyRecord) => String(row.building)).filter(Boolean));
   const tiers = unique(allRows.map((row: AnyRecord) => String(row.tier)).filter((value: string) => value && value !== "undefined" && value !== "-1" && value !== "0"));
   const rarities = unique(allRows.map((row: AnyRecord) => String(row.rarity)).filter((value: string) => value && value !== "undefined" && value !== "Default"));
-  const totalItems = rows.reduce((total: number, row: AnyRecord) => total + toNumber(row.quantity), 0);
+  const totalItems = addDecimalQuantities(rows.map((row: AnyRecord) => row.quantity));
   const occupiedContainers = containers.filter((container) => container.items.length > 0).length;
   const uniqueVisibleItems = unique(rows.map((row: AnyRecord) => String(row.name))).length;
   return (
@@ -132,7 +142,7 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
         description={`${containers.length} containers - ${rows.length} visible stacks`}
         meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
-            <span><Package size={14} /> {formatNumber(totalItems)} visible items</span>
+            <span><Package size={14} /> {formatDecimalQuantity(totalItems)} visible items</span>
             <span>{formatNumber(uniqueVisibleItems)} unique</span>
           </div>
           <div className="dashboard-settlement-pill">
@@ -142,7 +152,7 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
         </div>}
       />
       <div className="summary-grid inventory-summary">
-        <MiniStat icon={<Package />} label="Total Items" value={formatNumber(totalItems)} />
+        <MiniStat icon={<Package />} label="Total Items" value={formatDecimalQuantity(totalItems)} />
         <MiniStat icon={<Box />} label="Unique Items" value={uniqueVisibleItems} />
         <MiniStat icon={<Package />} label="Occupied Containers" value={occupiedContainers} />
         <MiniStat icon={<Building2 />} label="Containers" value={containers.length} />
@@ -155,17 +165,17 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
           {materialSummary.map((group) => (
             <button
               type="button"
-              className={`material-card ${group.quantity ? "" : "empty"} ${coreMaterialFilter === group.label ? "active" : ""}`}
+              className={`material-card ${group.quantity !== "0" ? "" : "empty"} ${coreMaterialFilter === group.label ? "active" : ""}`}
               key={group.label}
               aria-pressed={coreMaterialFilter === group.label}
               onClick={() => setCoreMaterialFilter(coreMaterialFilter === group.label ? "All" : group.label)}
             >
               <span>{group.label}</span>
-              <strong>{formatNumber(group.quantity)}</strong>
+              <strong>{formatDecimalQuantity(group.quantity)}</strong>
               <small>{group.containerCount ? `${group.containerCount} container${group.containerCount === 1 ? "" : "s"}` : "None stored"}</small>
               {group.tierBreakdown.length ? (
                 <div className="material-tier-list">
-                  {group.tierBreakdown.map((entry: AnyRecord) => <div key={entry.tierLabel}>{entry.tierLabel === "Other" ? <b>{entry.tierLabel}</b> : <TierMaterialIcon item={entry.item} tier={entry.tier} />}<em>{formatNumber(entry.quantity)}</em></div>)}
+                  {group.tierBreakdown.map((entry: AnyRecord) => <div key={entry.tierLabel}>{entry.tierLabel === "Other" ? <b>{entry.tierLabel}</b> : <TierMaterialIcon item={entry.item} tier={entry.tier} />}<em>{formatDecimalQuantity(entry.quantity)}</em></div>)}
                 </div>
               ) : null}
             </button>
@@ -225,18 +235,18 @@ export function Inventory({ data }: { data: ReturnType<typeof normalizeData> }) 
         </div>
       </div>
       <div className="container-list">
-        {filteredContainers.length === 0 ? <AsyncState kind={containers.length ? "no-match" : "empty"} title={containers.length ? "No containers match these filters" : "No storage containers available"} detail={containers.length ? "Clear a material, item, container, tier, rarity, or storage filter to broaden the results." : "Containers appear when BitJita returns settlement storage data."} /> : null}
+        {filteredContainers.length === 0 ? <AsyncState kind={containers.length ? "no-match" : "empty"} title={containers.length ? "No containers match these filters" : "No storage containers available"} detail={containers.length ? "Clear a material, item, container, tier, rarity, or storage filter to broaden the results." : "Containers appear when the Relay publishes settlement storage data."} /> : null}
         {filteredContainers.map((container) => {
-          const quantity = container.items.reduce((total: number, item: AnyRecord) => total + toNumber(item.quantity), 0);
+          const quantity = addDecimalQuantities(container.items.map((item: AnyRecord) => item.quantity));
           return (
             <details className="container-card" key={container.id} open={filteredContainers.length <= 4}>
               <summary>
                 <span><Package size={16} /> <strong>{container.name}</strong>{container.locked ? <Lock size={13} /> : null}</span>
-                <small>{container.items.length} stacks - {formatNumber(quantity)} items</small>
+                <small>{container.items.length} stacks - {formatDecimalQuantity(quantity)} items</small>
               </summary>
               <DataTable rows={container.items} scrollLabel="Storage container items table" emptyState="No matching items are stored in this container." columns={[
                 ["Item", (r) => <button className="item-link with-icon" onClick={() => setSelectedItem(r)}><ItemIcon item={r} /><span><strong>{r.name}</strong>{r.tag ? <small className="muted-line">{r.tag}</small> : null}</span></button>],
-                ["Qty", (r) => formatNumber(r.quantity)],
+                ["Qty", (r) => formatDecimalQuantity(r.quantity)],
                 ["Tier", (r) => r.tier ? <TierBadge tier={r.tier} /> : "-"],
                 ["Rarity", (r) => r.rarity ? <RarityBadge rarity={r.rarity} /> : "-"],
                 ["Type", (r) => r.type],

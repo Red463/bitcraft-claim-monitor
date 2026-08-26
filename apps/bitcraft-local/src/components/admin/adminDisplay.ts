@@ -1,23 +1,6 @@
 import { toNumber, type AnyRecord } from "../../main-app-data.ts";
 import { formatNumber } from "../../utils/format.ts";
 
-export const COLLECTOR_PURPOSES: Record<string, string> = {
-  claim: "Keeps current settlement data and status diagnostics up to date.",
-  members: "Tracks roster changes and supports member-derived history and diagnostics.",
-  players: "Refreshes player detail history such as online state, playtime, and equipment.",
-  professions: "Records profession snapshots used by comparisons and historical diagnostics.",
-  production: "Feeds craft contribution history, production notifications, and related diagnostics.",
-  inventory: "Supports inventory history, storage diagnostics, and stock-related change records.",
-  construction: "Records construction project and material-change history.",
-  research: "Keeps research progress snapshots available for diagnostics and history.",
-  market: "Tracks settlement market listings and market notification inputs.",
-  region: "Refreshes regional settlement comparison data and region status diagnostics.",
-  mapCatalog: "Updates map resource/catalog metadata used by map tools.",
-  empireMembership: "Records compact observed empire joins, confirmed departures, and rejoins without storing roster snapshots.",
-  storageActivity: "Records storage deposit/withdrawal events when BitJita exposes them.",
-  marketTrades: "Imports member market trade history for sales/activity views.",
-};
-
 export function bytesLabel(value: unknown) {
   const bytes = toNumber(value);
   if (bytes < 1024) return String(bytes) + " B";

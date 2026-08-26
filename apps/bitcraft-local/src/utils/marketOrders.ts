@@ -1,5 +1,5 @@
 // Buy-order helpers keep market tool behaviour consistent between the server
-// collector and the frontend table. BitJita has used several field names for the
+// collector and the frontend table. Historic payloads used several field names for the
 // same concepts over time, so normalization accepts the known variants here.
 export type NormalizedBuyOrder = {
   id: string;
@@ -51,7 +51,7 @@ function timestampMs(value: unknown): number {
 }
 
 export function normalizeBuyOrder(order: Record<string, unknown>, itemTypeFallback = 0): NormalizedBuyOrder {
-  // priceThreshold is the important BitJita buy-order field: it is the maximum
+  // priceThreshold is the important buy-order field: it is the maximum
   // unit price the buyer is willing to pay, which the app presents as unit price.
   const unitPrice = toNumber(order.priceThreshold ?? order.unitPrice ?? order.price);
   const quantity = toNumber(order.quantity);

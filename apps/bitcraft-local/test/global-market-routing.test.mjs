@@ -6,6 +6,7 @@ import {
   marketViewLocation,
   settlementMarketViewLocation,
 } from "../src/navigation/routeState.ts";
+import { panelHref } from "../src/navigation.ts";
 import { localHistoryIncludeForPanel } from "../src/api/localHistoryInclude.ts";
 import {
   ACCESS_TAB_GROUPS,
@@ -14,6 +15,7 @@ import {
 } from "../src/access/accessControl.mjs";
 
 test("global Market canonicalizes current and legacy tool tabs", () => {
+  assert.equal(panelHref("market"), "/?page=market&tab=overview");
   assert.deepEqual(marketViewLocation(null), {
     page: "market",
     view: "overview",
@@ -28,14 +30,20 @@ test("global Market canonicalizes current and legacy tool tabs", () => {
   });
   assert.deepEqual(marketViewLocation("buyOrders"), {
     page: "market",
-    view: "buy-orders",
-    canonicalTab: "buy-orders",
+    view: "opportunities",
+    canonicalTab: "opportunities",
+    shouldReplace: true,
+  });
+  assert.deepEqual(marketViewLocation("deals"), {
+    page: "market",
+    view: "opportunities",
+    canonicalTab: "opportunities",
     shouldReplace: true,
   });
   assert.deepEqual(marketViewLocation("deal-watchlist"), {
     page: "market",
-    view: "deal-watch",
-    canonicalTab: "deal-watch",
+    view: "saved",
+    canonicalTab: "saved",
     shouldReplace: true,
   });
 });
@@ -62,17 +70,18 @@ test("legacy local Market tabs redirect to Settlement Market", () => {
 });
 
 test("only Settlement Market requests monitored market history", () => {
-  assert.equal(localHistoryIncludeForPanel("market"), "activity");
-  assert.equal(localHistoryIncludeForPanel("settlement-market"), "activity,market");
+  assert.equal(localHistoryIncludeForPanel("market"), "");
+  assert.equal(localHistoryIncludeForPanel("settlement-market"), "market");
   assert.equal(localHistoryIncludeForPanel("dashboard"), "activity,market,dashboard");
 });
 
-test("global Market and Deal Watch use only regions reported active", () => {
+test("global Market and Deal Watch use their intended provider-neutral region scopes", () => {
   const marketPage = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
   const dealWatch = readFileSync(new URL("../src/pages/market/DealWatchlist.tsx", import.meta.url), "utf8");
-  assert.match(marketPage, /const activeRegions = useActiveRegions\(\);/);
-  assert.match(dealWatch, /const activeRegions = useActiveRegions\(\);/);
-  assert.doesNotMatch(marketPage, /useActiveRegions\(fallbackRegionId\)/);
+  assert.match(marketPage, /marketRegionScopeUrl\(claimId\)/);
+  assert.match(dealWatch, /marketRegionScopeUrl\(claimId\)/);
+  assert.doesNotMatch(dealWatch, /useActiveRegions\(\)/);
+  assert.doesNotMatch(marketPage, /useActiveRegions\(/);
   assert.doesNotMatch(dealWatch, /useActiveRegions\(defaultRegion\)/);
 });
 

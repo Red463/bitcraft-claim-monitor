@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const script = readFileSync(new URL("../../deploy/backup-bitcraft-monitor", import.meta.url), "utf8");
+const script = readFileSync(new URL("../../deploy/backup-bitcraft-claim-monitor-relay", import.meta.url), "utf8");
 
-test("backup command has fixed production defaults and a dedicated lock", () => {
-  assert.match(script, /DATA_DIR="\$\{DATA_DIR:-\/var\/lib\/bitcraft-claim-monitor\}"/);
-  assert.match(script, /BACKUP_DIR="\$\{BACKUP_DIR:-\/var\/backups\/bitcraft-claim-monitor\}"/);
-  assert.match(script, /BACKUP_LOCK_FILE="\$\{BACKUP_LOCK_FILE:-\/run\/lock\/bitcraft-claim-monitor-backup\.lock\}"/);
+test("backup command has fixed Relay defaults and a dedicated lock", () => {
+  assert.match(script, /DATA_DIR="\$\{DATA_DIR:-\/var\/lib\/bitcraft-claim-monitor-relay\}"/);
+  assert.match(script, /BACKUP_DIR="\$\{BACKUP_DIR:-\/var\/backups\/bitcraft-claim-monitor-relay\}"/);
+  assert.match(script, /BACKUP_LOCK_FILE="\$\{BACKUP_LOCK_FILE:-\/run\/lock\/bitcraft-claim-monitor-relay-backup\.lock\}"/);
+  assert.match(script, /DEPLOY_LOCK_FILE="\$\{DEPLOY_LOCK_FILE:-\/run\/lock\/bitcraft-claim-monitor-relay-deploy\.lock\}"/);
+  assert.match(script, /WORKER_SERVICE="\$\{WORKER_SERVICE:-bitcraft-claim-monitor-relay-worker\.service\}"/);
+  assert.match(script, /COLLECTOR_SERVICE="\$\{COLLECTOR_SERVICE:-bitcraft-claim-monitor-relay-collector\.service\}"/);
+  assert.match(script, /COLLECTOR_TIMER="\$\{COLLECTOR_TIMER:-bitcraft-claim-monitor-relay-collector\.timer\}"/);
   assert.match(script, /daily\|migration\|manual/);
 });
 
@@ -39,13 +43,14 @@ test("backup command declares retention for each completed backup class", () => 
   assert.match(script, /LEGACY_KEEP="\$\{LEGACY_KEEP:-3\}"/);
 });
 
-test("backup command exposes guarded legacy cleanup modes", () => {
+test("backup command exposes guarded cleanup modes inside the Relay backup directory", () => {
   assert.match(script, /--dry-run-prune/);
   assert.match(script, /--apply-prune/);
   assert.match(script, /Would remove:/);
   assert.match(script, /Recoverable bytes:/);
   assert.match(script, /Newest retained backup failed validation/);
-  assert.match(script, /DEPLOY_LOCK_FILE="\$\{DEPLOY_LOCK_FILE:-\/run\/lock\/bitcraft-claim-monitor-deploy\.lock\}"/);
+  assert.match(script, /BACKUP_ENCRYPTION_KEY_FILE="\$\{BACKUP_ENCRYPTION_KEY_FILE:-\/etc\/bitcraft-claim-monitor-relay\/backup-encryption\.key\}"/);
+  assert.match(script, /BACKUP_CRYPTO_HELPER="\$\{BACKUP_CRYPTO_HELPER:-\/usr\/local\/lib\/bitcraft-claim-monitor-relay\/backup-crypto\.mjs\}"/);
 });
 
 test("retention sorts revision-bearing backup names by their timestamp suffix", () => {

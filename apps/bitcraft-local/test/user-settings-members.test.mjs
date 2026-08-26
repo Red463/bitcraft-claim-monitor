@@ -17,14 +17,27 @@ test("User Settings loads settlement characters when the active page supplied no
   const members = await resolveUserSettingsMembers([], "claim-1", async (url) => {
     requestedUrls.push(url);
     return new Response(JSON.stringify({
-      members: [
-        { playerEntityId: "101", userName: "Modular" },
-        { playerEntityId: "102", userName: "Mosswick" },
-      ],
+      claimId: "claim-1",
+      regionId: "19",
+      generatedAt: "2026-07-29T12:00:00.000Z",
+      domains: {
+        members: {
+          data: [
+            { playerEntityId: "101", userName: "Modular" },
+            { playerEntityId: "102", userName: "Mosswick" },
+          ],
+          freshness: "fresh",
+          confidence: "joined",
+          ageMs: 0,
+          provenance: { receivedAt: "2026-07-29T12:00:00.000Z" },
+          warnings: [],
+        },
+      },
+      partialErrors: [],
     }), { status: 200 });
   });
 
-  assert.deepEqual(requestedUrls, ["/api/bitjita/claims/claim-1/members"]);
+  assert.deepEqual(requestedUrls, ["/api/local/game-data?claimId=claim-1&domains=members"]);
   assert.deepEqual(members, [
     { playerEntityId: "101", userName: "Modular" },
     { playerEntityId: "102", userName: "Mosswick" },

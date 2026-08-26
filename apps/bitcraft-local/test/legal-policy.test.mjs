@@ -65,7 +65,7 @@ test("policy contains the approved legal subjects, providers, and retention rule
   }
   assert.deepEqual(
     policy.providers.map(({ key }) => key),
-    ["hostworld", "namecheap", "discord", "bitjita", "proton", "buy-me-a-coffee", "github"],
+    ["hostworld", "namecheap", "discord", "bitcraft-relay", "proton", "buy-me-a-coffee", "github"],
   );
   assert.ok(policy.retention.some(({ key, days }) => key === "full-ip" && days === 7));
   assert.ok(policy.retention.some(({ key, days }) => key === "analytics-events" && days === 90));
@@ -74,6 +74,27 @@ test("policy contains the approved legal subjects, providers, and retention rule
   assert.match(JSON.stringify(policy.terms.sections), /administrator-assisted deletion/i);
   assert.match(JSON.stringify(policy.privacy.sections), /authorised administrator can delete an ordinary app account/i);
   assert.match(JSON.stringify(policy.privacy.sections), /separate administrator identity and Discord server membership/i);
+});
+
+test("policy identifies Relay as the sole game-data provider", () => {
+  const policy = legalPolicyForEnvironment({});
+  const relay = policy.providers.find(({ key }) => key === "bitcraft-relay");
+  const terms = JSON.stringify(policy.terms.sections);
+  const privacy = JSON.stringify(policy.privacy.sections);
+
+  assert.deepEqual(relay, {
+    key: "bitcraft-relay",
+    name: "BitCraft Relay",
+    role: "Current public BitCraft game-data relay",
+    data: "Public BitCraft game, character, settlement, inventory, market, and activity information requested by the app server.",
+    location: "The Relay operator and infrastructure locations have not been published to this app; processing may occur outside the United Kingdom.",
+  });
+  assert.equal(policy.providers.some(({ key }) => key === "bitjita"), false);
+  assert.match(terms, /BitCraft Relay.*current public game data/i);
+  assert.match(terms, /live craft-contribution events/i);
+  assert.match(privacy, /BitCraft Relay.*current public game data/i);
+  assert.match(privacy, /craft-contribution events/i);
+  assert.match(privacy, /BitCraft Relay.*may process data internationally/i);
 });
 
 test("deployment overrides affect the published policy and stable digests", () => {

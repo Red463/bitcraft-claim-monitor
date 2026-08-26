@@ -3,7 +3,7 @@ import { AlertTriangle, Landmark, MapPin, Shield, X, Zap } from "lucide-react";
 import { Dialog } from "../../components/main/Dialog";
 import type { AnyRecord } from "../../main-app-data";
 import { dateLabel, formatNumber } from "../../utils/format";
-import { groupSiegeParticipants, siegeDurationLabel } from "./siegePresentation";
+import { groupSiegeParticipants, siegeDurationLabel, siegeParticipantKey } from "./siegePresentation";
 import { coordinateText } from "./watchtowerPresentation";
 
 type SiegeDetailsDialogProps = {
@@ -18,15 +18,19 @@ function ParticipantCard({
   onViewEmpire,
 }: {
   participant: AnyRecord;
-  role: "attacker" | "defender";
+  role: "attacker" | "defender" | "unknown";
   onViewEmpire: (empireId: string) => void;
 }) {
   const empireId = String(participant.empireEntityId ?? participant.empireId ?? "").trim();
-  const label = role === "attacker" ? "Attacking Empire" : "Defending Empire";
+  const label = role === "attacker"
+    ? "Attacking Empire"
+    : role === "defender"
+      ? "Defending Empire"
+      : "Siege Role Unavailable";
   return (
     <article className={`siege-participant-card ${role}`}>
       <div className="siege-participant-head">
-        <span className={`status-pill ${role === "attacker" ? "danger" : "good"}`}>
+        <span className={`status-pill ${role === "attacker" ? "danger" : role === "defender" ? "good" : "muted"}`}>
           {role === "attacker" ? <AlertTriangle size={13} /> : <Shield size={13} />}
           {label}
         </span>
@@ -45,7 +49,7 @@ function ParticipantCard({
           <dd>{participant.empireName ?? "Unknown empire"}</dd>
         </div>
         <div>
-          <dt><Zap size={13} /> {role === "attacker" ? "Attacker" : "Defender"} Energy</dt>
+          <dt><Zap size={13} /> {role === "unknown" ? "Siege" : role === "attacker" ? "Attacker" : "Defender"} Energy</dt>
           <dd>{participant.energy == null ? "Unavailable" : formatNumber(participant.energy)}</dd>
         </div>
       </dl>
@@ -60,7 +64,7 @@ export function SiegeDetailsDialog({ tower, onClose, onViewEmpire }: SiegeDetail
     return () => window.clearInterval(timer);
   }, []);
 
-  const { attackers, defenders, startedAt } = groupSiegeParticipants(tower);
+  const { attackers, defenders, unknown, startedAt } = groupSiegeParticipants(tower);
   const towerName = String(tower.displayName ?? tower.nickname ?? "Watchtower");
 
   return (
@@ -95,7 +99,7 @@ export function SiegeDetailsDialog({ tower, onClose, onViewEmpire }: SiegeDetail
         </section>
         {attackers.map((participant, index) => (
           <ParticipantCard
-            key={`attacker:${String(participant.empireEntityId ?? participant.empireId ?? index)}`}
+            key={siegeParticipantKey(participant, "attacker", index)}
             role="attacker"
             participant={participant}
             onViewEmpire={onViewEmpire}
@@ -103,15 +107,26 @@ export function SiegeDetailsDialog({ tower, onClose, onViewEmpire }: SiegeDetail
         ))}
         {defenders.map((participant, index) => (
           <ParticipantCard
-            key={`defender:${String(participant.empireEntityId ?? participant.empireId ?? index)}`}
+            key={siegeParticipantKey(participant, "defender", index)}
             role="defender"
             participant={participant}
             onViewEmpire={onViewEmpire}
           />
         ))}
-        {!attackers.length && !defenders.length ? (
+        {unknown.map((participant, index) => (
+          <ParticipantCard
+            key={siegeParticipantKey(participant, "unknown", index)}
+            role="unknown"
+            participant={participant}
+            onViewEmpire={onViewEmpire}
+          />
+        ))}
+        {!attackers.length && !defenders.length && !unknown.length ? (
           <div className="empty-state compact">Active siege participant details are unavailable.</div>
         ) : null}
+        <p className="siege-availability-note">
+          Cancelled or removed sieges are unavailable from Relay.
+        </p>
       </div>
     </Dialog>
   );

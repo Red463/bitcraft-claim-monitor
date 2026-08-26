@@ -120,6 +120,27 @@ test("production activity helpers preserve stored normalized item metadata witho
   assert.equal(normalized.buildingName, "Public Workshop");
   assert.equal(normalized.crafterName, "Tester");
 });
+test("production metrics resolve normalized camel-case Relay skill ids", () => {
+  assert.deepEqual(productionMetrics({
+    levelRequirements: [{ skillId: "10" }],
+    experiencePerProgress: [{ skillId: "10", quantity: "2.5" }],
+    totalActionsRequired: "4",
+  }), {
+    skillId: 10,
+    skillName: "Tailoring",
+    professionKey: "tailoring",
+    totalEffort: 4,
+    remainingEffort: 4,
+    progressPct: 0,
+    totalXp: 10,
+  });
+});
+test("production metrics prefer the confirmed skill catalog over a provider Unknown label", () => {
+  assert.equal(productionMetrics({
+    levelRequirements: [{ skillId: "3", skillName: "Unknown" }],
+    experiencePerProgress: [{ skillId: "3", quantity: "2" }],
+  }).skillName, "Carpentry");
+});
 test("production activity helpers identify jobs that are already complete", () => {
   assert.equal(isCompletedProductionJob({ totalActionsRequired: 100, progress: 100 }), true);
   assert.equal(isCompletedProductionJob({ totalActionsRequired: 100, remainingCraftWork: 0 }), true);

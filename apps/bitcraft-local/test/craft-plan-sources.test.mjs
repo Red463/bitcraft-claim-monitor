@@ -1,9 +1,49 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playerInventoryContainerSources, selectedPlayerInventoryIds, sourceItemFromContents, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
+import { filterSelectedPlayerBankSources, playerBankOptions, playerInventoryContainerSources, selectedPlayerInventoryIds, settlementStorageSourcesFromInventories, sourceItemFromContents, trackedCraftPlanOutputs, trackedPassiveCraftPlanOutputs, trackedRelayCraftPlanOutputs } from "../src/server/craftPlanSources.mjs";
 
 const MONITORED_CLAIM_ID = "claim-monitored";
+
+test("settlementStorageSourcesFromInventories reads normalized Relay buildings and catalog identities", () => {
+  const result = settlementStorageSourcesFromInventories({
+    catalog: {
+      "items:100": {
+        catalogKey: "items:100",
+        targetId: "100",
+        kind: "items",
+        itemType: 0,
+        name: "Simple Wood Log",
+        tier: 1,
+      },
+      "cargo:100": {
+        catalogKey: "cargo:100",
+        targetId: "100",
+        kind: "cargo",
+        itemType: 1,
+        name: "Simple Wood Cargo",
+        tier: 1,
+      },
+    },
+    buildings: [{
+      entityId: "500",
+      name: "Town Bank",
+      nickname: "Trade Hall",
+      inventory: [
+        { contents: { itemId: "100", itemType: "item", quantity: "12" } },
+        { contents: { itemId: "100", itemType: "cargo", quantity: "3" } },
+      ],
+    }],
+  }, []);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].sourceId, "500");
+  assert.equal(result[0].label, "Trade Hall");
+  assert.deepEqual(result[0].items.map((item) => [item.kind, item.id, item.name, item.quantity]), [
+    ["items", "100", "Simple Wood Log", 12],
+    ["cargo", "100", "Simple Wood Cargo", 3],
+  ]);
+});
 
 test("trackedPassiveCraftPlanOutputs counts processing and complete jobs but ignores other states", () => {
   const outputs = trackedPassiveCraftPlanOutputs([{
@@ -51,6 +91,106 @@ test("trackedPassiveCraftPlanOutputs expands probabilistic farming products", ()
   assert.equal(straw?.quantity, 2);
   assert.equal(straw?.guaranteedQuantity, 0);
   assert.equal(straw?.status, "Passive craft in progress");
+});
+
+test("trackedRelayCraftPlanOutputs preserves tracked-player completion rules from one claim snapshot", () => {
+  const payload = {
+    catalog: {
+      "items:100": { targetId: "100", kind: "items", name: "Rough Plank", tier: 1 },
+      "items:200": { targetId: "200", kind: "items", name: "Embergrain Products", tier: 1 },
+    },
+    craftResults: [
+      {
+        entityId: "ordinary-active",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "untracked-player",
+        ownerUsername: "Builder",
+        buildingName: "Carpentry Station",
+        completed: false,
+        isPassive: false,
+        craftCount: 2,
+        craftedItem: [{ itemId: "100", itemType: "item", quantity: "3" }],
+      },
+      {
+        entityId: "ordinary-ready-tracked",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "tracked-player",
+        ownerUsername: "Planner",
+        buildingName: "Carpentry Station",
+        completed: true,
+        isPassive: false,
+        craftCount: 4,
+        craftedItem: [{ itemId: "100", itemType: "item", quantity: "1" }],
+      },
+      {
+        entityId: "ordinary-ready-untracked",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "untracked-player",
+        completed: true,
+        isPassive: false,
+        craftCount: 99,
+        craftedItem: [{ itemId: "100", itemType: "item", quantity: "1" }],
+      },
+      {
+        entityId: "passive-processing",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "tracked-player",
+        ownerUsername: "Planner",
+        buildingName: "Farming Station",
+        completed: false,
+        isPassive: true,
+        craftCount: 5,
+        craftedItem: [{ itemId: "200", itemType: "item", quantity: "1" }],
+      },
+      {
+        entityId: "passive-untracked",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "untracked-player",
+        completed: false,
+        isPassive: true,
+        craftCount: 100,
+        craftedItem: [{ itemId: "200", itemType: "item", quantity: "1" }],
+      },
+      {
+        entityId: "unknown-recipe-kind",
+        claimEntityId: MONITORED_CLAIM_ID,
+        ownerEntityId: "tracked-player",
+        completed: false,
+        isPassive: null,
+        craftCount: 100,
+        craftedItem: [{ itemId: "200", itemType: "item", quantity: "1" }],
+      },
+      {
+        entityId: "foreign-craft",
+        claimEntityId: "foreign-claim",
+        ownerEntityId: "tracked-player",
+        completed: false,
+        isPassive: false,
+        craftCount: 100,
+        craftedItem: [{ itemId: "100", itemType: "item", quantity: "1" }],
+      },
+    ],
+  };
+
+  const outputs = trackedRelayCraftPlanOutputs(
+    payload,
+    new Map(),
+    MONITORED_CLAIM_ID,
+    ["tracked-player"],
+  );
+
+  assert.deepEqual(outputs.map((output) => [
+    output.craftId,
+    output.name,
+    output.quantity,
+    output.status,
+    output.passive === true,
+    output.locationUnknown,
+  ]), [
+    ["ordinary-active", "Rough Plank", 6, "In progress", false, undefined],
+    ["ordinary-ready-tracked", "Rough Plank", 4, "Ready to collect", false, undefined],
+    ["passive-processing", "Embergrain Products", 5, "Passive craft in progress", true, false],
+  ]);
 });
 
 test("trackedCraftPlanOutputs counts only ordinary crafts that prove monitored claim ownership", () => {
@@ -295,7 +435,46 @@ test("selectedPlayerInventoryIds shares inventory requests across source familie
   assert.deepEqual(selectedPlayerInventoryIds({
     playerIds: ["player-1", "player-2"],
     bankPlayerIds: ["player-1", "player-3"],
-  }), ["player-1", "player-2", "player-3"]);
+    bankContainerIds: ["player-4:bank-8", "player-2:bank-9"],
+  }), ["player-1", "player-2", "player-3", "player-4"]);
+});
+
+test("filterSelectedPlayerBankSources prefers exact bank IDs while preserving legacy players", () => {
+  const sources = [
+    { sourceId: "player-1:bank-a", playerId: "player-1" },
+    { sourceId: "player-1:bank-b", playerId: "player-1" },
+    { sourceId: "player-2:bank-a", playerId: "player-2" },
+    { sourceId: "player-3:bank-a", playerId: "player-3" },
+  ];
+
+  assert.deepEqual(filterSelectedPlayerBankSources({
+    bankContainerIds: ["player-1:bank-b"],
+    bankPlayerIds: ["player-1", "player-2"],
+  }, sources).map((source) => source.sourceId), ["player-1:bank-b", "player-2:bank-a"]);
+});
+
+test("playerBankOptions exposes normalized banks and preserves missing tracked bank IDs", () => {
+  const banks = playerBankOptions("player-1", "Alice", {
+    items: [{ id: 10, name: "Timber" }],
+    inventories: [{
+      entityId: "bank-stocked",
+      inventoryName: "Town Bank",
+      claimName: "Timbersteel",
+      pockets: [{ contents: { itemId: 10, itemType: 0, quantity: 12 } }],
+    }, {
+      entityId: "bank-empty",
+      inventoryName: "Town Bank",
+      claimName: "Northwatch",
+      pockets: [],
+    }],
+  }, ["player-1:bank-missing"]);
+
+  assert.deepEqual(banks.map((bank) => ({ sourceId: bank.sourceId, claimName: bank.claimName, itemCount: bank.itemCount })), [
+    { sourceId: "player-1:bank-stocked", claimName: "Timbersteel", itemCount: 1 },
+    { sourceId: "player-1:bank-empty", claimName: "Northwatch", itemCount: 0 },
+    { sourceId: "player-1:bank-missing", claimName: null, itemCount: 0 },
+  ]);
+  assert.deepEqual(banks[0].items.map((item) => [item.kind, item.id, item.quantity]), [["items", "10", 12]]);
 });
 
 test("player banks preserve item and cargo identity", () => {

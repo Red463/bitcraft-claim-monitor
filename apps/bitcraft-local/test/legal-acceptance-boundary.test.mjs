@@ -32,12 +32,10 @@ test("current-policy acceptance is mandatory for stale signed-in sessions", () =
 });
 
 test("all app sign-in surfaces use the gated action instead of raw OAuth links", () => {
-  const priceFinder = readFileSync(new URL("../src/pages/market/PriceFinder.tsx", import.meta.url), "utf8");
   const dealWatchlist = readFileSync(new URL("../src/pages/market/DealWatchlist.tsx", import.meta.url), "utf8");
 
   assert.doesNotMatch(legalDialogs, /<a[^>]+href=\{authHref\}/);
   assert.doesNotMatch(appShell, /href=\{discordAuthHref\}/);
-  assert.doesNotMatch(priceFinder, /window\.location\.href\s*=\s*`\$\{LOCAL_API\}\/auth\/discord\/start/);
   assert.doesNotMatch(dealWatchlist, /window\.location\.href\s*=\s*`\$\{LOCAL_API\}\/auth\/discord\/start/);
 });
 

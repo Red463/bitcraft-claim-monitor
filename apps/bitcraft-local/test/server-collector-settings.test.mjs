@@ -2,130 +2,201 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import {
-  collectorCurrentTables,
-  collectorPrimaryPayloadDomain,
-  domainCollectorDefaults,
-  normalizeCollectorSettings,
-  payloadDomainsForCollectors,
-  payloadDomainCollector,
-} from "../src/server/collectorSettings.mjs";
-
-test("collector settings normalize saved dashboard configuration safely", () => {
-  const settings = normalizeCollectorSettings({
-    claim: { enabled: false, intervalSeconds: "5" },
-    members: { intervalMs: 45000 },
-    research: { intervalSeconds: "99999" },
-    market: null,
-    unknown: { enabled: false, intervalSeconds: 15 },
-  });
-
-  assert.equal(Object.keys(settings).length, Object.keys(domainCollectorDefaults).length);
-  assert.deepEqual(settings.claim, { label: "Current settlement", enabled: false, intervalSeconds: 15 });
-  assert.deepEqual(settings.members, { label: "Members", enabled: true, intervalSeconds: 45 });
-  assert.deepEqual(settings.research, { label: "Research", enabled: true, intervalSeconds: 3600 });
-  assert.deepEqual(settings.market, { label: "Market", enabled: true, intervalSeconds: 60 });
-  assert.equal(Object.hasOwn(settings, "unknown"), false);
-});
-
-test("due collectors select only the domain payloads they own", () => {
-  assert.deepEqual(payloadDomainsForCollectors(["members", "inventory"]), [
-    "members", "inventories", "recruitment", "layout",
-  ]);
-  assert.deepEqual(payloadDomainsForCollectors([]), []);
-});
-
-test("collector domain maps preserve current refresh and cache ownership", () => {
-  assert.equal(collectorPrimaryPayloadDomain.production, "crafts");
-  assert.equal(collectorPrimaryPayloadDomain.mapCatalog, "skills");
-  assert.equal(payloadDomainCollector.tradeVolume, "market");
-  assert.equal(payloadDomainCollector.regionalBuyOrders, undefined);
-  assert.deepEqual(collectorCurrentTables.market, ["market_listings", "market_trades"]);
-  assert.deepEqual(collectorCurrentTables.marketListings, ["market_listings", "market_events", "market_trades"]);
-  assert.deepEqual(collectorCurrentTables.productionContributions, ["production_jobs", "production_contributions"]);
-  assert.equal(collectorCurrentTables.buyOrders, undefined);
-  assert.equal(Object.hasOwn(domainCollectorDefaults, "buyOrders"), false);
-  assert.equal(Object.hasOwn(collectorCurrentTables, "snapshotHistory"), false);
-});
-
-test("side-effect collector intervals do not monopolize production", () => {
-  assert.equal(domainCollectorDefaults.marketListings.intervalSeconds, 60);
-  assert.equal(domainCollectorDefaults.productionContributions.intervalSeconds, 300);
-  assert.equal(Object.hasOwn(domainCollectorDefaults, "snapshotHistory"), false);
-});
-
-test("empire membership tracking has an independent bounded cadence", () => {
-  assert.deepEqual(domainCollectorDefaults.empireMembership, {
-    label: "Empire membership history",
-    intervalSeconds: 60,
-  });
-  const normalized = normalizeCollectorSettings({
-    empireMembership: { enabled: true, intervalSeconds: 5 },
-  });
-  assert.deepEqual(normalized.empireMembership, {
-    label: "Empire membership history",
-    enabled: true,
-    intervalSeconds: 15,
-  });
-  assert.equal(Object.hasOwn(collectorCurrentTables, "empireMembership"), false);
-});
-
-test("collector settings still clamp submitted intervals to the existing bounds", () => {
-  const normalized = normalizeCollectorSettings({ marketListings: { intervalSeconds: 2 } });
-
-  assert.equal(normalized.marketListings.intervalSeconds, 15);
-});
-test("production activity and settlement state rows are not gated by contribution sync cadence", () => {
+test("construction current state has one Relay owner and no scheduled BitJita writer", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const adminDisplay = readFileSync(
+    new URL("../src/components/admin/adminDisplay.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /function currentConstructionProjection\(claimId\)/);
+  assert.match(source, /currentStateRepository\.read\(String\(claimId\), "construction"\)/);
+  assert.match(source, /enrichConstructionWithCatalog/);
+  assert.doesNotMatch(source, /fetchBitjita\(`\/claims\/\$\{id\}\/construction`/);
+  assert.doesNotMatch(source, /collectorDue\(id, "construction"/);
+  assert.doesNotMatch(source, /timedCollectorFetch\(metrics, "construction"/);
+  assert.doesNotMatch(adminDisplay, /construction:\s*"Records construction/);
+});
+
+test("storage activity runs on the Relay live loop rather than a scheduled collector", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /relayStorageActivityService\.sync\(\{/);
+  assert.doesNotMatch(source, /collectStorageActivity/);
+  assert.doesNotMatch(source, /storageActivityJobBudget/);
+  assert.doesNotMatch(source, /collector(?:Attempt|Success|Failure)\("storageActivity"/);
+  assert.doesNotMatch(source, /\/logs\/storage/);
+  assert.match(source, /relayHttp\.storageLogs\(\{/);
+});
+
+test("regional rankings run on a live typed session rather than BitJita pagination or a scheduled collector", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /RelayRegionClaimsRuntime/);
+  assert.doesNotMatch(source, /function fetchCachedRegionClaims/);
+  assert.doesNotMatch(source, /function fetchAllRegionClaims/);
+  assert.doesNotMatch(source, /fetchBitjita\("\/regions\/status"/);
+  assert.doesNotMatch(source, /fetchBitjita\(`\/stats\/trade-volume/);
+  assert.doesNotMatch(source, /url\.pathname === "\/api\/local\/region\/claims"/);
+});
+
+test("global catalog supervisor reconciles healthy topology on the runtime cadence", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("async function superviseRelayGlobalCatalog");
+  const end = source.indexOf("function startBackgroundTasks", start);
+  const supervisor = source.slice(start, end);
+
+  assert.ok(start > -1 && end > start);
+  assert.match(
+    supervisor,
+    /if \(healthy\) \{[\s\S]*?relayGlobalCatalogRuntime\.reconcile\(\{[\s\S]*?relayBaseUrl,[\s\S]*?claimId: currentClaimId\(\)/,
+  );
+});
+
+test("Empire current state runs on the adaptive regional Relay runtime", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /RelayEmpireRuntime/);
+  assert.match(source, /relayEmpireRuntime\.reconcile/);
+  assert.match(source, /relayEmpireRuntime\.warmActiveRegions/);
+  assert.match(source, /currentStateRepository\.read\(currentClaimId\(\), "empires"\)/);
+  assert.match(source, /domains\.includes\("empires"\)/);
+  assert.doesNotMatch(source, /function regionalEmpire(?:Overview|Details|ClaimMembers|Watchtowers)/);
+  assert.doesNotMatch(source, /empireScout(?:Cache|Inflight)/);
+});
+
+test("Relay terrain builds run only through the background runtime while HTTP reads installed bundles", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(source, /const relayTerrainRuntime = new RelayTerrainRuntime/);
+  assert.match(source, /if \(!relayTerrainStarted\) \{[\s\S]*?relayTerrainRuntime\.start/);
+  assert.match(source, /relayTerrainRuntime\.reconcile/);
+  assert.match(source, /serveLocalMapTile\(url\.pathname, res, terrainTileStore, undefined, relayTerrainRuntime\.health\(\), roadTileStore\)/);
+  assert.match(source, /if \(processRoleConfig\.runBackgroundJobs\) startBackgroundTasks\(\)/);
+  assert.doesNotMatch(source, /renderTerrainTile\([^\n]*url\.pathname/);
+});
+
+test("empire membership history is subscription-driven without a scheduled collector", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(source, /onSnapshotCommitted:\s*syncEmpireMembershipFromRelaySnapshot/);
+  assert.match(source, /source:\s*"relay-subscription"/);
+  assert.doesNotMatch(source, /runEmpireMembershipCollector/);
+  assert.doesNotMatch(source, /fetchBitjita\([^\n]*\/empires/);
+});
+
+test("periodic reconciliation has no legacy current-domain writer", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const prepared = readFileSync(new URL("../src/server/preparedStatements.mjs", import.meta.url), "utf8");
+  const pollStart = source.indexOf("async function collectServerSnapshot");
+  const pollEnd = source.indexOf("function marketHistory", pollStart);
+  const polling = source.slice(pollStart, pollEnd);
+
+  assert.ok(pollStart > -1);
+  assert.ok(pollEnd > pollStart);
+  assert.doesNotMatch(source, /function (?:buildCurrentClaimData|refreshCurrentClaimState|persistDomainPayloads|readDomainPayloadMap|domainRowsToAppData)\b/);
+  assert.doesNotMatch(prepared, /\b(?:domainPayloadsByClaim|domainPayload|upsertDomainPayload|updateDomainPayloadError)\b/);
+  assert.doesNotMatch(polling, /(?:fetchBitjita|fetchAllClaimListings|settlementProductionCrafts|playerDetailSummaries|upsertDomainPayload)/);
+});
+
+test("completed sales are Relay-native and have no BitJita reconciler or schedule", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const session = readFileSync(
+    new URL("../src/server/game-data/claimMarketRegionSession.ts", import.meta.url),
+    "utf8",
+  );
+  const regionalSession = readFileSync(
+    new URL("../src/server/game-data/regionalMarketRegionSession.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(session, /closed_listing_state/);
+  assert.match(regionalSession, /closed_listing_state/);
+  assert.match(regionalSession, /this\.#applySnapshot\(connection, true\)/);
+  const claimRuntimeStart = source.indexOf("const relayClaimMarketRuntime = new RelayClaimMarketRuntime");
+  const regionalRuntimeStart = source.indexOf("const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime");
+  const nextRuntimeStart = source.indexOf("const relayEmpireRuntime", regionalRuntimeStart);
+  const claimRuntime = source.slice(claimRuntimeStart, regionalRuntimeStart);
+  const regionalRuntime = source.slice(regionalRuntimeStart, nextRuntimeStart);
+
+  assert.ok(claimRuntimeStart > -1);
+  assert.ok(regionalRuntimeStart > claimRuntimeStart);
+  assert.match(claimRuntime, /deriveTransitionEvents:[\s\S]*compactRelayMarketTransitionEvents/);
+  assert.match(claimRuntime, /onSnapshotCommitted:[\s\S]*kickMarketTransitionDispatcher/);
+  assert.doesNotMatch(claimRuntime, /relayMarketTransitionWriter\.apply/);
+  assert.match(regionalRuntime, /onCurrentPublished:[\s\S]*queueMarketDealWatchEvaluation/);
+  assert.doesNotMatch(regionalRuntime, /onSnapshotCommitted/);
+  assert.doesNotMatch(source, /regionalMarketTransitionSnapshot/);
+  assert.doesNotMatch(source, /\/market\/player\//);
+  assert.doesNotMatch(source, /\b(?:runMarketTradeCollector|importMemberSellTrades|marketTradeBackfillKey)\b/);
+  assert.doesNotMatch(source, /\bmarketTrades\b/);
+});
+
+test("production lifecycle and contributions follow committed Relay state without a scheduled acquisition job", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  const session = readFileSync(
+    new URL("../src/server/game-data/primaryRegionPlayerSession.ts", import.meta.url),
+    "utf8",
+  );
   const activityStart = source.indexOf("async function runProductionActivityCollector");
-  const contributionStart = source.indexOf("async function runProductionContributionCollector");
   const snapshotStart = source.indexOf("async function collectServerSnapshot");
-  const activityFunction = source.slice(activityStart, contributionStart);
-  const contributionFunction = source.slice(contributionStart, snapshotStart);
+  const activityFunction = source.slice(activityStart, snapshotStart);
 
   assert.ok(activityStart > -1);
-  assert.ok(contributionStart > activityStart);
-  assert.ok(snapshotStart > contributionStart);
-  assert.match(source, /await runProductionActivityCollector\(claimId, currentData\);\s*await runProductionContributionCollector\(claimId, currentData, force\);/);
-  assert.match(source, /recordSettlementState\(\{/);
+  assert.ok(snapshotStart > activityStart);
+  assert.match(source, /productionRelayLifecycleCoordinator\?\.onCommit\(event\)/);
+  assert.match(source, /settlementRelayTransitionCoordinator\?\.onCommit\(event\)/);
+  assert.doesNotMatch(source.slice(snapshotStart), /await runProductionActivityCollector\(claimId, currentData\);/);
+  assert.doesNotMatch(source.slice(snapshotStart), /recordSettlementState\(/);
+  assert.doesNotMatch(source, /url\.pathname === "\/api\/local\/snapshot"/);
   assert.doesNotMatch(source, /sideEffectCollectorDue\("snapshotHistory"/);
   assert.doesNotMatch(source, /collector(?:Attempt|Success|Failure)\("snapshotHistory"/);
   assert.match(activityFunction, /syncProductionJobActivityForSnapshot/);
-  assert.doesNotMatch(activityFunction, /sideEffectCollectorDue\("productionContributions"/);
-  assert.match(contributionFunction, /syncProductionContributionsForSnapshot/);
-  assert.match(contributionFunction, /currentData\.contributions/);
-  assert.match(source, /Live craft contributions were available but none could be persisted/);
+  assert.doesNotMatch(source, /runProductionContributionCollector|fetchCraftContributionEvidence|syncProductionContributionsForSnapshot/);
+  assert.match(session, /progressive_action_state/);
+  assert.match(session, /event\.tag !== "Transaction"/);
+  assert.match(session, /progressDelta <= 0n/);
+  assert.match(session, /domain:\s*"contributions"/);
+  assert.match(source, /relayCraftContributionTargets/);
   assert.match(source, /import \{[^}]*productionMetrics[^}]*\} from "\.\/src\/server\/productionActivity\.mjs"/);
   assert.match(source, /function craftPrimarySkill\(craft\) \{\s*return productionMetrics\(craft\)\.skillName;/);
   assert.doesNotMatch(source, /return skillId \? skillNames\[skillId\]/);
   assert.doesNotMatch(source, /catch \{\s*return \[\];\s*\}/);
-  assert.doesNotMatch(contributionFunction, /syncProductionJobActivityForSnapshot|deliverProductionNotifications|recordProductionJobs/);
 });
 
-test("market listing activity sync fetches live listings when the side-effect collector runs", () => {
+test("market listing activity is subscription-driven rather than scheduled", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
-  const marketStart = source.indexOf("async function runMarketListingsCollector");
-  const productionStart = source.indexOf("async function runProductionActivityCollector");
-  const marketFunction = source.slice(marketStart, productionStart);
-
-  assert.ok(marketStart > -1);
-  assert.ok(productionStart > marketStart);
-  assert.match(marketFunction, /fetchAllClaimListings\(claimId, \{ cache: false \}\)/);
-  assert.match(marketFunction, /syncMarketListingsForSnapshot\(claimId, marketPayload,/);
-  assert.doesNotMatch(marketFunction, /currentData\.market \?\? \{ listings: \[\] \}/);
+  assert.doesNotMatch(source, /runMarketListingsCollector/);
+  assert.doesNotMatch(source, /syncMarketListingsForSnapshot/);
+  assert.match(source, /createRelayMarketTransitionWriter/);
+  assert.match(source, /onSnapshotCommitted/);
 });
 
-test("collector status resolves the claim once without rebuilding all public settings per collector", () => {
+test("regional buy orders are subscription-driven with no SQL current cache", () => {
+  const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(source, /RelayRegionalMarketRuntime/);
+  assert.match(source, /currentStateRepository\.read\([^,]+,\s*"regional-market"\)/);
+  assert.match(source, /relayRegionalMarketRuntime\.reconcile/);
+  assert.doesNotMatch(source, /relayRegionalMarketRuntime\.warmActiveRegions/);
+  assert.doesNotMatch(source, /\bcurrent\.buyOrders\b/);
+  assert.doesNotMatch(source, /const markerKey = "regional_buy_order_(?:collector|state)_retired_at"/);
+  assert.doesNotMatch(source, /fetchRegionalBuyOrders/);
+  assert.doesNotMatch(source, /fetchRegionalBuyOrderSaleAverages/);
+  assert.doesNotMatch(source, /persistRegionalBuyOrdersCurrent/);
+  assert.doesNotMatch(source, /persistRegionalSaleAverages/);
+  assert.doesNotMatch(source, /market_buy_orders_current/);
+  assert.doesNotMatch(source, /market_regional_sale_averages_current/);
+  assert.doesNotMatch(source, /existingBuyOrders|buyOrders:\s*\{/);
+});
+
+test("collector status reports side-effect attempts without reading current-domain payload rows", () => {
   const source = readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
   const start = source.indexOf("function collectorStatusPayload");
-  const end = source.indexOf("async function runMarketListingsCollector", start);
+  const end = source.indexOf("async function syncEmpireMembershipFromRelaySnapshot", start);
   const implementation = source.slice(start, end);
 
   assert.ok(start > -1);
   assert.ok(end > start);
-  assert.match(implementation, /const claimId = currentClaimId\(\);/);
-  assert.match(implementation, /statements\.domainPayload\.get\(claimId, domain\)/);
-  assert.doesNotMatch(implementation, /getSettings\(\)\.claimId/);
+  assert.doesNotMatch(implementation, /currentClaimId\(\)|domainPayload|lastRunMetrics/);
+  assert.match(implementation, /collectors: pollStatus\.collectors/);
 });
 
 test("settlement collection operator copy no longer describes snapshot history", () => {

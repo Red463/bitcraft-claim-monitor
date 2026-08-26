@@ -1,22 +1,32 @@
 import React from "react";
-import { Bell, Search, X } from "lucide-react";
+import { Bell, X } from "lucide-react";
 
 import { RarityBadge, TierBadge } from "../../components/main/Badges";
 import { ItemIcon, ItemLabel } from "../../components/main/ItemDisplay";
 import { toNumber, type AnyRecord } from "../../main-app-data";
 import { formatNumber, timeAgo } from "../../utils/format";
-import { activeRegionLabel, useActiveRegions } from "../../hooks/useActiveRegions";
+import { activeRegionLabel, type ActiveRegion } from "../../hooks/useActiveRegions";
+import { useGameDataGeneration } from "../../hooks/useGameDataGeneration";
 import { usePersistedState } from "../../hooks/usePersistedState";
-import { isMarketableItem } from "../../utils/items";
 import { unique } from "../../utils/array";
 import type { LoadState } from "../../types/app";
-import type { MarketRefreshProps } from "./globalMarket";
+import type { UserAuthState } from "../../types/settings";
+import { createDelayedRefreshTask } from "../../refresh/pageRefresh.mjs";
+import { marketDealWatchSearchUrl, marketRegionScopeUrl, type MarketRefreshProps } from "./globalMarket";
 
-const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 
-export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeaders, trackRefresh, onDiscordLogin }: MarketRefreshProps & {
+function numericItemType(value: unknown): number {
+  return value === 1 || value === "1" || String(value ?? "").toLowerCase() === "cargo" ? 1 : 0;
+}
+
+export function DealWatchlist({ claimId, monitoredRegionId, initialItem, onInitialItemConsumed, auth, refreshSequence, refreshHeaders, trackRefresh, onAuthInvalidated, onDiscordLogin }: MarketRefreshProps & {
+  claimId: string;
   monitoredRegionId: string;
+  initialItem: AnyRecord | null;
+  onInitialItemConsumed: () => void;
+  auth: UserAuthState;
+  onAuthInvalidated: () => void;
   onDiscordLogin: (returnTo?: string) => void;
 }) {
   const defaultRegion = monitoredRegionId;
@@ -25,17 +35,62 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
   const [selectedItem, setSelectedItem] = React.useState<AnyRecord | null>(null);
   const [searchState, setSearchState] = React.useState<"idle" | "loading" | "error">("idle");
   const [regionChoice, setRegionChoice] = usePersistedState("market.dealWatch.region", defaultRegion);
-  const activeRegions = useActiveRegions();
-  const [authState, setAuthState] = React.useState<AnyRecord>({ user: null, discordLoginEnabled: false });
+  const [activeRegions, setActiveRegions] = React.useState<ActiveRegion[]>([]);
   const [watchState, setWatchState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: false });
   const [watchBusy, setWatchBusy] = React.useState("");
   const [thresholdDraft, setThresholdDraft] = React.useState("30");
+  const generationSequence = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
   const activeRegionIds = React.useMemo(() => new Set(activeRegions.map((region) => String(region.regionId))), [activeRegions]);
   const activeRegion = activeRegionIds.has(regionChoice)
     ? regionChoice
     : activeRegionIds.has(defaultRegion)
       ? defaultRegion
       : String(activeRegions[0]?.regionId ?? "");
+
+  React.useEffect(() => {
+    if (defaultRegion && regionChoice !== defaultRegion) setRegionChoice(defaultRegion);
+  }, [defaultRegion, regionChoice, setRegionChoice]);
+
+  React.useEffect(() => {
+    if (!initialItem) return;
+    const item = {
+      ...initialItem,
+      id: String(initialItem.id ?? initialItem.itemId ?? "0"),
+      name: String(initialItem.name ?? initialItem.itemName ?? "Unknown item"),
+    };
+    setSelectedItem(item);
+    setQuery(item.name);
+    setSuggestions([]);
+    onInitialItemConsumed();
+  }, [initialItem, onInitialItemConsumed]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    trackRefresh("global-market-watch-regions", fetch(marketRegionScopeUrl(claimId), {
+      headers: refreshHeaders,
+      signal: controller.signal,
+    }))
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market regions HTTP ${response.status}`)))
+      .then((payload) => {
+        const regions = (Array.isArray(payload.regions) ? payload.regions : [])
+          .map((region: AnyRecord) => ({
+            ...region,
+            regionId: String(region.regionId ?? ""),
+          }))
+          .filter((region: ActiveRegion) => /^\d+$/.test(region.regionId));
+        setActiveRegions(regions);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setActiveRegions((current) => current.length
+            ? current
+            : /^\d+$/.test(defaultRegion)
+              ? [{ regionId: defaultRegion, regionName: `Region ${defaultRegion}`, source: "fallback" }]
+              : []);
+        }
+      });
+    return () => controller.abort();
+  }, [claimId, defaultRegion, generationSequence, refreshSequence]);
 
   React.useEffect(() => {
     if (activeRegion && regionChoice !== activeRegion) setRegionChoice(activeRegion);
@@ -45,24 +100,25 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
     const controller = new AbortController();
     setWatchState((current) => ({ ...current, error: null, loading: true }));
     trackRefresh("global-market-deal-watches", fetch(`${LOCAL_API}/market/deal-watches`, { headers: refreshHeaders, signal: controller.signal }))
-      .then((response) => response.status === 401 ? { watches: [], settings: null, signedOut: true } : response.ok ? response.json() : Promise.reject(new Error(`deal watches HTTP ${response.status}`)))
+      .then((response) => {
+        if (response.status === 401) {
+          onAuthInvalidated();
+          return { watches: [], settings: null, signedOut: true };
+        }
+        return response.ok ? response.json() : Promise.reject(new Error(`deal watches HTTP ${response.status}`));
+      })
       .then((payload) => setWatchState({ data: payload, error: null, loading: false }))
       .catch((error) => {
-        if (!controller.signal.aborted) setWatchState({ data: null, error: error instanceof Error ? error.message : String(error), loading: false });
+        if (!controller.signal.aborted) {
+          setWatchState((current) => ({
+            ...current,
+            error: error instanceof Error ? error.message : String(error),
+            loading: false,
+          }));
+        }
       });
     return () => controller.abort();
-  }, [refreshSequence]);
-
-  React.useEffect(() => {
-    const controller = new AbortController();
-    trackRefresh("global-market-auth", fetch(`${LOCAL_API}/auth/me`, { headers: refreshHeaders, signal: controller.signal }))
-      .then((response) => response.ok ? response.json() : { user: null, discordLoginEnabled: false })
-      .then((payload) => setAuthState(payload ?? { user: null, discordLoginEnabled: false }))
-      .catch(() => {
-        if (!controller.signal.aborted) setAuthState({ user: null, discordLoginEnabled: false });
-      });
-    return () => controller.abort();
-  }, [refreshSequence]);
+  }, [onAuthInvalidated, refreshSequence]);
 
   React.useEffect(() => refreshDealWatches(), [refreshDealWatches]);
 
@@ -78,27 +134,31 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
       return;
     }
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
+    const refresh = createDelayedRefreshTask(() => {
       setSearchState("loading");
-      trackRefresh("global-market-watch-search", fetch(`${API}/market?hasOrders=true`, { headers: refreshHeaders, signal: controller.signal }))
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)))
-        .then((payload) => {
-          const queryToken = query.trim().toLowerCase();
-          setSuggestions((payload.data?.items ?? []).filter(isMarketableItem).filter((item: AnyRecord) => String(item.name ?? item.itemName ?? "").toLowerCase().includes(queryToken)).slice(0, 8));
-          setSearchState("idle");
-        })
-        .catch(() => {
-          if (!controller.signal.aborted) {
-            setSuggestions([]);
-            setSearchState("error");
-          }
-        });
+      return fetch(marketDealWatchSearchUrl({
+        claimId,
+        regionId: activeRegion,
+        query,
+      }), { headers: refreshHeaders, signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`market search HTTP ${response.status}`)));
     }, 250);
+    trackRefresh("global-market-watch-search", refresh.promise)
+      .then((payload) => {
+        setSuggestions((Array.isArray(payload.items) ? payload.items : []).slice(0, 8));
+        setSearchState("idle");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setSuggestions([]);
+          setSearchState("error");
+        }
+      });
     return () => {
-      window.clearTimeout(timer);
+      refresh.cancel();
       controller.abort();
     };
-  }, [query, refreshSequence, selectedItem?.name]);
+  }, [activeRegion, claimId, generationSequence, query, refreshSequence, selectedItem?.name]);
 
   function chooseItem(item: AnyRecord) {
     setSelectedItem(item);
@@ -112,11 +172,11 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-csrf-token": String(authState.csrfToken ?? "") },
+        headers: { "content-type": "application/json", "x-csrf-token": String(auth.csrfToken ?? "") },
         body: JSON.stringify({
           regionId: activeRegion,
           itemId: selectedItem.id,
-          itemType: toNumber(selectedItem.itemType),
+          itemType: numericItemType(selectedItem.itemType),
           itemName: selectedItem.name,
           tier: selectedItem.tier ?? selectedItem.itemTier,
           rarity: selectedItem.rarityStr ?? selectedItem.rarity ?? selectedItem.itemRarityStr,
@@ -125,6 +185,7 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
         }),
       });
       if (response.status === 401) {
+        onAuthInvalidated();
         onDiscordLogin(`${window.location.pathname}${window.location.search}`);
         return;
       }
@@ -149,9 +210,13 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json", "x-csrf-token": String(authState.csrfToken ?? "") },
+        headers: { "content-type": "application/json", "x-csrf-token": String(auth.csrfToken ?? "") },
         body: JSON.stringify(patch),
       });
+      if (response.status === 401) {
+        onAuthInvalidated();
+        return;
+      }
       if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
       refreshDealWatches();
     } catch (error) {
@@ -168,8 +233,12 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
     try {
       const response = await fetch(`${LOCAL_API}/market/deal-watches/${encodeURIComponent(id)}`, {
         method: "DELETE",
-        headers: { "x-csrf-token": String(authState.csrfToken ?? "") },
+        headers: { "x-csrf-token": String(auth.csrfToken ?? "") },
       });
+      if (response.status === 401) {
+        onAuthInvalidated();
+        return;
+      }
       if (!response.ok) throw new Error(`deal watch HTTP ${response.status}`);
       refreshDealWatches();
     } catch (error) {
@@ -194,8 +263,10 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
     ...activeRegions.map((region) => String(region.regionId ?? "")).filter(Boolean),
   ].filter(Boolean)).sort((a, b) => toNumber(a) - toNumber(b));
   const duplicateWatch = selectedItem
-    ? dealWatches.find((watch) => String(watch.regionId) === String(activeRegion) && String(watch.itemId) === String(selectedItem.id) && toNumber(watch.itemType) === toNumber(selectedItem.itemType))
+    ? dealWatches.find((watch) => String(watch.regionId) === String(activeRegion) && String(watch.itemId) === String(selectedItem.id) && numericItemType(watch.itemType) === numericItemType(selectedItem.itemType))
     : null;
+
+  if (!auth.user) return <section className="deal-watchlist-page"><div className="deal-watch-empty deal-watch-signed-out"><span><strong>Turn saved items into alerts</strong>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button primary" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div></section>;
 
   return (
     <section className="deal-watchlist-page">
@@ -232,34 +303,28 @@ export function DealWatchlist({ monitoredRegionId, refreshSequence, refreshHeade
           </label>
           <label className="research-filter-field deal-watch-add-threshold">
             <span>Alert threshold</span>
-            <div className="unit-input"><input type="number" min={1} max={95} step={1} value={thresholdDraft} onChange={(event) => setThresholdDraft(event.target.value)} /><em>% below average</em></div>
+            <div className="unit-input"><input type="number" min={1} max={95} step={1} value={thresholdDraft} onChange={(event) => setThresholdDraft(event.target.value)} /><em>% below live median</em></div>
           </label>
         </div>
-        {!authState.user ? (
-          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
-        ) : (
-          <div className="toolbar-row">
-            <button className="toolbar-button primary" type="button" onClick={addDealWatch} disabled={!selectedItem || Boolean(duplicateWatch) || watchBusy === "add" || dealWatches.length >= maxWatches}>
-              <Bell size={15} /> {watchBusy === "add" ? "Adding..." : "Watch item"}
-            </button>
-            <span className="legend">{duplicateWatch ? "This item is already watched in the selected region." : selectedItem ? `${selectedItem.name} in R${activeRegion}` : "Choose an item and region to add a watch."}</span>
-          </div>
-        )}
+        <div className="toolbar-row">
+          <button className="toolbar-button primary" type="button" onClick={addDealWatch} disabled={!selectedItem || Boolean(duplicateWatch) || watchBusy === "add" || dealWatches.length >= maxWatches}>
+            <Bell size={15} /> {watchBusy === "add" ? "Adding..." : "Watch item"}
+          </button>
+          <span className="legend">{duplicateWatch ? "This item is already watched in the selected region." : selectedItem ? `${selectedItem.name} in R${activeRegion}` : "Choose an item and region to add a watch."}</span>
+        </div>
       </section>
 
       <section className="deal-watchlist-section">
-        <h3><Bell size={17} /> Deal Watchlist <small>{authState.user ? `${formatNumber(dealWatches.length)} watched items` : "Discord sign-in required"}</small></h3>
+        <h3><Bell size={17} /> Deal Watchlist <small>{auth.user ? `${formatNumber(dealWatches.length)} watched items` : "Discord sign-in required"}</small></h3>
         {watchState.error ? <div className="error">Deal watchlist: {watchState.error}</div> : null}
-        {!authState.user ? (
-          <div className="deal-watch-empty"><span>Sign in with Discord to save watched items and receive deal alerts.</span><button className="toolbar-button" type="button" onClick={() => onDiscordLogin()}>Sign in with Discord</button></div>
-        ) : dealWatches.length ? (
+        {dealWatches.length ? (
           <div className="deal-watch-list">
             {dealWatches.map((watch) => (
               <article className="deal-watch-row" key={String(watch.id)}>
                 <ItemLabel item={{ ...watch, name: watch.itemName, tier: watch.tier, rarity: watch.rarity, iconAssetName: watch.iconAssetName }} name={String(watch.itemName ?? "Unknown item")} />
                 <div className="deal-watch-meta">
                   <div className="deal-watch-fact"><span>Region</span><strong>R{watch.regionId}</strong></div>
-                  <label className="deal-watch-fact deal-watch-threshold"><span>Alert below average</span><span><input type="number" min={1} max={95} step={1} key={String(watch.thresholdPercent)} defaultValue={Math.round(toNumber(watch.thresholdPercent) || 30)} disabled={watchBusy === String(watch.id)} onBlur={(event) => saveDealWatchThreshold(watch, event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><em>%</em></span></label>
+                  <label className="deal-watch-fact deal-watch-threshold"><span>Alert below live median</span><span><input type="number" min={1} max={95} step={1} key={String(watch.thresholdPercent)} defaultValue={Math.round(toNumber(watch.thresholdPercent) || 30)} disabled={watchBusy === String(watch.id)} onBlur={(event) => saveDealWatchThreshold(watch, event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><em>%</em></span></label>
                   <div className="deal-watch-fact"><span>Last checked</span><strong>{watch.lastCheckedAt ? timeAgo(watch.lastCheckedAt) : "Not yet"}</strong></div>
                   <div className="deal-watch-fact"><span>Last alert</span><strong>{watch.lastAlertAt ? timeAgo(watch.lastAlertAt) : "None"}</strong></div>
                 </div>

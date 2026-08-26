@@ -1,9 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const port = Number(process.env.PORT ?? 18428);
-const bitjitaTarget = process.env.BITJITA_API_ORIGIN ?? "https://bitjita.com";
-const localApiTarget = `http://127.0.0.1:${process.env.LOCAL_API_PORT ?? 18430}`;
+const port = Number(process.env.PORT ?? 19428);
+const localApiTarget = `http://127.0.0.1:${process.env.LOCAL_API_PORT ?? 19430}`;
 
 export default defineConfig({
   plugins: [react()],
@@ -12,7 +11,13 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
-          if (id.includes("react-dom") || id.includes("/react/") || id.includes("\\react\\")) return "vendor-react";
+          if (
+            id.includes("react-dom") ||
+            id.includes("/react/") ||
+            id.includes("\\react\\") ||
+            id.includes("/scheduler/") ||
+            id.includes("\\scheduler\\")
+          ) return "vendor-react";
           if (id.includes("lucide-react")) return "vendor-icons";
           return "vendor";
         },
@@ -23,12 +28,7 @@ export default defineConfig({
     port,
     strictPort: true,
     proxy: {
-      "/api/bitjita": {
-        target: bitjitaTarget,
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/bitjita/, "/api"),
-      },
-      "/api/local": {
+      "/api": {
         target: localApiTarget,
         changeOrigin: true,
       },

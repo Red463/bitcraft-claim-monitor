@@ -22,7 +22,7 @@ export const FIRST_RUN_TOUR_STEPS: FirstRunTourStep[] = [
     page: "dashboard",
     target: "floating-actions",
     title: "One live settlement view",
-    body: "Claim Monitor brings settlement work together using live BitJita data. Check the freshness status before relying on time-sensitive information, and refresh when you need the latest available view.",
+    body: "Claim Monitor brings settlement work together using live BitCraft Relay data. Check the freshness status before relying on time-sensitive information, and refresh when you need the latest available view.",
     placement: "center",
   },
   {

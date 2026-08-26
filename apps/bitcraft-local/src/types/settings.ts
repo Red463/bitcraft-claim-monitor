@@ -32,6 +32,7 @@ export type UserLegalStatus = {
 };
 export type UserAuthState = {
   user: AppUser | null;
+  featurebaseJwt?: string;
   csrfToken: string | null;
   discordLoginEnabled: boolean;
   legal: UserLegalStatus;
@@ -39,7 +40,7 @@ export type UserAuthState = {
 export type MarketDealWatchSettings = {
   maxWatchesPerUser: number;
   thresholdPercent: number;
-  minConfirmedSales: number;
+  minActiveListings: number;
   discordDmEnabled: boolean;
 };
 export type ColourRoleDefinition = { key: string; label: string; roleName: string; roleId: string; color: number };
@@ -86,7 +87,6 @@ export type AppSettings = {
   theme: ThemeSettings;
   refreshSeconds: number;
   serverRefreshSeconds: number;
-  collectorSettings: Record<string, { label: string; enabled: boolean; intervalSeconds: number }>;
   defaultPage: ActivePanel;
   defaultRegion: string;
   additionalActiveRegions: string;
@@ -94,7 +94,6 @@ export type AppSettings = {
   marketDealWatch: MarketDealWatchSettings;
   branding: { logo?: BrandingAsset; favicon?: BrandingAsset };
   visitorSecurity: { fullIpRetentionDays: number; statsRetentionDays: number; geoipProvider: string; geoipCacheDays: number; geoipSourceUrl: string; geoipAccountId: string; geoipLicenseKey?: string; geoipLicenseKeyConfigured?: boolean; geoipClearLicenseKey?: boolean };
-  browserSnapshotsEnabled: boolean;
   discord: DiscordSettings;
 };
 

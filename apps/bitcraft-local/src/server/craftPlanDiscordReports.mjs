@@ -80,7 +80,7 @@ function boundedEffortWarning(summary = {}) {
   const warning = Array.isArray(summary?.warnings)
     ? summary.warnings.find((value) => String(value).trim())
     : "";
-  return String(warning || "Effort progress is temporarily unavailable while the planner catalog refreshes.")
+  return String(warning || "Effort progress is unavailable until compatible Relay catalog data is ready.")
     .replaceAll("@", "@\u200b")
     .slice(0, 500);
 }

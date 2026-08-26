@@ -10,6 +10,7 @@ import {
   Shield,
   Star,
   User,
+  UserPlus,
   Users,
   Wrench,
 } from "lucide-react";
@@ -21,23 +22,23 @@ import { PageHeader } from "../components/main/PageHeader";
 import { SearchBox } from "../components/main/SearchBox";
 import { MiniStat } from "../components/main/Stats";
 import { toNumber, type AnyRecord } from "../main-app-data";
-import { summarizePassiveCrafts } from "../utils/crafts";
 import { formatCurrentSession, formatEquipmentSlot, formatNumber, timeAgo } from "../utils/format";
 import { equippedCount, equipmentPresets, equipmentSlots, playerToolbeltTools, visibleEquipmentSlots } from "../utils/items";
 import { normalizeData } from "../utils/normalize";
 import { memberClaimRole } from "../utils/ownership";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
-
-const API = "/api/bitjita";
+import { recruitmentSummary } from "./recruitmentView.ts";
+import { memberPresenceStatus, memberSessionStatus } from "./memberPresence.ts";
+import { orderMembersByDefault } from "./membersView.ts";
+import { memberPassiveCraftQuantityLabel } from "./production/passiveCraftPresentation.ts";
 
 /**
  * Settlement roster and member-detail view.
  *
- * Summary rows come from the normalized claim/member payload, while the detail
- * pane may fetch extra BitJita player data for equipment, tools, sessions, and
- * passive crafts. Keep those detail fetches optional because BitJita can return
- * partial player data during API blips.
+ * Summary, equipment, buffs, and passive crafts come from normalized Relay
+ * domains. Toolbelt and housing are fetched for only the opened member through
+ * one bounded provider-neutral request.
  */
 export function Members({
   data,
@@ -45,7 +46,7 @@ export function Members({
   onSelectMember,
   onMemberDetailsOpened,
 }: {
-  data: ReturnType<typeof normalizeData>;
+  data: ReturnType<typeof normalizeData> & { raw?: AnyRecord | null };
   selectedMemberId: string;
   onSelectMember: (id: string) => void;
   onMemberDetailsOpened?: () => void;
@@ -67,9 +68,11 @@ export function Members({
       player: playerMap.get(String(username)) ?? null,
     };
   });
-  const filtered = merged.filter((member) => String(member.username).toLowerCase().includes(searchTerm.toLowerCase()));
+  const orderedMembers = orderMembersByDefault(merged);
+  const filtered = orderedMembers.filter((member) => String(member.username).toLowerCase().includes(searchTerm.toLowerCase()));
   const onlineCount = merged.filter((member) => member.player?.signedIn).length;
   const totalMemberLevels = merged.reduce((total, member) => total + toNumber(member.citizen?.totalLevel ?? member.citizen?.totalSkillLevel), 0);
+  const recruitment = recruitmentSummary(data.raw?.recruitment);
   const selectedMember = merged.find((member) => String(member.playerEntityId) === selectedId);
   const openMemberDetails = (member: AnyRecord) => {
     setSelectedId(String(member.playerEntityId));
@@ -81,29 +84,70 @@ export function Members({
       return;
     }
     const controller = new AbortController();
+    const equipmentMembers = Array.isArray(data.raw?.equipment?.members)
+      ? data.raw.equipment.members as AnyRecord[]
+      : [];
+    const relayEquipment = equipmentMembers.find((member) => (
+      String(member.playerEntityId ?? "") === selectedId
+    ));
+    const selectedName = String(
+      data.members.find((member: AnyRecord) => String(member.playerEntityId) === selectedId)?.userName ?? "",
+    );
+    const relayPassiveCrafts = (Array.isArray(data.raw?.crafts?.passiveCraftResults)
+      ? data.raw.crafts.passiveCraftResults as AnyRecord[]
+      : []).filter((craft) => String(craft.memberName ?? "") === selectedName);
+    const relayProfile = {
+      buffs: relayEquipment?.buffs ?? { buffs: [] },
+      equipment: relayEquipment?.equipment ?? { equipmentSlots: [] },
+      equipmentPresets: relayEquipment?.equipmentPresets ?? { presets: [] },
+      inventories: null,
+      housing: null,
+      passiveCrafts: { craftResults: relayPassiveCrafts },
+      tasks: selectedMember?.player?.tasks ?? { tasks: [] },
+    };
+    setProfile(relayProfile);
     setProfileLoading(true);
     setProfileError(null);
     const requestOptions = { headers: manualRefreshHeaders(request, "members"), signal: controller.signal };
-    const refresh = Promise.all([
-      fetch(`${API}/players/${selectedId}/buffs`, requestOptions).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/equipment`, requestOptions).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/equipment/presets`, requestOptions).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/inventories`, requestOptions).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/housing`, requestOptions).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/passive-crafts?status=all`, requestOptions).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/market-collections`, requestOptions).then((response) => response.json()),
-      fetch(`${API}/players/${selectedId}/traveler-tasks`, requestOptions).then((response) => response.json()),
-    ]);
-    void trackPromise("member-details", refresh).then(([buffs, equipment, equipmentPresetData, inventories, housing, passiveCrafts, collections, tasks]) => {
-      setProfile({ buffs, equipment, equipmentPresets: equipmentPresetData, inventories, housing, passiveCrafts, collections, tasks });
+    const requestJson = async (url: string) => {
+      const response = await fetch(url, requestOptions);
+      if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
+      return response.json();
+    };
+    const claimId = String(data.claim.entityId ?? data.raw?.claimId ?? "");
+    const playerQuery = new URLSearchParams({ claimId, playerId: selectedId, domains: "inventory,housing" });
+    const refresh = requestJson(`/api/local/player-data?${playerQuery.toString()}`);
+    void trackPromise("member-details", refresh).then((payload) => {
+      if (controller.signal.aborted) return;
+      setProfile({
+        ...relayProfile,
+        inventories: payload?.domains?.inventory?.data ?? null,
+        housing: payload?.domains?.housing?.data ?? null,
+      });
+      const partialErrors = Array.isArray(payload?.partialErrors) ? payload.partialErrors : [];
+      setProfileError(partialErrors.length ? partialErrors.join(" ") : null);
     }).catch((error) => {
-      if (!controller.signal.aborted) setProfileError(error instanceof Error ? error.message : String(error));
+      if (!controller.signal.aborted) {
+        setProfileError(error instanceof Error ? error.message : String(error));
+      }
     }).finally(() => {
       if (!controller.signal.aborted) setProfileLoading(false);
     });
     return () => controller.abort();
-  }, [selectedId, request?.sequence, trackPromise]);
-  const passiveCraftSummaries = profile ? summarizePassiveCrafts(profile.passiveCrafts) : [];
+  }, [
+    selectedId,
+    data.claim.entityId,
+    data.members,
+    data.raw?.claimId,
+    data.raw?.crafts,
+    data.raw?.equipment,
+    selectedMember?.player?.tasks,
+    request?.sequence,
+    trackPromise,
+  ]);
+  const passiveCraftSummaries: AnyRecord[] = Array.isArray(profile?.passiveCrafts?.craftResults)
+    ? profile.passiveCrafts.craftResults
+    : [];
   const currentEquipmentSlots = profile ? equipmentSlots(profile.equipment) : [];
   const gearPresets = profile ? equipmentPresets(profile.equipmentPresets, currentEquipmentSlots) : [];
   const activeGearSlots = gearPresets.find((preset) => preset.active)?.slots ?? currentEquipmentSlots;
@@ -126,6 +170,7 @@ export function Members({
         <article><Activity /><span>Total Levels</span><strong>{formatNumber(totalMemberLevels)}</strong><small>Across visible citizens</small></article>
         <article><Hammer /><span>Build Access</span><strong>{merged.filter((member) => member.buildPermission).length}</strong><small>Members with build rights</small></article>
         <article><Shield /><span>Storage Access</span><strong>{merged.filter((member) => member.inventoryPermission).length}</strong><small>Members with inventory rights</small></article>
+        <article className="members-recruitment-summary"><UserPlus /><span>Recruitment</span><strong>{recruitment.statusLabel}</strong><small>{recruitment.requirementLabel} · {recruitment.approvalLabel}</small></article>
       </div>
       <div className="toolbar-row members-toolbar">
         <SearchBox label="Search settlement members" value={searchTerm} onChange={setSearchTerm} placeholder="Search username" />
@@ -142,7 +187,18 @@ export function Members({
             ["Username", (m) => (
               <span className="member-name-cell">
                 <span className="member-row-avatar">{String(m.username ?? "?").slice(0, 1).toUpperCase()}<i className={`online-dot ${m.player?.signedIn ? "is-online" : ""}`} /></span>
-                <span className="member-row-copy"><strong><TrackedOwnerName name={m.username} claim={data.claim} members={data.members} /></strong><small>{m.player?.signedIn ? "Online now" : `Last seen ${timeAgo(m.lastLoginTimestamp)}`}</small></span>
+                <span className="member-row-copy"><strong><TrackedOwnerName name={m.username} claim={data.claim} members={data.members} /></strong><small>{(() => {
+                  const status = memberPresenceStatus({
+                    ...m,
+                    ...m.player,
+                    lastActiveTimestamps: [
+                      m.player?.lastActiveTimestamp,
+                      m.lastActiveTimestamp,
+                    ],
+                    lastLoginTimestamp: m.player?.lastLoginTimestamp ?? m.lastLoginTimestamp,
+                  });
+                  return status.timestamp ? `${status.label} ${timeAgo(status.timestamp)}` : status.label;
+                })()}</small></span>
               </span>
             )],
             ["Role", (m) => {
@@ -152,7 +208,9 @@ export function Members({
             ["Total Levels", (m) => formatNumber(m.citizen?.totalLevel ?? m.citizen?.totalSkillLevel)],
             ["Session", (m) => {
               const sessionLabel = formatCurrentSession(m.player?.sessionSeconds);
-              return m.player?.signedIn ? <span className="online-text">{sessionLabel ? `Playing ${sessionLabel}` : "Online"}</span> : <span className="muted-cell">Offline</span>;
+              return m.player?.signedIn
+                ? <span className="online-text">{sessionLabel ? `Playing ${sessionLabel}` : "Online"}</span>
+                : <span className="muted-cell">{memberSessionStatus(m.player ?? { presenceSource: "unavailable" })}</span>;
             }],
             ["Permissions", (m) => (
               <span
@@ -177,13 +235,15 @@ export function Members({
               <button className="mini-action" onClick={() => setSelectedId(null)}>Close</button>
             </div>
           </div>
-          {profileLoading ? <p className="legend">Loading public player data...</p> : profileError ? <p className="error">{profileError}</p> : profile ? (
+          {profileLoading ? <p className="legend">Loading optional live player details...</p> : null}
+          {profileError ? <p className="error">Some optional player details are unavailable. {profileError}</p> : null}
+          {profile ? (
             <>
               <div className="metric-grid">
-                <MiniStat icon={<Activity />} label="Active Buffs" value={(profile.buffs.buffs ?? []).length} />
+                <MiniStat icon={<Activity />} label="Active Buffs" value={(profile.buffs?.buffs ?? []).length} />
                 <MiniStat icon={<Wrench />} label="Toolbelt Tools" value={playerToolbeltTools(profile.inventories).length} />
                 <MiniStat icon={<Shield />} label="Active Gear" value={equippedCount(activeGearSlots)} />
-                <MiniStat icon={<Home />} label="Housing" value={(profile.housing ?? []).length} />
+                <MiniStat icon={<Home />} label="Housing" value={profile.housing?.house ? 1 : 0} />
               </div>
               <section className="equipment-panel">
                 <h3><Wrench size={17} /> Toolbelt Tools</h3>
@@ -196,7 +256,7 @@ export function Members({
                         <strong>{item.name}</strong>
                         {item.tier ? <TierBadge tier={item.tier} /> : null}
                       </div>
-                      <span className="item-meta-line">{item.tag ?? "Tool"}{item.rarityStr ? <RarityBadge rarity={item.rarityStr} /> : null}{item.quantity > 1 ? `${formatNumber(item.quantity)} held` : ""}</span>
+                      <span className="item-meta-line">{item.tag ?? "Tool"}{item.rarityStr ?? item.rarity ? <RarityBadge rarity={item.rarityStr ?? item.rarity} /> : null}{toNumber(item.quantity) > 1 ? `${formatNumber(item.quantity)} held` : ""}</span>
                       {item.toolPower ? <p>Power {formatNumber(item.toolPower)} - removes {formatNumber(item.toolPower)} effort per action</p> : null}
                     </article>
                   ))}
@@ -206,7 +266,7 @@ export function Members({
               <section className="equipment-panel">
                 <div className="profile-section-heading">
                   <h3><Shield size={17} /> Gear Presets</h3>
-                  <span>2 preset slots</span>
+                  <span>{gearPresets.length} loadouts</span>
                 </div>
                 <div className="gear-preset-list">
                   {gearPresets.map((preset) => {
@@ -229,8 +289,8 @@ export function Members({
                                     <strong>{slot.item.name}</strong>
                                     {slot.item.tier ? <TierBadge tier={slot.item.tier} /> : null}
                                   </div>
-                                  <span className="item-meta-line">{slot.item.tags ?? "Equipment"}{slot.item.rarityString ? <RarityBadge rarity={slot.item.rarityString} /> : null}</span>
-                                  {(slot.item.stats ?? []).length ? <p>{slot.item.stats.slice(0, 3).map((stat: AnyRecord) => `${stat.name} ${formatNumber(stat.value, 2)}${stat.suffix ?? ""}`).join(" | ")}</p> : null}
+                                  <span className="item-meta-line">{slot.item.tag ?? slot.item.tags ?? "Equipment"}{slot.item.rarityString ?? slot.item.rarity ? <RarityBadge rarity={slot.item.rarityString ?? slot.item.rarity} /> : null}</span>
+                                  {(slot.item.stats ?? []).length ? <p>{slot.item.stats.slice(0, 3).map((stat: AnyRecord) => `${stat.name ?? stat.stat} ${formatNumber(stat.value, 2)}${stat.suffix ?? (stat.isPercent ? "%" : "")}`).join(" | ")}</p> : null}
                                 </>
                               ) : (
                                 <div className="equipment-card-main">
@@ -241,7 +301,7 @@ export function Members({
                             </article>
                           ))}
                         </div>
-                        {!preset.reported ? <p className="legend">BitJita has not reported gear for this preset slot, so empty visible slots are shown as placeholders.</p> : null}
+                        {!preset.reported ? <p className="legend">Relay has not reported gear for this preset slot, so empty visible slots are shown as placeholders.</p> : null}
                       </article>
                     );
                   })}
@@ -252,7 +312,7 @@ export function Members({
                 <section className="profile-history-panel">
                   <div className="profile-section-heading">
                     <h3><Factory size={17} /> Passive Crafts</h3>
-                    <span>{formatNumber((profile.passiveCrafts.craftResults ?? []).length)} records</span>
+                    <span>{formatNumber((profile.passiveCrafts?.craftResults ?? []).length)} records</span>
                   </div>
                   <div className="passive-craft-list">
                     {passiveCraftSummaries.map((craft) => (
@@ -263,7 +323,7 @@ export function Members({
                         </div>
                         <p>
                           <span className={`status-pill ${craft.status === "complete" ? "complete" : ""}`}>{formatEquipmentSlot(craft.status)}</span>
-                          <b>{formatNumber(craft.quantity)} crafted</b>
+                          <b>{memberPassiveCraftQuantityLabel(craft.quantity)}</b>
                         </p>
                         <small>{craft.structure} - {timeAgo(craft.timestamp)}</small>
                       </article>
@@ -273,7 +333,7 @@ export function Members({
                 </section>
                 <section className="profile-history-panel">
                   <h3><Star size={17} /> Quests</h3>
-                  <DataTable rows={(profile.tasks.tasks ?? []).slice(0, 8)} scrollLabel="Member quests table" emptyState="No recent quests were returned for this member." columns={[
+                  <DataTable rows={(profile.tasks?.tasks ?? []).slice(0, 8)} scrollLabel="Member quests table" emptyState="No recent quests were returned for this member." columns={[
                     ["Quest", (row) => row.description ?? "-"],
                     ["Status", (row) => row.completed ? "Complete" : "Open"],
                   ]} />

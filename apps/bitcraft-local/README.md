@@ -1,42 +1,49 @@
-# BitCraft Local Monitor
+# BitCraft Claim Monitor application
 
-A clean local-first rebuild of the Replit-exported claim monitor.
+This is the maintained application package. Run commands from the repository
+root with Node.js 24+, Corepack, and the pnpm version pinned in the root
+`package.json`.
 
-Run it from the repo root:
+The worker publishes committed Relay generations and the web process exposes
+them through same-origin, provider-neutral local routes. Current contribution
+attribution is derived from positive regional craft-progress transactions; it
+is not reconstructed by a scheduled browser-facing acquisition job.
 
-```sh
+## Local development
+
+```powershell
 corepack pnpm install
 corepack pnpm --filter @workspace/bitcraft-local run dev
 ```
 
-Open `http://localhost:18428`.
+The development command starts Vite at `http://localhost:19428` and the local
+Node API at `http://127.0.0.1:19430`. Vite proxies same-origin `/api/*` requests
+to that API. Set `BITCRAFT_LOCAL_DATA_DIR` to use an isolated SQLite directory.
 
-The dev command starts two local services:
+Process configuration and optional secret overrides start at
+[`.env.example`](../../.env.example). The monitored claim, active regions, most
+Discord settings, and some protected secrets are stored locally and managed by
+the application. Do not put real credentials in the repository.
 
-- Vite frontend on `http://localhost:18428`
-- SQLite history API on `http://127.0.0.1:18430`
+## Checks
 
-The Vite dev server proxies `/api/bitjita/*` to `https://bitjita.com/api/*` and `/api/local/*` to the local SQLite API.
-
-Persistent history and cached tool data are stored at `apps/bitcraft-local/data/bitcraft-local.sqlite`. Normal browser pages refresh live data through the local `/api/bitjita/*` proxy, while local tables retain market history, activity history, contribution history, analytics, notifications, recipe cache, regional buy-order cache, and diagnostics.
-
-In production, the Node server runs background collectors itself, so market, activity, production contribution and notification history continues collecting without a browser left open. Collector intervals and enabled states are configurable from Admin.
-
-Notification generation, deduplication, settings and verification notes are documented in [docs/notification-system.md](../../docs/notification-system.md).
-
-Maintainer architecture notes are in [docs/developer-guide.md](../../docs/developer-guide.md), and current public-release blockers are tracked in [docs/release-readiness-audit.md](../../docs/release-readiness-audit.md).
-
-The Admin page is protected by a local server-side session. Current deployments use Discord-backed administrator accounts, with the default owner Discord ID seeded by the server. Legacy password-based admin setup exists only as a compatibility path and should normally remain disabled. Administrator mutations additionally require a same-origin session token.
-
-For isolated testing, set `BITCRAFT_LOCAL_DATA_DIR` before running the dev server to point at a different database directory.
-
-For hosting on an Ubuntu VPS, see [`DEPLOYMENT.md`](../../DEPLOYMENT.md). The production build is served by the Node application:
-
-```sh
+```powershell
+corepack pnpm --filter @workspace/bitcraft-local run typecheck
 corepack pnpm --filter @workspace/bitcraft-local run build
-NODE_ENV=production BITCRAFT_LOCAL_DATA_DIR=/var/lib/bitcraft-claim-monitor corepack pnpm --filter @workspace/bitcraft-local run start
+corepack pnpm --filter @workspace/bitcraft-local test
 ```
 
-Configure Discord OAuth/bot settings before relying on Discord admin login in production. The full systemd and Caddy procedure is in the deployment guide.
+## Optional built smoke server
 
-License: repository-wide `AGPL-3.0-only`. See the root [`LICENSE`](../../LICENSE), [`NOTICE`](../../NOTICE), and [`TRADEMARKS.md`](../../TRADEMARKS.md).
+```powershell
+corepack pnpm --filter @workspace/bitcraft-local run build
+node scripts/start-bitcraft-local-smoke.mjs --restart
+curl.exe -s http://127.0.0.1:18449/api/local/health
+```
+
+The smoke server at `http://127.0.0.1:18449` is optional and serves the built
+application. It is not part of the normal two-service development command.
+
+For architecture, contribution, and hosting details, use the root
+[`README.md`](../../README.md), [`docs/developer-guide.md`](../../docs/developer-guide.md),
+and [`DEPLOYMENT.md`](../../DEPLOYMENT.md).

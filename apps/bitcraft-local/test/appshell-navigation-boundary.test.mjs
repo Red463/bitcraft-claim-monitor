@@ -27,6 +27,8 @@ try {
   // RED starts with the navigation-label helpers absent.
 }
 
+const { normalizeBootstrap } = await import("../src/api/bootstrap.ts");
+
 test("route-state helpers distinguish explicit navigation from normalization", () => {
   assert.equal(typeof routeStateModule.writePageLocation, "function");
   assert.match(routeState, /export type NavigationMode = "push" \| "replace"/);
@@ -65,8 +67,8 @@ test("legacy page IDs resolve to canonical page IDs", () => {
 test("Market tab locations canonicalize aliases and clean invalid values", () => {
   assert.equal(typeof routeStateModule.marketViewLocation, "function");
   assert.deepEqual(routeStateModule.marketViewLocation("pricing"), { page: "market", view: "browse", canonicalTab: "browse", shouldReplace: true });
-  assert.deepEqual(routeStateModule.marketViewLocation("buyOrders"), { page: "market", view: "buy-orders", canonicalTab: "buy-orders", shouldReplace: true });
-  assert.deepEqual(routeStateModule.marketViewLocation("dealWatchlist"), { page: "market", view: "deal-watch", canonicalTab: "deal-watch", shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation("buyOrders"), { page: "market", view: "opportunities", canonicalTab: "opportunities", shouldReplace: true });
+  assert.deepEqual(routeStateModule.marketViewLocation("dealWatchlist"), { page: "market", view: "saved", canonicalTab: "saved", shouldReplace: true });
   assert.deepEqual(routeStateModule.marketViewLocation("live"), { page: "settlement-market", view: "live", canonicalTab: "live", shouldReplace: true });
   assert.deepEqual(routeStateModule.marketViewLocation("unknown"), { page: "market", view: "overview", canonicalTab: "overview", shouldReplace: true });
   assert.deepEqual(routeStateModule.marketViewLocation(null), { page: "market", view: "overview", canonicalTab: "overview", shouldReplace: true });
@@ -83,6 +85,22 @@ test("route shell restores history and announces explicit route changes", () => 
   assert.match(appShell, /function restoreFromHistory\(\) \{[\s\S]*?setRouteSearch\(window\.location\.search\)/);
   assert.match(appShell, /updateQueryState\([\s\S]*?"push"\);[\s\S]*?setRouteSearch\(window\.location\.search\)/);
   assert.match(appShell, /<Market[\s\S]*?locationSearch=\{routeSearch\}[\s\S]*?onQueryStateChange=\{syncRouteSearch\}/);
+});
+
+test("AppShell composes game data only from the active claim and page scope", () => {
+  assert.match(appShell, /gameDataScopeKey\(claimId, activePanel\)/);
+  assert.match(appShell, /state\.scopeKey === requestedGameDataScopeKey/);
+  assert.match(appShell, /normalizeData\(state\.data\)/);
+  assert.match(appShell, /state\.loading && !state\.data/);
+});
+
+test("AppShell owns one page-scoped provider generation watcher", () => {
+  assert.match(appShell, /createPageGameDataGenerationWatcher\(\{/);
+  assert.match(appShell, /activePanel:\s*active/);
+  assert.match(appShell, /claimId,/);
+  assert.match(appShell, /onGeneration:\s*\(\) => pageRefreshController\.invalidateGeneration\(\)/);
+  assert.match(appShell, /return \(\) => watcher\?\.stop\(\)/);
+  assert.doesNotMatch(appShell, /active !== "craft-monitor"/);
 });
 
 test("sidebar and command palette consume the same effective page access", () => {
@@ -146,11 +164,26 @@ test("settlement navigation labels derive from the configured claim name", () =>
   assert.equal(navigationLabelsModule.settlementMarketTitle(null), "Settlement Market");
 });
 
+test("settlement navigation identity survives pages without claim data", () => {
+  const bootstrap = normalizeBootstrap({
+    config: { claimId: "123", claimName: " Timbersteel Trade ", refreshSeconds: 30 },
+    auth: {},
+    legal: {},
+    build: {},
+  });
+
+  assert.equal(bootstrap.config.claimName, "Timbersteel Trade");
+  assert.match(appShell, /settlementNamesByClaim/);
+  assert.match(appShell, /initialBootstrap\.config\.claimName/);
+  assert.match(appShell, /settlementNavigationLabel\(settlementName\)/);
+  assert.doesNotMatch(appShell, /settlementNavigationLabel\(data\.claim\.name\)/);
+});
+
 test("navigation and page headings use the approved settlement naming", () => {
   assert.match(navigation, /\["craft-monitor", "Craft Monitor", Factory\]/);
   assert.match(navigation, /\["settlement-market", "Local Market", CircleDollarSign\]/);
   assert.match(navigation, /\["region", "Region", Globe2\]/);
-  assert.match(appShell, /group\.id === "settlement"\s*\?\s*settlementNavigationLabel\(data\.claim\.name\)\s*:\s*group\.label/);
+  assert.match(appShell, /group\.id === "settlement"\s*\?\s*settlementNavigationLabel\(settlementName\)\s*:\s*group\.label/);
   assert.match(productionPage, /title="Craft Monitor"/);
   assert.match(settlementMarketPage, /<h2>\{settlementMarketTitle\(data\.claim\?\.name\)\}<\/h2>/);
 });

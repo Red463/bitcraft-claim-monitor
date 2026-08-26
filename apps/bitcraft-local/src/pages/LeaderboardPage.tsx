@@ -12,12 +12,14 @@ import { formatCompactNumber, formatCurrentSession, formatNumber, formatPlaytime
 import { usePersistedState } from "../hooks/usePersistedState";
 import { memberTrackingKeys } from "../utils/memberIdentity";
 import { normalizeData } from "../utils/normalize";
-import { bitjitaSkillRows, PROFESSION_IDS, skillNameFromRows, skillTier, SKILL_NAMES } from "../utils/professions";
+import { PROFESSION_IDS, skillNameFromRows, skillRows, skillTier, SKILL_NAMES } from "../utils/professions";
 import type { LoadState } from "../types/app";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { resolveAllowedView } from "../navigation/routeState.ts";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
+import { pageRefreshShowsRetainedDataProgress } from "../refresh/pageRefresh.mjs";
+import { addDecimal, compareDecimal, formatExactDecimal } from "../server/game-data/exactDecimal.ts";
 
 const LOCAL_API = "/api/local";
 
@@ -45,6 +47,7 @@ export function Leaderboard({
   access?: EffectiveAccess | null;
 }) {
   const { request, trackPromise } = useManualRefresh();
+  const showRefreshProgress = pageRefreshShowsRetainedDataProgress(request);
   const [state, setState] = React.useState<LoadState<AnyRecord>>({ data: null, error: null, loading: true });
   const [activeTab, setActiveTab] = usePersistedState<LeaderboardTab>("leaderboard.tab", "contribution");
   const [professionFilter, setProfessionFilter] = React.useState("All");
@@ -86,29 +89,30 @@ export function Leaderboard({
     const byProfession = new Map<string, AnyRecord>();
     for (const contributor of contributors) {
       for (const row of contributor.professions ?? []) {
-        const profession = String(row.profession ?? "Unknown");
-        const current = byProfession.get(profession) ?? { profession, totalProgress: 0, totalXp: 0, craftCount: 0, contributorCount: 0, topContributor: "", topContributorProgress: 0 };
-        const progress = toNumber(row.progress);
-        current.totalProgress += progress;
-        current.totalXp += toNumber(row.xp);
-        current.craftCount += toNumber(row.crafts);
+        const profession = String(row.profession ?? "").trim();
+        if (!profession) continue;
+        const current = byProfession.get(profession) ?? { profession, totalProgress: "0", totalXp: "0", craftCount: "0", contributorCount: 0, topContributor: "", topContributorProgress: "0" };
+        const progress = String(row.progress ?? "0");
+        current.totalProgress = addDecimal(String(current.totalProgress), progress);
+        current.totalXp = addDecimal(String(current.totalXp), String(row.xp ?? "0"));
+        current.craftCount = addDecimal(String(current.craftCount), String(row.crafts ?? "0"));
         current.contributorCount += 1;
-        if (progress > current.topContributorProgress) {
+        if (compareDecimal(progress, String(current.topContributorProgress)) > 0) {
           current.topContributor = contributor.name;
           current.topContributorProgress = progress;
         }
         byProfession.set(profession, current);
       }
     }
-    return Array.from(byProfession.values()).sort((a, b) => b.totalProgress - a.totalProgress);
+    return Array.from(byProfession.values()).sort((a, b) => compareDecimal(String(b.totalProgress), String(a.totalProgress)));
   }, [contributors]);
   const summary = React.useMemo(() => ({
     ...(contributionBoard.summary ?? {}),
     contributorCount: contributors.length,
     professionCount: professions.length,
-    totalProgress: contributors.reduce((sum, row) => sum + toNumber(row.totalProgress), 0),
-    totalXp: contributors.reduce((sum, row) => sum + toNumber(row.totalXp), 0),
-    recordedCrafts: contributors.reduce((sum, row) => sum + toNumber(row.craftCount), 0),
+    totalProgress: contributors.reduce((sum, row) => addDecimal(sum, String(row.totalProgress ?? "0")), "0"),
+    totalXp: contributors.reduce((sum, row) => addDecimal(sum, String(row.totalXp ?? "0")), "0"),
+    recordedCrafts: contributors.reduce((sum, row) => addDecimal(sum, String(row.craftCount ?? "0")), "0"),
     lastContributedAt: recent[0]?.lastContributedAt ?? null,
   }), [contributors, contributionBoard.summary, professions.length, recent]);
   const filteredContributors = professionFilter === "All"
@@ -116,7 +120,7 @@ export function Leaderboard({
     : contributors.filter((entry) => entry.professions?.some?.((profession: AnyRecord) => profession.profession === professionFilter));
   const topContributor = contributors[0];
   const topProfession = professions[0];
-  const professionRows = bitjitaSkillRows(data.skills, "Profession");
+  const professionRows = skillRows(data.skills, "Profession");
   const professionIds = professionRows.length ? professionRows.map((skill) => toNumber(skill.id)).filter(Boolean) : PROFESSION_IDS;
   const professionLabel = (id: number) => skillNameFromRows(professionRows, id) || SKILL_NAMES[id] || `Profession ${id}`;
   const citizens: AnyRecord[] = React.useMemo(() => {
@@ -204,10 +208,10 @@ export function Leaderboard({
     <MiniStat key="played" icon={<Trophy />} label="Most Played" value={mostPlayedRow?.timePlayedSeconds ? `${mostPlayedRow.name} - ${formatPlaytime(mostPlayedRow.timePlayedSeconds)}` : "Unavailable"} />,
     <MiniStat key="longest" icon={<Clock />} label="Longest Current Session" value={formatCurrentSession(longestSessionRow?.sessionSeconds) ?? "Unavailable"} />,
   ] : [
-    <MiniStat key="progress" icon={<Trophy />} label="Recorded Contribution" value={formatNumber(summary.totalProgress)} />,
-    <MiniStat key="xp" icon={<TrendingUp />} label="Estimated XP" value={formatNumber(summary.totalXp)} />,
+    <MiniStat key="progress" icon={<Trophy />} label="Recorded Contribution" value={formatExactDecimal(summary.totalProgress)} />,
+    <MiniStat key="xp" icon={<TrendingUp />} label="Estimated XP" value={formatExactDecimal(summary.totalXp)} />,
     <MiniStat key="top" icon={<Users />} label="Top Contributor" value={topContributor?.name ?? "None yet"} />,
-    <MiniStat key="profession" icon={<GraduationCap />} label="Top Profession" value={topProfession?.profession ?? "None yet"} />,
+    <MiniStat key="profession" icon={<GraduationCap />} label="Top Profession" value={topProfession?.profession ?? "—"} />,
   ];
   if (!resolvedTab) return (
     <div className="panel restricted-access-panel">
@@ -219,14 +223,14 @@ export function Leaderboard({
   return (
     <div className="panel leaderboard-page" data-tour="leaderboard-page">
       <header className="members-topbar leaderboard-topbar">
-        <div>
+        <div className="route-title-copy">
           <h2>Leaderboard</h2>
           <p>Compare settlement members across contribution, professions, market history, activity, and online status.</p>
         </div>
         <div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span><Trophy size={14} /> {formatNumber(summary.contributorCount)} contributors</span>
-            <span><Factory size={14} /> {formatNumber(summary.recordedCrafts)} crafts</span>
+            <span><Factory size={14} /> {formatExactDecimal(summary.recordedCrafts)} crafts</span>
             <span>{summary.lastContributedAt ? `Updated ${timeAgo(summary.lastContributedAt)}` : "No history yet"}</span>
           </div>
         </div>
@@ -244,7 +248,7 @@ export function Leaderboard({
       </div>
       <section className="dashboard-card leaderboard-card leaderboard-context">
         <header className="dashboard-card-title"><span>{activeTabMeta.icon} {activeTabMeta.label}</span></header>
-        <p>{currentTab === "activity" || currentTab === "market" ? "This tab uses local recorded settlement history, so it represents what the app has observed and stored for this claim." : currentTab === "professions" ? "This tab uses current BitJita citizen profession data for the monitored settlement." : currentTab === "online" ? "This tab uses current member and player detail data when BitJita provides it." : "This tab uses recorded BitJita craft contribution data observed by the app."}</p>
+        <p>{currentTab === "activity" || currentTab === "market" ? "This tab uses local recorded settlement history, so it represents what the app has observed and stored for this claim." : currentTab === "professions" ? "This tab uses current Relay citizen profession data for the monitored settlement." : currentTab === "online" ? "This tab uses current Relay member and player data." : "This tab uses locally recorded craft contribution data observed by the app."}</p>
       </section>
       {currentTab === "contribution" ? (
       <section className="dashboard-card leaderboard-card">
@@ -257,7 +261,7 @@ export function Leaderboard({
             </select>
           </label>
         </header>
-        {state.loading ? <AsyncState kind="loading" title="Refreshing contribution history" detail="Current standings remain visible while the latest records load." compact /> : null}
+        {state.loading && state.data && showRefreshProgress ? <AsyncState kind="loading" title="Refreshing contribution history" detail="Current standings remain visible while the latest records load." compact /> : null}
         {state.error ? <AsyncState kind="error" title="Leaderboard refresh failed" detail={`Current standings are retained. ${state.error}`} compact /> : null}
         {!state.loading && !contributors.length ? (
           <AsyncState kind="empty" title="No craft contributions recorded yet" detail="The leaderboard fills as settlement craft contribution data is observed during refreshes." />
@@ -269,12 +273,12 @@ export function Leaderboard({
             rows={filteredContributors}
             columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
-              ["Progress", (entry) => formatNumber(entry.totalProgress)],
-              ["Estimated XP", (entry) => formatNumber(entry.totalXp)],
-              ["Crafts", (entry) => formatNumber(entry.craftCount)],
+              ["Progress", (entry) => formatExactDecimal(entry.totalProgress)],
+              ["Estimated XP", (entry) => formatExactDecimal(entry.totalXp)],
+              ["Crafts", (entry) => formatExactDecimal(entry.craftCount)],
               ["Top professions", (entry) => (
                 <div className="leaderboard-profession-tags">
-                {(entry.professions ?? []).slice(0, 3).map((profession: AnyRecord) => <span key={profession.profession}>{profession.profession} <b>{formatNumber(profession.progress)}</b></span>)}
+                {(entry.professions ?? []).slice(0, 3).map((profession: AnyRecord) => <span key={profession.profession}>{profession.profession} <b>{formatExactDecimal(profession.progress)}</b></span>)}
                 </div>
               )],
               ["Last contribution", (entry) => entry.lastContributedAt ? timeAgo(entry.lastContributedAt) : "Unknown", (entry) => timestampMs(entry.lastContributedAt)],
@@ -304,7 +308,7 @@ export function Leaderboard({
               </label>
             </div>
           </header>
-          {!sortedProfessionRows.length ? <AsyncState kind={professionFilter === "All" ? "empty" : "no-match"} title={professionFilter === "All" ? "No profession data available" : "No members match this profession"} detail={professionFilter === "All" ? "Profession levels appear when BitJita returns citizen skill data." : "Choose another profession or show all professions."} /> : (
+          {!sortedProfessionRows.length ? <AsyncState kind={professionFilter === "All" ? "empty" : "no-match"} title={professionFilter === "All" ? "No profession data available" : "No members match this profession"} detail={professionFilter === "All" ? "Profession levels appear when Relay returns citizen skill data." : "Choose another profession or show all professions."} /> : (
             <DataTable rows={sortedProfessionRows} scrollLabel="Profession leaderboard table" emptyState="No profession leaderboard rows were returned." columns={[
               ["Member", (entry) => <strong>{entry.name}</strong>],
               ["Highest profession", (entry) => `${entry.highestProfession} ${formatNumber(entry.highestLevel)}`],
@@ -397,10 +401,10 @@ export function Leaderboard({
               <article key={profession.profession}>
                 <div>
                   <strong>{profession.profession}</strong>
-                  <small>{formatNumber(profession.contributorCount)} contributor{toNumber(profession.contributorCount) === 1 ? "" : "s"} - {formatNumber(profession.craftCount)} craft records</small>
+                  <small>{formatNumber(profession.contributorCount)} contributor{toNumber(profession.contributorCount) === 1 ? "" : "s"} - {formatExactDecimal(profession.craftCount)} craft records</small>
                 </div>
-                <span>{formatNumber(profession.totalProgress)}</span>
-                <em>Top: {profession.topContributor || "Unknown"}</em>
+                <span>{formatExactDecimal(profession.totalProgress)}</span>
+                <em>Top: {profession.topContributor || "—"}</em>
               </article>
             ))}
             {!professions.length ? <div className="empty-state compact"><GraduationCap />No profession totals yet.</div> : null}
@@ -414,9 +418,9 @@ export function Leaderboard({
                 <span className="activity-dot" />
                 <div>
                   <strong>{entry.contributorName}</strong>
-                  <small>{entry.profession || "Unknown profession"} - {entry.craftLabel} at {entry.structureName}</small>
+                  <small>{entry.profession ? `${entry.profession} - ` : ""}{entry.craftLabel} at {entry.structureName}</small>
                 </div>
-                <span>{formatNumber(entry.totalProgress)}</span>
+                <span>{formatExactDecimal(entry.totalProgress)}</span>
                 <time>{entry.lastContributedAt ? timeAgo(entry.lastContributedAt) : "Unknown"}</time>
               </article>
             ))}

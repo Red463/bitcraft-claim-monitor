@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  ACCESS_TAB_GROUPS,
   ACCESS_CONTROL_TARGETS,
   firstAllowedTab,
   normalizeAccessControlConfig,
@@ -28,6 +29,11 @@ test("access control defaults allow public app targets and exclude admin", () =>
   assert.equal(ACCESS_CONTROL_TARGETS.some((target) => target.id === "page:admin"), false);
   assert.equal(publicAccessDecision(config, "page:dashboard", anonymous).allowed, true);
   assert.equal(publicAccessDecision(config, "tab:market:dealWatchlist", anonymous).allowed, true);
+  assert.deepEqual(ACCESS_TAB_GROUPS.empires.map((tab) => tab.id), [
+    "overview",
+    "watchtowers",
+    "deposits",
+  ]);
 });
 
 test("access control evaluates discord, verified, and specific user rules", () => {

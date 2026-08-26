@@ -7,7 +7,7 @@ import { Dialog } from "./Dialog";
 import type { ActivePanel } from "../../types/app";
 import { routeHelpFor } from "../../navigation/routeHelp";
 
-const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor";
+const GITHUB_REPOSITORY = "https://github.com/Red463/bitcraft-claim-monitor-relay";
 const APP_VERSION = packageJson.version;
 const DEFAULT_LEGAL_POLICY = legalPolicyForEnvironment({});
 type AnalyticsConsent = "accepted" | "declined" | null;
@@ -180,7 +180,7 @@ export function DedicatedLegalPage({ type }: { type: "terms" | "privacy" }) {
         </div>
         <footer>
           <span>Questions or privacy requests: <a href={`mailto:${DEFAULT_LEGAL_POLICY.operator.privacyEmail}`}>{DEFAULT_LEGAL_POLICY.operator.privacyEmail}</a>.</span>
-          <span>Data provided by the <a href="https://bitjita.com/docs/api">BitJita API</a>. Source available on <a href={GITHUB_REPOSITORY}>GitHub</a>.</span>
+          <span>Current game data, completed-sale evidence, and live craft-contribution events are provided by <a href="https://relay.bitcraftsync.app/">BitCraft Relay</a>. Source available on <a href={GITHUB_REPOSITORY}>GitHub</a>.</span>
           <span>Application version {APP_VERSION} · {isTerms ? <a href="/privacy">Read the Privacy Policy</a> : <a href="/terms">Read the Terms of Service</a>}</span>
         </footer>
       </article>

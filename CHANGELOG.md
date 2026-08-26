@@ -9,6 +9,1036 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.63.0-beta.8] - 2026-08-26
+
+### Added
+
+- Added a protected workflow for installing the isolated public Discord OAuth credentials without enabling the public profile or collaboration.
+
+### Security
+
+- Added atomic credential rollback, running-process verification, worker isolation, and disabled-gate enforcement for public OAuth credential installation.
+
+## [0.63.0-beta.7] - 2026-08-26
+
+### Fixed
+
+- Fixed public Caddy acceptance to require the actual permanent redirect status emitted by the reviewed configuration.
+
+## [0.63.0-beta.6] - 2026-08-26
+
+### Fixed
+
+- Fixed production validation of temporary public Caddy candidates by explicitly selecting the Caddyfile adapter.
+
+## [0.63.0-beta.5] - 2026-08-26
+
+### Fixed
+
+- Fixed public Caddy admission for the existing Timbersteel loopback proxy while retaining strict reviewed headers on the new public host.
+
+## [0.63.0-beta.4] - 2026-08-26
+
+### Fixed
+
+- Fixed the protected public Caddy workflow so approval remains separate while deployment uses the existing Relay SSH environment.
+
+## [0.63.0-beta.3] - 2026-08-26
+
+### Added
+
+- Added a protected, revision-bound workflow for the one-time `claim-monitor.com` Caddy bootstrap with validation, root-only backup, idempotent routing, health verification, and automatic rollback.
+
+## [0.63.0-beta.2] - 2026-08-26
+
+### Fixed
+
+- Fixed internal deployment and recovery health probes after introducing the exact production host boundary.
+
+## [0.63.0-beta.1] - 2026-08-26
+
+### Added
+
+- Added a separate Claim Monitor public profile where visitors can find settlements and view current overview, member, inventory, craft, catalogue, recipe, icon, and calculator data on demand.
+- Added isolated public Discord accounts and collaborative craft plans with owner, editor, viewer, invitation, anonymous sharing, revision, archive, transfer, clone, export, deletion, and retention workflows.
+- Added Public service health, moderation, capability revocation, and privacy operations to the existing Timbersteel Admin console.
+
+### Changed
+
+- Extended the existing single web deployment to serve `app.timbersteeltrade.com` and `claim-monitor.com` as isolated host profiles while retaining the existing Timbersteel worker, database, history, notifications, Discord, Admin, bot, plans, cookies, and browser preferences.
+- Added staged public-service rollout and non-destructive rollback controls, with the public profile and collaboration disabled by default.
+- Published separate Claim Monitor legal and privacy behavior covering anonymous Relay lookups, public accounts, plans, sharing links, exports, deletion, moderation, and retention.
+
+### Security
+
+- Enforced exact host, origin, CSRF, session, OAuth callback, guild, configured-claim, and cross-profile API boundaries before sensitive session or application work.
+- Isolated public accounts, cookies, legal acceptance, plans, HMAC-protected bearer links, rate limits, caches, audit events, and privacy recovery from Timbersteel administration and operational data.
+- Restricted owner-role changes to existing owners, protected the final active owner, and prevented public plan owners from overriding administrator suspensions.
+
+## [0.62.0-beta.20] - 2026-08-25
+
+### Fixed
+
+- Prevented valid closed market listings from producing false missing-settlement warnings when their settlement or seller had no active order.
+
+## [0.62.0-beta.19] - 2026-08-25
+
+### Changed
+
+- Tightened the Global Market command bar and aligned its region and freshness controls.
+- Restyled Global Market map actions to match the application control system.
+
+### Fixed
+
+- Kept the configured settlement name visible in the sidebar when navigating to pages that do not load settlement data.
+
+## [0.62.0-beta.18] - 2026-08-25
+
+### Fixed
+
+- Prevented the Global Market from warning that the catalog runtime is stopped when a healthy worker heartbeat is available.
+
+## [0.62.0-beta.17] - 2026-08-25
+
+### Fixed
+
+- Prevented the web process from reporting healthy worker-owned Market subscriptions as stale or disconnected.
+
+## [0.62.0-beta.16] - 2026-08-25
+
+### Changed
+
+- Expanded Global Market region selection to every Relay-ready region.
+- Replaced recoverable regional warm-up warnings with a compact neutral live-data status.
+
+### Fixed
+
+- Reconnected failed regional market sessions automatically and kept healthy regional feeds subscribed.
+- Prevented valid all-region market data from exceeding legacy order and listing safety limits.
+- Reserved Global Market error alerts for genuine source failures while retaining last-good data during recovery.
+
+## [0.62.0-beta.15] - 2026-08-25
+
+### Changed
+
+- Clarified Global Market pricing with in-game sell-order and buy-order terminology.
+- Renamed trading route columns to “Buy from” and “Sell to” so each step describes the action to take.
+
+## [0.62.0-beta.14] - 2026-08-25
+
+### Changed
+
+- Added semantic ask, bid, spread, and profit colours throughout the Global Market workspaces.
+- Consolidated degraded Global Market messaging into a compact expandable alert.
+
+### Fixed
+
+- Prevented healthy live regional market sessions from being reported as stale solely because their retained snapshot is old.
+- Prevented Global Market search suggestions from reopening after an item is selected and live data refreshes.
+
+## [0.62.0-beta.13] - 2026-08-25
+
+### Fixed
+
+- Removed the duplicate divider beneath the Dashboard settlement status.
+- Fixed overlapping titles and descriptions in the command search popup.
+
+## [0.62.0-beta.12] - 2026-08-25
+
+### Fixed
+
+- Fixed GitHub registration of the scheduled Relay schema-drift workflow so its manual and scheduled triggers run correctly.
+
+## [0.62.0-beta.11] - 2026-08-25
+
+### Added
+
+- Added scheduled Relay schema-drift detection that prepares a pinned, tested bindings update for review without auto-merging or auto-deploying it.
+
+### Fixed
+
+- Restored live global region data after validating the current Relay global schema against regenerated bindings.
+- Prevented deployments from publishing bindings that no longer match either live Relay schema.
+
+## [0.62.0-beta.10] - 2026-08-25
+
+### Changed
+
+- Consolidated Map freshness messaging into its health/status surface instead of repeating stale-catalog warnings inside the Resource Finder.
+
+### Fixed
+
+- Removed the continuous backing strip behind the Map filter controls and made Map tool windows fully opaque on desktop and mobile.
+
+## [0.62.0-beta.9] - 2026-08-25
+
+### Changed
+
+- Rebalanced the Obsidian Ledger palette to neutral graphite blacks, removing the unintended green-gold cast while retaining gold for deliberate accents.
+
+### Fixed
+
+- Migrated Market and Bot/Admin views using either earlier built-in palette to the corrected neutral default without replacing custom themes.
+
+## [0.62.0-beta.8] - 2026-08-25
+
+### Changed
+
+- Applied the Obsidian Ledger neutral palette, sharper panel geometry, and flatter operational surfaces across the maintained application and Bot/Admin views.
+- Replaced repeated page-title heroes with the contextual title in the application utility bar.
+- Simplified the application footer into a quieter provenance and support strip.
+
+### Fixed
+
+- Migrated browsers using the previous built-in theme to the new Obsidian default while preserving deliberately customised themes.
+- Fixed Global Market warnings overflowing its compact command panel and removed obsolete floating-tool styling.
+
+## [0.62.0-beta.7] - 2026-08-25
+
+### Fixed
+
+- Improved the Local Market command panel on phones so its section label and explainer remain easy to scan.
+
+## [0.62.0-beta.6] - 2026-08-24
+
+### Fixed
+
+- Fixed the shared desktop table minimum width overriding Global Market’s mobile regional-price cards.
+
+## [0.62.0-beta.5] - 2026-08-24
+
+### Fixed
+
+- Fixed live Global Market item details retaining a wide intrinsic grid track on phones after the outer workspace had collapsed.
+
+## [0.62.0-beta.4] - 2026-08-24
+
+### Fixed
+
+- Improved the selected Global Market item header on phones so navigation, identity, and actions no longer compete for one cramped row.
+
+## [0.62.0-beta.3] - 2026-08-24
+
+### Fixed
+
+- Fixed the selected Global Market instrument being clipped on phones when live order data widened its implicit grid track.
+
+## [0.62.0-beta.2] - 2026-08-24
+
+### Fixed
+
+- Fixed regional price comparisons showing “Unknown region” when live orders supplied a region ID without an optional region name.
+
+## [0.62.0-beta.1] - 2026-08-24
+
+### Added
+
+- Added contextual workspace modes and an anchored application utility bar across the maintained app.
+- Added a regional best-price comparison book to Global Market item browsing.
+- Added a health-and-exceptions summary to the Discord Bot and Admin console.
+
+### Changed
+
+- Refreshed the whole application with the Obsidian Ledger visual system for denser, clearer settlement operations.
+- Reworked Dashboard into a settlement command centre that prioritises current health and exceptions.
+- Reworked Global Market into a search-first split exchange with persistent catalogue context and a mobile drill-in flow.
+- Improved Map immersion, mobile regional-price scanning, responsive page density, and selected-item clarity.
+
+## [0.61.1-beta.1] - 2026-08-23
+
+### Fixed
+
+- Fixed huntable animals missing their images and live map nodes.
+
+## [0.61.0-beta.1] - 2026-08-23
+
+### Added
+
+- Added a decision-first global Market workspace with Overview, Browse, Opportunities, Saved, and Stalls views.
+- Added sortable price, spread, availability, and order-count signals to global market browsing.
+
+### Changed
+
+- Improved global market discovery with preserved search context, accessible price history, compact opportunity and depth summaries, and responsive navigation.
+- Combined saved items and deal watches with direct watch setup from item details.
+- Improved market freshness, warning visibility, large-price accuracy, and keyboard navigation.
+
+## [0.60.1-beta.1] - 2026-08-23
+
+### Fixed
+
+- Removed the internal mixed-generation provenance banner from ordinary pages while retaining meaningful stale, partial, and unavailable data warnings.
+
+## [0.60.0-beta.1] - 2026-08-22
+
+### Added
+
+- Added per-domain generation and coherence diagnostics so mixed or stale Relay data is visible instead of silently combined.
+- Added bounded route-performance telemetry, trusted-proxy handling, and report-only request-limit profiles for the heaviest local API routes.
+- Added durable restart-safe market-transition dispatch and leased Discord delivery with explicit at-least-once diagnostics.
+- Added fail-safe operational-history retention previews and verified-backup readiness checks; deletion remains disabled with an empty approved-table allowlist and no prune route.
+- Added an in-depth whole-app developer guide, Relay/backend audit, implementation plan, and PDF handoff document.
+
+### Changed
+
+- Reduced page refresh work with claim-scoped generations, domain-aware invalidation, exact history ownership, and a bounded navigation cache.
+- Batched favorite market quotes into one scoped request and preserved catalog labels while substantially reducing response size and projection work.
+- Consolidated startup data into one provider-neutral bootstrap request and reused accessible shared dialogs for popup workflows.
+- Improved game-data handling with explicit empty-domain completion, exact dependency generations, and complete six-domain publication including buildings.
+- Refreshed the global Relay schema fingerprint against the current live schema while retaining the generated binding set after byte-equivalence verification.
+
+### Fixed
+
+- Fixed stale request completions, generation retry priority, hidden-tab recovery, and cleanup races that could leave pages on the wrong claim or generation.
+- Fixed protected Bot controls and Deal Watch authentication state so admin settings fail closed and expired sessions cannot retain mutation controls.
+- Fixed operational-history rollup boundaries, migration ordering, ingestion membership, backup artifact binding, and partial-prune failure handling.
+
+### Security
+
+- Isolated enforced rate-limit state from report-only traffic and bounded its memory use without trusting spoofed forwarded client addresses.
+- Kept Discord secrets, protected settings, schema response bodies, credentials, and request identifiers out of public diagnostics and telemetry.
+
+## [0.59.0-beta.1] - 2026-08-21
+
+### Added
+
+- Added immediate locating and highlighting for newly selected map resources as soon as the first matching position is available.
+
+### Changed
+
+- Improved map resource loading and warm reselection by prioritizing useful results, bounding background work, and reusing recently decoded resource data.
+- Improved map responsiveness by batching resource drawing and keeping claim, watchtower, focus, and player markers stable during resource updates.
+- Replaced the verified-character halo with a compact diamond marker.
+
+### Fixed
+
+- Fixed stale saved region selections unexpectedly broadening to every ready region.
+- Fixed cancelled, superseded, closed, or restarted resource streams applying obsolete results.
+
+## [0.58.0-beta.4] - 2026-08-21
+
+### Changed
+
+- Adjusted resource-marker density by zoom so distant map views remain readable while close views stay precise.
+
+## [0.58.0-beta.3] - 2026-08-21
+
+### Fixed
+
+- Fixed nearby resource-node clusters being thinned by nodes outside the visible map area.
+
+## [0.58.0-beta.2] - 2026-08-21
+
+### Fixed
+
+- Fixed explicit admin deep links repeatedly switching between the saved tab and requested tab.
+
+## [0.58.0-beta.1] - 2026-08-21
+
+### Added
+
+- Added direct links to every admin section and a compact admin workspace header.
+- Added configuration categories with unsaved-change indicators and clearer save controls.
+- Added mobile navigation for Discord administration sections.
+- Added a loopback-only, read-only admin review mode for authenticated smoke testing without Discord.
+
+### Changed
+
+- Reorganized admin health information by severity and made dashboard status easier to scan.
+- Improved responsive admin tables, workflow summaries, and confirmation dialogs.
+- Reduced the admin authentication loading delay and clarified unavailable Discord configuration states.
+
+### Fixed
+
+- Fixed Discord Role Panel default emoji values.
+- Prevented destructive admin actions from relying on browser-native confirmation prompts.
+
+## [0.57.1-beta.6] - 2026-08-20
+
+### Fixed
+
+- Fixed buyer attribution for newly confirmed Local Market sales.
+
+## [0.57.1-beta.5] - 2026-08-18
+
+### Fixed
+
+- Fixed simultaneous cold map resource subscriptions repeatedly blocking normal site requests while their regional data was seeded.
+
+## [0.57.1-beta.4] - 2026-08-18
+
+### Fixed
+
+- Fixed tracked map resources remaining stuck in the loading state when their live partition was already cached.
+
+## [0.57.1-beta.3] - 2026-08-17
+
+### Changed
+
+- Simplified the verified-character map marker to a compact halo without a text badge.
+
+## [0.57.1-beta.2] - 2026-08-17
+
+### Added
+
+- Added a prominent `ME` label and halo to the live map marker for an approved linked character.
+- Added custom colours for tracked player markers, synced to signed-in accounts with a browser-local fallback.
+
+## [0.57.1-beta.1] - 2026-08-17
+
+### Changed
+
+- Refreshed Relay bindings for the current global and regional game schemas.
+
+### Fixed
+
+- Made road generation report Relay schema drift directly instead of a misleading empty-region error.
+
+## [0.57.0-beta.4] - 2026-08-16
+
+### Changed
+
+- Updated the map watchtower marker artwork.
+
+## [0.57.0-beta.3] - 2026-08-16
+
+### Fixed
+
+- Kept the map's dedicated-tab button clear of the expanded floating tools.
+- Prevented live map updates from closing Resource Finder dropdown menus.
+
+## [0.57.0-beta.2] - 2026-08-16
+
+### Fixed
+
+- Kept the dedicated map edge to edge at narrow screen widths.
+
+## [0.57.0-beta.1] - 2026-08-16
+
+### Added
+
+- Added a dedicated edge-to-edge map view that opens in a new browser tab.
+
+### Changed
+
+- Expanded the standard map by removing its introductory banner.
+
+## [0.56.1-beta.1] - 2026-08-16
+
+### Changed
+
+- Renamed the Public Craft Finder skill filter to Profession.
+
+### Fixed
+
+- Restored Public Craft Finder profession filtering after the Relay migration.
+
+## [0.56.0-beta.5] - 2026-08-16
+
+### Fixed
+
+- Fixed verified off-box map-pack installation and allowed the capable deployment updater to self-update during normal releases.
+
+## [0.56.0-beta.4] - 2026-08-16
+
+### Fixed
+
+- Fixed scheduled off-box map generation startup so road and terrain refreshes can run without VPS CPU load.
+
+## [0.56.0-beta.3] - 2026-08-16
+
+### Fixed
+
+- Fixed CI-built release installation so the secured artifact can be extracted without rebuilding on the VPS.
+
+## [0.56.0-beta.2] - 2026-08-16
+
+### Fixed
+
+- Fixed the scheduled off-box map generator so GitHub can start terrain and road jobs successfully.
+
+## [0.56.0-beta.1] - 2026-08-16
+
+### Added
+
+- Added per-service CPU attribution to server health diagnostics for the web app, worker, Caddy, and map generators.
+
+### Changed
+
+- Moved terrain and road generation to scheduled GitHub Actions jobs so normal VPS traffic is not competing with large generation workloads.
+- Changed production deployments to install verified CI build outputs instead of compiling the application again on the VPS.
+
+### Fixed
+
+- Capped fallback VPS map-generation CPU, worker concurrency, and runtime while preserving the last-good map when a generation fails.
+
+## [0.55.0-beta.45] - 2026-08-15
+
+### Changed
+
+- Matched tracked resource pills to their resource marker colours for easier identification.
+
+## [0.55.0-beta.44] - 2026-08-15
+
+### Added
+
+- Added a saved Debug information option in Map Layers for showing generation details and canvas-point diagnostics only when needed.
+
+### Changed
+
+- Gave tierless resources stable, distinguishable map colours independent of selection order.
+
+### Fixed
+
+- Included resource-description artwork in the self-hosted game-icon acquisition workflow so resource finder entries can display their icons.
+
+## [0.55.0-beta.43] - 2026-08-14
+
+### Fixed
+
+- Started every validated region/resource partition independently so one dense resource cannot delay the others.
+
+## [0.55.0-beta.42] - 2026-08-14
+
+### Fixed
+
+- Improved cold all-region resource loading by opening each selected region in parallel.
+
+## [0.55.0-beta.41] - 2026-08-14
+
+### Added
+
+- Added near-live binary resource loading for dense selections across multiple regions.
+
+### Changed
+
+- Improved resource loading speed by caching compact coordinate partitions and updating only resources that changed.
+
+### Fixed
+
+- Removed the resource node-count failure that prevented very dense resources from loading.
+- Fixed new resource selections reloading or hiding resources that were already complete.
+
+## [0.55.0-beta.40] - 2026-08-14
+
+### Fixed
+
+- Kept claims, watchtowers, player markers, and map tooltips visible above dense resource nodes.
+
+## [0.55.0-beta.39] - 2026-08-14
+
+### Fixed
+
+- Matched the synthetic world-ocean background to the deep ocean used by generated terrain, removing abrupt colour blocks around temporary regions.
+
+## [0.55.0-beta.38] - 2026-08-14
+
+### Fixed
+
+- Fixed road generation for dense regions whose point counts exceed JavaScript's function-argument limit.
+
+## [0.55.0-beta.37] - 2026-08-14
+
+### Fixed
+
+- Preserved exact secret-safe road storage diagnostics through nested generation errors.
+
+## [0.55.0-beta.36] - 2026-08-14
+
+### Fixed
+
+- Prevented best-effort road staging cleanup from masking the primary generation failure.
+
+## [0.55.0-beta.35] - 2026-08-14
+
+### Fixed
+
+- Covered road bundle preflight and manifest construction in exact secret-safe generation diagnostics.
+
+## [0.55.0-beta.34] - 2026-08-14
+
+### Fixed
+
+- Added exact secret-safe operation diagnostics inside per-region road bundle storage.
+
+## [0.55.0-beta.33] - 2026-08-14
+
+### Fixed
+
+- Preserved the allow-listed road batch failure reason when Node omits nested error details from service journals.
+
+## [0.55.0-beta.32] - 2026-08-14
+
+### Fixed
+
+- Added secret-safe reason diagnostics for failed per-region road bundle installation.
+
+## [0.55.0-beta.31] - 2026-08-14
+
+### Fixed
+
+- Distinguished the exact secret-safe filesystem stage when road map generation fails.
+
+## [0.55.0-beta.30] - 2026-08-14
+
+### Fixed
+
+- Added deterministic, secret-safe stage diagnostics for failed road map generation.
+
+## [0.55.0-beta.29] - 2026-08-14
+
+### Fixed
+
+- Expanded secret-safe road failure classification to distinguish memory, Relay subscription, connection, module, storage, renderer, lock, and implementation failures.
+
+## [0.55.0-beta.28] - 2026-08-14
+
+### Fixed
+
+- Added secret-safe road generator diagnostics when a protected generation run fails.
+
+## [0.55.0-beta.27] - 2026-08-14
+
+### Fixed
+
+- Reused the cached Relay-ready region catalog so map requests no longer rebuild full provider health on every response.
+
+## [0.55.0-beta.26] - 2026-08-14
+
+### Fixed
+
+- Removed the fixed two-second delay from claim-only map snapshots while regional claim data hydrates in the background.
+
+## [0.55.0-beta.25] - 2026-08-14
+
+### Fixed
+
+- Kept the map responsive by releasing the large Relay resource cache after each bounded position refresh.
+- Removed unnecessary Relay readiness waits from claim, watchtower, and other non-resource map snapshots.
+
+## [0.55.0-beta.24] - 2026-08-14
+
+### Changed
+
+- Improved failed deployment diagnostics without exposing remote logs or secrets.
+
+## [0.55.0-beta.23] - 2026-08-14
+
+### Fixed
+
+- Fixed the map retaining an empty regional resource connection when no resources are being tracked.
+
+## [0.55.0-beta.22] - 2026-08-14
+
+### Fixed
+
+- Fixed installed map status and tile requests repeatedly parsing the full terrain file ledger.
+
+## [0.55.0-beta.21] - 2026-08-14
+
+### Fixed
+
+- Reduced live resource subscription memory and network pressure by enabling the Relay SDK's light mode.
+
+## [0.55.0-beta.20] - 2026-08-14
+
+### Fixed
+
+- Fixed repeated map tile requests re-reading and hashing an unchanged installed terrain manifest.
+
+## [0.55.0-beta.19] - 2026-08-14
+
+### Fixed
+
+- Fixed fresh server starts stalling when many terrain tiles simultaneously opened the installed map pack.
+
+## [0.55.0-beta.18] - 2026-08-14
+
+### Added
+
+- Filled the native map's ungenerated world-corner gaps with a lightweight ocean underlay that follows the canonical water palette.
+
+## [0.55.0-beta.17] - 2026-08-14
+
+### Changed
+
+- Added the allow-listed road generator failure category to deployment logs for automated diagnosis while continuing to suppress raw VPS output.
+
+## [0.55.0-beta.16] - 2026-08-14
+
+### Changed
+
+- Added the privacy-safe road generator failure category to deployment summaries while continuing to suppress raw VPS output and journals.
+
+## [0.55.0-beta.15] - 2026-08-14
+
+### Changed
+
+- Added privacy-safe native-map generator failure categories so production road failures can be diagnosed without exposing raw Relay rows, entity IDs, or coordinates.
+
+## [0.55.0-beta.14] - 2026-08-14
+
+### Fixed
+
+- Fixed terrain, road, and pack-verifier CLIs so production execution through the active-release symlink actually runs instead of returning a false success.
+
+## [0.55.0-beta.13] - 2026-08-14
+
+### Changed
+
+- Extended redacted native-map diagnostics to verify effective terrain and road unit paths and detect release-local pack output.
+
+## [0.55.0-beta.12] - 2026-08-14
+
+### Fixed
+
+- Fixed the production native-map directory pin for deployments whose application root includes a different textual path form.
+
+## [0.55.0-beta.11] - 2026-08-14
+
+### Fixed
+
+- Fixed protected terrain and road generation so production validators cannot inherit a different data directory from the web service and generation units.
+
+## [0.55.0-beta.10] - 2026-08-14
+
+### Fixed
+
+- Fixed protected native-map diagnostics so they run through the existing restricted updater without requiring broader deployment-host permissions.
+
+## [0.55.0-beta.9] - 2026-08-14
+
+### Changed
+
+- Added redacted native-map deployment diagnostics that compare installed packs with local and canonical serving without exposing map selections or coordinates.
+
+## [0.55.0-beta.8] - 2026-08-13
+
+### Fixed
+
+- Fixed native map generation verification so only hashed installed packs that the live web service can read and serve are accepted, with the production data directory pinned at process launch.
+
+## [0.55.0-beta.7] - 2026-08-13
+
+### Changed
+
+- Improved native map resource loading so dense selections page progressively across every Relay-ready region without a global 50,000-node limit.
+- Moved slow-changing terrain, water, and roads to verified pre-generated tile packs with atomic last-good installation and off-peak schedules.
+- Changed application deployments to preserve the installed map packs; full-world terrain and road generators now activate replacements independently after complete validation.
+- Added a protected full-world map generation workflow that runs terrain and roads sequentially under systemd memory limits, verifies both packs, and then enables their off-peak schedules.
+- Added aggregate map performance and reliability diagnostics for tiles, resource partitions, queue pressure, and generation latency without exposing tracked selections or coordinates.
+
+### Fixed
+
+- Fixed full-world terrain and road coverage so zoomed-out maps remain detailed without generating tiles during normal web requests.
+- Fixed resource generation processing to normalize each regional update once and retain usable partitions while other regions continue loading.
+- Prevented invalid tile-pack pointers, failed generations, and overloaded resource subscriptions from replacing last-good map data.
+- Prevented incomplete bundled maps, schema-mismatched resource regions, malformed tile manifests, and incomplete road joins from being advertised or activated.
+
+## [0.55.0-beta.6] - 2026-08-13
+
+### Fixed
+
+- Made native map artifact installation part of the root-owned transactional application updater instead of an unreliable second remote deployment phase.
+
+## [0.55.0-beta.5] - 2026-08-13
+
+### Fixed
+
+- Fixed live installation of the verified native map terrain, water, biome, and road bundle by transferring it directly and installing it with the required production ownership.
+
+## [0.55.0-beta.4] - 2026-08-13
+
+### Fixed
+
+- Shipped the accepted pre-generated native map terrain, water, biome masks, and Region 19 roads as a verified static release artifact, avoiding memory-heavy generation on the live server.
+
+## [0.55.0-beta.3] - 2026-08-13
+
+### Fixed
+
+- Installed the pre-generated world terrain, water, and Region 19 road overlays during production deployment so the native map does not fall back to an empty coordinate grid.
+
+## [0.55.0-beta.2] - 2026-08-13
+
+### Fixed
+
+- Made the native map the only Map-page renderer and removed the legacy iframe, renderer setting, and selection-bearing external map URLs.
+
+## [0.55.0-beta.1] - 2026-08-13
+
+### Added
+
+- Added a first-party native BitCraft map with self-hosted terrain, water, roads, biome highlighting, claim and NPC-town markers, watchtowers, waypoints, and live player tracking.
+- Added multi-region resource tracking with tier-based marker colours, stable variations, viewport-efficient rendering, and Relay-backed live updates.
+- Added integrated Layers, Biomes, Players, Resources, and Region controls that preserve selections and work across desktop and mobile layouts.
+
+### Changed
+
+- Replaced selection-bearing third-party map requests with provider-neutral, same-origin map snapshots and event streams.
+- Expanded the Region selector so claim markers and selected resources load from every Relay-ready region, including an all-regions view.
+- Pre-generates slow-changing world terrain and water while keeping roads, players, and resources on bounded live update paths.
+
+### Fixed
+
+- Fixed stale, partial, oversized, and cold resource selections so usable last-good results remain visible while updated regions load.
+- Fixed regional claim filtering, native marker layering, low-zoom terrain coverage, biome decoding, and mobile map-tool layout.
+
+## [0.54.1-beta.1] - 2026-08-11
+
+### Fixed
+
+- Prevented regular page refreshes from replacing unsaved changes in the open Craft Plan manager.
+
+## [0.54.0-beta.1] - 2026-08-11
+
+### Added
+
+- Added individual Craft Planning bank tracking for each settlement player, including progressive discovery, search, filtering, and tracked-empty bank visibility.
+
+### Changed
+
+- Enlarged and rebalanced the Craft Planning manager for clearer desktop, laptop, and mobile use.
+
+## [0.53.2-beta.3] - 2026-08-11
+
+### Fixed
+
+- Restored Craft Planning completion percentages and Discord progress reports after the Relay catalog migration.
+
+## [0.53.2-beta.2] - 2026-08-10
+
+### Changed
+
+- Simplified Craft Monitor contributor rows to show only who contributed, progress, and XP.
+
+## [0.53.2-beta.1] - 2026-08-10
+
+### Fixed
+
+- Fixed Craft Monitor contribution attribution when Relay consumes a successful craft action in the same transaction as progress.
+
+## [0.53.1-beta.1] - 2026-08-10
+
+### Fixed
+
+- Restored Craft Monitor contribution recording for current Relay craft reducer events.
+
+## [0.53.0-beta.1] - 2026-08-10
+
+### Added
+
+- Added the Featurebase in-app messenger with a dark, right-aligned English launcher.
+- Added signed Featurebase identity for Discord users while preserving anonymous visitor support.
+- Added a guarded dry-run and manifest workflow for repairing broken production branding assets without accepting unsafe paths or stale database state.
+
+### Changed
+
+- Made Recent Siege Outcomes collapsed by default and retained each user's preferred expanded state.
+- **Operator action required:** after deploying this release, run the guarded contribution-attribution and branding-asset repair procedure in `DEPLOYMENT.md`; keep all writers and real Discord delivery stopped, retain the exact dry-run manifests beside a decrypt-verified encrypted backup, verify SQLite integrity and service-owned branding metadata, then restart in the persistent no-send maintenance mode and confirm Relay generation advancement. Leave both maintenance drop-ins installed until a separately approved live Discord restart.
+
+### Security
+
+- Cleared Featurebase identity and messenger state when users sign out or delete their account.
+
+### Fixed
+
+- Fixed a blank page caused by a circular production bundle dependency after the Featurebase integration.
+- Allowed the Featurebase Messenger resources required by the production Content Security Policy.
+- Fixed craft contributions being credited to the craft owner when Relay did not provide exact contributor evidence.
+- Corrected regional settlement rankings by excluding neutral starter towns and deriving tiers from learned claim technology.
+- Restored Dashboard online-member locations from confirmed presence regions.
+- Restored Resource Finder item images and bundled logo and favicon fallbacks when configured assets are unavailable.
+- Ensured root-run branding repair preserves safe service-account ownership and modes across staging, recovery, and final publication.
+
+## [0.52.0-beta.1] - 2026-08-09
+
+### Added
+
+- Added canonical cutover preparation with a typed hostname confirmation, a maintenance gate, encrypted recovery artifacts, a 15-minute abort watchdog, and post-admission monitoring.
+
+### Changed
+
+- Prepared guarded account and configuration migration so supported accounts, character links, access settings, preferences, market watches, planning configuration, branding, legal acceptance, and Discord tools carry across while everyone must sign in again.
+- Made the Relay-backed app the canonical application and redirected the Relay host while preserving path and query details.
+- Limited live Discord ownership to one Relay worker gateway and delayed the custom migration notice until the canonical app passes its 30-minute intensive soak.
+- Retained the stopped and masked legacy installation for a 14-day forensic window; deletion requires separate approval and a final encrypted archive.
+
+### Security
+
+- Added fail-closed deployment validation for preview and canonical runtime settings, including the approved OAuth callback, legal confirmation, privacy-ledger merge/replay, and previous-key rotation protection.
+- Added a selective migration boundary that preserves Relay game/history data, migrates only approved identity and operational configuration, and revokes every existing session for forced re-login.
+- Reduced public health output to safe deployment readiness and release metadata.
+
+## [0.51.0-beta.9] - 2026-08-09
+
+### Added
+
+- Added a guarded dry-run and manifest workflow for repairing contribution professions only when exact stored craft evidence is available.
+- Added compact, accessible refresh warning details beside the Last Refresh indicator.
+
+### Changed
+
+- Made global Market open on an alphabetical item search with live best buy and sell summaries.
+- Made Profession Capability collapsible and alphabetized profession and skill columns.
+- Displayed Current Gear and every saved member equipment preset without truncation.
+
+### Fixed
+
+- Fixed contribution professions being classified as unknown when Relay supplies camel-case skill IDs.
+- Resolved Public Craft Finder names across regions and kept unchanged connected subscriptions fresh without snapshot rewrites.
+- Kept Public Craft Finder disconnects stale until a replacement authoritative snapshot is applied.
+
+## [0.51.0-beta.8] - 2026-08-09
+
+### Fixed
+
+- Restored reliable regional-claims refreshes by replacing excessive owner subscription fan-out with one bounded authoritative subscription.
+- Kept saved-data warnings active until a replacement regional snapshot commits successfully after a disconnect.
+
+## [0.51.0-beta.7] - 2026-08-08
+
+### Changed
+
+- Made Craft Monitor the only near-live page while ordinary pages refresh on their configured interval without flickering progress indicators.
+- Sorted online members first by longest current session, followed by recently seen offline members and unavailable presence.
+- Simplified Craft Monitor contributor and visibility copy for settlement users.
+
+### Fixed
+
+- Resolved the monitored settlement's player-facing region name on Dashboard instead of showing `Unknown`.
+- Coordinated each page's main and auxiliary data under one refresh cycle with hidden-tab catch-up and last-good-data preservation.
+
+## [0.51.0-beta.6] - 2026-08-08
+
+### Fixed
+
+- Fixed nonzero numbered Relay recipe placeholders such as `Tan {1}` appearing in Craft Monitor.
+
+## [0.51.0-beta.5] - 2026-08-08
+
+### Added
+
+- Added a bounded same-origin icon fallback for verified BitJita item and cargo images when a Relay catalog asset is unavailable locally.
+
+### Changed
+
+- Consolidated Research into Completed Technology and Available Research while keeping locked technologies visible with prerequisite status.
+
+### Fixed
+
+- Fixed missing local game icons returning the frontend HTML shell instead of a 404 response.
+
+## [0.51.0-beta.4] - 2026-08-08
+
+### Changed
+
+- Unified Dashboard and Craft Monitor output names, recipe labels, and icons while preserving separate item and cargo identities.
+- Grouped passive crafts only when member, output, structure, and status all match.
+- Limited contribution rankings to exact player attribution and exposed retained historical unknown events only as an admin diagnostic count.
+
+### Fixed
+
+- Replaced unresolved craft recipe placeholders with the catalog output name.
+- Added exact craft-owner fallback when reducer or player-action attribution is unavailable or ambiguous.
+- Safely migrated contribution confidence values and rebuilt aggregates only from stored exact evidence.
+
+## [0.51.0-beta.3] - 2026-08-08
+
+### Changed
+
+- Added accurate cross-region presence details for monitored members while keeping unavailable presence explicit.
+- Kept missing regional owner usernames as local Region coverage diagnostics instead of global refresh warnings.
+- Clarified whether saved data is actively refreshing or live refresh is unavailable.
+
+### Fixed
+
+- Fixed member status timestamps preferring last login over newer Relay last-active data.
+- Prevented members outside the primary region from being reported as offline or as a global data-loss warning.
+
+## [0.51.0-beta.2] - 2026-08-08
+
+### Added
+
+- Added a guarded dry-run and hash-verified repair tool for removing market history proven to belong to another claim.
+
+### Changed
+
+- Made Relay worker reconciliation non-overlapping, time-bounded, and automatically recoverable after subscription disconnects.
+- Made the claim-market subscription the sole writer of settlement market history while regional market data continues powering tools and Deal Watch.
+
+### Fixed
+
+- Rejected mixed or foreign-claim market snapshots before they can write history, activity, trades, or notifications.
+- Preserved item and cargo identity in market history and aligned Dashboard income, Revenue by Day, and Best Sellers to the same selected-period trade semantics.
+
+## [0.51.0-beta.1] - 2026-08-02
+
+### Added
+
+- Added a Craft Monitor control for showing private settlement crafts, with private crafts hidden by default.
+- Added locally observed craft contribution attribution with authoritative, inferred, and unknown contributor states.
+
+### Changed
+
+- Displayed craft XP as whole in-game values while retaining exact Relay calculation rates internally.
+- Identified contribution history by its local observation start so the UI does not imply older coverage.
+
+### Fixed
+
+- Fixed valid fractional Relay XP rates triggering incomplete-data warnings.
+- Fixed Craft Monitor contribution progress and contributor names not appearing from live Relay activity.
+
+## [0.50.0-beta.5] - 2026-08-02
+
+### Fixed
+
+- Fixed Dashboard storage capacity, production, and player-settlement regional wealth using authoritative Relay data.
+- Preserved exact large regional wealth totals and uninterrupted live craft contributions during subscription scope changes.
+- Kept Dashboard refresh warnings focused on data required by its visible metrics.
+
+## [0.50.0-beta.4] - 2026-08-02
+
+### Changed
+
+- Updated the default app logo and browser favicon to the approved Claim Monitor branding.
+
+## [0.50.0-beta.3] - 2026-08-02
+
+### Changed
+
+- Distinguished live but incomplete Relay details from stale-data refresh failures.
+- Condensed repeated missing-name diagnostics so live regional responses remain compact.
+
+### Fixed
+
+- Kept global catalog, skill, and region data marked live while their shared subscription remains healthy.
+
+## [0.50.0-beta.2] - 2026-08-02
+
+### Fixed
+
+- Kept unchanged subscription-backed data marked live while the Relay worker heartbeat remains healthy.
+
+## [0.50.0-beta.1] - 2026-08-01
+
+### Added
+
+- Added live Relay-backed settlement, catalog, inventory, crafting, market, region, empire, map, and public-tool data.
+- Added freshness, provenance, schema-health, and last-good outage reporting throughout the dashboard.
+- Added an isolated Relay preview deployment for `relay.timbersteeltrade.com`.
+
+### Changed
+
+- Replaced scheduled browser data snapshots with provider generations that update open pages as Relay data changes.
+- Rebuilt local history and notifications from normalized Relay observations while keeping current game state live.
+- Changed preview Discord delivery to enforced record-only mode.
+
+### Removed
+
+- Removed runtime BitJita API routes, clients, proxying, configuration, and remote icon requests.
+- Removed obsolete snapshot and collector configuration tables and legacy deployment artifacts.
+
 ## [0.49.1-beta.2] - 2026-07-29
 
 ### Fixed

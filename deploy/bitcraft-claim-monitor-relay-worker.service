@@ -1,0 +1,30 @@
+[Unit]
+Description=BitCraft Claim Monitor Relay Preview Worker
+After=network-online.target bitcraft-claim-monitor-relay.service
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=bitcraft
+Group=bitcraft
+WorkingDirectory=/opt/bitcraft-claim-monitor-relay/current/apps/bitcraft-local
+Environment=NODE_ENV=production
+Environment=BITCRAFT_LOCAL_DATA_DIR=/var/lib/bitcraft-claim-monitor-relay
+Environment=PRIVACY_LEDGER_PATH=/var/backups/bitcraft-claim-monitor-relay/privacy-deletion-ledger.jsonl
+Environment=PRIVACY_LEDGER_KEY_FILE=/etc/bitcraft-claim-monitor-relay/privacy-ledger.key
+Environment=MALLOC_TRIM_THRESHOLD_=131072
+EnvironmentFile=-/etc/bitcraft-claim-monitor-relay.env
+ExecStart=/usr/bin/env BITCRAFT_PROCESS_ROLE=worker BITCRAFT_LOCAL_DATA_DIR=/var/lib/bitcraft-claim-monitor-relay /usr/bin/node /opt/bitcraft-claim-monitor-relay/current/apps/bitcraft-local/worker.mjs
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/bitcraft-claim-monitor-relay /var/backups/bitcraft-claim-monitor-relay
+
+[Install]
+WantedBy=multi-user.target

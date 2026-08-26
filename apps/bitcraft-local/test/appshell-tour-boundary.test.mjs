@@ -86,6 +86,7 @@ test("tour does not force a settings modal open during guided steps", () => {
 });
 test("tour anchors are stable data attributes rather than CSS selectors", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const appUtilityBar = readFileSync(new URL("../src/components/main/AppUtilityBar.tsx", import.meta.url), "utf8");
   const dashboard = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
   const leaderboard = readFileSync(new URL("../src/pages/LeaderboardPage.tsx", import.meta.url), "utf8");
   const members = readFileSync(new URL("../src/pages/MembersPage.tsx", import.meta.url), "utf8");
@@ -97,7 +98,7 @@ test("tour anchors are stable data attributes rather than CSS selectors", () => 
   const market = readFileSync(new URL("../src/pages/MarketPage.tsx", import.meta.url), "utf8");
   const region = readFileSync(new URL("../src/pages/RegionPage.tsx", import.meta.url), "utf8");
   const empires = readFileSync(new URL("../src/pages/EmpiresPage.tsx", import.meta.url), "utf8");
-  const map = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+  const map = readFileSync(new URL("../src/pages/map/MapPlayerTrackingPanel.tsx", import.meta.url), "utf8");
   const activity = readFileSync(new URL("../src/pages/ActivityPage.tsx", import.meta.url), "utf8");
   const publicCrafts = readFileSync(new URL("../src/pages/PublicCraftFinderPage.tsx", import.meta.url), "utf8");
   const craftCalculator = readFileSync(new URL("../src/pages/CraftCalculatorPage.tsx", import.meta.url), "utf8");
@@ -105,7 +106,7 @@ test("tour anchors are stable data attributes rather than CSS selectors", () => 
   const userSettingsDialog = readFileSync(new URL("../src/components/main/UserSettingsDialog.tsx", import.meta.url), "utf8");
 
   assert.match(appShell, /data-tour="sidebar-navigation"/);
-  assert.match(appShell, /data-tour="floating-actions"/);
+  assert.match(appUtilityBar, /data-tour="floating-actions"/);
   assert.match(dashboard, /data-tour="dashboard-summary"/);
   assert.match(leaderboard, /data-tour="leaderboard-page"/);
   assert.match(members, /data-tour="members-page"/);

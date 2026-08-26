@@ -1,12 +1,25 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
+import * as globalMarket from "../src/pages/market/globalMarket.ts";
+
+const {
+  bestMarketDealPotential,
   filterMarketDeals,
+  marketFavoriteQuoteRows,
+  marketFavoriteQuotesRequest,
   marketFavoriteKeys,
   normalizeMarketOrders,
-  normalizeStallsPayload,
-} from "../src/pages/market/globalMarket.ts";
+} = globalMarket;
+
+test("bestMarketDealPotential does not add overlapping route capacity", () => {
+  assert.equal(typeof bestMarketDealPotential, "function");
+  assert.equal(bestMarketDealPotential([
+    { routeKey: "sell-1:buy-1", totalPotential: "9007199254740993" },
+    { routeKey: "sell-1:buy-2", totalPotential: "8000000000000000" },
+    { routeKey: "sell-2:buy-2", totalPotential: "7" },
+  ]), "9007199254740993");
+});
 
 test("global market orders keep item and cargo identity and normalize nullable fields", () => {
   const rows = normalizeMarketOrders({
@@ -31,11 +44,85 @@ test("global market orders keep item and cargo identity and normalize nullable f
   });
 
   assert.deepEqual(rows.map((row) => [row.side, row.itemType, row.itemId, row.unitPrice, row.quantity]), [
-    ["sell", "cargo", 7, 30, 4],
-    ["buy", "item", 7, 25, 8],
+    ["sell", "cargo", "7", "30", "4"],
+    ["buy", "item", "7", "25", "8"],
   ]);
   assert.equal(rows[0].claimName, "");
   assert.equal(rows[1].ownerName, "Buyer");
+});
+
+test("global market orders preserve exact decimal prices and quantities until display", () => {
+  const [order] = normalizeMarketOrders({
+    sellOrders: [{
+      entityId: "9007199254740993",
+      itemId: "9007199254740997",
+      itemType: "item",
+      price: "9007199254740993",
+      quantity: "9007199254740995",
+      regionId: "19",
+    }],
+  });
+
+  assert.equal(order.orderKey, "9007199254740993");
+  assert.equal(order.itemId, "9007199254740997");
+  assert.equal(order.unitPrice, "9007199254740993");
+  assert.equal(order.quantity, "9007199254740995");
+  assert.equal(order.regionId, "19");
+});
+
+test("market browse request URLs use only provider-neutral local routes", () => {
+  assert.equal(typeof globalMarket.marketBrowseSearchUrl, "function");
+  assert.equal(typeof globalMarket.marketBrowseItemUrls, "function");
+  assert.equal(globalMarket.marketBrowseSearchUrl({
+    query: "timber",
+    regionId: "19",
+    availableOnly: true,
+    hasSell: true,
+    hasBuy: false,
+    category: "Wood Products",
+    sort: "orders",
+  }), "/api/local/market/catalog?regionId=19&q=timber&availableOnly=true&hasSell=true&hasBuy=false&category=Wood+Products&sort=orders&limit=50");
+  assert.deepEqual(globalMarket.marketBrowseItemUrls({
+    itemType: "cargo",
+    itemId: "42",
+    regionId: "all",
+    range: "30d",
+  }), {
+    orderBook: "/api/local/market/order-book?regionId=all&itemType=cargo&itemId=42",
+    priceHistory: "/api/local/market/price-history?regionId=all&itemType=cargo&itemId=42&range=30d",
+  });
+});
+
+test("Deal Watch item search is scoped to live Relay sell orders", () => {
+  assert.equal(typeof globalMarket.marketDealWatchSearchUrl, "function");
+  assert.equal(typeof globalMarket.marketRegionScopeUrl, "function");
+  assert.equal(globalMarket.marketDealWatchSearchUrl({
+    claimId: "1369094286777412590",
+    regionId: "19",
+    query: "Leather & Hide",
+  }), "/api/local/market/catalog?claimId=1369094286777412590&regionId=19&q=Leather+%26+Hide&availableOnly=true&hasSell=true&hasBuy=false&limit=8");
+  assert.equal(
+    globalMarket.marketRegionScopeUrl("1369094286777412590"),
+    "/api/local/market/regions?claimId=1369094286777412590",
+  );
+});
+
+test("market browse surfaces stale and unavailable live-order state", () => {
+  assert.equal(typeof globalMarket.marketFreshnessNotice, "function");
+  assert.equal(globalMarket.marketFreshnessNotice({
+    freshness: "stale",
+    ageMs: 65_000,
+    warnings: ["socket lost"],
+  }), "Live order book is stale (1m old): socket lost");
+  assert.equal(globalMarket.marketFreshnessNotice({
+    freshness: "unavailable",
+    warnings: [],
+  }), "Live order book has not loaded yet.");
+  assert.equal(globalMarket.marketFreshnessNotice({
+    freshness: "fresh",
+    ageMs: 900,
+    warnings: [],
+  }), "Live order book updated just now.");
 });
 
 test("deal region filtering requires both route endpoints inside the selected set", () => {
@@ -49,43 +136,65 @@ test("deal region filtering requires both route endpoints inside the selected se
   assert.deepEqual(filterMarketDeals(deals, []).map((deal) => deal.id), ["same", "cross", "other"]);
 });
 
-test("stall normalization preserves item-for-item and cargo-for-cargo offers", () => {
-  const payload = normalizeStallsPayload({
-    stalls: [{
-      entityId: "stall-1",
-      ownerName: "Trader",
-      regionId: 11,
-      orderCount: 2,
-      orders: [{
-        entityId: "order-1",
-        remainingStock: "9",
-        offerItems: [{ itemId: 1, itemName: "Iron", quantity: "3" }],
-        requiredItems: [{ itemId: 2, itemName: "Wood", quantity: "4" }],
-        offerCargo: [{ itemId: 1, itemName: "Iron Package", quantity: "1" }],
-        requiredCargo: [{ itemId: 2, itemName: "Wood Package", quantity: "2" }],
-      }],
-    }],
-    totalStalls: 1,
-    totalOrders: 2,
-    page: 1,
-    totalPages: 1,
-    limit: 20,
-  });
-
-  assert.deepEqual(payload.stalls[0].orders[0].offers.map((entry) => entry.itemType), ["item", "cargo"]);
-  assert.deepEqual(payload.stalls[0].orders[0].requires.map((entry) => entry.itemType), ["item", "cargo"]);
-  assert.equal(payload.stalls[0].orders[0].remainingStock, 9);
-});
-
-test("favorite parsing rejects malformed entries and keeps matching numeric ids by type", () => {
+test("favorite parsing rejects malformed entries and preserves exact decimal ids by type", () => {
   assert.deepEqual(marketFavoriteKeys(JSON.stringify([
     { itemType: "item", itemId: 7 },
     { itemType: "cargo", itemId: 7 },
+    { itemType: "item", itemId: "9007199254740993" },
     { itemType: "other", itemId: 7 },
     { itemType: "item", itemId: 0 },
   ])), [
-    { itemType: "item", itemId: 7 },
-    { itemType: "cargo", itemId: 7 },
+    { itemType: "item", itemId: "7" },
+    { itemType: "cargo", itemId: "7" },
+    { itemType: "item", itemId: "9007199254740993" },
   ]);
   assert.deepEqual(marketFavoriteKeys("not json"), []);
+});
+
+test("favorite quote mapping preserves typed decimals and opens Leather with its catalog metadata", () => {
+  const favorites = [
+    { itemType: "item", itemId: "30" },
+    { itemType: "cargo", itemId: "30" },
+    { itemType: "item", itemId: "9007199254740993" },
+  ];
+  assert.deepEqual(marketFavoriteQuotesRequest("19", favorites), {
+    url: "/api/local/market/favorite-quotes",
+    body: JSON.stringify({ regionId: "19", items: favorites }),
+  });
+  assert.deepEqual(marketFavoriteQuoteRows(favorites, {
+    items: {
+      "item:30": {
+        id: "30",
+        itemId: "30",
+        itemType: "item",
+        name: "Leather",
+        category: "Hide",
+        tag: "Hide",
+        tier: 3,
+        rarity: "Rare",
+        rarityStr: "Rare",
+        iconAssetName: "leather.webp",
+      },
+    },
+    quotes: {
+      "item:30": { bestSell: "9007199254740995", bestBuy: "9007199254740994", sellCount: 2, buyCount: 1 },
+      "cargo:30": { bestSell: "17", bestBuy: null, sellCount: 1, buyCount: 0 },
+    },
+  }).map((row) => ({
+    key: `${row.itemType}:${row.itemId}`,
+    bestSell: row.bestSell,
+    bestBuy: row.bestBuy,
+    sellCount: row.sellCount,
+    buyCount: row.buyCount,
+    name: row.name,
+    itemName: row.itemName,
+    category: row.category,
+    tier: row.tier,
+    rarity: row.rarity,
+    iconAssetName: row.iconAssetName,
+  })), [
+    { key: "item:30", bestSell: "9007199254740995", bestBuy: "9007199254740994", sellCount: 2, buyCount: 1, name: "Leather", itemName: "Leather", category: "Hide", tier: 3, rarity: "Rare", iconAssetName: "leather.webp" },
+    { key: "cargo:30", bestSell: "17", bestBuy: null, sellCount: 1, buyCount: 0, name: undefined, itemName: "Cargo 30", category: undefined, tier: undefined, rarity: undefined, iconAssetName: undefined },
+    { key: "item:9007199254740993", bestSell: null, bestBuy: null, sellCount: 0, buyCount: 0, name: undefined, itemName: "Item 9007199254740993", category: undefined, tier: undefined, rarity: undefined, iconAssetName: undefined },
+  ]);
 });

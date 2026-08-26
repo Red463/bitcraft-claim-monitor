@@ -25,11 +25,19 @@ function localizedDateTimeMs(text: string): number | null {
   return timestamp;
 }
 
-export function sortComparable(value: unknown): string | number {
+export function sortComparable(value: unknown): string | number | bigint {
   if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "bigint") return value;
   const text = String(value ?? "").trim();
   if (!text || text === "-") return "";
-  const numeric = Number(text.replace(/,/g, "").replace(/[g%]$/i, ""));
+  const numericText = text.replace(/,/g, "").replace(/[g%]$/i, "");
+  if (/^[+-]?\d+$/.test(numericText)) {
+    const integer = BigInt(numericText);
+    if (integer > BigInt(Number.MAX_SAFE_INTEGER) || integer < BigInt(Number.MIN_SAFE_INTEGER)) {
+      return integer;
+    }
+  }
+  const numeric = Number(numericText);
   if (Number.isFinite(numeric) && /[0-9]/.test(text)) return numeric;
   const dateTime = localizedDateTimeMs(text);
   if (dateTime != null) return dateTime;
@@ -40,6 +48,17 @@ export function compareSortValues(left: unknown, right: unknown, direction: Sort
   const a = sortComparable(left);
   const b = sortComparable(right);
   const order = direction === "asc" ? 1 : -1;
+  if (typeof a === "bigint" || typeof b === "bigint") {
+    const integerLike = (value: string | number | bigint): value is number | bigint => (
+      typeof value === "bigint" || (typeof value === "number" && Number.isSafeInteger(value))
+    );
+    if (!integerLike(a) || !integerLike(b)) {
+      return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }) * order;
+    }
+    const leftInteger = typeof a === "bigint" ? a : BigInt(a);
+    const rightInteger = typeof b === "bigint" ? b : BigInt(b);
+    return (leftInteger < rightInteger ? -1 : leftInteger > rightInteger ? 1 : 0) * order;
+  }
   if (typeof a === "number" && typeof b === "number") return (a - b) * order;
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }) * order;
 }

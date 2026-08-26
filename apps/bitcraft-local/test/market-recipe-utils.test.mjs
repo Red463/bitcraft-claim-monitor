@@ -117,3 +117,24 @@ test("buildRecipePlan honors selected alternate recipes", () => {
   assert.deepEqual(plan.rawMaterials.map((material) => [material.name, material.quantity]), [["Simple Board", 6]]);
   assert.equal(plan.steps[0].recipeName, "Make Plank From Boards");
 });
+
+test("buildRecipePlan preserves fractional expected output yields from normalized Relay routes", () => {
+  const target = { id: "resin", kind: "items", itemType: 0, name: "Rough Resin" };
+  const details = new Map([
+    [recipeKey("items", "resin"), {
+      item: { id: "resin", name: "Rough Resin", itemType: 0 },
+      craftingRecipes: [{
+        id: "possibility:forestry:items:resin",
+        name: "Forestry Station -> Rough Resin",
+        consumedItemStacks: [{ item_id: "log", item_type: "item", quantity: 2 }],
+        consumedItems: [{ id: "log", name: "Rough Log", itemType: 0 }],
+        craftedItemStacks: [{ item_id: "resin", item_type: "item", quantity: 0.25 }],
+      }],
+    }],
+  ]);
+
+  const plan = buildRecipePlan(target, 2, details);
+  assert.deepEqual(plan.directMaterials.map((material) => [material.name, material.quantity]), [["Rough Log", 16]]);
+  assert.equal(plan.steps[0].craftCount, 8);
+  assert.equal(plan.steps[0].outputPerCraft, 0.25);
+});

@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mimeType, securityHeaders, staticCacheControl, routeGroup, shouldLogVisitor } from "../src/server/httpRoutes.mjs";
+import { mimeType, securityHeaders, staticCacheControl, routeGroup, shouldFallbackToFrontend, shouldLogVisitor } from "../src/server/httpRoutes.mjs";
 
 test("routeGroup classifies public API, admin, auth, Discord, static, and app routes", () => {
   assert.equal(routeGroup("/api/local/admin/settings"), "admin");
   assert.equal(routeGroup("/api/local/auth/me"), "auth");
   assert.equal(routeGroup("/api/local/user/preferences"), "auth");
   assert.equal(routeGroup("/api/discord/interactions"), "discord");
-  assert.equal(routeGroup("/api/bitjita/claims"), "bitjita-proxy");
+  assert.equal(routeGroup("/api/bitjita/claims"), "app");
   assert.equal(routeGroup("/api/local/history"), "local-api");
   assert.equal(routeGroup("/assets/index.js"), "static");
   assert.equal(routeGroup("/favicon.svg"), "static");
@@ -31,9 +31,20 @@ test("securityHeaders applies public release browser protections and preserves e
   assert.equal(headers["x-frame-options"], "SAMEORIGIN");
   assert.equal(headers["referrer-policy"], "strict-origin-when-cross-origin");
   assert.equal(headers["cross-origin-opener-policy"], "same-origin");
-  assert.match(headers["content-security-policy"], /default-src 'self'/);
-  assert.match(headers["content-security-policy"], /connect-src 'self' https:\/\/bitjita\.com https:\/\/discord\.com/);
-  assert.match(headers["content-security-policy"], /frame-ancestors 'self'/);
+  const contentSecurityPolicy = headers["content-security-policy"];
+  assert.match(contentSecurityPolicy, /default-src 'self'/);
+  assert.match(contentSecurityPolicy, /script-src[^;]*https:\/\/do\.featurebase\.app/);
+  assert.match(contentSecurityPolicy, /connect-src[^;]*https:\/\/\*\.featurebase\.app[^;]*wss:\/\/\*\.featurebase\.app/);
+  assert.match(contentSecurityPolicy, /frame-src[^;]*https:\/\/\*\.featurebase\.app/);
+  assert.match(contentSecurityPolicy, /media-src[^;]*https:\/\/\*\.featurebase-attachments\.com/);
+  assert.match(contentSecurityPolicy, /img-src[^;]*https:\/\/\*\.featurebase\.app[^;]*https:\/\/\*\.featurebase-attachments\.com/);
+  assert.doesNotMatch(contentSecurityPolicy, /bitjita/i);
+  assert.match(contentSecurityPolicy, /frame-ancestors 'self'/);
+});
+
+test("missing game icons never fall through to the frontend HTML shell", () => {
+  assert.equal(shouldFallbackToFrontend("/game-icons/GeneratedIcons/Items/Missing.webp"), false);
+  assert.equal(shouldFallbackToFrontend("/research"), true);
 });
 
 test("mimeType and staticCacheControl keep frontend asset responses predictable", () => {

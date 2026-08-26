@@ -8,7 +8,6 @@ import { ItemIcon } from "../components/main/ItemDisplay";
 import { PageHeader } from "../components/main/PageHeader";
 import { Segmented } from "../components/main/Segmented";
 import {
-  claimSupplyCap,
   claimSupplyRunOutAt,
   parseDateValue,
   toNumber,
@@ -26,15 +25,18 @@ import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
 import type { ActivePanel } from "../types/app";
 import { activityMetadata, signedDelta } from "./activity/activityUtils";
-import { MARKET_INCOME_RANGES, buildMarketIncomeSummary, type MarketIncomeRangeDays } from "./market/marketAnalytics";
+import { MARKET_INCOME_RANGES, buildMarketIncomeSummary, buildMarketRangeAnalytics, type MarketIncomeRangeDays } from "./market/marketAnalytics";
 import { hasRecentCraftContribution } from "./production/productionUtils";
+import { projectCraftPresentation } from "./production/craftPresentation";
+import { dashboardClaimRegionLabel, dashboardRegionWealth, formatExactCompactInteger } from "./dashboardView";
+import { researchSettlementCaps } from "./researchView";
 
 export function Dashboard({ data, activity, marketHistory, dashboardSummary, lastUpdated, onNavigate }: { data: ReturnType<typeof normalizeData>; activity: AnyRecord[]; marketHistory: AnyRecord | null; dashboardSummary: AnyRecord | null; lastUpdated: Date | null; onNavigate: (panel: ActivePanel, marketTab?: string) => void }) {
   const { request, trackPromise } = useManualRefresh();
   const [marketIncomeRange, setMarketIncomeRange] = React.useState<MarketIncomeRangeDays>(7);
-  const { claim, members, market, construction, crafts } = data;
+  const { claim, members, market, construction, crafts, research } = data;
   const supplies = toNumber(claim.supplies);
-  const supplyCap = claimSupplyCap(claim);
+  const { maxSupplies: supplyCap } = researchSettlementCaps(claim, research);
   const treasury = toNumber(claim.treasury);
   const upkeep = toNumber(claim.upkeepCost);
   const tileCost = toNumber(claim.tileCost);
@@ -59,11 +61,15 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
     const explicitTotal = toNumber(listing.totalValue ?? listing.total_value);
     return total + (explicitTotal || toNumber(listing.price) * Math.max(1, toNumber(listing.quantity || 1)));
   }, 0);
-  const regionSettlements = data.region;
-  const regionWealth = regionSettlements.reduce((total, row) => total + toNumber(row.treasury), 0);
-  const regionWealthDetail = regionSettlements.length
-    ? `${formatNumber(regionSettlements.length)} settlement${regionSettlements.length === 1 ? "" : "s"} in region`
+  const {
+    settlements: regionSettlements,
+    settlementCount: regionSettlementCount,
+    treasury: regionWealth,
+  } = dashboardRegionWealth(data.region);
+  const regionWealthDetail = regionSettlementCount
+    ? `${formatNumber(regionSettlementCount)} player settlement${regionSettlementCount === 1 ? "" : "s"} in region`
     : "Region data loading";
+  const claimRegionLabel = dashboardClaimRegionLabel(claim, data.regionStatus);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const treasuryEventsToday = activity.filter((event) => {
@@ -74,21 +80,20 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
   const treasuryDeltasToday = treasuryEventsToday.map(({ metadata }) => toNumber(metadata.after) - toNumber(metadata.before));
   const fallbackTreasuryNetToday = treasuryDeltasToday.reduce((total, delta) => total + delta, 0);
   const treasuryNetToday = dashboardSummary?.treasuryNetToday == null ? fallbackTreasuryNetToday : toNumber(dashboardSummary.treasuryNetToday);
-  const marketTotals = marketHistory?.totals ?? {};
-  const storedMarketIncome = marketTotals.trackedValue ?? marketTotals.totalValue;
-  const marketIncome = buildMarketIncomeSummary(
-    Array.isArray(marketHistory?.daily) ? marketHistory.daily : [],
+  const marketRange = buildMarketRangeAnalytics(
+    Array.isArray(marketHistory?.sales) ? marketHistory.sales : [],
     lastUpdated ?? new Date(),
     marketIncomeRange,
-    storedMarketIncome == null ? undefined : toNumber(storedMarketIncome),
   );
-  const confirmedMarketSales = marketTotals.confirmedSales == null && marketTotals.salesCount == null
-    ? marketIncome.salesCount
-    : toNumber(marketTotals.confirmedSales ?? marketTotals.salesCount);
-  const confirmedMarketUnits = marketTotals.confirmedUnits == null && marketTotals.unitsSold == null
-    ? marketIncome.unitsSold
-    : toNumber(marketTotals.confirmedUnits ?? marketTotals.unitsSold);
-  const confirmedMarketIncome = storedMarketIncome == null ? marketIncome.totalValue : toNumber(storedMarketIncome);
+  const marketIncome = buildMarketIncomeSummary(
+    marketRange.daily,
+    lastUpdated ?? new Date(),
+    marketIncomeRange,
+  );
+  const confirmedMarketSales = marketIncome.salesCount;
+  const confirmedMarketUnits = marketIncome.unitsSold;
+  const confirmedMarketIncome = marketIncome.totalValue;
+  const hasConfirmedMarketIncome = confirmedMarketIncome !== "0";
   const marketIncomeDetail = confirmedMarketSales
     ? `${formatNumber(confirmedMarketSales, 0)} sale${confirmedMarketSales === 1 ? "" : "s"} - ${formatNumber(confirmedMarketUnits, 0)} units sold`
     : "No confirmed sales tracked yet";
@@ -99,7 +104,7 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
     let stale = false;
     const controller = new AbortController();
     const refresh = fetch(`/api/local/craft-plan?claimId=${encodeURIComponent(monitoredClaimId)}`, { headers: manualRefreshHeaders(request, "dashboard"), signal: controller.signal })
-      .then((response) => response.ok ? response.json() : null)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`craft plan HTTP ${response.status}`)))
       .then((body) => { if (!stale) setCraftPlan(body); });
     void trackPromise("dashboard-craft-plan", refresh).catch(() => {});
     return () => { stale = true; controller.abort(); };
@@ -117,8 +122,8 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
   const memberByPlayerId = new Map(members.map((member) => [String(member.playerEntityId), member]));
   const dashboardMembers: AnyRecord[] = onlinePlayers.map((player: AnyRecord) => {
     const member = memberByPlayerId.get(String(player.entityId));
-    const regionId = player.regionId == null ? "" : String(player.regionId).trim();
-    const regionName = player.regionName ?? (regionId ? regionNameById.get(regionId) ?? `R${regionId}` : null);
+    const regionId = player.presenceRegionId == null ? "" : String(player.presenceRegionId).trim();
+    const regionName = regionId ? regionNameById.get(regionId) ?? `R${regionId}` : "Location unavailable";
     return {
       ...player,
       displayName: player.username ?? player.userName ?? member?.userName ?? "Unknown member",
@@ -127,20 +132,21 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
     };
   }).slice(0, 4);
   const rawData = (data as ReturnType<typeof normalizeData> & { raw?: AnyRecord | null }).raw;
-  const craftItemLookup = new Map([...(rawData?.crafts?.items ?? []), ...(rawData?.crafts?.cargos ?? [])].map((item: AnyRecord) => [String(item.id), item]));
   const currentCrafts = crafts.map((job) => {
-    const item = craftItemLookup.get(String(job.craftedItem?.[0]?.item_id)) ?? {};
+    const presentation = projectCraftPresentation(job, rawData?.crafts ?? {});
+    const item = presentation.item;
     const progress = toNumber(job.progress);
     const total = toNumber(job.totalActionsRequired);
     const pct = total > 0 ? Math.min(100, Math.round((progress / total) * 100)) : 0;
     const skillId = toNumber(job.levelRequirements?.[0]?.skill_id ?? job.experiencePerProgress?.[0]?.skill_id);
     const experiencePerEffort = toNumber(job.experiencePerProgress?.find((xp: AnyRecord) => toNumber(xp.skill_id) === skillId)?.quantity ?? job.experiencePerProgress?.[0]?.quantity ?? job.experiencePerEffort);
     const totalXp = toNumber(job.totalXp ?? job.totalXP) || total * experiencePerEffort;
-    const name = String(item.name ?? job.recipeName ?? job.craftName ?? job.buildingName ?? "Craft");
+    const name = presentation.displayName;
     return {
       id: String(job.entityId ?? `${job.recipeName}-${job.buildingName}`),
-      item: Object.keys(item).length ? item : { name },
+      item,
       name,
+      recipeName: presentation.recipeName,
       detail: job.buildingName ?? "Production",
       pct,
       totalXp,
@@ -155,24 +161,26 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
   ].filter(Boolean).slice(0, 4) as Array<{ icon: React.ReactNode; count: React.ReactNode; title: string; body: string; panel: ActivePanel; tone: string }>;
   return (
     <div className="dashboard-page">
+      <section className="dashboard-command-state">
       <PageHeader
-        title="Dashboard"
-        description={`Real-time summary of ${claim.name ?? "the monitored settlement"}`}
+        title="Settlement command centre"
+        description={`Live operating picture for ${claim.name ?? "the monitored settlement"}`}
         meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
-            <span className="dashboard-region-line"><Globe2 size={15} /> {claim.regionName ?? "Unknown"} <span className="dashboard-region-badge">R{claim.regionId ?? "?"}</span></span>
+            <span className="dashboard-region-line"><Globe2 size={15} /> {claimRegionLabel}</span>
             <span className="dashboard-refresh-line"><span className="online-dot is-online" /> Last updated {lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "waiting"}</span>
           </div>
           <span className="dashboard-claim-link"><TierBadge tier={claim.tier} /> {claim.name ?? "Monitored Settlement"}</span>
         </div>}
       />
+      </section>
 
-      <section className="dashboard-kpis" data-tour="dashboard-summary">
+      <section className="dashboard-kpis dashboard-command-metrics" data-tour="dashboard-summary">
         <DashboardMetric icon={<Users />} label="Members" value={members.length} detail={`${onlineCount} online now`} onClick={() => onNavigate("members")} />
         <DashboardMetric icon={<Package />} label="Supply Status" value={formatDaysAndHours(supplyDays)} detail={`${formatNumber(supplies)} stored`} progress={supplyPct} tone="green" onClick={() => onNavigate("inventory")} />
         <DashboardMetric icon={<CircleDollarSign />} label="Treasury" value={`${formatNumber(treasury)}g`} detail={`${signedDelta(treasuryNetToday, 0, "g")} net today`} tone="gold" onClick={() => onNavigate("activity")} />
         <DashboardMetric icon={<TrendingUp />} label="Market Listings" value={market.length} detail={`${formatCompactNumber(marketListingValue)} total listing value`} tone="green" onClick={() => onNavigate("market")} />
-        <DashboardMetric icon={<CircleDollarSign />} label="Region Wealth" value={regionSettlements.length ? formatCompactNumber(regionWealth) : "-"} detail={regionWealthDetail} tone="gold" onClick={() => onNavigate("region")} />
+        <DashboardMetric icon={<CircleDollarSign />} label="Region Wealth" value={regionSettlementCount ? formatExactCompactInteger(regionWealth) : "-"} detail={regionWealthDetail} tone="gold" onClick={() => onNavigate("region")} />
       </section>
 
       <section className="dashboard-main-grid">
@@ -190,8 +198,8 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
             )}
           />
           <div className="dashboard-money-row">
-            <strong>{confirmedMarketIncome ? `${formatNumber(confirmedMarketIncome)}g` : "0g"}</strong>
-            <span className={confirmedMarketIncome > 0 ? "positive" : ""}>{marketIncomeDetail}</span>
+            <strong>{hasConfirmedMarketIncome ? `${formatNumber(confirmedMarketIncome)}g` : "0g"}</strong>
+            <span className={hasConfirmedMarketIncome ? "positive" : ""}>{marketIncomeDetail}</span>
           </div>
           {marketIncome.partialRange && marketIncome.availableStartDay
             ? <p className="dashboard-chart-coverage">Stored sales begin {shortDateLabel(marketIncome.availableStartDay)}.</p>
@@ -212,7 +220,7 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
           </div>
         </article>
 
-        <article className="dashboard-card dashboard-card-activity">
+        <article className="dashboard-card dashboard-card-activity dashboard-live-activity">
           <DashboardCardHeader title="Gather Next" icon={<Target size={15} />} action="Open plan" onClick={() => onNavigate("planning")} />
           <div className="dashboard-feed">
             {gatherNextPreview.length ? gatherNextPreview.map((item) => (
@@ -263,7 +271,7 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
           <div className="dashboard-total-row"><span>Total Production XP</span><strong>{formatNumber(totalProductionXp)}</strong></div>
         </article>
 
-        <article className="dashboard-card dashboard-card-attention">
+        <article className="dashboard-card dashboard-card-attention dashboard-exceptions">
           <DashboardCardHeader title="Needs Attention" icon={<AlertTriangle size={15} />} />
           <div className="dashboard-alert-list">
             {attention.length ? attention.map((item) => (

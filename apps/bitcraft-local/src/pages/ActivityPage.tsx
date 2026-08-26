@@ -3,7 +3,7 @@ import "../styles/activity.css";
 import { Activity, Box, Building2, RefreshCw } from "lucide-react";
 
 import { MiniStat } from "../components/main/Stats";
-import { toNumber, unwrap, type AnyRecord } from "../main-app-data";
+import { toNumber, type AnyRecord } from "../main-app-data";
 import { dateLabel, formatNumber, timeAgo, timestampMs } from "../utils/format";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { unique } from "../utils/array";
@@ -12,8 +12,9 @@ import { activityActorName, activityContainerName, activitySummary, compactActiv
 import { activityStyle } from "./activity/activityDisplay";
 import { effectiveTargetAllowed, targetIdForTab, type EffectiveAccess } from "../access/accessControl.mjs";
 import { resolveAllowedView } from "../navigation/routeState.ts";
+import { usePageRefresh } from "../refresh/ManualRefreshContext";
+import { createDelayedRefreshTask, pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
 
-const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 
 const ACTIVITY_FILTERS = [
@@ -26,7 +27,8 @@ const ACTIVITY_FILTERS = [
   ["buildings", "Structures"],
 ] as const;
 
-export function ActivityPanel({ activity, activityTotal, claimId, error, access }: { activity: AnyRecord[]; activityTotal: number; claimId: string; error: string | null; access?: EffectiveAccess | null }) {
+export function ActivityPanel({ activity, activityTotal, claimId, error, members, access }: { activity: AnyRecord[]; activityTotal: number; claimId: string; error: string | null; members: AnyRecord[]; access?: EffectiveAccess | null }) {
+  const { cycle, trackPromise } = usePageRefresh();
   const [filter, setFilter] = usePersistedState<(typeof ACTIVITY_FILTERS)[number][0]>("activity.filter", "all");
   const [memberFilter, setMemberFilter] = usePersistedState("activity.member", "All");
   const [searchQuery, setSearchQuery] = usePersistedState("activity.search", "");
@@ -37,15 +39,6 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, access 
   React.useEffect(() => {
     if (resolvedFilter && resolvedFilter !== filter) setFilter(resolvedFilter);
   }, [filter, resolvedFilter, setFilter]);
-  const [members, setMembers] = React.useState<AnyRecord[]>([]);
-  React.useEffect(() => {
-    const controller = new AbortController();
-    fetch(`${API}/claims/${claimId}/members`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`members HTTP ${response.status}`)))
-      .then((payload) => setMembers(unwrap<AnyRecord[]>(payload, "members", [])))
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [claimId]);
   const trimmedSearch = searchQuery.trim();
   React.useEffect(() => {
     if (!trimmedSearch) {
@@ -53,20 +46,26 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, access 
       return;
     }
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
+    const refresh = createDelayedRefreshTask(() => {
       setSearchState((current) => ({ ...current, loading: true, error: null, query: trimmedSearch }));
-      fetch(`${LOCAL_API}/activity?claimId=${encodeURIComponent(claimId)}&q=${encodeURIComponent(trimmedSearch)}&limit=500`, { signal: controller.signal })
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`activity search HTTP ${response.status}`)))
-        .then((payload) => setSearchState({ loading: false, error: null, events: payload.events ?? [], total: toNumber(payload.total ?? payload.events?.length), query: trimmedSearch }))
-        .catch((searchError) => {
-          if (!controller.signal.aborted) setSearchState({ loading: false, error: searchError instanceof Error ? searchError.message : String(searchError), events: [], total: 0, query: trimmedSearch });
-        });
+      return fetch(`${LOCAL_API}/activity?claimId=${encodeURIComponent(claimId)}&q=${encodeURIComponent(trimmedSearch)}&limit=500`, { headers: cycle ? pageRefreshHeaders(cycle, "activity") : {}, signal: controller.signal })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error(`activity search HTTP ${response.status}`)));
     }, 250);
+    void trackPromise("activity-search", refresh.promise)
+      .then((payload) => setSearchState({ loading: false, error: null, events: payload.events ?? [], total: toNumber(payload.total ?? payload.events?.length), query: trimmedSearch }))
+      .catch((searchError) => {
+        if (!controller.signal.aborted) setSearchState((current) => ({
+          ...current,
+          loading: false,
+          error: searchError instanceof Error ? searchError.message : String(searchError),
+          query: trimmedSearch,
+        }));
+      });
     return () => {
-      window.clearTimeout(timer);
+      refresh.cancel();
       controller.abort();
     };
-  }, [claimId, trimmedSearch]);
+  }, [claimId, cycle?.sequence, trackPromise, trimmedSearch]);
   const searching = Boolean(trimmedSearch);
   const sourceActivity = searching ? searchState.events : activity;
   const sourceTotal = searching ? searchState.total : activityTotal;
@@ -96,7 +95,7 @@ export function ActivityPanel({ activity, activityTotal, claimId, error, access 
   return (
     <div className="panel activity-panel">
       <header className="members-topbar activity-topbar">
-        <div>
+        <div className="route-title-copy">
           <h2>Activity</h2>
           <p>A live audit trail of settlement updates and owned-storage movements.</p>
         </div>

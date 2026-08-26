@@ -21,7 +21,7 @@ export function DiscordSafetySection({
   setSafetyDraft,
 }: {
   channelIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
-  confirmModeration: (message: string) => boolean;
+  confirmModeration: (message: string, onConfirm: () => void) => void;
   discordToolResult: Record<string, any> | null;
   isPending: (key: string) => boolean;
   onApplySlowmode: () => void;
@@ -114,7 +114,7 @@ export function DiscordSafetySection({
             pending={isPending("discord-channel-lock")}
             pendingLabel="Locking channel..."
             disabled={!safetyDraft.lockdownChannelId}
-            onClick={() => confirmModeration("Lock this channel for @everyone?") && onLockChannel()}
+            onClick={() => confirmModeration("Lock this channel for @everyone?", onLockChannel)}
           >
             <Lock size={14} /> Lock Channel
           </ActionButton>
@@ -123,7 +123,7 @@ export function DiscordSafetySection({
             pending={isPending("discord-channel-unlock")}
             pendingLabel="Unlocking channel..."
             disabled={!safetyDraft.lockdownChannelId}
-            onClick={() => confirmModeration("Unlock this channel for @everyone?") && onUnlockChannel()}
+            onClick={() => confirmModeration("Unlock this channel for @everyone?", onUnlockChannel)}
           >
             <CheckCircle2 size={14} /> Unlock Channel
           </ActionButton>

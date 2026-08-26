@@ -10,6 +10,9 @@ import {
   deletionLedgerSubject,
   readDeletionLedger,
   replayPrivacyDeletions,
+  coordinatePublicPrivacyDeletion,
+  publicDeletionLedgerSubject,
+  replayPublicPrivacyDeletions,
 } from "../src/server/privacyDeletionLedger.mjs";
 
 test("signed deletion ledger coordinates commits without storing raw identifiers", () => {
@@ -70,4 +73,40 @@ test("ledger rejects tampering, ignores pending records, and replays committed d
   const tampered = readFileSync(ledgerPath, "utf8").replace('"state":"committed"', '"state":"aborted"');
   writeFileSync(tamperedPath, tampered);
   assert.throws(() => readDeletionLedger(tamperedPath, [key]), /verification failed/);
+});
+
+test("public-profile receipts and replay subjects are distinct from Timbersteel discord subjects", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "privacy-ledger-public-"));
+  const ledgerPath = path.join(directory, "ledger.jsonl");
+  const key = Buffer.alloc(32, 11).toString("base64url");
+  const discordId = "111111111111111111";
+  coordinatePublicPrivacyDeletion({
+    ledgerPath,
+    key,
+    discordId,
+    deleteAccount: () => ({ ok: true }),
+    now: () => new Date("2026-08-26T12:00:00.000Z"),
+    randomUUID: () => "public-operation",
+  });
+  const records = readDeletionLedger(ledgerPath, [key]);
+
+  assert.equal(records[0].subject, publicDeletionLedgerSubject(discordId, key));
+  assert.notEqual(records[0].subject, deletionLedgerSubject(discordId, key));
+  assert.doesNotMatch(readFileSync(ledgerPath, "utf8"), new RegExp(discordId));
+  const deleted = [];
+  assert.deepEqual(replayPrivacyDeletions({
+    records,
+    accounts: [{ id: 1, discordId }],
+    key,
+    deleteAccount: (account) => deleted.push(`timbersteel:${account.id}`),
+    now: new Date("2026-08-27T00:00:00.000Z"),
+  }), { deleted: 0 }, "existing Timbersteel replay must ignore public receipts");
+  assert.deepEqual(replayPublicPrivacyDeletions({
+    records,
+    accounts: [{ id: 2, discordId }],
+    key,
+    deleteAccount: (account) => deleted.push(`public:${account.id}`),
+    now: new Date("2026-08-27T00:00:00.000Z"),
+  }), { deleted: 1 });
+  assert.deepEqual(deleted, ["public:2"]);
 });

@@ -1,67 +1,109 @@
 import React from "react";
 
-import { toNumber, type AnyRecord } from "../main-app-data";
-import type { ManualRefreshRequest } from "../refresh/ManualRefreshContext";
-import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
-import type { ActivePanel, LocalHistoryState, NotificationActivityState } from "../types/app";
-import { localHistoryIncludeForPanel } from "./localHistoryInclude";
+import { toNumber, type AnyRecord } from "../main-app-data.ts";
+import type { PageRefreshCycle } from "../refresh/pageRefresh.mjs";
+import { pageRefreshHeaders } from "../refresh/pageRefresh.mjs";
+import type { ActivePanel, LocalHistoryState, NotificationActivityState } from "../types/app.ts";
+import { localHistoryIncludeForPanel } from "./localHistoryInclude.ts";
 
 const LOCAL_API = "/api/local";
 
+const EMPTY_LOCAL_HISTORY_STATE: LocalHistoryState = {
+  market: null,
+  activity: [],
+  activityTotal: 0,
+  dashboard: null,
+  error: null,
+  refreshToken: 0,
+};
+Object.freeze(EMPTY_LOCAL_HISTORY_STATE.activity);
+Object.freeze(EMPTY_LOCAL_HISTORY_STATE);
+
+export function localHistoryResultForPanel(
+  activePanel: ActivePanel,
+  retainedState: LocalHistoryState,
+): LocalHistoryState {
+  return localHistoryIncludeForPanel(activePanel) ? retainedState : EMPTY_LOCAL_HISTORY_STATE;
+}
+
+export function localHistoryRequestForPanel({
+  claimId,
+  activePanel,
+  pageRefreshCycle,
+  fetch: fetcher = globalThis.fetch,
+  signal,
+}: {
+  claimId: string;
+  activePanel: ActivePanel;
+  pageRefreshCycle: PageRefreshCycle | null;
+  fetch?: typeof fetch;
+  signal?: AbortSignal;
+}): Promise<AnyRecord> | null {
+  if (!pageRefreshCycle || pageRefreshCycle.page !== activePanel) return null;
+  const include = localHistoryIncludeForPanel(activePanel);
+  if (!include) return null;
+  const activityLimit = activePanel === "activity" ? 2000 : activePanel === "dashboard" ? 40 : 60;
+  return fetcher(`${LOCAL_API}/history?claimId=${encodeURIComponent(claimId)}&include=${encodeURIComponent(include)}&activityLimit=${activityLimit}`, {
+    headers: pageRefreshHeaders(pageRefreshCycle, activePanel),
+    signal,
+  }).then(async (response) => {
+    if (!response.ok) throw new Error(`local history HTTP ${response.status}`);
+    return response.json();
+  });
+}
+
+export function mergeLocalHistoryState(previous: LocalHistoryState, history: AnyRecord): LocalHistoryState {
+  const activity = history.activity;
+  const hasActivityEvents = activity != null && Object.prototype.hasOwnProperty.call(activity, "events");
+  return {
+    market: history.market ?? previous.market,
+    activity: hasActivityEvents ? activity.events ?? [] : previous.activity,
+    activityTotal: hasActivityEvents
+      ? toNumber(activity.total ?? activity.events?.length)
+      : previous.activityTotal,
+    dashboard: history.dashboard ?? previous.dashboard,
+    error: null,
+    refreshToken: previous.refreshToken + 1,
+  };
+}
+
 /**
- * Loads locally recorded history that BitJita does not provide directly.
+ * Loads locally recorded history that the live Relay generation does not retain.
  *
- * Live page data still comes from BitJita/proxy calls, but activity history,
+ * Live page data comes from provider-neutral local routes, while activity history,
  * dashboard trend data, and market history are built from SQLite records
  * captured by the local server.
  */
 export function useLocalHistory(
-  refreshToken: number,
   claimId: string,
   activePanel: ActivePanel,
-  manualRefreshRequest: ManualRefreshRequest | null = null,
-  trackManualRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (_taskKey, promise) => promise,
+  pageRefreshCycle: PageRefreshCycle | null,
+  trackPageRefreshPromise: <T>(taskKey: string, promise: Promise<T>) => Promise<T> = (_taskKey, promise) => promise,
 ): LocalHistoryState {
-  const [state, setState] = React.useState<LocalHistoryState>({
-    market: null,
-    activity: [],
-    activityTotal: 0,
-    dashboard: null,
-    error: null,
-    refreshToken: 0,
-  });
+  const [state, setState] = React.useState<LocalHistoryState>(EMPTY_LOCAL_HISTORY_STATE);
 
   React.useEffect(() => {
+    if (!localHistoryIncludeForPanel(activePanel)) return;
     const controller = new AbortController();
-    async function load() {
+    const request = localHistoryRequestForPanel({ claimId, activePanel, pageRefreshCycle, signal: controller.signal });
+    if (!request) return;
+    async function load(historyRequest: Promise<AnyRecord>) {
       try {
-        const include = localHistoryIncludeForPanel(activePanel);
-        const activityLimit = activePanel === "activity" ? 2000 : activePanel === "dashboard" ? 40 : 60;
-        const response = await fetch(`${LOCAL_API}/history?claimId=${encodeURIComponent(claimId)}&include=${encodeURIComponent(include)}&activityLimit=${activityLimit}`, { headers: manualRefreshHeaders(manualRefreshRequest, activePanel), signal: controller.signal });
-        if (!response.ok) throw new Error(`local history HTTP ${response.status}`);
-        const history = await response.json();
-        const activity = history.activity ?? {};
-        setState((prev) => ({
-          market: history.market ?? (activePanel === "settlement-market" || activePanel === "dashboard" ? null : prev.market),
-          activity: activity.events ?? [],
-          activityTotal: toNumber(activity.total ?? activity.events?.length),
-          dashboard: history.dashboard ?? (activePanel === "dashboard" ? null : prev.dashboard),
-          error: null,
-          refreshToken: prev.refreshToken + 1,
-        }));
+        const history = await historyRequest;
+        setState((prev) => mergeLocalHistoryState(prev, history));
       } catch (err) {
         if (controller.signal.aborted) return;
         setState((prev) => ({ ...prev, error: err instanceof Error ? err.message : String(err) }));
         throw err;
       }
     }
-    void trackManualRefreshPromise("local-history", load()).catch(() => {});
+    void trackPageRefreshPromise("local-history", load(request)).catch(() => {});
     return () => {
       controller.abort();
     };
-  }, [activePanel, claimId, manualRefreshRequest?.sequence, refreshToken, trackManualRefreshPromise]);
+  }, [activePanel, claimId, pageRefreshCycle?.sequence, trackPageRefreshPromise]);
 
-  return state;
+  return localHistoryResultForPanel(activePanel, state);
 }
 
 export function useNotificationActivity(refreshToken: number, claimId: string): NotificationActivityState {

@@ -29,10 +29,11 @@ test("admin surfaces no longer expose snapshot counts, retention, or pruning", (
   assert.doesNotMatch(serverHealth, /counts\?\.snapshots/);
 });
 
-test("admin setup accepts current or persisted collection success when polling is disabled", () => {
+test("admin setup reports Relay-provider readiness without a retired claim collector", () => {
   const adminPanel = source("../src/components/admin/AdminPanel.tsx");
 
-  assert.match(adminPanel, /done: Boolean\(status\?\.polling\?\.enabled \|\| status\?\.polling\?\.lastSuccessAt \|\| status\?\.polling\?\.collectors\?\.claim\?\.lastSuccessAt\)/);
+  assert.match(adminPanel, /done: Boolean\(status\?\.gameDataProvider\?\.running && status\?\.gameDataProvider\?\.cacheReady\)/);
+  assert.doesNotMatch(adminPanel, /polling\?\.collectors\?\.claim/);
 });
 
 test("frontend settings and collector copy no longer describe snapshot history", () => {

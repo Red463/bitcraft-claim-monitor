@@ -11,6 +11,7 @@ const emptySourceRules = {
   playerIds: [],
   craftPlayerIds: [],
   bankPlayerIds: [],
+  bankContainerIds: [],
   deployableContainerIds: [],
 };
 

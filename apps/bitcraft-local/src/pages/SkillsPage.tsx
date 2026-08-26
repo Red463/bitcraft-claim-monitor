@@ -13,7 +13,7 @@ import {
   ADVENTURE_SKILL_IDS,
   PROFESSION_IDS,
   TIER_COLORS,
-  bitjitaSkillRows,
+  skillRows,
   levelClass,
   skillNameFromRows,
   skillTier,
@@ -21,25 +21,26 @@ import {
 } from "../utils/professions";
 import { buildProfessionCapability, prioritizeSettlementNeeds, tierRequiredLevel, type ProfessionCapability } from "./professionCapability";
 
-// The UI calls these "Professions" even though BitJita exposes them as skill
-// rows. This page keeps the profession/adventure split explicit so future skill
-// categories can be displayed without changing the underlying BitJita mapping.
+// The UI calls these "Professions" while the normalized provider domain keeps
+// them as skill rows. The explicit split leaves room for future categories.
 type SortKey = "name" | "total" | "highest" | number;
 
 export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
   const [searchTerm, setSearchTerm] = React.useState("");
-  const [insightsOpen, setInsightsOpen] = React.useState(false);
+  const [insightsOpen, setInsightsOpen] = usePersistedState<boolean>("skills.capability-open", false);
   const [focusSkill, setFocusSkill] = usePersistedState<number>("skills.focus", PROFESSION_IDS[0]);
   const [sortKey, setSortKey] = usePersistedState<SortKey>("skills.sort", "total");
   const [sortDir, setSortDir] = usePersistedState<"asc" | "desc">("skills.direction", "desc");
   const [adventureSortKey, setAdventureSortKey] = usePersistedState<SortKey>("skills.adventure-sort", "total");
   const [adventureSortDir, setAdventureSortDir] = usePersistedState<"asc" | "desc">("skills.adventure-direction", "desc");
   const citizens = data.citizens;
-  const professionRows = bitjitaSkillRows(data.skills, "Profession");
-  const adventureRows = bitjitaSkillRows(data.skills, "Adventure");
-  const professionIds = professionRows.length ? professionRows.map((skill) => toNumber(skill.id)).filter(Boolean) : PROFESSION_IDS;
-  const adventureSkillIds = adventureRows.length ? adventureRows.map((skill) => toNumber(skill.id)).filter(Boolean) : ADVENTURE_SKILL_IDS;
+  const professionRows = skillRows(data.skills, "Profession");
+  const adventureRows = skillRows(data.skills, "Adventure");
   const skillLabel = (id: number) => skillNameFromRows([...professionRows, ...adventureRows], id);
+  const professionIds = (professionRows.length ? professionRows.map((skill) => toNumber(skill.id)).filter(Boolean) : PROFESSION_IDS)
+    .slice().sort((left, right) => skillLabel(left).localeCompare(skillLabel(right)));
+  const adventureSkillIds = (adventureRows.length ? adventureRows.map((skill) => toNumber(skill.id)).filter(Boolean) : ADVENTURE_SKILL_IDS)
+    .slice().sort((left, right) => skillLabel(left).localeCompare(skillLabel(right)));
   const focusedProfession = professionIds.includes(focusSkill) ? focusSkill : professionIds[0];
   const getName = (c: AnyRecord) => c.userName ?? c.username ?? "Unknown";
   const getSkill = (c: AnyRecord, id: number) => toNumber(c.skills?.[String(id)]);
@@ -134,6 +135,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
       <section className="profession-insights capability-dashboard">
         <div className="profession-insights-bar">
           <div className="profession-insights-title"><ShieldCheck size={15} /><span><strong>Profession capability</strong><small>{nextSettlementTier ? `Readiness for T${nextSettlementTier}` : "Maximum-tier coverage"}</small></span></div>
+          {insightsOpen ? <>
           <label className="profession-insights-select"><span>Profession</span><select className="select-control" value={focusedProfession} onChange={(event) => setFocusSkill(Number(event.target.value))}>
             {professionIds.map((id) => <option key={id} value={id}>{skillLabel(id)}</option>)}
           </select></label>
@@ -142,16 +144,17 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
             <span><small>{nextSettlementTier ? `T${nextSettlementTier} capable` : "Qualified"}</small><strong>{focusedCapability?.nextCapableCount ?? 0} members</strong></span>
             <span><small>Next-tier risk</small><strong>{focusedCapability?.dependencyRisk === "high" ? "High" : focusedCapability?.dependencyRisk === "covered" ? "Covered" : focusedCapability?.dependencyRisk === "gap" ? "Gap" : "Unknown"}</strong></span>
           </div>
+          </> : null}
           <button className="profession-insights-toggle" type="button" aria-expanded={insightsOpen} aria-controls="profession-insights-content" onClick={() => setInsightsOpen((open) => !open)}>{insightsOpen ? "Hide details" : "Show details"}<ChevronDown size={16} /></button>
         </div>
-        <div className="capability-grid" aria-label="Profession readiness overview">
+        {insightsOpen ? <><div className="capability-grid" aria-label="Profession readiness overview">
           {capabilities.map((capability) => <button type="button" key={capability.id} className={focusedProfession === capability.id ? "active" : ""} onClick={() => setFocusSkill(capability.id)}>
             <div className="capability-card-heading"><strong>{capability.name}</strong><span className={`capability-state ${capability.nextOutlook === "ready" ? "ready" : capability.nextOutlook === "developing" ? "gap" : capability.nextOutlook}`}>{capability.nextOutlook === "ready" ? `T${capability.nextTier} ready` : capability.nextOutlook === "developing" ? `T${capability.nextTier} gap` : capability.nextOutlook === "maximum-tier" ? "Maximum tier" : "Tier unknown"}</span></div>
             <div className="capability-card-metrics"><span><small>Current capable</small><b>{capability.currentCapableCount}</b></span><span><small>{nextSettlementTier ? `T${nextSettlementTier} capable` : "Next tier"}</small><b>{nextSettlementTier ? capability.nextCapableCount : "-"}</b></span><span><small>Levels to next</small><b>{capability.nextTier ? capability.nextLevelGap : "-"}</b></span></div>
             <p>{outlookLabel(capability)}</p><small className="capability-explanation">{capability.explanation}</small>
           </button>)}
         </div>
-        {insightsOpen ? <div className="skills-dashboard profession-insights-content" id="profession-insights-content">
+        <div className="skills-dashboard profession-insights-content" id="profession-insights-content">
         <section className="focus-panel">
           <div className="split-header">
             <h3><Target size={17} /> Capability Detail</h3>
@@ -193,7 +196,7 @@ export function Skills({ data }: { data: ReturnType<typeof normalizeData> }) {
           <p>{focusedCapability?.explanation}</p>
           <div className="capability-outlook-detail"><span><small>Current readiness</small><strong>{focusedCapability?.currentStatus === "ready" ? `Supports T${settlementTier}` : `Does not yet support T${settlementTier}`}</strong></span><span><small>Next-tier outlook</small><strong>{focusedCapability ? outlookLabel(focusedCapability) : "Unavailable"}</strong></span><span><small>Next requirement</small><strong>{focusedCapability?.nextTier ? `T${focusedCapability.nextTier} · Lv ${tierRequiredLevel(focusedCapability.nextTier)}` : "Maximum tier reached"}</strong></span></div>
         </section>
-      </div> : null}
+      </div></> : null}
       </section>
       <div className="toolbar-row skills-toolbar">
         <SearchBox label="Search members by name" value={searchTerm} onChange={setSearchTerm} placeholder="Search members" />

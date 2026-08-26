@@ -66,7 +66,7 @@ import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";
 import { hasPersistedState, usePersistedState } from "../hooks/usePersistedState";
 import { settlementMarketTitle } from "../navigation/navigationLabels";
 import { getTrackedOwnerName } from "../utils/ownership";
-import { bitjitaIconUrl, isMarketableItem, playerToolbeltTools } from "../utils/items";
+import { isMarketableItem, playerToolbeltTools } from "../utils/items";
 import { memberDisplayName, memberTrackingId } from "../utils/memberIdentity";
 import { normalizeData } from "../utils/normalize";
 import { unique } from "../utils/array";
@@ -78,19 +78,17 @@ import { trackAnalyticsEvent } from "../utils/analytics";
 import type { ActivePanel, LoadState } from "../types/app";
 import { useManualRefresh } from "../refresh/ManualRefreshContext";
 import { manualRefreshHeaders } from "../refresh/manualRefresh.mjs";
-import { bitcraftMapUrl, mapResourceCategory, mapResourceToken, normalizeMapResourceToken, parseBitcraftMapUrl, type MapFocus } from "./map/mapUtils";
-import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketDaily, buildMarketTopItems, formatMarketDay, type BestSellerSortKey } from "./market/marketAnalytics";
+import { mapResourceCategory, mapResourceToken, normalizeMapResourceToken, type MapFocus } from "./map/mapUtils";
+import { BEST_SELLER_SORTS, bestSellerSortValue, buildMarketRangeAnalytics, formatMarketDay, type BestSellerSortKey } from "./market/marketAnalytics";
 import { displayItemName, listingDate, listingTrackingKey, liveDaysSince, safeDisplayJson, settlementListingState } from "./market/listingUtils";
 
 /*
  * Main application pages that still share a large amount of display logic.
  *
- * AppShell passes normalized BitJita data and local history into these pages.
- * Keep automatic BitJita fetching out of page components unless the interaction
- * is an explicit user-triggered tool such as market search or map catalog lookup.
+ * AppShell passes normalized provider data and locally observed history into
+ * these pages. Page components contact only provider-neutral local routes.
  */
 
-const API = "/api/bitjita";
 const LOCAL_API = "/api/local";
 function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMeta: Map<string, AnyRecord> }) {
   const [sort, setSort] = React.useState<BestSellerSortKey>("units");
@@ -106,7 +104,7 @@ function BestSellersLeaderboard({ rows, itemMeta }: { rows: AnyRecord[]; itemMet
       <div className="market-best-empty">
         <Star size={24} />
         <strong>No confirmed best sellers yet</strong>
-        <span>API-confirmed sales will appear here once BitJita reports completed trades for this selection.</span>
+        <span>Confirmed sales will appear here when an authoritative completed-trade signal is available for this selection.</span>
       </div>
     );
   }
@@ -230,12 +228,14 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
         id: event.id,
         itemName: event.item_name,
         name: event.item_name,
+        itemId: event.itemId ?? event.item_id,
+        itemType: event.itemType ?? event.item_type,
         iconAssetName: event.iconAssetName ?? raw.iconAssetName,
         quantity: event.quantity,
         unitPrice: event.price,
         totalPrice: event.total_value,
         sellerUsername: event.owner,
-        purchaserUsername: raw.purchaserUsername,
+        purchaserUsername: event.purchaserUsername ?? event.purchaser_username ?? raw.purchaserUsername,
         itemTier: event.tier ?? raw.itemTier,
         itemRarityStr: event.rarity ?? raw.itemRarityStr,
         timestamp: event.occurred_at,
@@ -273,6 +273,10 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
   const saleEvents = apiTrades.map((trade: AnyRecord) => ({
     itemName: trade.itemName,
     item_name: trade.itemName,
+    itemId: trade.itemId,
+    item_id: trade.itemId,
+    itemType: trade.itemType,
+    item_type: trade.itemType,
     quantity: trade.quantity,
     price: trade.unitPrice,
     totalValue: trade.totalPrice,
@@ -280,12 +284,13 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
     occurredAt: trade.timestamp ?? trade.createdAt,
     occurred_at: trade.timestamp ?? trade.createdAt,
   }));
-  const topItems = analytics?.topItems ?? buildMarketTopItems(saleEvents);
-  const daily = analytics?.daily ?? buildMarketDaily(saleEvents);
-  const confirmedSales = toNumber(analytics?.totals?.confirmedSales ?? apiTrades.length);
-  const confirmedRevenue = toNumber(analytics?.totals?.trackedValue ?? apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.totalPrice), 0));
-  const unitsSold = toNumber(analytics?.totals?.confirmedUnits ?? apiTrades.reduce((total: number, trade: AnyRecord) => total + toNumber(trade.quantity), 0));
-  const averageSaleValue = confirmedSales ? confirmedRevenue / confirmedSales : 0;
+  const marketRange = buildMarketRangeAnalytics(saleEvents, new Date(), 365);
+  const topItems = marketRange.topItems;
+  const daily = marketRange.daily;
+  const confirmedSales = marketRange.totals.confirmedSales;
+  const confirmedRevenue = marketRange.totals.trackedValue;
+  const unitsSold = marketRange.totals.confirmedUnits;
+  const averageSaleValue = confirmedSales ? toNumber(confirmedRevenue) / confirmedSales : 0;
   const listingValue = all.reduce((total, listing) => total + toNumber(listing.price) * Math.max(1, toNumber(listing.quantity)), 0);
   const maxDailyValue = Math.max(...daily.map((row: AnyRecord) => toNumber(row.totalValue)), 1);
   const trendRange = daily.length ? `${formatMarketDay(daily[0].day)} to ${formatMarketDay(daily[daily.length - 1].day)}` : "No confirmed sales";
@@ -303,7 +308,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
   return (
     <div className="panel market-page">
       <header className="members-topbar market-topbar">
-        <div>
+        <div className="route-title-copy">
           <h2>{settlementMarketTitle(data.claim?.name)}</h2>
           <p>{`${formatNumber(all.length)} monitored listing${all.length === 1 ? "" : "s"} for ${filterLabel}`}</p>
         </div>
@@ -344,7 +349,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
       </section>
       {currentView === "analytics" ? (
         <>
-          <p className="legend market-legend">Completed sales for orders listed at this settlement market, confirmed from BitJita trade records.</p>
+          <p className="legend market-legend">Completed sales for orders listed at this settlement market, confirmed from Relay closed-listing proceeds.</p>
           <div className="metric-grid market-analytics-metrics">
             <MiniStat icon={<CheckCircle2 />} label="Confirmed Sales" value={formatNumber(confirmedSales)} />
             <MiniStat icon={<Package />} label="Units Sold" value={formatNumber(unitsSold)} />
@@ -354,7 +359,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
           <div className="two-col market-analytics">
             <section>
               <h3><Star size={17} /> Best Sellers</h3>
-              <p className="legend">Top confirmed sellers from recorded BitJita trade history.</p>
+              <p className="legend">Top confirmed sellers from locally recorded Relay sale evidence.</p>
               <BestSellersLeaderboard rows={topItems} itemMeta={marketItemMeta} />
             </section>
             <section>
@@ -368,7 +373,7 @@ export function SettlementMarket({ data, history, claimId, access, locationSearc
                     <strong>{formatNumber(row.totalValue)}g</strong>
                     <small>{formatNumber(row.salesCount)} sale{row.salesCount === 1 ? "" : "s"} - {formatNumber(row.unitsSold)} units</small>
                   </div>
-                )) : <p className="legend">No API-confirmed sales found for this selection.</p>}
+                )) : <p className="legend">No confirmed sales have been observed for this selection.</p>}
               </div>
             </section>
           </div>

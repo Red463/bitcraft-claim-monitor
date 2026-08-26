@@ -11,7 +11,8 @@ test("shared Dialog owns the accessible modal interaction contract", () => {
   assert.match(dialog, /createPortal\(/);
   assert.match(dialog, /role="dialog"/);
   assert.match(dialog, /aria-modal=\{modal \? "true" : undefined\}/);
-  assert.match(dialog, /aria-labelledby=\{titleId\}/);
+  assert.match(dialog, /aria-labelledby=\{titleElementId \?\? titleId\}/);
+  assert.match(dialog, /!titleElementId \? <span className="dialog-sr-only" id=\{titleId\}>/);
   assert.match(dialog, /aria-describedby=\{description \? descriptionId : undefined\}/);
   assert.match(dialog, /event\.key === "Escape"/);
   assert.match(dialog, /event\.key !== "Tab"/);
@@ -42,7 +43,6 @@ test("global and feature overlays delegate dialog semantics to the primitive", (
     "../src/pages/CraftPlanManagerDialog.tsx",
     "../src/pages/MembersPage.tsx",
     "../src/pages/EmpiresPage.tsx",
-    "../src/pages/MapPage.tsx",
     "../src/components/admin/AdminPopupsSection.tsx",
     "../src/pages/CraftPlanningPage.tsx",
   ];
@@ -65,6 +65,14 @@ test("the notification drawer remains non-modal while blocking dialogs opt into 
   assert.match(notificationCss, /\.drawer-overlay\s*\{[^}]*align-items:\s*stretch;/s);
   assert.match(notificationCss, /\.drawer-overlay\s*\{[^}]*overflow:\s*hidden;/s);
   assert.match(notificationCss, /\.notice-drawer\s*\{[^}]*height:\s*100dvh;[^}]*max-height:\s*100dvh;[^}]*overflow:\s*auto;/s);
+});
+
+test("admin destructive actions use the shared fixed dialog foundation", () => {
+  const source = readFileSync(new URL("../src/components/admin/ConfirmAdminActionDialog.tsx", import.meta.url), "utf8");
+  assert.match(source, /import \{ Dialog \} from "\.\.\/main\/Dialog"/);
+  assert.match(source, /<Dialog\b/);
+  assert.match(source, /Reversible/);
+  assert.match(source, /initialFocusRef/);
 });
 
 test("AppShell resolves consent before mounting optional Discord identity", () => {

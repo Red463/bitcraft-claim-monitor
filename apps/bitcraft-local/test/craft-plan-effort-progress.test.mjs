@@ -10,6 +10,7 @@ import {
   normalizeGameResourceEffortCandidates,
   projectCraftPlanEffortMaterials,
   selectLowestEffortWeights,
+  unavailableCraftPlanEffortProgress,
 } from "../src/server/craftPlanEffortProgress.mjs";
 
 function fishingPlan({ current = false } = {}) {
@@ -226,6 +227,12 @@ test("empty plans are complete without requiring catalog weights", () => {
   const result = calculateCraftPlanEffortProgress({ baselinePlan: { materials: [] }, currentPlan: { materials: [] }, weights: new Map() });
   assert.equal(result.state, "empty");
   assert.deepEqual(result.overall, { state: "empty", baselineEffort: 0, remainingEffort: 0, completion: 100 });
+});
+
+test("unavailable effort progress explains Relay catalog readiness without retired refresh instructions", () => {
+  const result = unavailableCraftPlanEffortProgress();
+  assert.deepEqual(result.warnings, ["Effort progress is unavailable until compatible Relay catalog data is ready."]);
+  assert.doesNotMatch(result.warnings.join(" "), /refresh|full catalog run|scheduled/i);
 });
 
 test("Fishing variants replace only interchangeable fish inputs", () => {

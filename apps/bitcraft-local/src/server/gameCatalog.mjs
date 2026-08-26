@@ -3,19 +3,13 @@ import { createHash } from "node:crypto";
 import { selectLowestEffortWeights } from "./craftPlanEffortProgress.mjs";
 import { resolveItemListProbabilities } from "./itemProbability.mjs";
 
-export const GAME_CATALOG_NORMALIZATION_VERSION = 8;
-
-export function catalogNormalizationNeedsRefresh(storedVersion) {
-  return Number(storedVersion) !== GAME_CATALOG_NORMALIZATION_VERSION;
-}
-
-export function catalogRefreshShouldResume(previousRun, storedVersion) {
-  return Boolean(previousRun && previousRun.status !== "completed" && !catalogNormalizationNeedsRefresh(storedVersion));
-}
-
 function toNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function escapedLikePattern(value) {
+  return String(value ?? "").replace(/[\\%_]/g, "\\$&");
 }
 
 function normalizeInteger(value, fallback = null) {
@@ -424,47 +418,6 @@ function mapRecipeRow(row, inputs, outputs) {
   };
 }
 
-function mapRefreshRunRow(row) {
-  return row ? {
-    id: toNumber(row.id),
-    status: row.status,
-    phase: row.phase ?? null,
-    cursorKind: row.cursor_kind ?? null,
-    cursorId: row.cursor_id ?? null,
-    processedCount: toNumber(row.processed_count),
-    totalCount: toNumber(row.total_count),
-    itemCount: toNumber(row.item_count),
-    cargoCount: toNumber(row.cargo_count),
-    recipeCount: toNumber(row.recipe_count),
-    byproductCount: toNumber(row.byproduct_count),
-    failureCount: toNumber(row.failure_count),
-    startedAt: row.started_at,
-    completedAt: row.completed_at ?? null,
-    lastError: row.last_error ?? null,
-    updatedAt: row.updated_at,
-  } : null;
-}
-
-function mapRefreshTargetRow(row) {
-  if (!row) return null;
-  return {
-    runId: toNumber(row.run_id),
-    sequence: toNumber(row.sequence),
-    catalogKey: row.catalog_key,
-    kind: row.kind,
-    id: row.target_id,
-    itemType: toNumber(row.item_type),
-    name: row.name,
-    tag: row.tag,
-    tier: normalizeInteger(row.tier),
-    rarityStr: row.rarity,
-    iconAssetName: row.icon_asset_name,
-    state: row.state,
-    attemptCount: toNumber(row.attempt_count),
-    lastError: row.last_error,
-  };
-}
-
 export function createGameCatalogRepository(db) {
   const statements = {
     upsertEntity: db.prepare(`
@@ -485,6 +438,8 @@ export function createGameCatalogRepository(db) {
     `),
     getEntity: db.prepare("SELECT * FROM game_catalog_entities WHERE catalog_key = ?"),
     listRecipeKeysBySource: db.prepare("SELECT recipe_key FROM game_catalog_recipe_sources WHERE catalog_key = ?"),
+    deleteAllRecipeSources: db.prepare("DELETE FROM game_catalog_recipe_sources"),
+    deleteAllRecipes: db.prepare("DELETE FROM game_catalog_recipes"),
     deleteRecipeSourcesForEntity: db.prepare("DELETE FROM game_catalog_recipe_sources WHERE catalog_key = ?"),
     insertRecipeSource: db.prepare("INSERT OR IGNORE INTO game_catalog_recipe_sources (catalog_key, recipe_key) VALUES (?, ?)"),
     countRecipeSources: db.prepare("SELECT COUNT(*) AS count FROM game_catalog_recipe_sources WHERE recipe_key = ?"),
@@ -621,65 +576,6 @@ export function createGameCatalogRepository(db) {
       FROM game_catalog_effort_weights
       WHERE model_version = ?
     `),
-    insertRefreshRun: db.prepare(`
-      INSERT INTO game_catalog_refresh_runs (
-        status, phase, cursor_kind, cursor_id, processed_count, total_count, item_count, cargo_count,
-        recipe_count, byproduct_count, failure_count, started_at, completed_at, last_error, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `),
-    getRefreshRun: db.prepare("SELECT * FROM game_catalog_refresh_runs WHERE id = ?"),
-    getLatestRefreshRun: db.prepare("SELECT * FROM game_catalog_refresh_runs ORDER BY updated_at DESC, id DESC LIMIT 1"),
-    listRefreshRuns: db.prepare("SELECT * FROM game_catalog_refresh_runs ORDER BY updated_at DESC, id DESC LIMIT ?"),
-    saveRefreshRun: db.prepare(`
-      UPDATE game_catalog_refresh_runs
-      SET status = ?, phase = ?, cursor_kind = ?, cursor_id = ?, processed_count = ?, total_count = ?,
-          item_count = ?, cargo_count = ?, recipe_count = ?, byproduct_count = ?, failure_count = ?,
-          started_at = ?, completed_at = ?, last_error = ?, updated_at = ?
-      WHERE id = ?
-    `),
-    deleteRefreshTargets: db.prepare("DELETE FROM game_catalog_refresh_targets WHERE run_id = ?"),
-    insertRefreshTarget: db.prepare(`
-      INSERT INTO game_catalog_refresh_targets (
-        run_id, sequence, catalog_key, kind, target_id, item_type, name, tag, tier, rarity,
-        icon_asset_name, state, attempt_count, last_error, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, ?)
-    `),
-    countRefreshTargets: db.prepare(`
-      SELECT
-        COUNT(*) AS total,
-        SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END) AS pending,
-        SUM(CASE WHEN state = 'processed' THEN 1 ELSE 0 END) AS processed,
-        SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END) AS failed
-      FROM game_catalog_refresh_targets
-      WHERE run_id = ?
-    `),
-    listPendingRefreshTargets: db.prepare(`
-      SELECT * FROM game_catalog_refresh_targets
-      WHERE run_id = ? AND state = 'pending'
-      ORDER BY sequence ASC
-      LIMIT ?
-    `),
-    listRetryableRefreshTargets: db.prepare(`
-      SELECT * FROM game_catalog_refresh_targets
-      WHERE run_id = ? AND state = 'failed' AND attempt_count < ?
-      ORDER BY sequence ASC
-      LIMIT ?
-    `),
-    markRefreshTargetProcessed: db.prepare(`
-      UPDATE game_catalog_refresh_targets
-      SET state = 'processed', attempt_count = attempt_count + 1, last_error = NULL, updated_at = ?
-      WHERE run_id = ? AND catalog_key = ?
-    `),
-    markRefreshTargetFailed: db.prepare(`
-      UPDATE game_catalog_refresh_targets
-      SET state = 'failed', attempt_count = attempt_count + 1, last_error = ?, updated_at = ?
-      WHERE run_id = ? AND catalog_key = ?
-    `),
-    markRefreshTargetUnavailable: db.prepare(`
-      UPDATE game_catalog_refresh_targets
-      SET state = 'failed', attempt_count = ?, last_error = ?, updated_at = ?
-      WHERE run_id = ? AND catalog_key = ?
-    `),
     listEntityItemLists: db.prepare(`
       SELECT catalog_key, item_list_id
       FROM game_catalog_entities
@@ -801,6 +697,44 @@ export function createGameCatalogRepository(db) {
       SELECT * FROM game_catalog_entities
       ORDER BY kind ASC, name COLLATE NOCASE ASC, target_id ASC
     `),
+    searchEntities: db.prepare(`
+      SELECT *
+      FROM game_catalog_entities
+      WHERE target_id = ?
+        OR name LIKE ? ESCAPE '\\' COLLATE NOCASE
+      ORDER BY
+        CASE
+          WHEN lower(name) = lower(?) THEN 0
+          WHEN name LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1
+          ELSE 2
+        END,
+        tier ASC,
+        name COLLATE NOCASE ASC,
+        kind ASC,
+        target_id ASC
+      LIMIT ?
+    `),
+    findEntities: db.prepare(`
+      SELECT *
+      FROM game_catalog_entities
+      WHERE target_id = ?
+        OR name LIKE ? ESCAPE '\\' COLLATE NOCASE
+      ORDER BY
+        CASE
+          WHEN lower(name) = lower(?) THEN 0
+          WHEN name LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1
+          ELSE 2
+        END,
+        tier ASC,
+        name COLLATE NOCASE ASC,
+        kind ASC,
+        target_id ASC
+    `),
+    listEntities: db.prepare(`
+      SELECT *
+      FROM game_catalog_entities
+      ORDER BY name COLLATE NOCASE ASC, kind ASC, target_id ASC
+    `),
     listRawItemListRows: db.prepare(`
       SELECT
         lists.item_list_id,
@@ -871,6 +805,19 @@ export function createGameCatalogRepository(db) {
     );
   }
 
+  function runMutation(manageTransaction, mutation) {
+    if (!manageTransaction) return mutation();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = mutation();
+      db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   return {
     upsertEntityIdentity(source, { updatedAt = new Date().toISOString(), kind = null } = {}) {
       const entity = entityFromSource(source, {}, kind);
@@ -888,153 +835,6 @@ export function createGameCatalogRepository(db) {
         updatedAt,
       );
       return { ...entity, updatedAt };
-    },
-    beginRefreshRun({
-      status = "running",
-      phase = null,
-      cursorKind = null,
-      cursorId = null,
-      processedCount = 0,
-      totalCount = 0,
-      itemCount = 0,
-      cargoCount = 0,
-      recipeCount = 0,
-      byproductCount = 0,
-      failureCount = 0,
-      startedAt = new Date().toISOString(),
-      completedAt = null,
-      lastError = null,
-      updatedAt = startedAt,
-    } = {}) {
-      const result = statements.insertRefreshRun.run(
-        status,
-        phase,
-        cursorKind,
-        cursorId,
-        processedCount,
-        totalCount,
-        itemCount,
-        cargoCount,
-        recipeCount,
-        byproductCount,
-        failureCount,
-        startedAt,
-        completedAt,
-        lastError,
-        updatedAt,
-      );
-      return mapRefreshRunRow(statements.getRefreshRun.get(result.lastInsertRowid));
-    },
-    updateRefreshRun(id, patch = {}) {
-      const current = mapRefreshRunRow(statements.getRefreshRun.get(id));
-      if (!current) return null;
-      const next = {
-        id: current.id,
-        status: patch.status ?? current.status,
-        phase: Object.prototype.hasOwnProperty.call(patch, "phase") ? patch.phase : current.phase,
-        cursorKind: Object.prototype.hasOwnProperty.call(patch, "cursorKind") ? patch.cursorKind : current.cursorKind,
-        cursorId: Object.prototype.hasOwnProperty.call(patch, "cursorId") ? patch.cursorId : current.cursorId,
-        processedCount: patch.processedCount ?? current.processedCount,
-        totalCount: patch.totalCount ?? current.totalCount,
-        itemCount: patch.itemCount ?? current.itemCount,
-        cargoCount: patch.cargoCount ?? current.cargoCount,
-        recipeCount: patch.recipeCount ?? current.recipeCount,
-        byproductCount: patch.byproductCount ?? current.byproductCount,
-        failureCount: patch.failureCount ?? current.failureCount,
-        startedAt: patch.startedAt ?? current.startedAt,
-        completedAt: Object.prototype.hasOwnProperty.call(patch, "completedAt") ? patch.completedAt : current.completedAt,
-        lastError: Object.prototype.hasOwnProperty.call(patch, "lastError") ? patch.lastError : current.lastError,
-        updatedAt: patch.updatedAt ?? new Date().toISOString(),
-      };
-      statements.saveRefreshRun.run(
-        next.status,
-        next.phase,
-        next.cursorKind,
-        next.cursorId,
-        next.processedCount,
-        next.totalCount,
-        next.itemCount,
-        next.cargoCount,
-        next.recipeCount,
-        next.byproductCount,
-        next.failureCount,
-        next.startedAt,
-        next.completedAt,
-        next.lastError,
-        next.updatedAt,
-        next.id,
-      );
-      return mapRefreshRunRow(statements.getRefreshRun.get(next.id));
-    },
-    getLatestRefreshRun() {
-      return mapRefreshRunRow(statements.getLatestRefreshRun.get());
-    },
-    listRefreshRuns(limit = 20) {
-      const normalizedLimit = Math.max(1, Math.floor(toNumber(limit, 20) || 20));
-      return statements.listRefreshRuns.all(normalizedLimit).map((row) => mapRefreshRunRow(row));
-    },
-    replaceRefreshTargets(runId, targets = []) {
-      const updatedAt = new Date().toISOString();
-      db.exec("BEGIN IMMEDIATE");
-      try {
-        statements.deleteRefreshTargets.run(runId);
-        targets.forEach((source, sequence) => {
-          const entity = entityFromSource(source, {}, source.kind);
-          statements.insertRefreshTarget.run(
-            runId,
-            sequence,
-            entity.catalogKey,
-            entity.kind,
-            entity.targetId,
-            entity.itemType,
-            entity.name,
-            entity.tag,
-            entity.tier,
-            entity.rarity,
-            entity.iconAssetName,
-            updatedAt,
-          );
-        });
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-      return this.getRefreshTargetCounts(runId);
-    },
-    getRefreshTargetCounts(runId) {
-      const row = statements.countRefreshTargets.get(runId) ?? {};
-      return {
-        total: toNumber(row.total),
-        pending: toNumber(row.pending),
-        processed: toNumber(row.processed),
-        failed: toNumber(row.failed),
-      };
-    },
-    listPendingRefreshTargets(runId, limit = 250) {
-      return statements.listPendingRefreshTargets.all(runId, Math.max(1, Math.floor(toNumber(limit, 250)))).map(mapRefreshTargetRow);
-    },
-    listRetryableRefreshTargets(runId, limit = 250, maxAttempts = 3) {
-      return statements.listRetryableRefreshTargets.all(
-        runId,
-        Math.max(1, Math.floor(toNumber(maxAttempts, 3))),
-        Math.max(1, Math.floor(toNumber(limit, 250))),
-      ).map(mapRefreshTargetRow);
-    },
-    markRefreshTargetProcessed(runId, catalogKey, updatedAt = new Date().toISOString()) {
-      statements.markRefreshTargetProcessed.run(updatedAt, runId, catalogKey);
-    },
-    markRefreshTargetFailed(runId, catalogKey, error, updatedAt = new Date().toISOString()) {
-      statements.markRefreshTargetFailed.run(String(error ?? "Unknown catalog refresh error"), updatedAt, runId, catalogKey);
-    },
-    markRefreshTargetUnavailable(runId, catalogKey, error, maxAttempts = 3, updatedAt = new Date().toISOString()) {
-      statements.markRefreshTargetUnavailable.run(
-        Math.max(1, Math.floor(toNumber(maxAttempts, 3) || 3)),
-        String(error ?? "Catalog entity unavailable"),
-        updatedAt,
-        runId,
-        catalogKey,
-      );
     },
     upsertDetail(payload, { updatedAt = new Date().toISOString(), fallback = {} } = {}) {
       const normalized = normalizeGameCatalogDetail(payload, fallback);
@@ -1138,11 +938,179 @@ export function createGameCatalogRepository(db) {
         recipes: normalized.recipes.map((recipe) => ({ ...recipe, updatedAt })),
       };
     },
+    replaceRecipeSnapshot(
+      recipes = [],
+      updatedAt = new Date().toISOString(),
+      publish = null,
+      { manageTransaction = true } = {},
+    ) {
+      if (!Array.isArray(recipes)) throw new TypeError("Recipe snapshot must be an array.");
+      const seen = new Set();
+      const normalized = recipes.map((recipe, recipeIndex) => {
+        const label = `Recipe snapshot row ${recipeIndex}`;
+        const recipeKey = String(recipe?.recipeKey ?? "").trim();
+        if (!recipeKey) throw new Error(`${label} recipe key is required.`);
+        if (seen.has(recipeKey)) throw new Error(`Duplicate recipe snapshot key: ${recipeKey}`);
+        seen.add(recipeKey);
+        const sourceKind = gameCatalogKindFromItemType(recipe?.sourceKind);
+        const sourceId = String(recipe?.sourceId ?? "").trim();
+        if (!/^\d+$/.test(sourceId)) throw new Error(`${label} source id must be a decimal string.`);
+        const actionCount = Number(recipe?.actionCount ?? 0);
+        if (!Number.isFinite(actionCount) || actionCount < 0) {
+          throw new Error(`${label} action count must be a non-negative finite number.`);
+        }
+        const normalizeLinks = (rows, linkKind) => {
+          if (!Array.isArray(rows)) throw new TypeError(`${label} ${linkKind}s must be an array.`);
+          return rows.map((link, linkIndex) => {
+            const kind = gameCatalogKindFromItemType(link?.kind);
+            const targetId = String(link?.targetId ?? "").trim();
+            if (!/^\d+$/.test(targetId)) {
+              throw new Error(`${label} ${linkKind} ${linkIndex} id must be a decimal string.`);
+            }
+            const quantity = Number(link?.quantity);
+            if (!Number.isFinite(quantity) || quantity <= 0) {
+              throw new Error(`${label} ${linkKind} ${linkIndex} quantity must be positive.`);
+            }
+            const occurrenceRate = Number(link?.occurrenceRate ?? 1);
+            if (!Number.isFinite(occurrenceRate) || occurrenceRate < 0) {
+              throw new Error(`${label} ${linkKind} ${linkIndex} occurrence rate must be non-negative.`);
+            }
+            return {
+              ...link,
+              kind,
+              targetId,
+              [`${linkKind}Key`]: gameCatalogKey(kind, targetId),
+              quantity,
+              occurrenceRate,
+            };
+          });
+        };
+        const inputs = normalizeLinks(recipe?.inputs ?? [], "input");
+        const outputs = normalizeLinks(recipe?.outputs ?? [], "output");
+        if (outputs.length === 0) throw new Error(`${label} must have at least one output.`);
+        const outputComponents = normalizeLinks(recipe?.outputComponents ?? outputs, "output")
+          .map((component, componentIndex) => ({
+            ...component,
+            componentIndex: Math.max(0, Math.trunc(toNumber(component?.componentIndex, componentIndex))),
+          }));
+        const sourceCatalogKeys = [...new Set(
+          (Array.isArray(recipe?.sourceCatalogKeys) && recipe.sourceCatalogKeys.length
+            ? recipe.sourceCatalogKeys
+            : outputs.map((output) => output.outputKey))
+            .map((value) => String(value ?? "").trim())
+            .filter(Boolean),
+        )];
+        return {
+          ...recipe,
+          recipeKey,
+          sourceKind,
+          sourceId,
+          actionCount,
+          activityKind: recipe?.activityKind === "gathering" ? "gathering" : "craft",
+          gatheringMode: recipe?.gatheringMode === "prospecting" ? "prospecting" : "ordinary",
+          resourceId: recipe?.resourceId == null ? null : String(recipe.resourceId),
+          inputs,
+          outputs,
+          outputComponents,
+          sourceCatalogKeys,
+        };
+      });
+
+      return runMutation(manageTransaction, () => {
+        statements.deleteAllRecipeSources.run();
+        statements.deleteAllRecipes.run();
+        for (const recipe of normalized) {
+          statements.insertRecipe.run(
+            recipe.recipeKey,
+            recipe.sourceKind,
+            recipe.sourceId,
+            recipe.actionCount,
+            recipe.activityKind,
+            recipe.gatheringMode,
+            recipe.name == null ? null : String(recipe.name),
+            recipe.stationName == null ? null : String(recipe.stationName),
+            recipe.skillName == null ? null : String(recipe.skillName),
+            recipe.isPassive ? 1 : 0,
+            recipe.isTransportRoute ? 1 : 0,
+            recipe.resourceId,
+            updatedAt,
+          );
+          for (const input of recipe.inputs) {
+            statements.insertRecipeInput.run(
+              recipe.recipeKey,
+              input.inputKey,
+              input.kind,
+              input.targetId,
+              input.quantity,
+            );
+          }
+          for (const output of recipe.outputs) {
+            statements.insertRecipeOutput.run(
+              recipe.recipeKey,
+              output.outputKey,
+              output.kind,
+              output.targetId,
+              output.quantity,
+              output.occurrenceRate,
+              output.yieldBasis === "per_progress" ? "per_progress" : "per_craft",
+              output.guaranteedQuantity == null ? null : Math.max(0, toNumber(output.guaranteedQuantity)),
+              output.isPrimaryOutput ? 1 : 0,
+            );
+          }
+          for (const component of recipe.outputComponents) {
+            statements.insertRecipeOutputComponent.run(
+              recipe.recipeKey,
+              component.componentIndex,
+              component.outputKey,
+              component.kind,
+              component.targetId,
+              component.quantity,
+              component.occurrenceRate,
+              component.yieldBasis === "per_progress" ? "per_progress" : "per_craft",
+              component.isPrimaryOutput ? 1 : 0,
+            );
+          }
+          for (const catalogKey of recipe.sourceCatalogKeys) {
+            statements.insertRecipeSource.run(catalogKey, recipe.recipeKey);
+          }
+        }
+        const result = { recipeCount: normalized.length, updatedAt };
+        if (typeof publish === "function") publish(result);
+        return result;
+      });
+    },
     deleteOrphanRecipes() {
       return statements.deleteOrphanRecipes.run().changes;
     },
     getEntity(catalogKey) {
       return mapEntityRow(statements.getEntity.get(catalogKey));
+    },
+    searchEntities(query, limit = 20) {
+      const normalizedQuery = String(query ?? "").trim();
+      if (normalizedQuery.length < 2) return [];
+      const escaped = escapedLikePattern(normalizedQuery);
+      const normalizedLimit = Math.max(1, Math.min(50, Math.floor(toNumber(limit, 20) || 20)));
+      return statements.searchEntities.all(
+        normalizedQuery,
+        `%${escaped}%`,
+        normalizedQuery,
+        `${escaped}%`,
+        normalizedLimit,
+      ).map(mapEntityRow);
+    },
+    findEntities(query) {
+      const normalizedQuery = String(query ?? "").trim();
+      if (normalizedQuery.length < 2) return [];
+      const escaped = escapedLikePattern(normalizedQuery);
+      return statements.findEntities.all(
+        normalizedQuery,
+        `%${escaped}%`,
+        normalizedQuery,
+        `${escaped}%`,
+      ).map(mapEntityRow);
+    },
+    listEntities() {
+      return statements.listEntities.all().map(mapEntityRow);
     },
     listProducerRecipesForOutput(outputKey) {
       return statements.listProducerRecipesForOutput.all(outputKey).map((row) => recipeWithLinks(row));
@@ -1169,7 +1137,7 @@ export function createGameCatalogRepository(db) {
       sourceRevision = null,
       sources = [],
       updatedAt = new Date().toISOString(),
-    } = {}, publish = null) {
+    } = {}, publish = null, { manageTransaction = true } = {}) {
       const normalizedSourceUrl = String(sourceUrl ?? "").trim();
       if (!normalizedSourceUrl) throw new Error("Probability snapshot source URL is required.");
       const itemListIdByOutputKey = new Map(
@@ -1178,8 +1146,7 @@ export function createGameCatalogRepository(db) {
       const resolved = resolveItemListProbabilities(itemLists, itemListIdByOutputKey);
       const warningSet = new Set(resolved.warnings);
 
-      db.exec("BEGIN IMMEDIATE");
-      try {
+      return runMutation(manageTransaction, () => {
         statements.deleteProbabilitySnapshot.run();
         statements.deleteProbabilitySources.run();
         statements.deleteAllItemListOutputs.run();
@@ -1325,12 +1292,8 @@ export function createGameCatalogRepository(db) {
           updatedAt,
         };
         if (typeof publish === "function") publish(result);
-        db.exec("COMMIT");
         return result;
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
+      });
     },
     getProbabilitySnapshot() {
       const row = statements.getProbabilitySnapshot.get();
@@ -1648,13 +1611,18 @@ export function createGameCatalogRepository(db) {
         probability: 1,
       }));
     },
-    replaceEffortWeights(candidates, modelVersion, updatedAt = new Date().toISOString(), publish = null) {
+    replaceEffortWeights(
+      candidates,
+      modelVersion,
+      updatedAt = new Date().toISOString(),
+      publish = null,
+      { manageTransaction = true } = {},
+    ) {
       const normalizedVersion = Math.max(1, Math.floor(toNumber(modelVersion)));
       const weights = selectLowestEffortWeights((candidates ?? []).filter((row) => (
         row?.method === "crafting" || row?.method === "gathering"
       )));
-      db.exec("BEGIN IMMEDIATE");
-      try {
+      return runMutation(manageTransaction, () => {
         statements.deleteEffortWeights.run();
         for (const row of weights.values()) {
           statements.insertEffortWeight.run(
@@ -1667,12 +1635,8 @@ export function createGameCatalogRepository(db) {
           );
         }
         if (typeof publish === "function") publish({ count: weights.size, updatedAt });
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-      return weights.size;
+        return weights.size;
+      });
     },
     getEffortWeights(modelVersion) {
       return new Map(statements.listEffortWeights.all(modelVersion).map((row) => [row.catalog_key, {

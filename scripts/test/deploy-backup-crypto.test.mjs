@@ -7,6 +7,22 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const helper = fileURLToPath(new URL("../../deploy/backup-crypto.mjs", import.meta.url));
+const helperSource = readFileSync(helper, "utf8");
+const cutoverSource = readFileSync(new URL("../../deploy/cutover-relay-production.mjs", import.meta.url), "utf8");
+
+test("cutover backup hashing and authenticated encryption never buffer whole database files", () => {
+  assert.match(helperSource, /createReadStream/);
+  assert.match(helperSource, /pipeline/);
+  assert.doesNotMatch(helperSource, /readFileSync\((?:input|output)\)/);
+  const backupFlow = cutoverSource.slice(
+    cutoverSource.indexOf("async function createAndVerifyEncryptedBackups"),
+    cutoverSource.indexOf("async function createRepairManifest"),
+  );
+  assert.match(backupFlow, /sha256File\(plaintext\)/);
+  assert.match(backupFlow, /sha256File\(validation\)/);
+  assert.match(backupFlow, /sha256File\(encrypted\)/);
+  assert.doesNotMatch(backupFlow, /sha256\(readFileSync\((?:plaintext|validation|encrypted)\)\)/);
+});
 
 test("backup crypto round-trips with authenticated AES-256-GCM and fresh nonces", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "backup-crypto-"));

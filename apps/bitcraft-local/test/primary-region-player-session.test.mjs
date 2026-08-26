@@ -1,0 +1,777 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+let sessionModule = null;
+try {
+  sessionModule = await import("../src/server/game-data/primaryRegionPlayerSession.ts");
+} catch {
+  // The first TDD run proves the regional player session is absent.
+}
+
+function fakeBindings({
+  bankRows = [],
+  inventoryRows = [],
+  userRows = [],
+  playerActionRows = [],
+} = {}) {
+  const state = {
+    connectConfig: {},
+    queries: null,
+    onApplied: null,
+    subscriptions: [],
+    callbacks: new Map(),
+    disconnected: false,
+    unsubscribed: false,
+  };
+  const rows = [{
+    entityId: 101n,
+    timePlayed: 7200,
+    sessionStartTimestamp: 0,
+    timeSignedIn: 3600,
+    signInTimestamp: 1785352200,
+    signedIn: true,
+    travelerTasksExpiration: 0,
+  }];
+  const cachedTable = (name, tableRows = []) => ({
+    iter: () => tableRows[Symbol.iterator](),
+    onInsert: (callback) => state.callbacks.set(`${name}:insert`, callback),
+    onUpdate: (callback) => state.callbacks.set(`${name}:update`, callback),
+    onDelete: (callback) => state.callbacks.set(`${name}:delete`, callback),
+    removeOnInsert: () => state.callbacks.delete(`${name}:insert`),
+    removeOnUpdate: () => state.callbacks.delete(`${name}:update`),
+    removeOnDelete: () => state.callbacks.delete(`${name}:delete`),
+  });
+  const playerState = cachedTable("player", rows);
+  const equipmentState = cachedTable("equipment", [{
+    entityId: 101n,
+    equipmentSlots: [],
+  }]);
+  const equipmentPresetState = cachedTable("preset", []);
+  const activeBuffState = cachedTable("buff", []);
+  const projectSiteState = cachedTable("project", [{
+    entityId: 9001n,
+    constructionRecipeId: 3023,
+    resourcePlacementRecipeId: 0,
+    items: [{
+      itemId: 3090004,
+      quantity: 5,
+      itemType: { tag: "Item", value: {} },
+    }],
+    cargos: [],
+    progress: 157,
+    lastCritOutcome: 1,
+    ownerId: 1369094286777412590n,
+    direction: 2,
+    lastHitTimestamp: {
+      __timestamp_micros_since_unix_epoch__: 1785096910248578n,
+    },
+  }]);
+  const buildingState = cachedTable("building", [{
+    entityId: 7001n,
+    claimEntityId: 1369094286777412590n,
+    directionIndex: 2,
+    buildingDescriptionId: 6020,
+    constructedByPlayerEntityId: 101n,
+  }]);
+  const claimTechState = cachedTable("research", [{
+    entityId: 1369094286777412590n,
+    learned: [1, 200, 748616905],
+    researching: 0,
+    startTimestamp: {
+      __timestamp_micros_since_unix_epoch__: 0n,
+    },
+    scheduledId: null,
+  }]);
+  const claimRecruitmentState = cachedTable("recruitment", [{
+    entityId: 1369094286821318198n,
+    claimEntityId: 1369094286777412590n,
+    remainingStock: 19,
+    requiredSkillId: 1,
+    requiredSkillLevel: 1,
+    requiredApproval: false,
+  }]);
+  const travelerTaskState = cachedTable("traveler-task", [{
+    entityId: 6001n,
+    playerEntityId: 101n,
+    travelerId: 12,
+    taskId: 77,
+    completed: false,
+  }]);
+  const travelerTaskDesc = cachedTable("traveler-task-desc", [{
+    id: 77,
+    description: "Deliver fine planks",
+    levelRequirement: { skillId: 3, level: 20 },
+    requiredItems: [],
+    rewardedItems: [],
+    rewardedExperience: { skillId: 3, quantity: 125 },
+  }]);
+  const bankState = cachedTable("bank", bankRows);
+  const inventoryState = cachedTable("inventory", inventoryRows);
+  const progressiveActionState = cachedTable("progressive-action", []);
+  const userState = cachedTable("user", userRows);
+  const playerActionState = cachedTable("player-action", playerActionRows);
+  const connection = {
+    db: {
+      playerState,
+      equipmentState,
+      equipmentPresetState,
+      activeBuffState,
+      projectSiteState,
+      buildingState,
+      claimTechState,
+      claimRecruitmentState,
+      travelerTaskState,
+      travelerTaskDesc,
+      bankState,
+      inventoryState,
+      progressiveActionState,
+      userState,
+      playerActionState,
+    },
+    subscriptionBuilder() {
+      const subscriptionState = {
+        onApplied: null,
+        onError: null,
+        queries: null,
+        unsubscribed: false,
+      };
+      const builder = {
+        onApplied(callback) {
+          subscriptionState.onApplied = callback;
+          return builder;
+        },
+        onError(callback) {
+          subscriptionState.onError = callback;
+          return builder;
+        },
+        subscribe(queries) {
+          subscriptionState.queries = queries;
+          state.subscriptions.push(subscriptionState);
+          if (state.subscriptions.length === 1) {
+            state.queries = queries;
+            state.onApplied = subscriptionState.onApplied;
+          }
+          return { unsubscribe: () => {
+            subscriptionState.unsubscribed = true;
+            if (state.subscriptions[0] === subscriptionState) state.unsubscribed = true;
+          } };
+        },
+      };
+      return builder;
+    },
+    disconnect() {
+      state.disconnected = true;
+    },
+  };
+  const builder = {
+    withUri(value) {
+      state.connectConfig.uri = value;
+      return builder;
+    },
+    withDatabaseName(value) {
+      state.connectConfig.database = value;
+      return builder;
+    },
+    onConnect(callback) {
+      state.onConnect = callback;
+      return builder;
+    },
+    onConnectError() {
+      return builder;
+    },
+    onDisconnect() {
+      return builder;
+    },
+    build() {
+      return connection;
+    },
+  };
+  return {
+    module: { DbConnection: { builder: () => builder } },
+    connection,
+    state,
+  };
+}
+
+const manifest = {
+  schemas: {
+    regional: { fingerprint: "regional-v1", bindingsGenerated: true },
+  },
+};
+
+const members = [
+  { playerEntityId: "101", userName: "Ada" },
+  { playerEntityId: "202", userName: "Grace" },
+];
+
+test("primary-region member queries reject unsafe numeric entity identifiers", () => {
+  assert.throws(
+    () => sessionModule.playerStateQueries([{
+      playerEntityId: Number.MAX_SAFE_INTEGER + 1,
+      userName: "Rounded",
+    }]),
+    /invalid player entity id/i,
+  );
+});
+
+test("primary-region session filters member, settlement, and Town Bank state before emitting snapshots", async () => {
+  assert.ok(sessionModule, "primary-region player session module must exist");
+  const fake = fakeBindings({
+    bankRows: [{
+      buildingEntityId: 7002n,
+      claimEntityId: 1369094286777412590n,
+      coordinates: { q: 1, r: 2 },
+    }],
+    inventoryRows: [{
+      entityId: 8001n,
+      ownerEntityId: 7002n,
+      playerOwnerEntityId: 101n,
+      inventoryIndex: 4,
+      cargoIndex: 5,
+      pockets: [{
+        volume: 10,
+        contents: {
+          itemId: 42,
+          quantity: 7,
+          itemType: { tag: "Item", value: {} },
+          durability: null,
+        },
+        locked: false,
+      }],
+    }],
+  });
+  const snapshots = [];
+  const session = new sessionModule.RelayPrimaryRegionPlayerSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+    now: () => new Date("2026-07-29T20:35:00.000Z"),
+  });
+
+  await session.start({
+    uri: "wss://relay.example:4000",
+    database: "relay-region-19",
+    schemaFingerprint: "regional-v1",
+    manifest,
+    generation: 4,
+    regionId: "19",
+    claimId: "1369094286777412590",
+    members,
+    contributionWarnings: ["Relay craft 9002 has invalid experience per progress"],
+  });
+  fake.state.onConnect(fake.connection);
+  assert.deepEqual(fake.state.queries, [
+    "SELECT * FROM player_state WHERE entity_id = 101 OR entity_id = 202",
+    "SELECT * FROM equipment_state WHERE entity_id = 101 OR entity_id = 202",
+    "SELECT * FROM equipment_preset_state WHERE player_entity_id = 101 OR player_entity_id = 202",
+    "SELECT * FROM active_buff_state WHERE entity_id = 101 OR entity_id = 202",
+    "SELECT * FROM user_state WHERE entity_id = 101 OR entity_id = 202",
+    "SELECT * FROM player_action_state WHERE entity_id = 101 OR entity_id = 202",
+    "SELECT * FROM project_site_state WHERE owner_id = 1369094286777412590",
+    "SELECT * FROM building_state WHERE claim_entity_id = 1369094286777412590",
+    "SELECT * FROM claim_tech_state WHERE entity_id = 1369094286777412590",
+    "SELECT * FROM claim_recruitment_state WHERE claim_entity_id = 1369094286777412590",
+    "SELECT * FROM traveler_task_state WHERE player_entity_id = 101 OR player_entity_id = 202",
+    "SELECT * FROM traveler_task_desc",
+    "SELECT * FROM bank_state WHERE claim_entity_id = 1369094286777412590",
+  ]);
+
+  fake.state.onApplied({});
+  assert.equal(snapshots.length, 0);
+  assert.deepEqual(fake.state.subscriptions[1].queries, [
+    "SELECT * FROM inventory_state WHERE owner_entity_id = 7002",
+  ]);
+  fake.state.subscriptions[1].onApplied({});
+  await Promise.resolve();
+  assert.deepEqual(snapshots[0], {
+    players: [
+      {
+        entityId: "101",
+        playerEntityId: "101",
+        username: "Ada",
+        signedIn: true,
+        presenceRegionId: "19",
+        presenceSource: "regional",
+        sessionSeconds: 5100,
+        timePlayedSeconds: 7200,
+        timeSignedInSeconds: 3600,
+        signInTimestamp: "2026-07-29T19:10:00.000Z",
+        tasks: {
+          tasks: [{
+            entityId: "6001",
+            travelerId: "12",
+            taskId: "77",
+            description: "Deliver fine planks",
+            completed: false,
+          }],
+        },
+      },
+      {
+        entityId: "202",
+        playerEntityId: "202",
+        username: "Grace",
+        signedIn: null,
+        presenceRegionId: null,
+        presenceSource: "unavailable",
+        sessionSeconds: null,
+        timePlayedSeconds: null,
+        timeSignedInSeconds: null,
+        tasks: { tasks: [] },
+      },
+    ],
+    warnings: [],
+    equipment: {
+      members: [
+        {
+          playerEntityId: "101",
+          username: "Ada",
+          equipment: { equipmentSlots: [] },
+          equipmentPresets: { presets: [] },
+          buffs: { buffs: [] },
+        },
+        {
+          playerEntityId: "202",
+          username: "Grace",
+          equipment: { equipmentSlots: [] },
+          equipmentPresets: { presets: [] },
+          buffs: { buffs: [] },
+        },
+      ],
+      coverage: { unexpectedPresetRowCount: 0 },
+    },
+    equipmentWarnings: [],
+    construction: {
+      projects: [{
+        entityId: "9001",
+        constructionRecipeId: "3023",
+        resourcePlacementRecipeId: "0",
+        ownerId: "1369094286777412590",
+        items: [{ itemId: "3090004", itemType: "item", quantity: "5" }],
+        cargos: [],
+        progress: "157",
+        lastCritOutcome: 1,
+        direction: 2,
+        lastHitAt: "2026-07-26T20:15:10.248Z",
+      }],
+      buildings: [{
+        entityId: "7001",
+        claimEntityId: "1369094286777412590",
+        directionIndex: 2,
+        buildingDescriptionId: "6020",
+        constructedByPlayerEntityId: "101",
+      }],
+    },
+    constructionWarnings: [],
+    research: {
+      claimId: "1369094286777412590",
+      learnedTechIds: ["1", "200", "748616905"],
+      researchingTechId: null,
+      researchStartedAt: null,
+      scheduledId: null,
+    },
+    researchWarnings: [],
+    recruitment: {
+      claimId: "1369094286777412590",
+      isRecruiting: true,
+      recruitment: [{
+        entityId: "1369094286821318198",
+        claimEntityId: "1369094286777412590",
+        remainingStock: "19",
+        requiredSkillId: "1",
+        requiredSkillLevel: "1",
+        requiredApproval: false,
+        isRecruiting: true,
+      }],
+    },
+    recruitmentWarnings: [],
+    bankInventories: {
+      buildings: [{
+        entityId: "8001",
+        buildingEntityId: "7002",
+        playerOwnerEntityId: "101",
+        playerOwnerName: "Ada",
+        name: "Town Bank — Ada",
+        nickname: "Town Bank — Ada",
+        category: "town-bank",
+        inventoryIndex: 4,
+        cargoIndex: 5,
+        items: [{ itemId: "42", itemType: "item", quantity: "7" }],
+        inventory: [{
+          slot: 0,
+          locked: false,
+          contents: { itemId: "42", itemType: "item", quantity: "7" },
+        }],
+      }],
+    },
+    bankInventoryWarnings: [],
+    contributionWarnings: ["Relay craft 9002 has invalid experience per progress"],
+    database: "relay-region-19",
+    regionId: "19",
+    schemaFingerprint: "regional-v1",
+    generation: 4,
+    receivedAt: "2026-07-29T20:35:00.000Z",
+  });
+
+  fake.state.callbacks.get("equipment:update")({}, {}, {});
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(snapshots[1].generation, 5);
+
+  await session.stop();
+  assert.equal(fake.state.unsubscribed, true);
+  assert.equal(fake.state.subscriptions.every(({ unsubscribed }) => unsubscribed), true);
+  assert.equal(fake.state.disconnected, true);
+  assert.equal(fake.state.callbacks.size, 0);
+});
+
+test("primary-region session attributes reducer and consumed-action updates without owner rows and deduplicates evidence", async () => {
+  assert.ok(sessionModule, "primary-region player session module must exist");
+  const playerActionRows = [{
+    autoId: 94295n,
+    entityId: 576460752388321942n,
+    startTime: 1785675248960n,
+    duration: 1274n,
+    target: 1369094286799419104n,
+    recipeId: 307004,
+    actionType: { tag: "Craft", value: undefined },
+    lastActionResult: { tag: "Success", value: undefined },
+    clientCancel: false,
+    wasConsumed: false,
+  }];
+  const fake = fakeBindings({
+    userRows: [
+      {
+        entityId: 576460752388321942n,
+        identity: { toHexString: () => "0xabc" },
+        canSignIn: true,
+      },
+      {
+        entityId: 504403158356601680n,
+        identity: { toHexString: () => "0xdef" },
+        canSignIn: true,
+      },
+    ],
+    playerActionRows,
+  });
+  const contributions = [];
+  const resolvedPlayerIds = [];
+  const session = new sessionModule.RelayPrimaryRegionPlayerSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: () => {},
+    onContribution: (event) => contributions.push(event),
+    resolvePlayerName: async (playerEntityId) => {
+      resolvedPlayerIds.push(playerEntityId);
+      return playerEntityId === "504403158356601680" ? "Relay Grace" : `Player ${playerEntityId}`;
+    },
+    now: () => new Date("2026-08-02T12:54:09.000Z"),
+  });
+  const target = {
+    craftEntityId: "1369094287428103662",
+    buildingEntityId: "1369094286799419104",
+    recipeId: "307004",
+    profession: "Forestry",
+    craftLabel: "Owl Feather",
+    structureName: "Forester",
+    itemTier: "3",
+    xpPerProgress: "1.76",
+  };
+
+  await session.start({
+    uri: "wss://relay.example:4000",
+    database: "bitcraft-live-19",
+    schemaFingerprint: "regional-v1",
+    manifest,
+    generation: 1,
+    regionId: "19",
+    claimId: "1369094286777412590",
+    members: [
+      { playerEntityId: "576460752388321942", userName: "Mosswick" },
+      { playerEntityId: "504403158356601680" },
+    ],
+    contributionTargets: [target],
+  });
+  fake.state.onConnect(fake.connection);
+  assert.ok(fake.state.subscriptions[0].queries.includes(
+    "SELECT * FROM user_state WHERE entity_id = 576460752388321942 OR entity_id = 504403158356601680",
+  ));
+  assert.ok(fake.state.subscriptions[0].queries.includes(
+    "SELECT * FROM player_action_state WHERE entity_id = 576460752388321942 OR entity_id = 504403158356601680",
+  ));
+  assert.ok(fake.state.subscriptions[1].queries.includes(
+    "SELECT * FROM progressive_action_state WHERE entity_id = 1369094287428103662",
+  ));
+  fake.state.onApplied({});
+
+  const update = fake.state.callbacks.get("progressive-action:update");
+  assert.equal(typeof update, "function");
+  update(
+    { event: { tag: "SubscribeApplied" } },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 0 },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16056 },
+  );
+  const reducerContext = {
+    event: {
+      tag: "Reducer",
+      value: {
+        callerIdentity: { toHexString: () => "0xabc" },
+        reducer: {
+          tag: "CraftContinue",
+          value: {
+            request: {
+              progressiveActionEntityId: 1369094287428103662n,
+              timestamp: 1785675248960n,
+            },
+          },
+        },
+      },
+    },
+  };
+  update(
+    reducerContext,
+    { entityId: 1369094287428103662n, progress: 16056 },
+    { entityId: 1369094287428103662n, progress: 16080 },
+  );
+  update(
+    reducerContext,
+    { entityId: 1369094287428103662n, progress: 16056 },
+    { entityId: 1369094287428103662n, progress: 16080 },
+  );
+  fake.state.callbacks.get("player-action:update")(
+    { event: { tag: "Transaction" } },
+    playerActionRows[0],
+    { ...playerActionRows[0], wasConsumed: true },
+  );
+  update(
+    { event: { tag: "Transaction" } },
+    { entityId: 1369094287428103662n, progress: 16080 },
+    { entityId: 1369094287428103662n, progress: 16104 },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(contributions.length, 2, "consumed action evidence must remain available to the progress callback");
+  playerActionRows.push({
+    ...playerActionRows[0],
+    autoId: 94296n,
+    entityId: 504403158356601680n,
+  });
+  fake.state.callbacks.get("player-action:insert")(
+    {},
+    playerActionRows[1],
+  );
+  update(
+    { event: { tag: "Transaction" } },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16104 },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16128 },
+  );
+  playerActionRows.splice(0);
+  update(
+    { event: { tag: "Transaction" } },
+    { entityId: 1369094287428103662n, ownerEntityId: 504403158356601680n, progress: 16128 },
+    { entityId: 1369094287428103662n, ownerEntityId: 504403158356601680n, progress: 16152 },
+  );
+  update(
+    { event: { tag: "Transaction" } },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16152 },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16152 },
+  );
+  update(
+    { event: { tag: "Transaction" } },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 16152 },
+    { entityId: 1369094287428103662n, ownerEntityId: 576460752388321942n, progress: 0 },
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(contributions.length, 2);
+  assert.deepEqual(resolvedPlayerIds, []);
+  assert.deepEqual(
+    contributions.map(({ sourceKey, data }) => ({
+      sourceKey,
+      contributorEntityId: data.contributorEntityId,
+      contributorName: data.contributorName,
+      attributionConfidence: data.attributionConfidence,
+      observedSince: data.observedSince,
+      contributedProgress: data.contributedProgress,
+      contributedXp: data.contributedXp,
+    })),
+    [
+      {
+        sourceKey: "relay-craft-contribution:19:authoritative:reducer:0xabc:1369094287428103662:16056:16080",
+        contributorEntityId: "576460752388321942",
+        contributorName: "Mosswick",
+        attributionConfidence: "authoritative",
+        observedSince: "2026-08-02T12:54:09.000Z",
+        contributedProgress: "24",
+        contributedXp: "42.24",
+      },
+      {
+        sourceKey: "relay-craft-contribution:19:matched_action:action:94295:1369094287428103662:16080:16104",
+        contributorEntityId: "576460752388321942",
+        contributorName: "Mosswick",
+        attributionConfidence: "matched_action",
+        observedSince: "2026-08-02T12:54:09.000Z",
+        contributedProgress: "24",
+        contributedXp: "42.24",
+      },
+    ],
+  );
+  assert.deepEqual(session.health(), {
+    connected: true,
+    applied: true,
+    lastAppliedAt: "2026-08-02T12:54:09.000Z",
+    lastError: null,
+    lastContributionAt: "2026-08-02T12:54:09.000Z",
+    authoritativeContributions: 1,
+    matchedActionContributions: 1,
+    unattributedContributions: 2,
+    ambiguousContributionMatches: 2,
+    deduplicatedContributions: 1,
+  });
+
+  await session.stop();
+  assert.equal(fake.state.callbacks.has("user:update"), false);
+  assert.equal(fake.state.callbacks.has("player-action:update"), false);
+});
+
+test("primary-region session replaces contribution queries without replacing base data", async () => {
+  assert.ok(sessionModule, "primary-region player session module must exist");
+  const playerActionRows = [];
+  const fake = fakeBindings({ playerActionRows });
+  const snapshots = [];
+  const contributions = [];
+  const session = new sessionModule.RelayPrimaryRegionPlayerSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+    onContribution: (event) => contributions.push(event),
+    now: () => new Date("2026-08-02T10:00:00.000Z"),
+  });
+  const first = {
+    craftEntityId: "9001",
+    buildingEntityId: "7001",
+    recipeId: "3001",
+    profession: "Forestry",
+    craftLabel: "Planks",
+    structureName: "Forester",
+    itemTier: "3",
+    xpPerProgress: "2",
+  };
+  const second = { ...first, craftEntityId: "9002", craftLabel: "Beams" };
+
+  await session.start({
+    uri: "wss://relay.example:4000",
+    database: "bitcraft-live-19",
+    schemaFingerprint: "regional-v1",
+    manifest,
+    generation: 1,
+    regionId: "19",
+    claimId: "1369094286777412590",
+    members: [{ playerEntityId: "101", userName: "Ada" }],
+    contributionTargets: [first],
+  });
+  fake.state.onConnect(fake.connection);
+  playerActionRows.push({
+    autoId: 1n,
+    entityId: 101n,
+    startTime: 1785664800000n,
+    duration: 100n,
+    target: 7001n,
+    recipeId: 3001n,
+    actionType: { tag: "Craft" },
+    lastActionResult: { tag: "Success" },
+    clientCancel: false,
+    wasConsumed: false,
+  });
+
+  const base = fake.state.subscriptions[0];
+  const initialContribution = fake.state.subscriptions[1];
+  assert.doesNotMatch(base.queries.join("\n"), /progressive_action_state/);
+  assert.match(initialContribution.queries.join("\n"), /entity_id = 9001/);
+  initialContribution.onApplied({});
+  await Promise.resolve();
+  assert.equal(snapshots.length, 0, "contribution readiness must not publish broad data before base readiness");
+  base.onApplied({});
+  await Promise.resolve();
+  await Promise.resolve();
+
+  session.updateContributionScope([second], []);
+
+  const replacementContribution = fake.state.subscriptions[2];
+  assert.equal(base.unsubscribed, false);
+  assert.equal(initialContribution.unsubscribed, false, "old target stays live until replacement applies");
+  assert.match(replacementContribution.queries.join("\n"), /entity_id = 9002/);
+  assert.equal(fake.state.disconnected, false);
+
+  const update = fake.state.callbacks.get("progressive-action:update");
+  update(
+    { event: { tag: "Transaction", id: "transaction-overlap" } },
+    { entityId: 9002n, ownerEntityId: 101n, progress: 10 },
+    { entityId: 9002n, ownerEntityId: 101n, progress: 20 },
+  );
+  await Promise.resolve();
+  assert.equal(contributions[0]?.data?.craftEntityId, "9002");
+
+  replacementContribution.onApplied({});
+  assert.equal(initialContribution.unsubscribed, true);
+});
+
+test("primary-region player session rejects schema mismatch before loading bindings", async () => {
+  assert.ok(sessionModule, "primary-region player session module must exist");
+  let loaded = false;
+  const session = new sessionModule.RelayPrimaryRegionPlayerSession({
+    loadBindings: async () => {
+      loaded = true;
+      return fakeBindings().module;
+    },
+    onSnapshot: () => assert.fail("schema mismatch must not emit a snapshot"),
+  });
+  await assert.rejects(session.start({
+    uri: "wss://relay.example:4000",
+    database: "relay-region-19",
+    schemaFingerprint: "unexpected",
+    manifest,
+    generation: 1,
+    regionId: "19",
+    claimId: "1369094286777412590",
+    members,
+  }), /schema fingerprint mismatch/i);
+  assert.equal(loaded, false);
+});
+
+test("primary-region player session coalesces rapid changes while a snapshot apply is unfinished", async () => {
+  assert.ok(sessionModule, "primary-region player session module must exist");
+  const fake = fakeBindings();
+  const snapshots = [];
+  let releaseFirst;
+  const firstApply = new Promise((resolve) => { releaseFirst = resolve; });
+  const session = new sessionModule.RelayPrimaryRegionPlayerSession({
+    loadBindings: async () => fake.module,
+    onSnapshot: (snapshot) => {
+      snapshots.push(snapshot);
+      return snapshots.length === 1 ? firstApply : undefined;
+    },
+  });
+  await session.start({
+    uri: "wss://relay.example:4019",
+    database: "relay-region-19",
+    schemaFingerprint: "regional-v1",
+    manifest,
+    generation: 30,
+    regionId: "19",
+    claimId: "1369094286777412590",
+    members,
+  });
+  fake.state.onConnect(fake.connection);
+  fake.state.onApplied({});
+  fake.state.callbacks.get("player:update")({}, {}, {});
+  fake.state.callbacks.get("buff:insert")({}, {});
+  fake.state.callbacks.get("project:update")({}, {}, {});
+  fake.state.callbacks.get("research:update")({}, {}, {});
+  fake.state.callbacks.get("recruitment:update")({}, {}, {});
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(snapshots.length, 1);
+
+  releaseFirst();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(snapshots.map(({ generation }) => generation), [30, 31]);
+  await session.stop();
+});

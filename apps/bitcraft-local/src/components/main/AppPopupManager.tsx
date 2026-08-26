@@ -2,12 +2,15 @@ import React from "react";
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 import type { ActivePanel } from "../../types/app";
 import {
+  createPopupRefreshController,
   dismissalStateAfterAction,
   normalizePopupConfig,
+  popupDismissalKey,
   selectNextPopup,
   type AppPopup,
   type PopupDismissalState,
 } from "../../popups/appPopups";
+import { Dialog } from "./Dialog";
 
 const LOCAL_API = "/api/local";
 const PERSISTENT_KEY = "claim-monitor.popupDismissals";
@@ -45,19 +48,25 @@ export function AppPopupManager({ activePage = "dashboard", enabled = true }: { 
     persistentDismissals: readDismissals(typeof window === "undefined" ? undefined : window.localStorage, PERSISTENT_KEY),
     sessionDismissals: readDismissals(typeof window === "undefined" ? undefined : window.sessionStorage, SESSION_KEY),
   }));
+  const dismissedPopupKeyRef = React.useRef("");
 
   React.useEffect(() => {
-    let stale = false;
-    fetch(`${LOCAL_API}/popups`)
-      .then((response) => response.ok ? response.json() : { popups: [] })
-      .then((body) => {
-        if (!stale) setPopups(normalizePopupConfig(body).popups);
-      })
-      .catch(() => {
-        if (!stale) setPopups([]);
-      });
+    const request = new AbortController();
+    const refresh = createPopupRefreshController({
+      load: async () => {
+        try {
+          const response = await fetch(`${LOCAL_API}/popups`, { cache: "no-store", signal: request.signal });
+          const body = response.ok ? await response.json() : { popups: [] };
+          if (!request.signal.aborted) setPopups(normalizePopupConfig(body).popups);
+        } catch {
+          if (!request.signal.aborted) setPopups([]);
+        }
+      },
+    });
+    void refresh.start();
     return () => {
-      stale = true;
+      refresh.stop();
+      request.abort();
     };
   }, []);
 
@@ -65,6 +74,9 @@ export function AppPopupManager({ activePage = "dashboard", enabled = true }: { 
 
   function dismiss(action: "ok" | "never") {
     if (!activePopup) return;
+    const dismissalKey = popupDismissalKey(activePopup);
+    if (dismissedPopupKeyRef.current === dismissalKey) return;
+    dismissedPopupKeyRef.current = dismissalKey;
     const next = dismissalStateAfterAction(activePopup, action, dismissals);
     setDismissals(next);
     writeDismissals(typeof window === "undefined" ? undefined : window.localStorage, PERSISTENT_KEY, next.persistentDismissals);
@@ -74,8 +86,16 @@ export function AppPopupManager({ activePage = "dashboard", enabled = true }: { 
   if (!activePopup) return null;
 
   return (
-    <div className="app-popup-backdrop" role="presentation">
-      <section className={`app-popup app-popup-${activePopup.type}`} role="dialog" aria-modal="true" aria-labelledby="app-popup-title">
+    <Dialog
+      open
+      title={activePopup.title}
+      titleElementId="app-popup-title"
+      closeOnBackdrop={false}
+      dismissible={activePopup.type !== "danger"}
+      onClose={() => dismiss("ok")}
+      className={`app-popup app-popup-${activePopup.type}`}
+      backdropClassName="app-popup-backdrop"
+    >
         <div className="app-popup-icon" aria-hidden="true">{popupIcon(activePopup)}</div>
         <div className="app-popup-body">
           <h2 id="app-popup-title">{activePopup.title}</h2>
@@ -85,7 +105,6 @@ export function AppPopupManager({ activePage = "dashboard", enabled = true }: { 
           {activePopup.mode === "repeatUntilDismissed" ? <button className="toolbar-button" onClick={() => dismiss("never")}>Do not show again</button> : null}
           <button className="toolbar-button primary" onClick={() => dismiss("ok")}>OK</button>
         </div>
-      </section>
-    </div>
+    </Dialog>
   );
 }

@@ -5,6 +5,7 @@ import {
   defaultMapPlayerSelection,
   filterMapPlayerRows,
   mapPlayerTrackingSummary,
+  replaceSettlementPlayerSelection,
   sortedMapPlayerRows,
 } from "../src/pages/map/playerTracking.ts";
 
@@ -35,4 +36,12 @@ test("filterMapPlayerRows supports manager tabs and search", () => {
   assert.deepEqual(filterMapPlayerRows(rows, "online", "").map((row) => row.id), ["a", "c"]);
   assert.deepEqual(filterMapPlayerRows(rows, "untracked", "").map((row) => row.id), ["c", "b"]);
   assert.deepEqual(filterMapPlayerRows(rows, "all", "br").map((row) => row.id), ["b"]);
+});
+
+test("settlement presets never alter explicitly tracked external players", () => {
+  const externalPlayers = [{ playerId: "504403158356601750", username: "Outside" }];
+  assert.deepEqual(replaceSettlementPlayerSelection({ settlementIds: ["1"], externalPlayers }, ["2", "3"]), {
+    settlementIds: ["2", "3"],
+    externalPlayers,
+  });
 });

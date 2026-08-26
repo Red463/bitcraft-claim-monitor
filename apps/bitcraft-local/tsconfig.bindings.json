@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/server/game-data/bindings/global/**/*.ts",
+    "src/server/game-data/bindings/regional/**/*.ts"
+  ]
+}

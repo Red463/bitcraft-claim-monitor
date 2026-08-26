@@ -1,0 +1,1361 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_ROOT="${APP_ROOT:-/opt/bitcraft-claim-monitor-relay}"
+SOURCE_DIR="${SOURCE_DIR:-$APP_ROOT/source}"
+RELEASES_DIR="${RELEASES_DIR:-$APP_ROOT/releases}"
+CURRENT_LINK="${CURRENT_LINK:-$APP_ROOT/current}"
+DATA_DIR="${DATA_DIR:-/var/lib/bitcraft-claim-monitor-relay}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/bitcraft-claim-monitor-relay}"
+CONFIG_DIR="${CONFIG_DIR:-/etc/bitcraft-claim-monitor-relay}"
+BACKUP_HELPER_PATH="${BACKUP_HELPER_PATH:-/usr/local/bin/backup-bitcraft-claim-monitor-relay}"
+BACKUP_CRYPTO_HELPER_PATH="${BACKUP_CRYPTO_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor-relay/backup-crypto.mjs}"
+PRIVACY_REPLAY_HELPER_PATH="${PRIVACY_REPLAY_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor-relay/replay-privacy-deletions.mjs}"
+UPDATER_PATH="${UPDATER_PATH:-/usr/local/bin/update-bitcraft-claim-monitor-relay}"
+CUTOVER_HELPER_PATH="${CUTOVER_HELPER_PATH:-$CURRENT_LINK/deploy/cutover-relay-production.mjs}"
+PUBLIC_CADDY_HELPER_PATH="${PUBLIC_CADDY_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor-relay/configure-public-caddy.mjs}"
+PUBLIC_CADDY_REFERENCE_PATH="${PUBLIC_CADDY_REFERENCE_PATH:-/etc/bitcraft-claim-monitor-relay/Caddyfile.public-reference}"
+PUBLIC_OAUTH_HELPER_PATH="${PUBLIC_OAUTH_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor-relay/install-public-oauth-credentials.mjs}"
+SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
+LOCK_FILE="${LOCK_FILE:-/run/lock/bitcraft-claim-monitor-relay-deploy.lock}"
+KEEP_RELEASES="${KEEP_RELEASES:-3}"
+RUN_USER="${RUN_USER:-bitcraft}"
+RUN_HOME="${RUN_HOME:-$APP_ROOT}"
+RUN_SSH_CONFIG="${RUN_SSH_CONFIG:-$RUN_HOME/.ssh/config}"
+WEB_SERVICE="${WEB_SERVICE:-bitcraft-claim-monitor-relay.service}"
+WORKER_SERVICE="${WORKER_SERVICE:-bitcraft-claim-monitor-relay-worker.service}"
+COLLECTOR_TIMER="${COLLECTOR_TIMER:-bitcraft-claim-monitor-relay-collector.timer}"
+BACKUP_TIMER="${BACKUP_TIMER:-bitcraft-claim-monitor-relay-backup.timer}"
+MAP_TERRAIN_SERVICE="${MAP_TERRAIN_SERVICE:-bitcraft-claim-monitor-relay-map-terrain.service}"
+MAP_TERRAIN_TIMER="${MAP_TERRAIN_TIMER:-bitcraft-claim-monitor-relay-map-terrain.timer}"
+MAP_ROADS_SERVICE="${MAP_ROADS_SERVICE:-bitcraft-claim-monitor-relay-map-roads.service}"
+MAP_ROADS_TIMER="${MAP_ROADS_TIMER:-bitcraft-claim-monitor-relay-map-roads.timer}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:19430/api/local/health}"
+HEALTH_HOST="${HEALTH_HOST:-app.timbersteeltrade.com}"
+PUBLIC_URL="${PUBLIC_URL:-https://relay.timbersteeltrade.com}"
+LOG_DIR="${LOG_DIR:-/var/log/bitcraft-claim-monitor-relay}"
+LOG_FILE="${LOG_FILE:-}"
+VERBOSE=0
+SKIP_PUBLIC_CHECK=0
+FORCE_BACKUP=0
+REVISION=""
+REVISION_SEEN=0
+CUTOVER_MODE=""
+CUTOVER_CONFIRMATION=""
+CUTOVER_CONFIRMATION_SEEN=0
+CUTOVER_MANIFEST_HASH=""
+CUTOVER_MANIFEST_HASH_SEEN=0
+SKIP_CUTOVER_SOAK=0
+PUBLIC_CADDY_MODE=0
+PUBLIC_OAUTH_MODE=0
+MAP_GENERATION_MODE=""
+MAP_GENERATION_MODE_SEEN=0
+MAP_INSTALL_PRODUCT=""
+MAP_INSTALL_PRODUCT_SEEN=0
+MAP_ARTIFACT_SHA256=""
+MAP_ARTIFACT_SHA256_SEEN=0
+MAP_IMPORT_DIR=""
+MAP_IMPORT_ARCHIVE=""
+BUILD_ARTIFACT_SHA256=""
+BUILD_ARTIFACT_SHA256_SEEN=0
+BUILD_IMPORT_DIR=""
+BUILD_IMPORT_ARCHIVE=""
+HEALTH_SUMMARY="Health: not checked"
+PUBLIC_SUMMARY="Public: skipped"
+deployment_succeeded=0
+transaction_started=0
+transaction_restored=0
+rollback_attempted=0
+transaction_dir=""
+web_was_active=0
+worker_was_active=0
+backup_timer_was_active=0
+backup_timer_was_enabled=0
+
+usage() {
+  cat <<USAGE
+Usage: update-bitcraft-claim-monitor-relay --revision <full-sha> --build-artifact-sha256 <64hex> [--verbose] [--no-public-check] [--force-backup]
+       update-bitcraft-claim-monitor-relay --revision <full-sha> --prepare-cutover --confirmation app.timbersteeltrade.com
+       update-bitcraft-claim-monitor-relay --revision <full-sha> --apply-cutover --manifest-hash <64hex> [--skip-soak]
+       update-bitcraft-claim-monitor-relay --revision <full-sha> --abort-cutover --manifest-hash <64hex>
+       update-bitcraft-claim-monitor-relay --revision <full-sha> --generate-map all
+       update-bitcraft-claim-monitor-relay --revision <full-sha> --install-map-product terrain|roads --artifact-sha256 <64hex>
+       update-bitcraft-claim-monitor-relay --revision <full-sha> --configure-public-caddy --confirmation claim-monitor.com
+       update-bitcraft-claim-monitor-relay --revision <full-sha> --install-public-oauth-credentials --confirmation claim-monitor.com
+
+  --revision <sha>  Deploy this full lowercase commit SHA from origin/main.
+  --verbose         Stream install/build output while also logging it.
+  --no-public-check Skip the public HTTPS check after local health passes.
+  --force-backup    Create a manual backup even when the schema is unchanged.
+  --prepare-cutover Prepare the protected canonical production cutover.
+  --apply-cutover   Apply the matching prepared cutover.
+  --abort-cutover   Restore the matching prepared cutover before admission.
+  --skip-soak       Explicitly skip the timed post-admission soak during apply.
+  --generate-map    Generate terrain then roads for the active revision and enable their timers.
+  --install-map-product  Install one verified map product generated by GitHub Actions.
+  --artifact-sha256 Verify the product archive before extracting or installing it.
+  --build-artifact-sha256 Verify and install the revision-bound CI build outputs.
+  --configure-public-caddy  Merge and reload only the reviewed public Caddy hosts.
+  --install-public-oauth-credentials  Install public Discord OAuth credentials from stdin.
+USAGE
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --revision)
+        [[ $# -ge 2 ]] || { echo "--revision requires a value."; exit 2; }
+        [[ "$REVISION_SEEN" == "0" ]] || { echo "Duplicate --revision is not allowed."; exit 2; }
+        REVISION_SEEN=1
+        REVISION="$2"
+        shift 2
+        ;;
+      --verbose)
+        VERBOSE=1
+        shift
+        ;;
+      --no-public-check)
+        SKIP_PUBLIC_CHECK=1
+        shift
+        ;;
+      --force-backup)
+        FORCE_BACKUP=1
+        shift
+        ;;
+      --prepare-cutover|--apply-cutover|--abort-cutover)
+        [[ -z "$CUTOVER_MODE" ]] || { echo "Unknown or mixed cutover mode."; exit 2; }
+        CUTOVER_MODE="${1#--}"
+        CUTOVER_MODE="${CUTOVER_MODE%-cutover}"
+        shift
+        ;;
+      --configure-public-caddy)
+        [[ "$PUBLIC_CADDY_MODE" == "0" ]] || { echo "Duplicate --configure-public-caddy is not allowed."; exit 2; }
+        PUBLIC_CADDY_MODE=1
+        shift
+        ;;
+      --install-public-oauth-credentials)
+        [[ "$PUBLIC_OAUTH_MODE" == "0" ]] || { echo "Duplicate --install-public-oauth-credentials is not allowed."; exit 2; }
+        PUBLIC_OAUTH_MODE=1
+        shift
+        ;;
+      --confirmation)
+        [[ $# -ge 2 ]] || { echo "--confirmation requires a value."; exit 2; }
+        [[ "$CUTOVER_CONFIRMATION_SEEN" == "0" ]] || { echo "Duplicate --confirmation is not allowed."; exit 2; }
+        CUTOVER_CONFIRMATION_SEEN=1
+        CUTOVER_CONFIRMATION="$2"
+        shift 2
+        ;;
+      --manifest-hash)
+        [[ $# -ge 2 ]] || { echo "--manifest-hash requires a value."; exit 2; }
+        [[ "$CUTOVER_MANIFEST_HASH_SEEN" == "0" ]] || { echo "Duplicate --manifest-hash is not allowed."; exit 2; }
+        CUTOVER_MANIFEST_HASH_SEEN=1
+        CUTOVER_MANIFEST_HASH="$2"
+        shift 2
+        ;;
+      --skip-soak)
+        [[ "$SKIP_CUTOVER_SOAK" == "0" ]] || { echo "Duplicate --skip-soak is not allowed."; exit 2; }
+        SKIP_CUTOVER_SOAK=1
+        shift
+        ;;
+      --generate-map)
+        [[ $# -ge 2 ]] || { echo "--generate-map requires a value."; exit 2; }
+        [[ "$MAP_GENERATION_MODE_SEEN" == "0" && "$2" == "all" ]] || { echo "--generate-map accepts exactly 'all' once."; exit 2; }
+        MAP_GENERATION_MODE_SEEN=1
+        MAP_GENERATION_MODE="$2"
+        shift 2
+        ;;
+      --install-map-product)
+        [[ $# -ge 2 ]] || { echo "--install-map-product requires a value."; exit 2; }
+        [[ "$MAP_INSTALL_PRODUCT_SEEN" == "0" && ( "$2" == "terrain" || "$2" == "roads" ) ]] \
+          || { echo "--install-map-product accepts terrain or roads exactly once."; exit 2; }
+        MAP_INSTALL_PRODUCT_SEEN=1
+        MAP_INSTALL_PRODUCT="$2"
+        shift 2
+        ;;
+      --artifact-sha256)
+        [[ $# -ge 2 ]] || { echo "--artifact-sha256 requires a value."; exit 2; }
+        [[ "$MAP_ARTIFACT_SHA256_SEEN" == "0" && "$2" =~ ^[0-9a-f]{64}$ ]] \
+          || { echo "--artifact-sha256 requires one lowercase SHA-256 value."; exit 2; }
+        MAP_ARTIFACT_SHA256_SEEN=1
+        MAP_ARTIFACT_SHA256="$2"
+        shift 2
+        ;;
+      --build-artifact-sha256)
+        [[ $# -ge 2 ]] || { echo "--build-artifact-sha256 requires a value."; exit 2; }
+        [[ "$BUILD_ARTIFACT_SHA256_SEEN" == "0" && "$2" =~ ^[0-9a-f]{64}$ ]] \
+          || { echo "--build-artifact-sha256 requires one lowercase SHA-256 value."; exit 2; }
+        BUILD_ARTIFACT_SHA256_SEEN=1
+        BUILD_ARTIFACT_SHA256="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown option: $1"
+        usage
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ ! "$REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "--revision must be a full 40-character lowercase Git commit SHA."
+    exit 2
+  fi
+
+  if [[ "$PUBLIC_OAUTH_MODE" == "1" ]]; then
+    [[ "$PUBLIC_CADDY_MODE" == "0" \
+      && -z "$CUTOVER_MODE" \
+      && "$CUTOVER_CONFIRMATION_SEEN" == "1" \
+      && "$CUTOVER_CONFIRMATION" == "claim-monitor.com" \
+      && "$CUTOVER_MANIFEST_HASH_SEEN" == "0" \
+      && "$SKIP_CUTOVER_SOAK" == "0" \
+      && -z "$MAP_GENERATION_MODE" \
+      && -z "$MAP_INSTALL_PRODUCT" \
+      && "$MAP_ARTIFACT_SHA256_SEEN" == "0" \
+      && "$BUILD_ARTIFACT_SHA256_SEEN" == "0" \
+      && "$VERBOSE" == "0" \
+      && "$SKIP_PUBLIC_CHECK" == "0" \
+      && "$FORCE_BACKUP" == "0" ]] \
+      || { echo "Unknown or mixed public OAuth credential mode."; exit 2; }
+  elif [[ "$PUBLIC_CADDY_MODE" == "1" ]]; then
+    [[ -z "$CUTOVER_MODE" \
+      && "$CUTOVER_CONFIRMATION_SEEN" == "1" \
+      && "$CUTOVER_CONFIRMATION" == "claim-monitor.com" \
+      && "$CUTOVER_MANIFEST_HASH_SEEN" == "0" \
+      && "$SKIP_CUTOVER_SOAK" == "0" \
+      && -z "$MAP_GENERATION_MODE" \
+      && -z "$MAP_INSTALL_PRODUCT" \
+      && "$MAP_ARTIFACT_SHA256_SEEN" == "0" \
+      && "$BUILD_ARTIFACT_SHA256_SEEN" == "0" \
+      && "$VERBOSE" == "0" \
+      && "$SKIP_PUBLIC_CHECK" == "0" \
+      && "$FORCE_BACKUP" == "0" ]] \
+      || { echo "Unknown or mixed public Caddy mode."; exit 2; }
+  elif [[ -n "$CUTOVER_MODE" ]]; then
+    if [[ "$VERBOSE" == "1" || "$SKIP_PUBLIC_CHECK" == "1" || "$FORCE_BACKUP" == "1" ]]; then
+      echo "Unknown or mixed cutover mode."
+      exit 2
+    fi
+    case "$CUTOVER_MODE" in
+      prepare)
+        [[ "$CUTOVER_CONFIRMATION_SEEN" == "1" \
+          && "$CUTOVER_CONFIRMATION" == "app.timbersteeltrade.com" \
+          && "$CUTOVER_MANIFEST_HASH_SEEN" == "0" \
+          && "$SKIP_CUTOVER_SOAK" == "0" ]] \
+          || { echo "Unknown or mixed cutover mode."; exit 2; }
+        ;;
+      apply|abort)
+        [[ "$CUTOVER_CONFIRMATION_SEEN" == "0" \
+          && "$CUTOVER_MANIFEST_HASH_SEEN" == "1" \
+          && "$CUTOVER_MANIFEST_HASH" =~ ^[0-9a-f]{64}$ ]] \
+          || { echo "Unknown or mixed cutover mode."; exit 2; }
+        [[ "$CUTOVER_MODE" == "apply" || "$SKIP_CUTOVER_SOAK" == "0" ]] \
+          || { echo "Unknown or mixed cutover mode."; exit 2; }
+        ;;
+      *)
+        echo "Unknown or mixed cutover mode."
+        exit 2
+        ;;
+    esac
+  elif [[ "$CUTOVER_CONFIRMATION_SEEN" == "1" || "$CUTOVER_MANIFEST_HASH_SEEN" == "1" || "$SKIP_CUTOVER_SOAK" == "1" ]]; then
+    echo "Unknown or mixed cutover mode."
+    exit 2
+  fi
+  if [[ -n "$MAP_GENERATION_MODE" && ( -n "$CUTOVER_MODE" || "$VERBOSE" == "1" || "$SKIP_PUBLIC_CHECK" == "1" || "$FORCE_BACKUP" == "1" ) ]]; then
+    echo "Unknown or mixed map generation mode."
+    exit 2
+  fi
+  if [[ -n "$MAP_INSTALL_PRODUCT" ]]; then
+    if [[ "$MAP_ARTIFACT_SHA256_SEEN" != "1" || -n "$CUTOVER_MODE" || -n "$MAP_GENERATION_MODE" \
+      || "$VERBOSE" == "1" || "$SKIP_PUBLIC_CHECK" == "1" || "$FORCE_BACKUP" == "1" ]]; then
+      echo "Unknown or mixed map installation mode."
+      exit 2
+    fi
+  elif [[ "$MAP_ARTIFACT_SHA256_SEEN" == "1" ]]; then
+    echo "--artifact-sha256 requires --install-map-product."
+    exit 2
+  fi
+  if [[ "$BUILD_ARTIFACT_SHA256_SEEN" == "1" ]]; then
+    if [[ "$PUBLIC_CADDY_MODE" == "1" || "$PUBLIC_OAUTH_MODE" == "1" || -n "$CUTOVER_MODE" || -n "$MAP_GENERATION_MODE" || -n "$MAP_INSTALL_PRODUCT" ]]; then
+      echo "Unknown or mixed build artifact mode."
+      exit 2
+    fi
+  elif [[ "$PUBLIC_CADDY_MODE" == "0" && "$PUBLIC_OAUTH_MODE" == "0" && -z "$CUTOVER_MODE" && -z "$MAP_GENERATION_MODE" && -z "$MAP_INSTALL_PRODUCT" ]]; then
+    echo "Ordinary deployments require --build-artifact-sha256."
+    exit 2
+  fi
+}
+
+start_and_wait_for_map_generation() {
+  local service="$1"
+  run_logged "Running $service" systemctl start "$service"
+}
+
+generate_native_map_packs() {
+  local current_revision
+  current_revision="$(basename "$(readlink -f "$CURRENT_LINK")")"
+  [[ "$current_revision" == "$REVISION" ]] || {
+    printf "Active revision %s does not match requested map revision %s.\n" "$current_revision" "$REVISION" >&2
+    return 1
+  }
+  start_and_wait_for_map_generation "$MAP_TERRAIN_SERVICE"
+  run_logged "Validating terrain map pack" sudo -u "$RUN_USER" node \
+    "$CURRENT_LINK/apps/bitcraft-local/scripts/verify-native-map-pack.mjs" \
+    --data-dir "$DATA_DIR" --product terrain
+  if ! start_and_wait_for_map_generation "$MAP_ROADS_SERVICE"; then
+    log "Reporting native map serving diagnostics"
+    node "$CURRENT_LINK/deploy/diagnose-native-map-serving.mjs" || true
+    return 1
+  fi
+  run_logged "Validating road map pack" sudo -u "$RUN_USER" node \
+    "$CURRENT_LINK/apps/bitcraft-local/scripts/verify-native-map-pack.mjs" \
+    --data-dir "$DATA_DIR" --product roads
+  run_logged "Validating served native map" sudo -u "$RUN_USER" node \
+    "$CURRENT_LINK/apps/bitcraft-local/scripts/verify-native-map-pack.mjs" \
+    --data-dir "$DATA_DIR" --serve-base-url "http://127.0.0.1:19430"
+  log "Reporting native map serving diagnostics"
+  node "$CURRENT_LINK/deploy/diagnose-native-map-serving.mjs"
+  systemctl enable --now "$MAP_TERRAIN_TIMER" "$MAP_ROADS_TIMER" >>"$LOG_FILE" 2>&1
+  printf "Native map terrain and roads generated, validated, and scheduled.\n"
+}
+
+map_product_directory() {
+  case "$1" in
+    terrain) printf "map-tiles\n" ;;
+    roads) printf "map-road-tiles\n" ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_native_map_archive() {
+  local archive="$1"
+  local expected_directory="$2"
+  local entry normalized listing entry_type
+  printf "%s  %s\n" "$MAP_ARTIFACT_SHA256" "$archive" | sha256sum --check --status -
+  tar -tzf "$archive" >/dev/null
+  while IFS= read -r entry; do
+    normalized="${entry#./}"
+    normalized="${normalized%/}"
+    [[ -z "$normalized" || "$normalized" == "." ]] && continue
+    [[ "$normalized" != /* && "$normalized" != *\\* \
+      && ! "$normalized" =~ (^|/)\.\.(/|$) \
+      && ( "$normalized" == "$expected_directory" || "$normalized" == "$expected_directory/"* ) ]] \
+      || { printf "Native map archive contains an unsafe path.\n" >&2; return 1; }
+  done < <(tar -tzf "$archive")
+  while IFS= read -r listing; do
+    entry_type="${listing:0:1}"
+    [[ "$entry_type" == "d" || "$entry_type" == "-" ]] \
+      || { printf "Native map archive contains a non-regular entry.\n" >&2; return 1; }
+  done < <(tar -tvzf "$archive")
+}
+
+install_native_map_product_archive() {
+  local current_revision caller caller_home expected_archive archive_owner expected_directory secured_archive
+  current_revision="$(basename "$(readlink -f "$CURRENT_LINK")")"
+  [[ "$current_revision" == "$REVISION" ]] || {
+    printf "Active revision %s does not match requested map revision %s.\n" "$current_revision" "$REVISION" >&2
+    return 1
+  }
+  caller="${SUDO_USER:-}"
+  [[ "$caller" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || {
+    printf "Map product installation requires an identified sudo caller.\n" >&2
+    return 1
+  }
+  caller_home="$(getent passwd "$caller" | cut -d: -f6)"
+  [[ -n "$caller_home" && "$caller_home" == /* && -d "$caller_home" ]] || {
+    printf "Map product installer could not resolve the caller home.\n" >&2
+    return 1
+  }
+  expected_archive="$caller_home/bitcraft-map-${MAP_INSTALL_PRODUCT}-${MAP_ARTIFACT_SHA256}.tar.gz"
+  [[ -f "$expected_archive" && ! -L "$expected_archive" ]] || {
+    printf "Expected map product archive is unavailable.\n" >&2
+    return 1
+  }
+  archive_owner="$(stat -c %U "$expected_archive")"
+  [[ "$archive_owner" == "$caller" ]] || {
+    printf "Map product archive is not owned by the sudo caller.\n" >&2
+    return 1
+  }
+  install -d -o root -g root -m 0700 "$LOG_DIR/incoming"
+  secured_archive="$LOG_DIR/incoming/bitcraft-map-${MAP_INSTALL_PRODUCT}-${MAP_ARTIFACT_SHA256}.tar.gz"
+  [[ ! -e "$secured_archive" && ! -L "$secured_archive" ]] || {
+    printf "A secured map product archive already exists.\n" >&2
+    return 1
+  }
+  mv -- "$expected_archive" "$secured_archive"
+  chown root:root "$secured_archive"
+  chmod 0600 "$secured_archive"
+  MAP_IMPORT_ARCHIVE="$secured_archive"
+  expected_directory="$(map_product_directory "$MAP_INSTALL_PRODUCT")"
+  validate_native_map_archive "$MAP_IMPORT_ARCHIVE" "$expected_directory"
+
+  install -d -o "$RUN_USER" -g "$RUN_USER" -m 0750 "$DATA_DIR"
+  MAP_IMPORT_DIR="$(mktemp -d "$DATA_DIR/.map-import-${MAP_INSTALL_PRODUCT}-XXXXXX")"
+  chown "$RUN_USER:$RUN_USER" "$MAP_IMPORT_DIR"
+  tar --no-same-owner --no-same-permissions -xzf "$MAP_IMPORT_ARCHIVE" -C "$MAP_IMPORT_DIR"
+  chown -R "$RUN_USER:$RUN_USER" "$MAP_IMPORT_DIR"
+  run_logged "Installing verified $MAP_INSTALL_PRODUCT map product" sudo -u "$RUN_USER" node \
+    "$CURRENT_LINK/apps/bitcraft-local/scripts/install-native-map-product.mjs" \
+    --source-data-dir "$MAP_IMPORT_DIR" --data-dir "$DATA_DIR" --product "$MAP_INSTALL_PRODUCT"
+  run_logged "Validating installed $MAP_INSTALL_PRODUCT map product" sudo -u "$RUN_USER" node \
+    "$CURRENT_LINK/apps/bitcraft-local/scripts/verify-native-map-pack.mjs" \
+    --data-dir "$DATA_DIR" --product "$MAP_INSTALL_PRODUCT"
+  systemctl disable --now "$MAP_TERRAIN_TIMER" "$MAP_ROADS_TIMER" >>"$LOG_FILE" 2>&1
+  rm -rf -- "$MAP_IMPORT_DIR"
+  MAP_IMPORT_DIR=""
+  rm -f -- "$MAP_IMPORT_ARCHIVE"
+  MAP_IMPORT_ARCHIVE=""
+  printf "Native map %s product installed and validated.\n" "$MAP_INSTALL_PRODUCT"
+}
+
+validate_relay_build_archive() {
+  local archive="$1"
+  local entry normalized listing entry_type
+  printf "%s  %s\n" "$BUILD_ARTIFACT_SHA256" "$archive" | sha256sum --check --status -
+  tar -tzf "$archive" >/dev/null
+  while IFS= read -r entry; do
+    normalized="${entry#./}"
+    normalized="${normalized%/}"
+    [[ -z "$normalized" || "$normalized" == "." ]] && continue
+    [[ "$normalized" != /* && "$normalized" != *\\* && ! "$normalized" =~ (^|/)\.\.(/|$) ]] \
+      || { printf "Relay build archive contains an unsafe path.\n" >&2; return 1; }
+    case "$normalized" in
+      build-manifest.json|apps|apps/bitcraft-local|apps/bitcraft-local/dist|apps/bitcraft-local/dist/*|apps/bitcraft-local/dist-server|apps/bitcraft-local/dist-server/*|apps/bitcraft-local/dist-bindings|apps/bitcraft-local/dist-bindings/*) ;;
+      *) printf "Relay build archive contains an unexpected path.\n" >&2; return 1 ;;
+    esac
+  done < <(tar -tzf "$archive")
+  while IFS= read -r listing; do
+    entry_type="${listing:0:1}"
+    [[ "$entry_type" == "d" || "$entry_type" == "-" ]] \
+      || { printf "Relay build archive contains a non-regular entry.\n" >&2; return 1; }
+  done < <(tar -tvzf "$archive")
+}
+
+prepare_relay_build_artifact() {
+  local caller caller_home expected_archive archive_owner secured_archive
+  caller="${SUDO_USER:-}"
+  [[ "$caller" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || {
+    printf "Build artifact installation requires an identified sudo caller.\n" >&2
+    return 1
+  }
+  caller_home="$(getent passwd "$caller" | cut -d: -f6)"
+  [[ -n "$caller_home" && "$caller_home" == /* && -d "$caller_home" ]] || {
+    printf "Build artifact installer could not resolve the caller home.\n" >&2
+    return 1
+  }
+  expected_archive="$caller_home/bitcraft-build-${BUILD_ARTIFACT_SHA256}.tar.gz"
+  [[ -f "$expected_archive" && ! -L "$expected_archive" ]] || {
+    printf "Expected Relay build archive is unavailable.\n" >&2
+    return 1
+  }
+  archive_owner="$(stat -c %U "$expected_archive")"
+  [[ "$archive_owner" == "$caller" ]] || {
+    printf "Relay build archive is not owned by the sudo caller.\n" >&2
+    return 1
+  }
+  install -d -o root -g root -m 0700 "$LOG_DIR/incoming"
+  secured_archive="$LOG_DIR/incoming/bitcraft-build-${BUILD_ARTIFACT_SHA256}.tar.gz"
+  [[ ! -e "$secured_archive" && ! -L "$secured_archive" ]] || {
+    printf "A secured Relay build archive already exists.\n" >&2
+    return 1
+  }
+  mv -- "$expected_archive" "$secured_archive"
+  chown root:root "$secured_archive"
+  chmod 0600 "$secured_archive"
+  BUILD_IMPORT_ARCHIVE="$secured_archive"
+  validate_relay_build_archive "$BUILD_IMPORT_ARCHIVE"
+  [[ -d "$APP_ROOT" && ! -L "$APP_ROOT" ]] || {
+    printf "Relay application root is unavailable.\n" >&2
+    return 1
+  }
+  BUILD_IMPORT_DIR="$(mktemp -d "$APP_ROOT/.build-import-XXXXXX")"
+  chown "$RUN_USER:$RUN_USER" "$BUILD_IMPORT_DIR"
+  tar --no-same-owner --no-same-permissions -xzf "$BUILD_IMPORT_ARCHIVE" -C "$BUILD_IMPORT_DIR"
+  chown -R "$RUN_USER:$RUN_USER" "$BUILD_IMPORT_DIR"
+}
+
+finish_relay_build_artifact() {
+  if [[ -n "$BUILD_IMPORT_DIR" && "$BUILD_IMPORT_DIR" == "$APP_ROOT"/.build-import-* ]]; then
+    rm -rf -- "$BUILD_IMPORT_DIR"
+  fi
+  BUILD_IMPORT_DIR=""
+  if [[ -n "$BUILD_IMPORT_ARCHIVE" \
+    && "$BUILD_IMPORT_ARCHIVE" == */bitcraft-build-${BUILD_ARTIFACT_SHA256}.tar.gz ]]; then
+    rm -f -- "$BUILD_IMPORT_ARCHIVE"
+  fi
+  BUILD_IMPORT_ARCHIVE=""
+}
+
+delegate_cutover_mode() {
+  [[ -f "$CUTOVER_HELPER_PATH" && ! -L "$CUTOVER_HELPER_PATH" ]] || {
+    printf "Cutover helper is unavailable: %s\n" "$CUTOVER_HELPER_PATH" >&2
+    return 1
+  }
+  case "$CUTOVER_MODE" in
+    prepare)
+      exec env BITCRAFT_CUTOVER_UPDATER=1 node "$CUTOVER_HELPER_PATH" \
+        --revision "$REVISION" --prepare-cutover --confirmation "$CUTOVER_CONFIRMATION"
+      ;;
+    apply)
+      if [[ "$SKIP_CUTOVER_SOAK" == "1" ]]; then
+        exec env BITCRAFT_CUTOVER_UPDATER=1 node "$CUTOVER_HELPER_PATH" \
+          --revision "$REVISION" --apply-cutover --manifest-hash "$CUTOVER_MANIFEST_HASH" --skip-soak
+      fi
+      exec env BITCRAFT_CUTOVER_UPDATER=1 node "$CUTOVER_HELPER_PATH" \
+        --revision "$REVISION" --apply-cutover --manifest-hash "$CUTOVER_MANIFEST_HASH"
+      ;;
+    abort)
+      exec env BITCRAFT_CUTOVER_UPDATER=1 node "$CUTOVER_HELPER_PATH" \
+        --revision "$REVISION" --abort-cutover --manifest-hash "$CUTOVER_MANIFEST_HASH"
+      ;;
+  esac
+}
+
+cleanup_public_caddy_staging_root() {
+  local staging_root="$1"
+  rm -f -- \
+    "$staging_root/public-caddy-stage/deploy/configure-public-caddy.mjs" \
+    "$staging_root/public-caddy-stage/deploy/Caddyfile.example"
+  rmdir -- "$staging_root/public-caddy-stage/deploy" 2>/dev/null || true
+  rmdir -- "$staging_root/public-caddy-stage" 2>/dev/null || true
+  rmdir -- "$staging_root" 2>/dev/null || true
+}
+
+cleanup_public_oauth_staging_root() {
+  local staging_root="$1"
+  rm -f -- "$staging_root/public-oauth-stage/deploy/install-public-oauth-credentials.mjs"
+  rmdir -- "$staging_root/public-oauth-stage/deploy" 2>/dev/null || true
+  rmdir -- "$staging_root/public-oauth-stage" 2>/dev/null || true
+  rmdir -- "$staging_root" 2>/dev/null || true
+}
+
+delegate_public_caddy_mode() {
+  local active_release bootstrap_root
+  active_release="$(readlink -f "$CURRENT_LINK")"
+  [[ -n "$active_release" && "$(basename "$active_release")" == "$REVISION" ]] || {
+    printf "Public Caddy configuration requires the active deployed revision.\n" >&2
+    return 1
+  }
+  bootstrap_root="$(mktemp -d "${TMPDIR:-/tmp}/bitcraft-public-caddy-bootstrap.XXXXXX")"
+  chmod 0700 "$bootstrap_root"
+  if ! stage_public_caddy_helper "$active_release" "$bootstrap_root"; then
+    cleanup_public_caddy_staging_root "$bootstrap_root"
+    return 1
+  fi
+  cleanup_public_caddy_staging_root "$bootstrap_root"
+  [[ -f "$PUBLIC_CADDY_HELPER_PATH" && ! -L "$PUBLIC_CADDY_HELPER_PATH" ]] || {
+    printf "Public Caddy helper is unavailable.\n" >&2
+    return 1
+  }
+  exec env BITCRAFT_PUBLIC_CADDY_UPDATER=1 node "$PUBLIC_CADDY_HELPER_PATH" \
+    --confirmation "$CUTOVER_CONFIRMATION"
+}
+
+delegate_public_oauth_mode() {
+  local active_release bootstrap_root
+  active_release="$(readlink -f "$CURRENT_LINK")"
+  [[ -n "$active_release" && "$(basename "$active_release")" == "$REVISION" ]] || {
+    printf "Public OAuth credential installation requires the active deployed revision.\n" >&2
+    return 1
+  }
+  bootstrap_root="$(mktemp -d "${TMPDIR:-/tmp}/bitcraft-public-oauth-bootstrap.XXXXXX")"
+  chmod 0700 "$bootstrap_root"
+  if ! stage_public_oauth_helper "$active_release" "$bootstrap_root"; then
+    cleanup_public_oauth_staging_root "$bootstrap_root"
+    return 1
+  fi
+  cleanup_public_oauth_staging_root "$bootstrap_root"
+  [[ -f "$PUBLIC_OAUTH_HELPER_PATH" && ! -L "$PUBLIC_OAUTH_HELPER_PATH" ]] || {
+    printf "Public OAuth credential helper is unavailable.\n" >&2
+    return 1
+  }
+  [[ "$(stat -c '%U:%G:%a' "$PUBLIC_OAUTH_HELPER_PATH")" == "root:root:755" ]] || {
+    printf "Public OAuth credential helper ownership or mode is invalid.\n" >&2
+    return 1
+  }
+  cmp -s -- "$active_release/deploy/install-public-oauth-credentials.mjs" "$PUBLIC_OAUTH_HELPER_PATH" || {
+    printf "Public OAuth credential helper does not match the active revision.\n" >&2
+    return 1
+  }
+  exec env BITCRAFT_PUBLIC_OAUTH_UPDATER=1 node "$PUBLIC_OAUTH_HELPER_PATH" \
+    --revision "$REVISION" --confirmation "$CUTOVER_CONFIRMATION"
+}
+
+log() {
+  printf "\n== %s ==\n" "$1"
+}
+
+initialize_log() {
+  umask 077
+  if [[ -n "$LOG_FILE" ]]; then
+    [[ ! -e "$LOG_FILE" && ! -L "$LOG_FILE" ]] || {
+      printf "Refusing to overwrite existing log path: %s\n" "$LOG_FILE" >&2
+      return 1
+    }
+    (set -o noclobber; : >"$LOG_FILE")
+  else
+    install -d -o root -g root -m 0700 "$LOG_DIR"
+    LOG_FILE="$(mktemp "$LOG_DIR/update.XXXXXX.log")"
+  fi
+  chmod 0600 "$LOG_FILE"
+}
+
+log_detail() {
+  printf "%s\n" "$*" >>"$LOG_FILE"
+}
+
+print_log_tail() {
+  if [[ -f "$LOG_FILE" ]]; then
+    printf "\nLast log lines from %s:\n" "$LOG_FILE"
+    tail -n 80 "$LOG_FILE" || true
+  fi
+}
+
+run_logged() {
+  local label="$1"
+  shift
+
+  log "$label"
+  log_detail "== $label =="
+  log_detail "+ $*"
+  set +e
+  if [[ "$VERBOSE" == "1" ]]; then
+    "$@" 2>&1 | tee -a "$LOG_FILE"
+  else
+    "$@" >>"$LOG_FILE" 2>&1
+  fi
+  local status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf "%s ok\n" "$label"
+    return 0
+  fi
+
+  printf "%s failed (exit %s)\n" "$label" "$status"
+  print_log_tail
+  return "$status"
+}
+
+run_git_as_user() {
+  sudo -u "$RUN_USER" env HOME="$RUN_HOME" \
+    GIT_NO_REPLACE_OBJECTS=1 \
+    GIT_SSH_COMMAND="ssh -F $RUN_SSH_CONFIG" git "$@"
+}
+
+sync_source_revision() {
+  run_logged "Fetching latest code" run_git_as_user \
+    -C "$SOURCE_DIR" fetch --prune origin main
+  run_git_as_user -C "$SOURCE_DIR" merge-base --is-ancestor "$REVISION" origin/main || {
+    echo "Requested revision is not reachable from origin/main."
+    return 1
+  }
+}
+
+service_summary() {
+  local service="$1"
+  local label="$2"
+  local state pid active_since
+
+  state="$(systemctl show "$service" --property=ActiveState --value 2>/dev/null || printf "unknown")"
+  pid="$(systemctl show "$service" --property=MainPID --value 2>/dev/null || printf "0")"
+  active_since="$(systemctl show "$service" --property=ActiveEnterTimestamp --value 2>/dev/null || printf "")"
+  printf "%s: %s pid=%s" "$label" "$state" "$pid"
+  if [[ -n "$active_since" ]]; then
+    printf " since=%s" "$active_since"
+  fi
+  printf "\n"
+}
+
+service_journal_tail() {
+  local service="$1"
+  printf "\nRecent journal for %s:\n" "$service"
+  journalctl -u "$service" -n 80 --no-pager -l || true
+}
+
+wait_for_service() {
+  local service="$1"
+  local label="$2"
+
+  printf "Waiting for %s" "$label"
+  for _ in {1..30}; do
+    if systemctl is-active --quiet "$service"; then
+      printf " ok\n"
+      service_summary "$service" "$label"
+      return 0
+    fi
+    printf "."
+    sleep 1
+  done
+
+  printf " failed\n"
+  service_summary "$service" "$label" || true
+  service_journal_tail "$service"
+  return 1
+}
+
+health_summary() {
+  node -e '
+const payload = process.argv[1] || "{}";
+try {
+  const data = JSON.parse(payload);
+  const polling = data.polling || {};
+  const version = data.version || data.appVersion || data.release?.version || "unknown";
+  console.log(`Health: ok=${data.ok === true}, polling enabled=${polling.enabled === true}, version=${version}`);
+} catch {
+  console.log("Health: response was not JSON");
+}
+' "$1"
+}
+
+wait_for_health() {
+  local expected_version="${1:-}"
+  local response
+
+  printf "Waiting for web health at %s" "$HEALTH_URL"
+  for _ in {1..12}; do
+    if response="$(curl -fsS --connect-timeout 1 --max-time 10 --header "Host: $HEALTH_HOST" "$HEALTH_URL" 2>>"$LOG_FILE")" \
+      && node -e '
+        const data = JSON.parse(process.argv[1]);
+        const expected = process.argv[2];
+        const actual = data.version || data.appVersion || data.release?.version || "";
+        process.exit(data.ok === true && (!expected || actual === expected) ? 0 : 1);
+      ' "$response" "$expected_version"; then
+      printf " ok\n"
+      HEALTH_SUMMARY="$(health_summary "$response")"
+      printf "%s\n" "$HEALTH_SUMMARY"
+      log_detail "Health response: $response"
+      return 0
+    fi
+    printf "."
+    sleep 2
+  done
+
+  printf " failed\n"
+  curl -v --max-time 5 --header "Host: $HEALTH_HOST" "$HEALTH_URL" >>"$LOG_FILE" 2>&1 || true
+  print_log_tail
+  return 1
+}
+
+public_http_check() {
+  local status final_url
+  if [[ "$SKIP_PUBLIC_CHECK" == "1" ]]; then
+    PUBLIC_SUMMARY="Public: skipped (--no-public-check)"
+    printf "%s\n" "$PUBLIC_SUMMARY"
+    return 0
+  fi
+
+  status="$(curl -fsSIL --max-time 10 -o /dev/null -w "%{http_code}" "$PUBLIC_URL" 2>>"$LOG_FILE")" || {
+    PUBLIC_SUMMARY="Public: check failed status=none url=$PUBLIC_URL"
+    printf "%s\n" "$PUBLIC_SUMMARY"
+    return 1
+  }
+  final_url="$(curl -fsSIL --max-time 10 -o /dev/null -w "%{url_effective}" "$PUBLIC_URL" 2>>"$LOG_FILE")" || {
+    PUBLIC_SUMMARY="Public: check failed status=$status url=$PUBLIC_URL"
+    printf "%s\n" "$PUBLIC_SUMMARY"
+    return 1
+  }
+  if [[ "$status" =~ ^[23] ]]; then
+    PUBLIC_SUMMARY="Public: ok status=$status url=$final_url"
+    printf "%s\n" "$PUBLIC_SUMMARY"
+    return 0
+  fi
+
+  PUBLIC_SUMMARY="Public: check failed status=${status:-none} url=$final_url"
+  printf "%s\n" "$PUBLIC_SUMMARY"
+  return 1
+}
+
+atomic_switch() {
+  local release_path="$1"
+  local relative_target="releases/$(basename "$release_path")"
+  local pending_link="$APP_ROOT/.current-$$"
+  ln -s "$relative_target" "$pending_link"
+  mv -Tf "$pending_link" "$CURRENT_LINK"
+}
+
+restart_service() {
+  systemctl restart "$1"
+}
+
+prepare_release() {
+  local release_dir="$1"
+  install -d -o "$RUN_USER" -g "$RUN_USER" "$RELEASES_DIR"
+  if [[ ! -d "$release_dir" ]]; then
+    run_logged "Creating release worktree" run_git_as_user \
+      -C "$SOURCE_DIR" worktree add --detach "$release_dir" "$REVISION"
+  fi
+  run_logged "Installing dependencies" sudo -u "$RUN_USER" bash -lc \
+    "cd '$release_dir' && corepack pnpm install --frozen-lockfile"
+  run_logged "Installing verified CI build" sudo -u "$RUN_USER" bash -lc \
+    "cd '$release_dir' && node deploy/install-relay-build-artifact.mjs --source-root '$BUILD_IMPORT_DIR' --release-dir '$release_dir' --revision '$REVISION'"
+}
+
+stage_public_caddy_helper() {
+  local release_dir="$1"
+  local stage_base="${2:-$transaction_dir}"
+  local stage_dir="$stage_base/public-caddy-stage"
+  local helper_candidate="$stage_dir/deploy/configure-public-caddy.mjs"
+  local reference_candidate="$stage_dir/deploy/Caddyfile.example"
+  [[ -n "$stage_base" && -d "$stage_base" && ! -L "$stage_base" ]] || {
+    printf "Public Caddy staging root is unavailable.\n" >&2
+    return 1
+  }
+  node --check "$release_dir/deploy/configure-public-caddy.mjs" || return 1
+  install -d -o root -g root -m 0700 "$stage_dir" || return 1
+  install -d -o root -g root -m 0700 "$stage_dir/deploy" || return 1
+  run_git_as_user -C "$SOURCE_DIR" show "$REVISION:deploy/configure-public-caddy.mjs" \
+    >"$helper_candidate" || return 1
+  run_git_as_user -C "$SOURCE_DIR" show "$REVISION:deploy/Caddyfile.example" \
+    >"$reference_candidate" || return 1
+  chmod 0600 "$helper_candidate" "$reference_candidate" || return 1
+  [[ -f "$helper_candidate" && ! -L "$helper_candidate" \
+    && -f "$reference_candidate" && ! -L "$reference_candidate" ]] || {
+    printf "Revision-bound public Caddy files are unavailable.\n" >&2
+    return 1
+  }
+  cmp -s -- "$helper_candidate" "$release_dir/deploy/configure-public-caddy.mjs" || {
+    printf "Public Caddy helper differs from the revision-bound candidate release.\n" >&2
+    return 1
+  }
+  cmp -s -- "$reference_candidate" "$release_dir/deploy/Caddyfile.example" || {
+    printf "Public Caddy reference differs from the revision-bound candidate release.\n" >&2
+    return 1
+  }
+  node --check "$helper_candidate" || return 1
+  install -d -o root -g root -m 0755 "$(dirname "$PUBLIC_CADDY_HELPER_PATH")" || return 1
+  install -d -o root -g "$RUN_USER" -m 0750 "$(dirname "$PUBLIC_CADDY_REFERENCE_PATH")" || return 1
+  install -o root -g root -m 0755 "$helper_candidate" "$PUBLIC_CADDY_HELPER_PATH" || return 1
+  install -o root -g root -m 0644 "$reference_candidate" "$PUBLIC_CADDY_REFERENCE_PATH" || return 1
+  cmp -s -- "$helper_candidate" "$PUBLIC_CADDY_HELPER_PATH" || return 1
+  cmp -s -- "$reference_candidate" "$PUBLIC_CADDY_REFERENCE_PATH" || return 1
+  [[ "$(stat -c '%U:%G:%a' "$PUBLIC_CADDY_HELPER_PATH")" == "root:root:755" ]] || return 1
+  [[ "$(stat -c '%U:%G:%a' "$PUBLIC_CADDY_REFERENCE_PATH")" == "root:root:644" ]] || return 1
+}
+
+stage_public_oauth_helper() {
+  local release_dir="$1"
+  local stage_base="${2:-$transaction_dir}"
+  local stage_dir="$stage_base/public-oauth-stage"
+  local helper_candidate="$stage_dir/deploy/install-public-oauth-credentials.mjs"
+  [[ -n "$stage_base" && -d "$stage_base" && ! -L "$stage_base" ]] || {
+    printf "Public OAuth staging root is unavailable.\n" >&2
+    return 1
+  }
+  node --check "$release_dir/deploy/install-public-oauth-credentials.mjs" || return 1
+  install -d -o root -g root -m 0700 "$stage_dir" || return 1
+  install -d -o root -g root -m 0700 "$stage_dir/deploy" || return 1
+  run_git_as_user -C "$SOURCE_DIR" show "$REVISION:deploy/install-public-oauth-credentials.mjs" \
+    >"$helper_candidate" || return 1
+  chmod 0600 "$helper_candidate" || return 1
+  [[ -f "$helper_candidate" && ! -L "$helper_candidate" ]] || {
+    printf "Revision-bound public OAuth credential helper is unavailable.\n" >&2
+    return 1
+  }
+  cmp -s -- "$helper_candidate" "$release_dir/deploy/install-public-oauth-credentials.mjs" || {
+    printf "Public OAuth credential helper differs from the active revision.\n" >&2
+    return 1
+  }
+  node --check "$helper_candidate" || return 1
+  install -d -o root -g root -m 0755 "$(dirname "$PUBLIC_OAUTH_HELPER_PATH")" || return 1
+  install -o root -g root -m 0755 "$helper_candidate" "$PUBLIC_OAUTH_HELPER_PATH" || return 1
+  cmp -s -- "$helper_candidate" "$PUBLIC_OAUTH_HELPER_PATH" || return 1
+  [[ "$(stat -c '%U:%G:%a' "$PUBLIC_OAUTH_HELPER_PATH")" == "root:root:755" ]] || return 1
+}
+
+stage_backup_helper() {
+  local release_dir="$1"
+  local candidate="$release_dir/deploy/backup-bitcraft-claim-monitor-relay"
+  local crypto_candidate="$release_dir/deploy/backup-crypto.mjs"
+  local replay_candidate="$release_dir/deploy/replay-privacy-deletions.mjs"
+  [[ -f "$candidate" ]] || {
+    printf "Candidate backup helper is missing: %s\n" "$candidate" >&2
+    return 1
+  }
+  [[ -f "$crypto_candidate" ]] || {
+    printf "Candidate backup crypto helper is missing: %s\n" "$crypto_candidate" >&2
+    return 1
+  }
+  [[ -f "$replay_candidate" ]] || {
+    printf "Candidate privacy replay helper is missing: %s\n" "$replay_candidate" >&2
+    return 1
+  }
+  run_logged "Validating database backup helper" bash -n "$candidate"
+  run_logged "Validating database backup crypto helper" node --check "$crypto_candidate"
+  run_logged "Validating privacy replay helper" node --check "$replay_candidate"
+  install -d -o root -g root -m 0755 "$(dirname "$BACKUP_CRYPTO_HELPER_PATH")"
+  install -m 0755 "$crypto_candidate" "$BACKUP_CRYPTO_HELPER_PATH"
+  install -m 0755 "$replay_candidate" "$PRIVACY_REPLAY_HELPER_PATH"
+  install -m 0755 "$candidate" "$BACKUP_HELPER_PATH"
+}
+
+snapshot_live_path() {
+  local name="$1"
+  local live_path="$2"
+  local snapshot_dir="$transaction_dir/$name"
+  install -d -m 0700 "$snapshot_dir"
+  if [[ -e "$live_path" || -L "$live_path" ]]; then
+    cp -a -- "$live_path" "$snapshot_dir/value"
+    : >"$snapshot_dir/present"
+  fi
+}
+
+restore_live_path() {
+  local name="$1"
+  local live_path="$2"
+  local snapshot_dir="$transaction_dir/$name"
+  local status=0
+  rm -f -- "$live_path" || status=1
+  if [[ -f "$snapshot_dir/present" ]]; then
+    cp -a -- "$snapshot_dir/value" "$live_path" || status=1
+  fi
+  return "$status"
+}
+
+snapshot_live_installation() {
+  umask 077
+  transaction_dir="$(mktemp -d "${TMPDIR:-/tmp}/bitcraft-claim-monitor-relay-transaction.XXXXXX")"
+  chmod 0700 "$transaction_dir"
+  snapshot_live_path backup-helper "$BACKUP_HELPER_PATH"
+  snapshot_live_path backup-crypto-helper "$BACKUP_CRYPTO_HELPER_PATH"
+  snapshot_live_path privacy-replay-helper "$PRIVACY_REPLAY_HELPER_PATH"
+  snapshot_live_path public-caddy-helper "$PUBLIC_CADDY_HELPER_PATH"
+  snapshot_live_path public-caddy-reference "$PUBLIC_CADDY_REFERENCE_PATH"
+  snapshot_live_path public-oauth-helper "$PUBLIC_OAUTH_HELPER_PATH"
+  snapshot_live_path updater "$UPDATER_PATH"
+  snapshot_live_path current-link "$CURRENT_LINK"
+  snapshot_live_path web-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service"
+  snapshot_live_path worker-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-worker.service"
+  snapshot_live_path collector-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.service"
+  snapshot_live_path collector-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.timer"
+  snapshot_live_path backup-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.service"
+  snapshot_live_path backup-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.timer"
+  snapshot_live_path map-terrain-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-terrain.service"
+  snapshot_live_path map-terrain-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-terrain.timer"
+  snapshot_live_path map-roads-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-roads.service"
+  snapshot_live_path map-roads-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-roads.timer"
+  snapshot_live_path map-terrain-pointer "$DATA_DIR/map-tiles/current.json"
+  snapshot_live_path map-roads-pointer "$DATA_DIR/map-road-tiles/current.json"
+
+  if systemctl is-active --quiet "$WEB_SERVICE"; then web_was_active=1; fi
+  if systemctl is-active --quiet "$WORKER_SERVICE"; then worker_was_active=1; fi
+  if systemctl is-active --quiet "$BACKUP_TIMER"; then backup_timer_was_active=1; fi
+  if systemctl is-enabled --quiet "$BACKUP_TIMER"; then backup_timer_was_enabled=1; fi
+  transaction_started=1
+}
+
+restore_live_installation() {
+  local status=0
+  restore_live_path backup-helper "$BACKUP_HELPER_PATH" || status=1
+  restore_live_path backup-crypto-helper "$BACKUP_CRYPTO_HELPER_PATH" || status=1
+  restore_live_path privacy-replay-helper "$PRIVACY_REPLAY_HELPER_PATH" || status=1
+  restore_live_path public-caddy-helper "$PUBLIC_CADDY_HELPER_PATH" || status=1
+  restore_live_path public-caddy-reference "$PUBLIC_CADDY_REFERENCE_PATH" || status=1
+  restore_live_path public-oauth-helper "$PUBLIC_OAUTH_HELPER_PATH" || status=1
+  restore_live_path updater "$UPDATER_PATH" || status=1
+  restore_live_path current-link "$CURRENT_LINK" || status=1
+  restore_live_path web-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service" || status=1
+  restore_live_path worker-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-worker.service" || status=1
+  restore_live_path collector-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.service" || status=1
+  restore_live_path collector-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.timer" || status=1
+  restore_live_path backup-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.service" || status=1
+  restore_live_path backup-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.timer" || status=1
+  restore_live_path map-terrain-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-terrain.service" || status=1
+  restore_live_path map-terrain-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-terrain.timer" || status=1
+  restore_live_path map-roads-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-roads.service" || status=1
+  restore_live_path map-roads-timer "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-roads.timer" || status=1
+  restore_live_path map-terrain-pointer "$DATA_DIR/map-tiles/current.json" || status=1
+  restore_live_path map-roads-pointer "$DATA_DIR/map-road-tiles/current.json" || status=1
+  systemctl daemon-reload || status=1
+  return "$status"
+}
+
+restore_service_runtime() {
+  local service="$1"
+  local was_active="$2"
+  local label="$3"
+  if [[ "$was_active" == "1" ]]; then
+    restart_service "$service"
+    wait_for_service "$service" "$label"
+  else
+    systemctl stop "$service" >>"$LOG_FILE" 2>&1 || true
+  fi
+}
+
+restore_previous_runtime() {
+  local status=0
+  if [[ "$backup_timer_was_enabled" == "1" ]]; then
+    systemctl enable "$BACKUP_TIMER" >>"$LOG_FILE" 2>&1 || status=1
+  else
+    systemctl disable "$BACKUP_TIMER" >>"$LOG_FILE" 2>&1 || true
+  fi
+  if [[ "$backup_timer_was_active" == "1" ]]; then
+    systemctl start "$BACKUP_TIMER" >>"$LOG_FILE" 2>&1 || status=1
+  else
+    systemctl stop "$BACKUP_TIMER" >>"$LOG_FILE" 2>&1 || true
+  fi
+  restore_service_runtime "$WEB_SERVICE" "$web_was_active" "web service" || status=1
+  if [[ "$web_was_active" == "1" ]]; then
+    wait_for_health "" || status=1
+  fi
+  restore_service_runtime "$WORKER_SERVICE" "$worker_was_active" "worker service" || status=1
+  return "$status"
+}
+
+rollback_deployment_transaction() {
+  [[ "$transaction_started" == "1" ]] || return 0
+  local status=0
+  rollback_attempted=1
+  log "Restoring previous deployment transaction"
+  restore_live_installation || status=1
+  restore_previous_runtime || status=1
+  if [[ "$status" -eq 0 ]]; then
+    transaction_restored=1
+  fi
+  return "$status"
+}
+
+report_retained_recovery_snapshot() {
+  local recovery_message="Rollback incomplete. Recovery snapshot retained at: $transaction_dir"
+  printf "%s\n" "$recovery_message" >&2
+  log_detail "$recovery_message"
+}
+
+cleanup_deployment_transaction() {
+  local status=$?
+  local rollback_status=0
+  set +e
+  if [[ -n "$MAP_IMPORT_DIR" && "$MAP_IMPORT_DIR" == "$DATA_DIR"/.map-import-* && -d "$MAP_IMPORT_DIR" ]]; then
+    rm -rf -- "$MAP_IMPORT_DIR"
+  fi
+  if [[ -n "$MAP_IMPORT_ARCHIVE" \
+    && "$MAP_IMPORT_ARCHIVE" == */bitcraft-map-${MAP_INSTALL_PRODUCT}-${MAP_ARTIFACT_SHA256}.tar.gz \
+    && -f "$MAP_IMPORT_ARCHIVE" && ! -L "$MAP_IMPORT_ARCHIVE" ]]; then
+    rm -f -- "$MAP_IMPORT_ARCHIVE"
+  fi
+  if [[ -n "$BUILD_IMPORT_DIR" && "$BUILD_IMPORT_DIR" == "$APP_ROOT"/.build-import-* && -d "$BUILD_IMPORT_DIR" ]]; then
+    rm -rf -- "$BUILD_IMPORT_DIR"
+  fi
+  if [[ -n "$BUILD_IMPORT_ARCHIVE" \
+    && "$BUILD_IMPORT_ARCHIVE" == */bitcraft-build-${BUILD_ARTIFACT_SHA256}.tar.gz \
+    && -f "$BUILD_IMPORT_ARCHIVE" && ! -L "$BUILD_IMPORT_ARCHIVE" ]]; then
+    rm -f -- "$BUILD_IMPORT_ARCHIVE"
+  fi
+  if [[ "$transaction_started" == "1" \
+    && "$deployment_succeeded" != "1" \
+    && "$transaction_restored" != "1" \
+    && "$rollback_attempted" != "1" ]]; then
+    rollback_deployment_transaction
+    rollback_status=$?
+  fi
+  if [[ ( "$deployment_succeeded" == "1" || "$transaction_restored" == "1" ) \
+    && -n "$transaction_dir" && -d "$transaction_dir" ]]; then
+    rm -rf -- "$transaction_dir"
+  elif [[ "$transaction_started" == "1" && -n "$transaction_dir" && -d "$transaction_dir" ]]; then
+    report_retained_recovery_snapshot
+    rollback_status=1
+  fi
+  if [[ "$status" -eq 0 && "$rollback_status" -ne 0 ]]; then
+    status="$rollback_status"
+  fi
+  return "$status"
+}
+
+read_schema_version() {
+  local marker="$1/deploy/database-schema-version"
+  local value
+  [[ -f "$marker" ]] || return 1
+  value="$(tr -d '[:space:]' <"$marker")"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || return 1
+  printf "%s\n" "$value"
+}
+
+schema_backup_kind() {
+  local previous_version candidate_version
+  previous_version="$(read_schema_version "$1" 2>/dev/null || true)"
+  candidate_version="$(read_schema_version "$2" 2>/dev/null || true)"
+  if [[ -z "$previous_version" || -z "$candidate_version" || "$previous_version" != "$candidate_version" ]]; then
+    printf "migration\n"
+  elif [[ "$FORCE_BACKUP" == "1" ]]; then
+    printf "manual\n"
+  else
+    printf "none\n"
+  fi
+}
+
+create_required_backup() {
+  local kind="$1"
+  [[ -f "$DATA_DIR/bitcraft-local.sqlite" ]] || {
+    printf "Database does not exist yet; no deployment backup is needed.\n"
+    return 0
+  }
+  case "$kind" in
+    migration)
+      run_logged "Creating schema-migration database backup" \
+        "$BACKUP_HELPER_PATH" migration --revision "$REVISION"
+      ;;
+    manual)
+      run_logged "Creating manually requested database backup" \
+        "$BACKUP_HELPER_PATH" manual --revision "$REVISION"
+      ;;
+    none)
+      printf "Database schema is unchanged; deployment backup skipped.\n"
+      ;;
+    *)
+      printf "Unknown backup kind: %s\n" "$kind" >&2
+      return 1
+      ;;
+  esac
+}
+
+validate_release_config() {
+  local release_dir="$1"
+  local -a units=(
+    "$release_dir/deploy/bitcraft-claim-monitor-relay.service"
+    "$release_dir/deploy/bitcraft-claim-monitor-relay-worker.service"
+    "$release_dir/deploy/bitcraft-claim-monitor-relay-collector.service"
+    "$release_dir/deploy/bitcraft-claim-monitor-relay-collector.timer"
+    "$release_dir/deploy/bitcraft-claim-monitor-relay-map-terrain.service"
+    "$release_dir/deploy/bitcraft-claim-monitor-relay-map-terrain.timer"
+    "$release_dir/deploy/bitcraft-claim-monitor-relay-map-roads.service"
+    "$release_dir/deploy/bitcraft-claim-monitor-relay-map-roads.timer"
+  )
+  if [[ -f "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.service" \
+    && -f "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.timer" ]]; then
+    units+=(
+      "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.service"
+      "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.timer"
+    )
+  fi
+  run_logged "Validating systemd units" systemd-analyze verify \
+    "${units[@]}"
+  run_logged "Validating Caddy configuration" caddy validate \
+    --config "$release_dir/deploy/Caddyfile.example"
+  run_logged "Validating cutover maintenance Caddy configuration" caddy validate \
+    --config "$release_dir/deploy/Caddyfile.cutover-maintenance"
+  run_logged "Validating cutover orchestration helper" node --check \
+    "$release_dir/deploy/cutover-relay-production.mjs"
+  run_logged "Validating canonical soak verifier" node --check \
+    "$release_dir/deploy/verify-canonical-soak.mjs"
+  run_logged "Validating public Caddy bootstrap helper" node --check \
+    "$release_dir/deploy/configure-public-caddy.mjs"
+  run_logged "Validating public OAuth credential helper" node --check \
+    "$release_dir/deploy/install-public-oauth-credentials.mjs"
+}
+
+install_release_config() {
+  local release_dir="$1"
+  install -d -o "$RUN_USER" -g "$RUN_USER" -m 0700 "$BACKUP_DIR"
+  install -d -o root -g "$RUN_USER" -m 0750 "$CONFIG_DIR"
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay.service" \
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service"
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-worker.service" \
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-worker.service"
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-collector.service" \
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.service"
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-collector.timer" \
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-collector.timer"
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-map-terrain.service" \
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-terrain.service"
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-map-terrain.timer" \
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-terrain.timer"
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-map-roads.service" \
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-roads.service"
+  install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-map-roads.timer" \
+    "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-map-roads.timer"
+  if [[ -f "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.service" \
+    && -f "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.timer" ]]; then
+    install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.service" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.service"
+    install -m 0644 "$release_dir/deploy/bitcraft-claim-monitor-relay-backup.timer" \
+      "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-backup.timer"
+  fi
+  install -d -o root -g "$RUN_USER" -m 0750 "$DATA_DIR/monitoring"
+  install -d -o root -g root -m 0755 "$(dirname "$PUBLIC_OAUTH_HELPER_PATH")"
+  install -o root -g root -m 0755 \
+    "$release_dir/deploy/install-public-oauth-credentials.mjs" "$PUBLIC_OAUTH_HELPER_PATH"
+  systemctl daemon-reload
+}
+
+prune_releases() {
+  local active_path
+  active_path="$(readlink -f "$1")"
+  local keep_inactive=$((KEEP_RELEASES - 1))
+  local kept=0
+  local status=0
+  local entry path
+  local -a candidates=()
+
+  while IFS= read -r entry; do
+    candidates+=("${entry#* }")
+  done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -nr)
+
+  for path in "${candidates[@]}"; do
+    [[ "$(readlink -f "$path")" == "$active_path" ]] && continue
+    if (( kept < keep_inactive )); then
+      ((kept += 1))
+      continue
+    fi
+    run_logged "Removing old release $(basename "$path")" \
+      run_git_as_user -C "$SOURCE_DIR" worktree remove --force "$path" || status=1
+  done
+  run_git_as_user -C "$SOURCE_DIR" worktree prune || status=1
+  return "$status"
+}
+
+post_commit_prune() {
+  local release_dir="$1"
+  if ! prune_releases "$release_dir"; then
+    local warning="Release pruning failed after deployment commit; continuing"
+    printf "Warning: %s. Inspect %s.\n" "$warning" "$LOG_FILE" >&2
+    log_detail "$warning"
+  fi
+  return 0
+}
+
+print_summary() {
+  local previous_release="$1"
+  local release_dir="$2"
+  local expected_version="$3"
+  local preparation_seconds="$4"
+  local cutover_seconds="$5"
+  printf "Deployment complete.\n"
+  printf "Version: %s\n" "$expected_version"
+  printf "Requested revision: %s\n" "$REVISION"
+  printf "Previous revision: %s\n" "$(basename "${previous_release:-none}")"
+  printf "Preparation: %ss\n" "$preparation_seconds"
+  printf "Cutover: %ss\n" "$cutover_seconds"
+  service_summary "$WEB_SERVICE" "Web service"
+  service_summary "$WORKER_SERVICE" "Worker service"
+  printf "%s\n" "$HEALTH_SUMMARY"
+  printf "%s\n" "$PUBLIC_SUMMARY"
+  printf "Rollback: not needed\n"
+  printf "Active release: %s\n" "$release_dir"
+  printf "Database backup directory: %s\n" "$BACKUP_DIR"
+  printf "Full log: %s\n" "$LOG_FILE"
+}
+
+print_failure_summary() {
+  local previous_release="$1"
+  local release_dir="$2"
+  local expected_version="$3"
+  local preparation_seconds="$4"
+  local cutover_seconds="$5"
+  local candidate_health="$6"
+  local candidate_public="$7"
+  local rollback_summary="$8"
+  printf "Deployment failed.\n"
+  printf "Version: %s\n" "$expected_version"
+  printf "Requested revision: %s\n" "$REVISION"
+  printf "Previous revision: %s\n" "$(basename "${previous_release:-none}")"
+  printf "Preparation: %ss\n" "$preparation_seconds"
+  printf "Cutover and rollback: %ss\n" "$cutover_seconds"
+  service_summary "$WEB_SERVICE" "Web service"
+  service_summary "$WORKER_SERVICE" "Worker service"
+  printf "Candidate %s\n" "$candidate_health"
+  printf "Candidate %s\n" "$candidate_public"
+  printf "Rollback: %s\n" "$rollback_summary"
+  printf "Active release: %s\n" "$(readlink -f "$CURRENT_LINK" 2>/dev/null || printf unknown)"
+  printf "Failed release retained: %s\n" "$release_dir"
+  printf "Full log: %s\n" "$LOG_FILE"
+}
+
+main() {
+  [[ "${EUID:-$(id -u)}" -eq 0 ]] || { echo "Run this script as root."; exit 1; }
+  if [[ "$#" -eq 1 && "$1" == "--capabilities" ]]; then
+    printf "relay-build-artifact-v1\npublic-caddy-bootstrap-v2\npublic-oauth-credentials-v1\n"
+    return
+  fi
+  parse_args "$@"
+  if [[ "$MAP_GENERATION_MODE" == "all" ]]; then
+    DATA_DIR="/var/lib/bitcraft-claim-monitor-relay"
+  fi
+  if [[ -n "$CUTOVER_MODE" ]]; then
+    delegate_cutover_mode
+  fi
+  if [[ "$PUBLIC_OAUTH_MODE" == "1" ]]; then
+    exec 9>"$LOCK_FILE"
+    flock -n 9 || { echo "Another deployment is already running."; exit 1; }
+    delegate_public_oauth_mode
+  fi
+  if [[ "$PUBLIC_CADDY_MODE" == "1" ]]; then
+    exec 9>"$LOCK_FILE"
+    flock -n 9 || { echo "Another deployment is already running."; exit 1; }
+    delegate_public_caddy_mode
+  fi
+  trap cleanup_deployment_transaction EXIT
+  exec 9>"$LOCK_FILE"
+  flock -n 9 || { echo "Another deployment is already running."; exit 1; }
+  initialize_log
+  printf "Full log: %s\n" "$LOG_FILE"
+  if [[ "$MAP_GENERATION_MODE" == "all" ]]; then
+    generate_native_map_packs
+    return
+  fi
+  if [[ -n "$MAP_INSTALL_PRODUCT" ]]; then
+    install_native_map_product_archive
+    return
+  fi
+  local deploy_started prepare_finished cutover_started cutover_finished
+  deploy_started="$(date +%s)"
+
+  install -d -o "$RUN_USER" -g "$RUN_USER" "$SOURCE_DIR" "$RELEASES_DIR"
+  sync_source_revision
+  prepare_relay_build_artifact
+
+  local release_dir="$RELEASES_DIR/$REVISION"
+  local previous_release=""
+  previous_release="$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)"
+  prepare_release "$release_dir"
+  finish_relay_build_artifact
+  local expected_version
+  expected_version="$(node -p "require('$release_dir/apps/bitcraft-local/package.json').version")"
+  validate_release_config "$release_dir"
+  snapshot_live_installation
+  stage_public_caddy_helper "$release_dir"
+  stage_backup_helper "$release_dir"
+  local backup_kind
+  backup_kind="$(schema_backup_kind "$previous_release" "$release_dir")"
+  create_required_backup "$backup_kind"
+  install_release_config "$release_dir"
+  prepare_finished="$(date +%s)"
+  cutover_started="$prepare_finished"
+  atomic_switch "$release_dir"
+
+  if ! restart_service "$WEB_SERVICE" \
+    || ! wait_for_service "$WEB_SERVICE" "web service" \
+    || ! wait_for_health "$expected_version" \
+    || ! restart_service "$WORKER_SERVICE" \
+    || ! wait_for_service "$WORKER_SERVICE" "worker service" \
+    || ! public_http_check; then
+    local candidate_health="$HEALTH_SUMMARY"
+    local candidate_public="$PUBLIC_SUMMARY"
+    local rollback_summary
+    if rollback_deployment_transaction; then
+      rollback_summary="restored $(basename "$previous_release") successfully"
+    else
+      rollback_summary="failed; recovery snapshot retained at $transaction_dir; inspect systemd and $LOG_FILE immediately"
+    fi
+    cutover_finished="$(date +%s)"
+    print_failure_summary "$previous_release" "$release_dir" "$expected_version" \
+      "$((prepare_finished - deploy_started))" "$((cutover_finished - cutover_started))" \
+      "$candidate_health" "$candidate_public" "$rollback_summary"
+    return 1
+  fi
+
+  cutover_finished="$(date +%s)"
+  install -m 0755 "$release_dir/deploy/update-bitcraft-claim-monitor-relay" \
+    "$UPDATER_PATH"
+  systemctl enable --now "$BACKUP_TIMER" >>"$LOG_FILE" 2>&1
+  systemctl disable --now "$MAP_TERRAIN_TIMER" "$MAP_ROADS_TIMER" >>"$LOG_FILE" 2>&1
+  deployment_succeeded=1
+  post_commit_prune "$release_dir"
+  print_summary "$previous_release" "$release_dir" "$expected_version" \
+    "$((prepare_finished - deploy_started))" "$((cutover_finished - cutover_started))"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

@@ -8,7 +8,9 @@ const sectionUrls = {
   analytics: new URL("../src/components/admin/AdminAnalyticsSection.tsx", import.meta.url),
   data: new URL("../src/components/admin/AdminDataSection.tsx", import.meta.url),
   empireMembership: new URL("../src/components/admin/AdminEmpireMembershipSection.tsx", import.meta.url),
+  publicService: new URL("../src/components/admin/PublicServiceAdminSection.tsx", import.meta.url),
 };
+const configurationNavUrl = new URL("../src/components/admin/AdminConfigurationNav.tsx", import.meta.url);
 
 const sourceIfPresent = (url) => existsSync(url) ? readFileSync(url, "utf8") : "";
 
@@ -22,10 +24,23 @@ test("AdminPanel composes focused admin feature sections", () => {
   assert.match(adminPanel, /import \{ AdminAnalyticsSection \} from "\.\/AdminAnalyticsSection";/);
   assert.match(adminPanel, /import \{ AdminDataSection \} from "\.\/AdminDataSection";/);
   assert.match(adminPanel, /import \{ AdminEmpireMembershipSection \} from "\.\/AdminEmpireMembershipSection";/);
+  assert.match(adminPanel, /import \{ PublicServiceAdminSection \} from "\.\/PublicServiceAdminSection";/);
   assert.match(adminPanel, /<AdminAccessSection\b/);
   assert.match(adminPanel, /<AdminAnalyticsSection\b/);
   assert.match(adminPanel, /<AdminDataSection\b/);
   assert.match(adminPanel, /<AdminEmpireMembershipSection\b/);
+  assert.match(adminPanel, /<PublicServiceAdminSection\b/);
+});
+
+test("Public service Admin UI exposes exact lookup, moderation and documented privacy controls without document or secret editors", () => {
+  const source = sourceIfPresent(sectionUrls.publicService);
+  assert.match(source, /Public service health/);
+  assert.match(source, /Exact account lookup/);
+  assert.match(source, /Exact plan lookup/);
+  assert.match(source, /Suspend account/);
+  assert.match(source, /Revoke invitation/);
+  assert.match(source, /Recent public Discord reauthentication/);
+  assert.doesNotMatch(source, /botToken|tokenHash|documentJson|Edit plan document/);
 });
 
 test("AdminPanel no longer owns extracted presentation blocks", () => {
@@ -52,4 +67,20 @@ test("feature sections expose explicit data, pending, error, and action props", 
     assert.match(source, /\berror\??:/, `Admin ${name} section should receive errors explicitly`);
     assert.match(source, /\bon[A-Z][A-Za-z]+\??:/, `Admin ${name} section should receive actions explicitly`);
   }
+});
+
+test("configuration uses a labelled responsive category navigator", () => {
+  const source = sourceIfPresent(configurationNavUrl);
+  assert.equal(existsSync(configurationNavUrl), true);
+  assert.match(source, /aria-label="Configuration categories"/);
+  assert.match(source, /Configuration category/);
+  assert.match(source, /aria-current/);
+  assert.match(source, /CONFIGURATION_SECTIONS\.map/);
+});
+
+test("dirty configuration navigation uses the shared in-app confirmation", () => {
+  const adminPanel = readFileSync(adminPanelUrl, "utf8");
+  assert.match(adminPanel, /requestDiscardSettings/);
+  assert.match(adminPanel, /<ConfirmAdminActionDialog\b/);
+  assert.doesNotMatch(adminPanel, /window\.confirm/);
 });

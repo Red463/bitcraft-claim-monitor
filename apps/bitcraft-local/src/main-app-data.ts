@@ -1,9 +1,9 @@
 export type AnyRecord = Record<string, any>;
 
 /*
- * Shared data helpers for BitJita payloads.
+ * Shared data helpers for normalized game-data payloads.
  *
- * BitJita responses are not fully uniform: some endpoints wrap arrays in named
+ * Provider and persisted payloads are not fully uniform: some wrap arrays in named
  * properties, timestamps can arrive in several units, and construction projects
  * expose "required" and "already contributed" materials separately. These
  * helpers keep that domain knowledge out of page components.
@@ -32,7 +32,7 @@ export function parseDateValue(value: unknown): Date | null {
     const text = String(value).trim();
     const numeric = Number(text);
     if (!Number.isFinite(numeric) || numeric <= 0) return null;
-    // BitJita and local history have used seconds, milliseconds, and
+    // Provider data and local history have used seconds, milliseconds, and
     // microseconds. Length-based detection preserves old rows without forcing
     // every caller to know which source produced the timestamp.
     const millis = text.length >= 16 ? numeric / 1000 : text.length <= 10 ? numeric * 1000 : numeric;
@@ -69,8 +69,15 @@ function constructionCatalog(construction: AnyRecord, key: "items" | "cargos"): 
   return new Map((construction?.[key] ?? []).map((entry: AnyRecord) => [String(entry.id), entry]));
 }
 
-function inventoryStoredTotals(inventories: AnyRecord): Map<string, number> {
-  const totals = new Map<string, number>();
+function exactQuantity(value: unknown): bigint {
+  const normalized = typeof value === "bigint"
+    ? value.toString()
+    : String(value ?? "0").replace(/,/g, "").trim();
+  return /^\d+$/.test(normalized) ? BigInt(normalized) : 0n;
+}
+
+function inventoryStoredTotals(inventories: AnyRecord): Map<string, bigint> {
+  const totals = new Map<string, bigint>();
   for (const building of inventories?.buildings ?? []) {
     for (const slot of building.inventory ?? []) {
       const contents = slot.contents ?? {};
@@ -79,7 +86,7 @@ function inventoryStoredTotals(inventories: AnyRecord): Map<string, number> {
       const itemId = contents.item_id ?? contents.itemId;
       if (itemId == null) continue;
       const key = `${type}:${itemId}`;
-      totals.set(key, (totals.get(key) ?? 0) + toNumber(contents.quantity));
+      totals.set(key, (totals.get(key) ?? 0n) + exactQuantity(contents.quantity));
     }
   }
   return totals;
@@ -98,7 +105,7 @@ function constructionMaterialRows(
   materials: AnyRecord[],
   type: "item" | "cargo",
   contributions: Map<string, number>,
-  storedTotals: Map<string, number>,
+  storedTotals: Map<string, bigint>,
   itemLookup: Map<string, AnyRecord>,
   cargoLookup: Map<string, AnyRecord>,
 ): AnyRecord[] {
@@ -113,7 +120,7 @@ function constructionMaterialRows(
       name: lookup?.name ?? `${type === "cargo" ? "Cargo" : "Item"} #${itemId}`,
       required,
       contributed: contributions.get(key) ?? 0,
-      stored: storedTotals.get(key) ?? 0,
+      stored: Number(storedTotals.get(key) ?? 0n),
       tier: lookup?.tier ?? material.tier,
       rarity: lookup?.rarityStr ?? lookup?.rarity ?? material.rarityStr ?? material.rarity,
       iconAssetName: lookup?.iconAssetName ?? material.iconAssetName,
@@ -130,13 +137,20 @@ export function buildConstructionProjects(construction: AnyRecord, inventories: 
       return {
         ...project,
         name: project.name ?? project.recipeName ?? project.buildingName ?? project.structureName ?? project.entityId,
+        materials: project.materials.map((material: AnyRecord) => ({
+          ...material,
+          stored: (
+            storedTotals.get(`${material.type === "cargo" ? "cargo" : "item"}:${material.itemId}`)
+            ?? 0n
+          ).toString(),
+        })),
       };
     }
     const contributions = new Map<string, number>();
     addConstructionContributions(contributions, project.items ?? [], "item");
     addConstructionContributions(contributions, project.cargos ?? [], "cargo");
 
-    // BitJita currently exposes full project requirements as consumed*Stacks, while
+    // Current project payloads expose full requirements as consumed*Stacks, while
     // project.items/cargos are the materials already added to that construction site.
     const requiredItems = project.consumedItemStacks?.length ? project.consumedItemStacks : project.items ?? [];
     const requiredCargos = project.consumedCargoStacks?.length ? project.consumedCargoStacks : project.cargos ?? [];

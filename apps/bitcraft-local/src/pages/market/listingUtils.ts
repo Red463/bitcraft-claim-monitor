@@ -20,7 +20,7 @@ export function listingTrackingKey(listing: AnyRecord): string {
 }
 
 /*
- * BitJita active market listings expose their original listing time as
+ * Active market listings expose their original listing time as
  * `timestamp`; persisted first-seen time is used for older/fallback payloads.
  */
 export function listingDate(listing: AnyRecord, firstSeen: unknown): unknown {

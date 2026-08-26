@@ -1,17 +1,17 @@
+import { addDecimal } from "../../dist-server/game-data/exactDecimal.js";
+import { applyOperationalHistoryRetentionSchema } from "./operationalHistoryRetention.mjs";
+
+export function applyOperationalHistoryRetentionMigration(db) {
+  applyOperationalHistoryRetentionSchema(db);
+}
+
 export const additiveColumnMigrations = [
-  { table: "market_listings", column: "owner_entity_id", definition: "TEXT" },
-  { table: "market_listings", column: "item_id", definition: "TEXT" },
-  { table: "market_listings", column: "item_type", definition: "TEXT" },
   { table: "market_events", column: "owner_entity_id", definition: "TEXT" },
   { table: "market_events", column: "item_id", definition: "TEXT" },
   { table: "market_events", column: "item_type", definition: "TEXT" },
   { table: "market_events", column: "trade_id", definition: "TEXT" },
   { table: "market_events", column: "source_key", definition: "TEXT" },
-  { table: "market_buy_orders_current", column: "icon_asset_name", definition: "TEXT" },
-  { table: "market_buy_orders_current", column: "active", definition: "INTEGER NOT NULL DEFAULT 1" },
-  { table: "market_buy_orders_current", column: "updated_at", definition: "TEXT" },
-  { table: "market_regional_sale_averages_current", column: "item_name", definition: "TEXT" },
-  { table: "market_regional_sale_averages_current", column: "window_days", definition: "INTEGER NOT NULL DEFAULT 7" },
+  { table: "market_trades", column: "region_id", definition: "TEXT" },
   { table: "activity_events", column: "source_key", definition: "TEXT" },
   { table: "admin_users", column: "active", definition: "INTEGER NOT NULL DEFAULT 1" },
   { table: "admin_users", column: "last_login_at", definition: "TEXT" },
@@ -22,8 +22,25 @@ export const additiveColumnMigrations = [
   { table: "admin_users", column: "discord_avatar", definition: "TEXT" },
   { table: "user_sessions", column: "reauthenticated_at", definition: "TEXT" },
   { table: "user_accounts", column: "inactivity_warning_sent_at", definition: "TEXT" },
+  { table: "public_craft_plan_events", column: "actor_deleted_marker", definition: "TEXT" },
+  { table: "public_user_accounts", column: "status", definition: "TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended'))" },
+  { table: "public_user_accounts", column: "suspended_at", definition: "TEXT" },
+  { table: "public_craft_plans", column: "moderation_previous_status", definition: "TEXT" },
+  { table: "public_craft_plans", column: "moderation_suspended_account_id", definition: "INTEGER" },
   { table: "production_jobs", column: "start_notified", definition: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "provider_subscription_health", column: "runtime_state", definition: "TEXT NOT NULL DEFAULT 'disconnected' CHECK (runtime_state IN ('connected', 'disconnected', 'blocked_by_schema'))" },
   { table: "domain_payload_current", column: "updated_at", definition: "TEXT" },
+  { table: "domain_payload_current", column: "provider", definition: "TEXT NOT NULL DEFAULT 'legacy'" },
+  { table: "domain_payload_current", column: "source_key", definition: "TEXT" },
+  { table: "domain_payload_current", column: "region_id", definition: "TEXT" },
+  { table: "domain_payload_current", column: "database_name", definition: "TEXT" },
+  { table: "domain_payload_current", column: "schema_fingerprint", definition: "TEXT" },
+  { table: "domain_payload_current", column: "source_observed_at", definition: "TEXT" },
+  { table: "domain_payload_current", column: "received_at", definition: "TEXT" },
+  { table: "domain_payload_current", column: "freshness", definition: "TEXT NOT NULL DEFAULT 'unavailable'" },
+  { table: "domain_payload_current", column: "confidence", definition: "TEXT NOT NULL DEFAULT 'unknown'" },
+  { table: "domain_payload_current", column: "generation", definition: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "domain_payload_current", column: "warnings_json", definition: "TEXT NOT NULL DEFAULT '[]'" },
   { table: "discord_youtube_channels", column: "discord_channel_id", definition: "TEXT" },
   { table: "game_catalog_item_list_outputs", column: "guaranteed_quantity", definition: "REAL NOT NULL DEFAULT 0" },
   { table: "game_catalog_recipes", column: "action_count", definition: "REAL NOT NULL DEFAULT 0" },
@@ -42,6 +59,48 @@ export const schemaIndexStatements = [
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_market_events_source ON market_events (claim_id, source_key) WHERE source_key IS NOT NULL;",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_discord_id ON admin_users (discord_id) WHERE discord_id IS NOT NULL AND discord_id <> '';",
   "CREATE INDEX IF NOT EXISTS idx_game_catalog_entities_item_list ON game_catalog_entities (item_list_id, catalog_key);",
+  "CREATE INDEX IF NOT EXISTS idx_market_trades_claim_region_item_time ON market_trades (claim_id, region_id, item_id, item_type, occurred_at DESC);",
+  "CREATE INDEX IF NOT EXISTS idx_production_contrib_claim ON production_contributions (claim_id, last_contributed_at DESC);",
+  "CREATE INDEX IF NOT EXISTS idx_production_contrib_profession ON production_contributions (claim_id, profession, contributed_progress DESC);",
+  "CREATE INDEX IF NOT EXISTS idx_production_contrib_events_claim ON production_contribution_events (claim_id, occurred_at DESC);",
+  "CREATE INDEX IF NOT EXISTS idx_production_contrib_events_craft ON production_contribution_events (claim_id, craft_entity_id, occurred_at DESC);",
+];
+
+export const discordOutboxLeaseColumnMigrations = [
+  { table: "discord_notification_outbox", column: "locked_by", definition: "TEXT" },
+  { table: "discord_notification_outbox", column: "lease_token", definition: "TEXT" },
+  { table: "discord_notification_outbox", column: "lease_expires_at", definition: "TEXT" },
+];
+
+export const discordOutboxLeaseIndexStatements = [
+  "CREATE INDEX IF NOT EXISTS idx_discord_notification_outbox_lease ON discord_notification_outbox (status, next_attempt_at, lease_expires_at, id);",
+];
+
+export const providerTransitionLeaseColumnMigrations = [
+  { table: "provider_transition_outbox", column: "locked_by", definition: "TEXT" },
+  { table: "provider_transition_outbox", column: "lease_token", definition: "TEXT" },
+  { table: "provider_transition_outbox", column: "locked_at", definition: "TEXT" },
+  { table: "provider_transition_outbox", column: "lease_expires_at", definition: "TEXT" },
+];
+
+export const providerTransitionLeaseIndexStatements = [
+  "CREATE INDEX IF NOT EXISTS idx_provider_transition_lease ON provider_transition_outbox (claim_id, domain, updated_at, lease_expires_at, created_at, transition_key);",
+];
+
+export const retiredTableNames = [
+  "current_claim_state",
+  "recipe_catalog_entries",
+  "game_catalog_refresh_targets",
+  "game_catalog_refresh_runs",
+  "market_listings",
+  "market_buy_orders_current",
+  "market_regional_sale_averages_current",
+  "global_market_price_snapshots",
+  "empire_hexite_targets",
+  "empire_hexite_snapshots",
+  "empire_hexite_sweep_empires",
+  "empire_hexite_sources",
+  "empire_hexite_sweeps",
 ];
 
 export function applySettlementStateMigration(db) {
@@ -49,8 +108,8 @@ export function applySettlementStateMigration(db) {
     CREATE TABLE IF NOT EXISTS settlement_state_current (
       claim_id TEXT PRIMARY KEY,
       captured_at TEXT NOT NULL,
-      supplies REAL,
-      treasury REAL,
+      supplies TEXT,
+      treasury TEXT,
       members_count INTEGER,
       buildings_count INTEGER,
       market_count INTEGER,
@@ -60,6 +119,53 @@ export function applySettlementStateMigration(db) {
 
   db.exec("BEGIN IMMEDIATE");
   try {
+    const checkpointColumns = db.prepare("PRAGMA table_info(settlement_state_current)").all();
+    const checkpointTypes = new Map(checkpointColumns.map((column) => [
+      String(column.name),
+      String(column.type ?? "").toUpperCase(),
+    ]));
+    if (checkpointTypes.get("supplies") !== "TEXT" || checkpointTypes.get("treasury") !== "TEXT") {
+      db.exec(`
+        ALTER TABLE settlement_state_current RENAME TO settlement_state_current_legacy_amounts;
+        CREATE TABLE settlement_state_current (
+          claim_id TEXT PRIMARY KEY,
+          captured_at TEXT NOT NULL,
+          supplies TEXT,
+          treasury TEXT,
+          members_count INTEGER,
+          buildings_count INTEGER,
+          market_count INTEGER,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO settlement_state_current (
+          claim_id, captured_at, supplies, treasury, members_count,
+          buildings_count, market_count, updated_at
+        )
+        SELECT
+          claim_id,
+          captured_at,
+          CASE
+            WHEN supplies IS NULL THEN NULL
+            WHEN supplies BETWEEN -9007199254740991 AND 9007199254740991
+              AND supplies = CAST(supplies AS INTEGER)
+              THEN CAST(CAST(supplies AS INTEGER) AS TEXT)
+            ELSE NULL
+          END,
+          CASE
+            WHEN treasury IS NULL THEN NULL
+            WHEN treasury BETWEEN -9007199254740991 AND 9007199254740991
+              AND treasury = CAST(treasury AS INTEGER)
+              THEN CAST(CAST(treasury AS INTEGER) AS TEXT)
+            ELSE NULL
+          END,
+          members_count,
+          buildings_count,
+          market_count,
+          updated_at
+        FROM settlement_state_current_legacy_amounts;
+        DROP TABLE settlement_state_current_legacy_amounts;
+      `);
+    }
     const hasLegacySnapshots = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'snapshots'").get();
     if (hasLegacySnapshots) {
       db.exec(`
@@ -68,7 +174,23 @@ export function applySettlementStateMigration(db) {
           buildings_count, market_count, updated_at
         )
         SELECT
-          s.claim_id, s.captured_at, s.supplies, s.treasury, s.members_count,
+          s.claim_id,
+          s.captured_at,
+          CASE
+            WHEN s.supplies IS NULL THEN NULL
+            WHEN s.supplies BETWEEN -9007199254740991 AND 9007199254740991
+              AND s.supplies = CAST(s.supplies AS INTEGER)
+              THEN CAST(CAST(s.supplies AS INTEGER) AS TEXT)
+            ELSE NULL
+          END,
+          CASE
+            WHEN s.treasury IS NULL THEN NULL
+            WHEN s.treasury BETWEEN -9007199254740991 AND 9007199254740991
+              AND s.treasury = CAST(s.treasury AS INTEGER)
+              THEN CAST(CAST(s.treasury AS INTEGER) AS TEXT)
+            ELSE NULL
+          END,
+          s.members_count,
           s.buildings_count, s.market_count, s.captured_at
         FROM snapshots s
         WHERE NOT EXISTS (
@@ -105,9 +227,484 @@ export function applyAdditiveColumnMigrations(db, migrations = additiveColumnMig
   }
 }
 
+export function applyDiscordOutboxLeaseMigration(
+  db,
+  migrations = discordOutboxLeaseColumnMigrations,
+  indexes = discordOutboxLeaseIndexStatements,
+) {
+  applyAdditiveColumnMigrations(db, migrations);
+  applySchemaIndexStatements(db, indexes);
+}
+
+export function applyProviderTransitionLeaseMigration(
+  db,
+  migrations = providerTransitionLeaseColumnMigrations,
+  indexes = providerTransitionLeaseIndexStatements,
+) {
+  applyAdditiveColumnMigrations(db, migrations);
+  applySchemaIndexStatements(db, indexes);
+}
+
+export function applyMarketHistoryExactAmountMigration(db) {
+  const needsExactAmounts = (table, columns) => {
+    const types = new Map(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => [
+      String(column.name),
+      String(column.type ?? "").toUpperCase(),
+    ]));
+    return columns.some((column) => types.get(column) !== "TEXT");
+  };
+  const migrateEvents = needsExactAmounts(
+    "market_events",
+    ["quantity", "price", "total_value"],
+  );
+  const migrateTrades = needsExactAmounts(
+    "market_trades",
+    ["quantity", "unit_price", "total_price"],
+  );
+  if (!migrateEvents && !migrateTrades) return;
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    if (migrateEvents) {
+      db.exec(`
+        ALTER TABLE market_events RENAME TO market_events_legacy_amounts;
+        CREATE TABLE market_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          claim_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          listing_key TEXT NOT NULL,
+          item_name TEXT NOT NULL,
+          side TEXT,
+          owner TEXT,
+          owner_entity_id TEXT,
+          item_id TEXT,
+          item_type TEXT,
+          quantity TEXT,
+          price TEXT,
+          total_value TEXT,
+          tier TEXT,
+          rarity TEXT,
+          occurred_at TEXT NOT NULL,
+          trade_id TEXT,
+          source_key TEXT,
+          raw_json TEXT NOT NULL
+        );
+        INSERT INTO market_events (
+          id, claim_id, event_type, listing_key, item_name, side, owner,
+          owner_entity_id, item_id, item_type, quantity, price, total_value,
+          tier, rarity, occurred_at, trade_id, source_key, raw_json
+        )
+        SELECT
+          id, claim_id, event_type, listing_key, item_name, side, owner,
+          owner_entity_id, item_id, item_type,
+          CASE WHEN quantity IS NULL THEN NULL ELSE CAST(quantity AS TEXT) END,
+          CASE WHEN price IS NULL THEN NULL ELSE CAST(price AS TEXT) END,
+          CASE WHEN total_value IS NULL THEN NULL ELSE CAST(total_value AS TEXT) END,
+          tier, rarity, occurred_at, trade_id, source_key, raw_json
+        FROM market_events_legacy_amounts;
+        DROP TABLE market_events_legacy_amounts;
+      `);
+    }
+    if (migrateTrades) {
+      const hasTradeRegion = db.prepare("PRAGMA table_info(market_trades)").all()
+        .some((column) => String(column.name) === "region_id");
+      db.exec(`
+        ALTER TABLE market_trades RENAME TO market_trades_legacy_amounts;
+        CREATE TABLE market_trades (
+          trade_id TEXT PRIMARY KEY,
+          claim_id TEXT NOT NULL,
+          region_id TEXT,
+          order_entity_id TEXT,
+          seller_entity_id TEXT,
+          seller_username TEXT,
+          purchaser_entity_id TEXT,
+          purchaser_username TEXT,
+          item_id TEXT,
+          item_type TEXT,
+          item_name TEXT NOT NULL,
+          quantity TEXT NOT NULL,
+          unit_price TEXT NOT NULL,
+          total_price TEXT NOT NULL,
+          tier TEXT,
+          rarity TEXT,
+          occurred_at TEXT NOT NULL,
+          imported_at TEXT NOT NULL,
+          raw_json TEXT NOT NULL
+        );
+        INSERT INTO market_trades (
+          trade_id, claim_id, region_id, order_entity_id, seller_entity_id,
+          seller_username, purchaser_entity_id, purchaser_username, item_id,
+          item_type, item_name, quantity, unit_price, total_price, tier,
+          rarity, occurred_at, imported_at, raw_json
+        )
+        SELECT
+          trade_id, claim_id, ${hasTradeRegion ? "region_id" : "NULL"}, order_entity_id, seller_entity_id,
+          seller_username, purchaser_entity_id, purchaser_username, item_id,
+          item_type, item_name, CAST(quantity AS TEXT), CAST(unit_price AS TEXT),
+          CAST(total_price AS TEXT), tier, rarity, occurred_at, imported_at,
+          raw_json
+        FROM market_trades_legacy_amounts;
+        DROP TABLE market_trades_legacy_amounts;
+      `);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function applyMarketTradeRegionBackfill(db) {
+  const rows = db.prepare(`
+    SELECT trade_id, raw_json
+    FROM market_trades
+    WHERE region_id IS NULL OR region_id = ''
+  `).all();
+  if (!rows.length) return;
+  const update = db.prepare(`
+    UPDATE market_trades
+    SET region_id = ?
+    WHERE trade_id = ? AND (region_id IS NULL OR region_id = '')
+  `);
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const row of rows) {
+      const tradeId = String(row.trade_id ?? "");
+      const relayMatch = tradeId.match(/^relay_closed_listing:(\d+):/);
+      let regionId = relayMatch?.[1] ?? "";
+      if (!regionId) {
+        try {
+          const raw = JSON.parse(String(row.raw_json ?? "{}"));
+          regionId = String(raw?.listing?.regionId ?? "").trim();
+        } catch {
+          regionId = "";
+        }
+      }
+      if (/^\d+$/.test(regionId)) update.run(regionId, tradeId);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function applyProductionContributionExactAmountMigration(db) {
+  const contributionColumns = db.prepare("PRAGMA table_info(production_contributions)").all();
+  const eventColumns = db.prepare("PRAGMA table_info(production_contribution_events)").all();
+  const canonicalLegacyCounter = (value) => {
+    if (typeof value === "bigint") return value >= 0n ? value.toString() : null;
+    if (typeof value === "number") {
+      return Number.isSafeInteger(value) && value >= 0 ? String(value) : null;
+    }
+    const text = String(value ?? "").trim();
+    const integral = text.match(/^(\d+)(?:\.0+)?$/);
+    return integral ? BigInt(integral[1]).toString() : null;
+  };
+  const columnMap = (columns) => new Map(columns.map((column) => [
+    String(column.name),
+    column,
+  ]));
+  const contributions = columnMap(contributionColumns);
+  const events = columnMap(eventColumns);
+  const tableSql = (name) => String(db.prepare(`
+    SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?
+  `).get(name)?.sql ?? "");
+  const contributionSql = tableSql("production_contributions");
+  const eventSql = tableSql("production_contribution_events");
+  const hasCurrentConfidenceConstraint = (sql) => (
+    sql.includes("'matched_action'")
+    && sql.includes("'owner_fallback'")
+    && !sql.includes("'joined'")
+  );
+  const migrateContributions = contributionColumns.length > 0 && (
+    String(contributions.get("contributed_progress")?.type ?? "").toUpperCase() !== "TEXT"
+    || String(contributions.get("contributed_xp")?.type ?? "").toUpperCase() !== "TEXT"
+    || String(contributions.get("contribution_count")?.type ?? "").toUpperCase() !== "TEXT"
+    || Number(contributions.get("contributor_entity_id")?.notnull ?? 0) !== 0
+    || !contributions.has("attribution_confidence")
+    || !hasCurrentConfidenceConstraint(contributionSql)
+  );
+  const migrateEvents = eventColumns.length > 0 && (
+    String(events.get("contributed_progress")?.type ?? "").toUpperCase() !== "TEXT"
+    || String(events.get("contributed_xp")?.type ?? "").toUpperCase() !== "TEXT"
+    || Number(events.get("contributor_entity_id")?.notnull ?? 0) !== 0
+    || !events.has("attribution_confidence")
+    || !hasCurrentConfidenceConstraint(eventSql)
+  );
+  if (!migrateContributions && !migrateEvents && contributionColumns.length === 0) {
+    return;
+  }
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    if (migrateContributions) {
+      const confidence = contributions.has("attribution_confidence")
+        ? `CASE
+            WHEN attribution_confidence = 'joined' THEN 'matched_action'
+            WHEN attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback', 'unknown')
+              THEN attribution_confidence
+            ELSE 'unknown'
+          END`
+        : "'unknown'";
+      db.exec(`
+        ALTER TABLE production_contributions
+          RENAME TO production_contributions_legacy_amounts;
+        CREATE TABLE production_contributions (
+          contribution_key TEXT PRIMARY KEY,
+          claim_id TEXT NOT NULL,
+          craft_entity_id TEXT NOT NULL,
+          contributor_entity_id TEXT,
+          contributor_name TEXT NOT NULL,
+          attribution_confidence TEXT NOT NULL DEFAULT 'unknown'
+            CHECK (attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback', 'unknown')),
+          profession TEXT,
+          craft_label TEXT,
+          structure_name TEXT,
+          item_tier TEXT,
+          contributed_progress TEXT NOT NULL DEFAULT '0',
+          contributed_xp TEXT NOT NULL DEFAULT '0',
+          contribution_count TEXT NOT NULL DEFAULT '0',
+          first_contributed_at TEXT,
+          last_contributed_at TEXT,
+          first_seen TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          raw_json TEXT NOT NULL
+        );
+        INSERT INTO production_contributions (
+          contribution_key, claim_id, craft_entity_id, contributor_entity_id,
+          contributor_name, attribution_confidence, profession, craft_label,
+          structure_name, item_tier, contributed_progress, contributed_xp,
+          contribution_count, first_contributed_at, last_contributed_at,
+          first_seen, updated_at, raw_json
+        )
+        SELECT
+          contribution_key, claim_id, craft_entity_id, contributor_entity_id,
+          contributor_name, ${confidence}, profession, craft_label,
+          structure_name, item_tier, CAST(contributed_progress AS TEXT),
+          CAST(contributed_xp AS TEXT), CAST(contribution_count AS TEXT),
+          first_contributed_at, last_contributed_at, first_seen, updated_at,
+          raw_json
+        FROM production_contributions_legacy_amounts;
+        DROP TABLE production_contributions_legacy_amounts;
+      `);
+    }
+    if (migrateEvents) {
+      const confidence = events.has("attribution_confidence")
+        ? `CASE
+            WHEN attribution_confidence = 'joined' THEN 'matched_action'
+            WHEN attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback')
+              THEN attribution_confidence
+            WHEN attribution_confidence = 'unknown'
+              AND json_valid(raw_json)
+              AND json_extract(raw_json, '$.attributionConfidence') = 'owner_fallback'
+              AND CAST(json_extract(raw_json, '$.craftEntityId') AS TEXT) = craft_entity_id
+              AND CAST(json_extract(raw_json, '$.craftOwnerEntityId') AS TEXT) = contributor_entity_id
+              THEN 'owner_fallback'
+            ELSE 'unknown'
+          END`
+        : "'unknown'";
+      db.exec(`
+        ALTER TABLE production_contribution_events
+          RENAME TO production_contribution_events_legacy_attribution;
+        CREATE TABLE production_contribution_events (
+          source_key TEXT PRIMARY KEY,
+          claim_id TEXT NOT NULL,
+          region_id TEXT NOT NULL,
+          craft_entity_id TEXT NOT NULL,
+          contributor_entity_id TEXT,
+          attribution_confidence TEXT NOT NULL DEFAULT 'unknown'
+            CHECK (attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback', 'unknown')),
+          contributed_progress TEXT NOT NULL,
+          contributed_xp TEXT NOT NULL,
+          occurred_at TEXT NOT NULL,
+          received_at TEXT NOT NULL,
+          raw_json TEXT NOT NULL
+        );
+        INSERT INTO production_contribution_events (
+          source_key, claim_id, region_id, craft_entity_id,
+          contributor_entity_id, attribution_confidence, contributed_progress,
+          contributed_xp, occurred_at, received_at, raw_json
+        )
+        SELECT
+          source_key, claim_id, region_id, craft_entity_id,
+          contributor_entity_id, ${confidence},
+          CAST(contributed_progress AS TEXT), CAST(contributed_xp AS TEXT),
+          occurred_at, received_at, raw_json
+        FROM production_contribution_events_legacy_attribution;
+        DROP TABLE production_contribution_events_legacy_attribution;
+      `);
+    }
+    const counterRows = contributionColumns.length
+      ? db.prepare(`
+          SELECT contribution_key, contributed_progress, contribution_count
+          FROM production_contributions
+        `).all()
+      : [];
+    const counterUpdates = counterRows.map((row) => {
+      const contributedProgress = canonicalLegacyCounter(row.contributed_progress);
+      const contributionCount = canonicalLegacyCounter(row.contribution_count);
+      return {
+        contributionKey: String(row.contribution_key),
+        contributedProgress,
+        contributionCount,
+        changed: (
+          contributedProgress !== null
+          && contributedProgress !== String(row.contributed_progress ?? "").trim()
+        ) || (
+          contributionCount !== null
+          && contributionCount !== String(row.contribution_count ?? "").trim()
+        ),
+      };
+    });
+    if (counterUpdates.some(({ changed }) => changed)) {
+      const updateProgress = db.prepare(`
+        UPDATE production_contributions
+        SET contributed_progress = ?
+        WHERE contribution_key = ?
+      `);
+      const updateCount = db.prepare(`
+        UPDATE production_contributions
+        SET contribution_count = ?
+        WHERE contribution_key = ?
+      `);
+      for (const update of counterUpdates) {
+        if (update.contributedProgress !== null) {
+          updateProgress.run(update.contributedProgress, update.contributionKey);
+        }
+        if (update.contributionCount !== null) {
+          updateCount.run(update.contributionCount, update.contributionKey);
+        }
+      }
+    }
+    if (migrateContributions || migrateEvents) {
+      const exactId = (value) => {
+        const id = String(value ?? "").trim();
+        return /^\d+$/.test(id) ? BigInt(id).toString() : null;
+      };
+      const safeJson = (value) => {
+        try {
+          const parsed = JSON.parse(String(value ?? "{}"));
+          return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+          return {};
+        }
+      };
+      const evidenceMatches = (row, raw) => {
+        const confidence = String(row.attribution_confidence ?? "unknown");
+        const evidenceKey = String(raw.evidenceKey ?? row.source_key ?? "");
+        if (confidence === "authoritative") return evidenceKey.includes("reducer:");
+        if (confidence === "matched_action") return evidenceKey.includes("action:");
+        if (confidence !== "owner_fallback") return false;
+        return evidenceKey.includes("owner:")
+          && exactId(raw.craftEntityId) === exactId(row.craft_entity_id)
+          && exactId(raw.craftOwnerEntityId) === exactId(row.contributor_entity_id);
+      };
+      const confidenceRank = { owner_fallback: 1, matched_action: 2, authoritative: 3 };
+      const aggregates = new Map();
+      const eventRows = db.prepare(`
+        SELECT * FROM production_contribution_events
+        ORDER BY occurred_at, source_key
+      `).all();
+      for (const row of eventRows) {
+        const craftEntityId = exactId(row.craft_entity_id);
+        const contributorEntityId = exactId(row.contributor_entity_id);
+        const progress = canonicalLegacyCounter(row.contributed_progress);
+        const raw = safeJson(row.raw_json);
+        if (!craftEntityId || !contributorEntityId || !progress || !evidenceMatches(row, raw)) continue;
+        let xp;
+        try {
+          xp = addDecimal("0", String(row.contributed_xp ?? ""));
+        } catch {
+          continue;
+        }
+        const key = `${String(row.claim_id)}:${craftEntityId}:${contributorEntityId}`;
+        const current = aggregates.get(key) ?? {
+          contributionKey: key,
+          claimId: String(row.claim_id),
+          craftEntityId,
+          contributorEntityId,
+          contributorName: `Player ${contributorEntityId}`,
+          attributionConfidence: "owner_fallback",
+          profession: null,
+          craftLabel: "Craft contribution",
+          structureName: "Unknown structure",
+          itemTier: null,
+          contributedProgress: "0",
+          contributedXp: "0",
+          contributionCount: "0",
+          firstContributedAt: String(row.occurred_at),
+          lastContributedAt: String(row.occurred_at),
+          firstSeen: String(row.received_at),
+          updatedAt: String(row.received_at),
+          rawJson: String(row.raw_json),
+        };
+        const confidence = String(row.attribution_confidence);
+        if ((confidenceRank[confidence] ?? 0) > (confidenceRank[current.attributionConfidence] ?? 0)) {
+          current.attributionConfidence = confidence;
+        }
+        current.contributorName = String(raw.contributorName ?? current.contributorName).trim() || current.contributorName;
+        current.profession = String(raw.profession ?? "").trim() || current.profession;
+        current.craftLabel = String(raw.craftLabel ?? "").trim() || current.craftLabel;
+        current.structureName = String(raw.structureName ?? "").trim() || current.structureName;
+        current.itemTier = String(raw.itemTier ?? "").trim() || current.itemTier;
+        current.contributedProgress = (BigInt(current.contributedProgress) + BigInt(progress)).toString();
+        current.contributedXp = addDecimal(current.contributedXp, xp);
+        current.contributionCount = (BigInt(current.contributionCount) + 1n).toString();
+        if (String(row.occurred_at) < current.firstContributedAt) current.firstContributedAt = String(row.occurred_at);
+        if (String(row.occurred_at) >= current.lastContributedAt) {
+          current.lastContributedAt = String(row.occurred_at);
+          current.updatedAt = String(row.received_at);
+          current.rawJson = String(row.raw_json);
+        }
+        if (String(row.received_at) < current.firstSeen) current.firstSeen = String(row.received_at);
+        aggregates.set(key, current);
+      }
+      db.exec("DELETE FROM production_contributions");
+      const insertAggregate = db.prepare(`
+        INSERT INTO production_contributions (
+          contribution_key, claim_id, craft_entity_id, contributor_entity_id,
+          contributor_name, attribution_confidence, profession, craft_label,
+          structure_name, item_tier, contributed_progress, contributed_xp,
+          contribution_count, first_contributed_at, last_contributed_at,
+          first_seen, updated_at, raw_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const row of aggregates.values()) {
+        insertAggregate.run(
+          row.contributionKey, row.claimId, row.craftEntityId,
+          row.contributorEntityId, row.contributorName,
+          row.attributionConfidence, row.profession, row.craftLabel,
+          row.structureName, row.itemTier, row.contributedProgress,
+          row.contributedXp, row.contributionCount, row.firstContributedAt,
+          row.lastContributedAt, row.firstSeen, row.updatedAt, row.rawJson,
+        );
+      }
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function applySchemaIndexStatements(db, statements = schemaIndexStatements) {
   for (const statement of statements) db.exec(statement);
 }
 export function applyLegacySchemaCleanup(db) {
-  db.exec("DROP TABLE IF EXISTS current_claim_state;");
+  db.exec(`
+    ${retiredTableNames.map((table) => `DROP TABLE IF EXISTS ${table};`).join("\n")}
+    DELETE FROM scheduled_jobs WHERE job_key = 'recipe_catalog_refresh';
+    DELETE FROM scheduled_jobs WHERE job_key = 'global_market_insights';
+    DELETE FROM scheduled_jobs WHERE job_key = 'empire_hexite_reserves_refresh';
+    DELETE FROM app_settings WHERE key = 'global_market_overview_json';
+    DELETE FROM app_settings
+      WHERE key LIKE 'market_trade_backfill:%'
+         OR key LIKE 'collector_resume:marketTrades:%';
+    DELETE FROM domain_payload_current WHERE domain = 'layout';
+    DELETE FROM domain_payload_current
+      WHERE domain IN ('regionStatus', 'tradeVolume')
+         OR (domain = 'region' AND json_type(data_json, '$.claims') = 'array');
+  `);
 }

@@ -61,6 +61,7 @@ function fixtureSnapshot({
         playerIds: ["player-1"],
         craftPlayerIds: ["player-1"],
         bankPlayerIds: [],
+        bankContainerIds: ["player-1:bank-7"],
         deployableContainerIds: [],
       },
       buildingProgress: {},
@@ -125,6 +126,7 @@ test("snapshot retains exact source identities and complete effort progress", ()
           playerIds: ["player-7"],
           craftPlayerIds: ["player-7"],
           bankPlayerIds: [],
+          bankContainerIds: ["player-7:bank-9"],
           deployableContainerIds: [],
         },
         buildingProgress: {},
@@ -178,6 +180,7 @@ test("snapshot retains exact source identities and complete effort progress", ()
   assert.equal(snapshot.effortProgress.confirmed.overall.completion, 50);
   assert.equal(snapshot.effortProgress.projected.overall.completion, 60);
   assert.deepEqual(snapshot.planInputs.sourceRules.storageContainerIds, ["store-9"]);
+  assert.deepEqual(snapshot.planInputs.sourceRules.bankContainerIds, ["player-7:bank-9"]);
   assert.match(snapshot.planConfigFingerprint, /^[a-f0-9]{64}$/);
 });
 

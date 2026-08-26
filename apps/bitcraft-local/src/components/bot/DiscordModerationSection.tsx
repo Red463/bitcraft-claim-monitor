@@ -25,7 +25,7 @@ export function DiscordModerationSection({
   setModerationDraft,
 }: {
   channelIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
-  confirmModeration: (message: string) => boolean;
+  confirmModeration: (message: string, onConfirm: () => void) => void;
   discordToolResult: Record<string, any> | null;
   discoveredMemberCount: number;
   memberIdSelect: (value: string, onChange: (value: string) => void) => React.ReactNode;
@@ -107,7 +107,7 @@ export function DiscordModerationSection({
               pending={isPending("discord-moderation-kick")}
               pendingLabel="Kicking member..."
               disabled={!moderationDraft.userId.trim()}
-              onClick={() => confirmModeration("Kick this Discord member from the server?") && onKick()}
+              onClick={() => confirmModeration("Kick this Discord member from the server?", onKick)}
             >
               <User size={14} /> Kick
             </ActionButton>
@@ -126,7 +126,7 @@ export function DiscordModerationSection({
               pending={isPending("discord-moderation-ban")}
               pendingLabel="Banning member..."
               disabled={!moderationDraft.userId.trim()}
-              onClick={() => confirmModeration("Ban this Discord member from the server?") && onBan()}
+              onClick={() => confirmModeration("Ban this Discord member from the server?", onBan)}
             >
               <Ban size={14} /> Ban
             </ActionButton>
@@ -145,7 +145,7 @@ export function DiscordModerationSection({
               pending={isPending("discord-moderation-temp-ban")}
               pendingLabel="Recording ban..."
               disabled={!moderationDraft.userId.trim()}
-              onClick={() => confirmModeration("Temporarily ban this Discord member?") && onTempBan()}
+              onClick={() => confirmModeration("Temporarily ban this Discord member?", onTempBan)}
             >
               <Ban size={14} /> Temp Ban
             </ActionButton>
@@ -175,7 +175,7 @@ export function DiscordModerationSection({
             pending={isPending("discord-moderation-purge")}
             pendingLabel="Purging messages..."
             disabled={!moderationDraft.channelId.trim()}
-            onClick={() => confirmModeration("Delete the newest messages from this Discord channel?") && onPurge()}
+            onClick={() => confirmModeration("Delete the newest messages from this Discord channel?", onPurge)}
           >
             <Trash2 size={14} /> Purge Messages
           </ActionButton>
@@ -201,7 +201,7 @@ export function DiscordModerationSection({
             pending={isPending("discord-moderation-unban")}
             pendingLabel="Removing ban..."
             disabled={!(moderationDraft.unbanUserId || moderationDraft.userId).trim()}
-            onClick={() => confirmModeration("Remove this Discord server ban?") && onUnban()}
+            onClick={() => confirmModeration("Remove this Discord server ban?", onUnban)}
           >
             <CheckCircle2 size={14} /> Unban User
           </ActionButton>

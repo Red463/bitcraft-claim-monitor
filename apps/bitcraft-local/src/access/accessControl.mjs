@@ -49,6 +49,7 @@ export const ACCESS_TAB_GROUPS = {
   empires: [
     { id: "overview", label: "Overview" },
     { id: "watchtowers", label: "Watchtowers" },
+    { id: "deposits", label: "Hexite Deposits" },
   ],
   activity: [
     { id: "all", label: "All" },

@@ -1,4 +1,5 @@
 import { craftDisplayName, isCompletedProductionJob, mergeCurrentCraftRows } from "./productionActivity.mjs";
+import { bankSourceBelongsToPlayer, playerIdFromBankSourceId } from "../craftPlanBankIdentity.mjs";
 
 const DEPLOYABLE_INVENTORY_NAME = /cart|stash|cache|deploy|housing|wagon|handcart|boat|ship|sled|mount/i;
 const SETTLEMENT_STORAGE_INVENTORY_NAME = /town bank|settlement storage|claim storage|community storage|bank/i;
@@ -44,7 +45,7 @@ export function craftPlanCatalogLookup(payload = {}) {
   const lookup = new Map();
   const addRows = (rows, kind) => {
     for (const item of rows) {
-      const id = String(item.id ?? item.itemId ?? "").trim();
+      const id = String(item.id ?? item.itemId ?? item.targetId ?? "").trim();
       if (!id) continue;
       lookup.set(`${kind}:${id}`, item);
       if (!lookup.has(id)) lookup.set(id, item);
@@ -52,6 +53,12 @@ export function craftPlanCatalogLookup(payload = {}) {
   };
   addRows([...asArray(payload.items), ...asArray(payload.data?.items)], "items");
   addRows([...asArray(payload.cargos), ...asArray(payload.data?.cargos)], "cargo");
+  for (const [key, item] of Object.entries(payload.catalog ?? payload.data?.catalog ?? {})) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const [rawKind] = String(key).split(":", 1);
+    const kind = rawKind === "cargo" ? "cargo" : "items";
+    addRows([item], kind);
+  }
   return lookup;
 }
 
@@ -121,10 +128,12 @@ function trackedCraftPlanOutputsFromPayloads(craftPayloads = [], detailsByKey = 
     items: payloads.flatMap((payload) => asArray(payload?.items)),
     cargos: payloads.flatMap((payload) => asArray(payload?.cargos)),
   };
-  const catalog = new Map([
-    ...craftsPayload.items.map((item) => [craftOutputKey("items", item.id), item]),
-    ...craftsPayload.cargos.map((item) => [craftOutputKey("cargo", item.id), item]),
-  ]);
+  const catalog = new Map();
+  for (const payload of payloads) {
+    for (const [key, item] of craftPlanCatalogLookup(payload)) {
+      if (String(key).includes(":")) catalog.set(key, item);
+    }
+  }
   const publicCrafts = asArray(payloads[0]?.craftResults);
   const playerCrafts = payloads.slice(1).flatMap((payload) => asArray(payload?.craftResults));
   const crafts = mergeCurrentCraftRows(publicCrafts, playerCrafts);
@@ -193,6 +202,56 @@ export function trackedCraftPlanOutputs(craftPayloads = [], detailsByKey = new M
   return trackedCraftPlanOutputsFromPayloads(scopedPayloads, detailsByKey);
 }
 
+function craftOwnerId(craft) {
+  return String(
+    craft?.ownerEntityId
+      ?? craft?.playerEntityId
+      ?? craft?.crafterEntityId
+      ?? craft?.ownerId
+      ?? "",
+  ).trim();
+}
+
+function craftCompleted(craft) {
+  return craft?.completed === true || isCompletedProductionJob(craft);
+}
+
+export function trackedRelayCraftPlanOutputs(
+  craftPayload = {},
+  detailsByKey = new Map(),
+  monitoredClaimId = "",
+  trackedPlayerIds = [],
+) {
+  const expectedClaimId = String(monitoredClaimId).trim();
+  if (!expectedClaimId) return [];
+  const trackedPlayers = new Set(asArray(trackedPlayerIds).map(String));
+  const claimCrafts = asArray(craftPayload?.craftResults)
+    .filter((craft) => craftClaimId(craft) === expectedClaimId);
+  const ordinaryCrafts = claimCrafts.filter((craft) => (
+    craft?.isPassive === false
+    && (!craftCompleted(craft) || trackedPlayers.has(craftOwnerId(craft)))
+  ));
+  const passiveCrafts = claimCrafts.filter((craft) => (
+    craft?.isPassive === true
+    && trackedPlayers.has(craftOwnerId(craft))
+  ));
+  const ordinaryOutputs = trackedCraftPlanOutputsFromPayloads([{
+    ...craftPayload,
+    craftResults: ordinaryCrafts,
+  }], detailsByKey);
+  const passiveOutputs = trackedCraftPlanOutputsFromPayloads([
+    { craftResults: [] },
+    { ...craftPayload, craftResults: passiveCrafts },
+  ], detailsByKey).map((output) => ({
+    ...output,
+    passive: true,
+    sourceType: "Passive craft",
+    locationUnknown: !String(output.buildingName ?? "").trim(),
+    status: output.completed ? "Passive craft ready to collect" : "Passive craft in progress",
+  }));
+  return [...ordinaryOutputs, ...passiveOutputs];
+}
+
 function passiveCraftStatus(craft) {
   return String(craft?.status ?? craft?.state ?? "").trim().toLowerCase();
 }
@@ -233,7 +292,7 @@ export function settlementStorageSourcesFromInventories(inventories = {}, allowe
     const sourceId = String(building.entityId ?? building.id ?? building.buildingName ?? "").trim();
     return {
       sourceId,
-      label: String(building.buildingNickname ?? building.buildingName ?? (sourceId || "Settlement storage")),
+      label: String(building.buildingNickname ?? building.nickname ?? building.buildingName ?? building.name ?? (sourceId || "Settlement storage")),
       type: "Settlement storage",
       items: sourceItemsFromSlots(building.inventory, lookup),
     };
@@ -252,7 +311,20 @@ export function selectedPlayerInventoryIds(sourceRules = {}) {
   return [...new Set([
     ...(Array.isArray(sourceRules.playerIds) ? sourceRules.playerIds : []),
     ...(Array.isArray(sourceRules.bankPlayerIds) ? sourceRules.bankPlayerIds : []),
+    ...(Array.isArray(sourceRules.bankContainerIds) ? sourceRules.bankContainerIds : [])
+      .map(playerIdFromBankSourceId),
   ].map(String).map((value) => value.trim()).filter(Boolean))];
+}
+
+export function filterSelectedPlayerBankSources(sourceRules = {}, sources = []) {
+  const exactIds = new Set((Array.isArray(sourceRules.bankContainerIds) ? sourceRules.bankContainerIds : []).map(String));
+  const exactPlayerIds = new Set([...exactIds].map(playerIdFromBankSourceId));
+  const legacyPlayerIds = new Set((Array.isArray(sourceRules.bankPlayerIds) ? sourceRules.bankPlayerIds : []).map(String));
+  return (Array.isArray(sources) ? sources : []).filter((source) => {
+    const sourceId = String(source?.sourceId ?? "");
+    const playerId = String(source?.playerId ?? "");
+    return exactIds.has(sourceId) || (!exactPlayerIds.has(playerId) && legacyPlayerIds.has(playerId));
+  });
 }
 
 export function isSettlementStorageInventory(inventory = {}, inventoryName = "") {
@@ -386,4 +458,28 @@ export function playerInventoryContainerSources(playerId, label, payload = {}, a
     deployables: deployables.filter((source) => !allowedDeployables.size || allowedDeployables.has(source.sourceId) || source.legacySourceIds?.some((id) => allowedDeployables.has(id))),
     deployableOptions: deployables.map((source) => ({ ...source, itemCount: source.items.length, items: source.items.slice(0, 12) })),
   };
+}
+
+export function playerBankOptions(playerId, label, payload = {}, trackedSourceIds = []) {
+  const banks = playerInventoryContainerSources(playerId, label, payload).banks.map((source) => ({
+    ...source,
+    itemCount: source.items.length,
+  }));
+  const knownIds = new Set(banks.map((source) => source.sourceId));
+  for (const sourceId of trackedSourceIds.map(String).filter((id) => bankSourceBelongsToPlayer(id, playerId))) {
+    if (knownIds.has(sourceId)) continue;
+    banks.push({
+      sourceId,
+      label: sourceId,
+      type: "Player bank",
+      playerId: String(playerId),
+      playerName: String(label),
+      containerName: "Tracked bank",
+      claimName: null,
+      unavailable: true,
+      items: [],
+      itemCount: 0,
+    });
+  }
+  return banks;
 }

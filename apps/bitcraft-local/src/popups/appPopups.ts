@@ -61,6 +61,62 @@ export type PopupSelectionOptions = PopupNormalizeOptions & {
   page?: ActivePanel | PopupPage;
 };
 
+type PopupRefreshDocument = {
+  visibilityState: string;
+  addEventListener: (type: "visibilitychange", listener: () => void) => void;
+  removeEventListener: (type: "visibilitychange", listener: () => void) => void;
+};
+
+type PopupRefreshOptions = {
+  load: () => Promise<void>;
+  documentTarget?: PopupRefreshDocument;
+  intervalMs?: number;
+  setInterval?: (callback: () => void, intervalMs: number) => ReturnType<typeof globalThis.setInterval>;
+  clearInterval?: (timer: ReturnType<typeof globalThis.setInterval>) => void;
+};
+
+export function createPopupRefreshController({
+  load,
+  documentTarget = document,
+  intervalMs = 300_000,
+  setInterval = globalThis.setInterval,
+  clearInterval = globalThis.clearInterval,
+}: PopupRefreshOptions) {
+  let stopped = false;
+  let started = false;
+  let inFlight: Promise<void> | null = null;
+  let timer: ReturnType<typeof globalThis.setInterval> | null = null;
+
+  function refresh() {
+    if (stopped || documentTarget.visibilityState === "hidden") return Promise.resolve();
+    if (inFlight) return inFlight;
+    inFlight = load().finally(() => { inFlight = null; });
+    return inFlight;
+  }
+
+  function handleVisibilityChange() {
+    void refresh().catch(() => undefined);
+  }
+
+  return {
+    async start() {
+      if (!started) {
+        started = true;
+        documentTarget.addEventListener("visibilitychange", handleVisibilityChange);
+        timer = setInterval(handleVisibilityChange, intervalMs);
+      }
+      await refresh();
+    },
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      documentTarget.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (timer !== null) clearInterval(timer);
+      timer = null;
+    },
+  };
+}
+
 function isPopupType(value: unknown): value is PopupType {
   return POPUP_TYPES.includes(value as PopupType);
 }

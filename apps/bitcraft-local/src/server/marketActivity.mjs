@@ -15,7 +15,7 @@ export function listingKey(row) {
   ].join("|");
 }
 
-export function bitjitaTimestampIso(value) {
+export function gameTimestampIso(value) {
   if (!value) return null;
   const text = String(value);
   if (!/^\d+$/.test(text)) {
@@ -44,7 +44,7 @@ export function normalizeListing(row) {
     totalValue: quantity * price,
     tier: row.itemTier ?? row.tier ?? null,
     rarity: row.itemRarityStr ?? row.rarity ?? null,
-    listedAt: bitjitaTimestampIso(row.timestamp ?? row.createdAt),
+    listedAt: gameTimestampIso(row.timestamp ?? row.createdAt),
     tradeId: row.tradeId ?? row.id ?? null,
     raw: row,
   };

@@ -143,6 +143,7 @@ export function normalizeCraftPlanConfig(input = {}) {
   const playerIds = uniqueStrings(raw.sourceRules?.playerIds);
   const craftPlayerIds = Array.isArray(raw.sourceRules?.craftPlayerIds) ? uniqueStrings(raw.sourceRules.craftPlayerIds) : playerIds;
   const bankPlayerIds = uniqueStrings(raw.sourceRules?.bankPlayerIds);
+  const bankContainerIds = uniqueStrings(raw.sourceRules?.bankContainerIds);
   const targets = (Array.isArray(raw.targets) ? raw.targets : []).map(normalizeTarget).filter(Boolean).slice(0, 50);
   const buildingTargetKeys = new Set(targets.filter((target) => target.kind === "building").map((target) => recipeKey(target.kind, target.id)));
   const buildingProgress = {};
@@ -162,6 +163,7 @@ export function normalizeCraftPlanConfig(input = {}) {
       playerIds,
       craftPlayerIds,
       bankPlayerIds,
+      bankContainerIds,
       deployableContainerIds: uniqueStrings(raw.sourceRules?.deployableContainerIds),
     },
     routeOverrides,
@@ -177,6 +179,7 @@ const CRAFT_PLAN_AUDIT_SOURCE_RULES = [
   ["storageContainerIds", "storage"],
   ["playerIds", "player_inventory"],
   ["craftPlayerIds", "player_crafts"],
+  ["bankContainerIds", "player_bank"],
   ["deployableContainerIds", "deployable"],
 ];
 
@@ -626,7 +629,7 @@ function possibilityRecipesForTarget(target, detailsByKey) {
   return recipes;
 }
 
-function recipesForTarget(detail, target, detailsByKey = null) {
+export function recipesForTarget(detail, target, detailsByKey = null) {
   const recipes = [...directRecipesForTarget(detail, target), ...possibilityRecipesForTarget(target, detailsByKey)];
   return recipes.sort((a, b) => {
     const gatheringOrder = Number(routeIsGathering(b)) - Number(routeIsGathering(a));
@@ -1580,6 +1583,7 @@ function materialRowsForRequirements({
 
 export function computeCraftPlan({
   config,
+  preparedConfig = null,
   detailsByKey = new Map(),
   storageSources = [],
   playerSources = [],
@@ -1589,7 +1593,7 @@ export function computeCraftPlan({
   craftSourceErrors = [],
   catalogWarnings = [],
 } = {}) {
-  const normalized = normalizeCraftPlanConfig(config);
+  const normalized = preparedConfig ?? normalizeCraftPlanConfig(config);
   if (!normalized.enabled || normalized.targets.length === 0) {
     return { config: normalized, enabled: normalized.enabled, targets: [], materials: [], steps: [], gatherNext: [], unavailableSources: [], warnings: [], personalViews: { fishing: { tiers: [] } } };
   }

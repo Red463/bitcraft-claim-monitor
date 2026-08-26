@@ -22,10 +22,10 @@
 .public-craft-page .mini-stat {
   min-height: 112px;
   border: 1px solid rgba(108,123,145,.24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+    var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
   padding: 18px;
   grid-template-columns: 44px minmax(0, 1fr);
@@ -36,7 +36,7 @@
   width: 42px;
   height: 42px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--radius-dialog);
   background: rgba(255,255,255,.035);
   color: #f3c532;
 }
@@ -80,8 +80,8 @@
 .public-craft-finder .table-wrap {
   max-width: 100%;
   border-color: rgba(108,123,145,.24);
-  border-radius: 7px;
-  background-color: #090e15;
+  border-radius: var(--radius-control);
+  background-color: var(--surface-2);
   background-image: none;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 12px 28px rgba(0,0,0,.2);
   overflow-x: auto;
@@ -113,7 +113,7 @@
 
 .public-craft-page .select-control {
   border-color: rgba(154,168,190,.28);
-  background: #080d14;
+  background: var(--surface-1);
 }
 
 @media (max-width: 1250px) {

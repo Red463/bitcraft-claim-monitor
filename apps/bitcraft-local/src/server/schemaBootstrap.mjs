@@ -1,31 +1,16 @@
+import { operationalHistoryRetentionSchemaSql } from "./operationalHistoryRetention.mjs";
+
 export const schemaBootstrapSql = `
   PRAGMA journal_mode = WAL;
   CREATE TABLE IF NOT EXISTS settlement_state_current (
     claim_id TEXT PRIMARY KEY,
     captured_at TEXT NOT NULL,
-    supplies REAL,
-    treasury REAL,
+    supplies TEXT,
+    treasury TEXT,
     members_count INTEGER,
     buildings_count INTEGER,
     market_count INTEGER,
     updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS market_listings (
-    listing_key TEXT PRIMARY KEY,
-    claim_id TEXT NOT NULL,
-    item_name TEXT NOT NULL,
-    side TEXT,
-    owner TEXT,
-    quantity REAL,
-    price REAL,
-    total_value REAL,
-    tier TEXT,
-    rarity TEXT,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    status TEXT NOT NULL,
-    sold_at TEXT,
-    raw_json TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS market_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,9 +20,9 @@ export const schemaBootstrapSql = `
     item_name TEXT NOT NULL,
     side TEXT,
     owner TEXT,
-    quantity REAL,
-    price REAL,
-    total_value REAL,
+    quantity TEXT,
+    price TEXT,
+    total_value TEXT,
     tier TEXT,
     rarity TEXT,
     occurred_at TEXT NOT NULL,
@@ -47,6 +32,7 @@ export const schemaBootstrapSql = `
   CREATE TABLE IF NOT EXISTS market_trades (
     trade_id TEXT PRIMARY KEY,
     claim_id TEXT NOT NULL,
+    region_id TEXT,
     order_entity_id TEXT,
     seller_entity_id TEXT,
     seller_username TEXT,
@@ -55,71 +41,14 @@ export const schemaBootstrapSql = `
     item_id TEXT,
     item_type TEXT,
     item_name TEXT NOT NULL,
-    quantity REAL NOT NULL,
-    unit_price REAL NOT NULL,
-    total_price REAL NOT NULL,
+    quantity TEXT NOT NULL,
+    unit_price TEXT NOT NULL,
+    total_price TEXT NOT NULL,
     tier TEXT,
     rarity TEXT,
     occurred_at TEXT NOT NULL,
     imported_at TEXT NOT NULL,
     raw_json TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS market_buy_orders_current (
-    claim_id TEXT NOT NULL,
-    order_key TEXT NOT NULL,
-    region_id TEXT NOT NULL,
-    region_name TEXT,
-    market_claim_id TEXT,
-    market_claim_name TEXT,
-    buyer_entity_id TEXT,
-    buyer_name TEXT,
-    item_id TEXT,
-    item_type TEXT,
-    item_name TEXT NOT NULL,
-    tier TEXT,
-    rarity TEXT,
-    icon_asset_name TEXT,
-    quantity REAL,
-    unit_price REAL,
-    total_value REAL,
-    stored_coins REAL,
-    listed_at TEXT,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1,
-    raw_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, order_key)
-  );
-  CREATE TABLE IF NOT EXISTS market_regional_sale_averages_current (
-    claim_id TEXT NOT NULL,
-    region_id TEXT NOT NULL,
-    item_id TEXT NOT NULL,
-    item_type TEXT NOT NULL DEFAULT '0',
-    item_name TEXT,
-    average_unit_price REAL,
-    sales_count REAL,
-    units_sold REAL,
-    total_value REAL,
-    window_days INTEGER NOT NULL DEFAULT 7,
-    first_bucket_at TEXT,
-    last_bucket_at TEXT,
-    raw_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (claim_id, region_id, item_id, item_type)
-  );
-  CREATE TABLE IF NOT EXISTS global_market_price_snapshots (
-    captured_at TEXT NOT NULL,
-    item_type TEXT NOT NULL,
-    item_id INTEGER NOT NULL,
-    item_name TEXT NOT NULL,
-    icon_asset_name TEXT,
-    vwap24h REAL,
-    vwap7d REAL,
-    volume24h REAL NOT NULL DEFAULT 0,
-    lowest_sell_price REAL,
-    highest_buy_price REAL,
-    PRIMARY KEY (captured_at, item_type, item_id)
   );
   CREATE TABLE IF NOT EXISTS activity_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,6 +108,112 @@ export const schemaBootstrapSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_user_legal_acceptances_user_time
     ON user_legal_acceptances (user_id, accepted_at DESC);
+  CREATE TABLE IF NOT EXISTS public_user_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    discord_id TEXT NOT NULL UNIQUE,
+    discord_username TEXT,
+    discord_global_name TEXT,
+    discord_avatar TEXT,
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    last_login_at TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+    suspended_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS public_user_sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    reauthenticated_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES public_user_accounts(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS public_user_legal_acceptances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    legal_version TEXT NOT NULL,
+    terms_digest TEXT NOT NULL,
+    privacy_digest TEXT NOT NULL,
+    age_confirmed INTEGER NOT NULL CHECK (age_confirmed IN (0, 1)),
+    accepted_at TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('oauth', 'existing-session')),
+    FOREIGN KEY (user_id) REFERENCES public_user_accounts(id) ON DELETE CASCADE,
+    UNIQUE (user_id, legal_version, terms_digest, privacy_digest)
+  );
+  CREATE INDEX IF NOT EXISTS idx_public_user_legal_acceptances_user_time
+    ON public_user_legal_acceptances (user_id, accepted_at DESC);
+  CREATE TABLE IF NOT EXISTS public_craft_plans (
+    id TEXT PRIMARY KEY,
+    owner_user_id INTEGER NOT NULL,
+    claim_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    document_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived', 'suspended')),
+    document_revision INTEGER NOT NULL DEFAULT 1 CHECK (document_revision >= 1),
+    access_revision INTEGER NOT NULL DEFAULT 1 CHECK (access_revision >= 1),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    moderation_previous_status TEXT,
+    moderation_suspended_account_id INTEGER,
+    FOREIGN KEY (owner_user_id) REFERENCES public_user_accounts(id) ON DELETE RESTRICT
+  );
+  CREATE TABLE IF NOT EXISTS public_craft_plan_members (
+    plan_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('editor', 'viewer')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (plan_id, user_id),
+    FOREIGN KEY (plan_id) REFERENCES public_craft_plans(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES public_user_accounts(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS public_craft_plan_invites (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    created_by_user_id INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('editor', 'viewer')),
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    accepted_at TEXT,
+    accepted_by_user_id INTEGER,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (plan_id) REFERENCES public_craft_plans(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by_user_id) REFERENCES public_user_accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (accepted_by_user_id) REFERENCES public_user_accounts(id) ON DELETE SET NULL
+  );
+  CREATE TABLE IF NOT EXISTS public_craft_plan_share_links (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    created_by_user_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (plan_id) REFERENCES public_craft_plans(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by_user_id) REFERENCES public_user_accounts(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS public_craft_plan_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id TEXT NOT NULL,
+    actor_user_id INTEGER,
+    actor_deleted_marker TEXT,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (plan_id) REFERENCES public_craft_plans(id) ON DELETE CASCADE,
+    FOREIGN KEY (actor_user_id) REFERENCES public_user_accounts(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_public_craft_plans_owner_status
+    ON public_craft_plans (owner_user_id, status, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_public_craft_plan_members_user
+    ON public_craft_plan_members (user_id, plan_id);
+  CREATE INDEX IF NOT EXISTS idx_public_craft_plan_invites_plan_active
+    ON public_craft_plan_invites (plan_id, accepted_at, revoked_at, expires_at);
+  CREATE INDEX IF NOT EXISTS idx_public_craft_plan_share_links_plan_active
+    ON public_craft_plan_share_links (plan_id, revoked_at);
+  CREATE INDEX IF NOT EXISTS idx_public_craft_plan_events_plan_time
+    ON public_craft_plan_events (plan_id, created_at DESC, id DESC);
   CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -193,8 +228,64 @@ export const schemaBootstrapSql = `
     last_success_at TEXT NOT NULL,
     last_error TEXT,
     updated_at TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'legacy',
+    source_key TEXT,
+    region_id TEXT,
+    database_name TEXT,
+    schema_fingerprint TEXT,
+    source_observed_at TEXT,
+    received_at TEXT,
+    freshness TEXT NOT NULL DEFAULT 'unavailable',
+    confidence TEXT NOT NULL DEFAULT 'unknown',
+    generation INTEGER NOT NULL DEFAULT 0,
+    warnings_json TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (claim_id, domain)
   );
+  CREATE TABLE IF NOT EXISTS provider_source_health (
+    provider TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    ready INTEGER NOT NULL DEFAULT 0,
+    database_name TEXT,
+    schema_fingerprint TEXT,
+    last_observed_at TEXT,
+    last_error TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (provider, source_key)
+  );
+  CREATE TABLE IF NOT EXISTS provider_subscription_health (
+    provider TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    generation INTEGER NOT NULL DEFAULT 0,
+    connected INTEGER NOT NULL DEFAULT 0,
+    runtime_state TEXT NOT NULL DEFAULT 'disconnected'
+      CHECK (runtime_state IN ('connected', 'disconnected', 'blocked_by_schema')),
+    apply_duration_ms INTEGER,
+    lag_ms INTEGER,
+    reconnects INTEGER NOT NULL DEFAULT 0,
+    malformed_rows INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (provider, source_key, domain)
+  );
+  CREATE TABLE IF NOT EXISTS provider_transition_outbox (
+    transition_key TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    locked_by TEXT,
+    lease_token TEXT,
+    locked_at TEXT,
+    lease_expires_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_provider_transition_pending
+    ON provider_transition_outbox (claim_id, domain, created_at, transition_key);
   CREATE TABLE IF NOT EXISTS app_secrets (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -214,68 +305,6 @@ export const schemaBootstrapSql = `
     metadata_json TEXT NOT NULL DEFAULT '{}',
     updated_at TEXT NOT NULL
   );
-  CREATE TABLE IF NOT EXISTS empire_hexite_sweeps (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    status TEXT NOT NULL,
-    capsule_energy_cost REAL,
-    total_targets INTEGER NOT NULL DEFAULT 0,
-    processed_targets INTEGER NOT NULL DEFAULT 0,
-    failure_count INTEGER NOT NULL DEFAULT 0,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    last_error TEXT,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS empire_hexite_sweep_empires (
-    sweep_id INTEGER NOT NULL,
-    empire_id TEXT NOT NULL,
-    treasury REAL NOT NULL DEFAULT 0,
-    discovery_state TEXT NOT NULL DEFAULT 'pending',
-    member_count INTEGER NOT NULL DEFAULT 0,
-    claim_count INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (sweep_id, empire_id),
-    FOREIGN KEY (sweep_id) REFERENCES empire_hexite_sweeps(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS empire_hexite_targets (
-    sweep_id INTEGER NOT NULL,
-    empire_id TEXT NOT NULL,
-    source_type TEXT NOT NULL,
-    source_id TEXT NOT NULL,
-    state TEXT NOT NULL DEFAULT 'pending',
-    energy REAL NOT NULL DEFAULT 0,
-    capsules REAL NOT NULL DEFAULT 0,
-    reserve_capsules REAL NOT NULL DEFAULT 0,
-    inventories_json TEXT NOT NULL DEFAULT '[]',
-    attempt_count INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (sweep_id, source_type, source_id),
-    FOREIGN KEY (sweep_id) REFERENCES empire_hexite_sweeps(id) ON DELETE CASCADE
-  );
-  CREATE TABLE IF NOT EXISTS empire_hexite_sources (
-    source_type TEXT NOT NULL,
-    source_id TEXT NOT NULL,
-    empire_id TEXT NOT NULL,
-    energy REAL NOT NULL DEFAULT 0,
-    capsules REAL NOT NULL DEFAULT 0,
-    reserve_capsules REAL NOT NULL DEFAULT 0,
-    inventories_json TEXT NOT NULL DEFAULT '[]',
-    scanned_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (source_type, source_id)
-  );
-  CREATE TABLE IF NOT EXISTS empire_hexite_snapshots (
-    empire_id TEXT PRIMARY KEY,
-    sweep_id INTEGER NOT NULL,
-    payload_json TEXT NOT NULL,
-    calculated_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (sweep_id) REFERENCES empire_hexite_sweeps(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_empire_hexite_targets_pending ON empire_hexite_targets (sweep_id, state, source_type, source_id);
-  CREATE INDEX IF NOT EXISTS idx_empire_hexite_targets_empire ON empire_hexite_targets (sweep_id, empire_id, state);
   CREATE TABLE IF NOT EXISTS empire_membership_tracking (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     empire_id TEXT NOT NULL,
@@ -343,22 +372,6 @@ export const schemaBootstrapSql = `
     recovered_notified_at TEXT,
     last_delivery_error TEXT
   );
-  CREATE TABLE IF NOT EXISTS recipe_catalog_entries (
-    catalog_key TEXT PRIMARY KEY,
-    kind TEXT NOT NULL,
-    target_id TEXT NOT NULL,
-    item_type INTEGER NOT NULL DEFAULT 0,
-    name TEXT,
-    tier INTEGER,
-    rarity TEXT,
-    tag TEXT,
-    icon_asset_name TEXT,
-    detail_json TEXT NOT NULL,
-    source TEXT NOT NULL,
-    last_synced_at TEXT NOT NULL,
-    last_error TEXT,
-    updated_at TEXT NOT NULL
-  );
   CREATE TABLE IF NOT EXISTS game_catalog_entities (
     catalog_key TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
@@ -371,6 +384,22 @@ export const schemaBootstrapSql = `
     icon_asset_name TEXT,
     item_list_id TEXT,
     updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_source_state (
+    source_key TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    database_name TEXT NOT NULL,
+    schema_fingerprint TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    received_at TEXT NOT NULL,
+    row_count INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS game_catalog_descriptions (
+    description_kind TEXT NOT NULL,
+    description_id TEXT NOT NULL,
+    data_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (description_kind, description_id)
   );
   CREATE TABLE IF NOT EXISTS game_catalog_recipes (
     recipe_key TEXT PRIMARY KEY,
@@ -511,43 +540,6 @@ export const schemaBootstrapSql = `
     source_key TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
-  CREATE TABLE IF NOT EXISTS game_catalog_refresh_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    status TEXT NOT NULL,
-    phase TEXT,
-    cursor_kind TEXT,
-    cursor_id TEXT,
-    processed_count INTEGER NOT NULL DEFAULT 0,
-    total_count INTEGER NOT NULL DEFAULT 0,
-    item_count INTEGER NOT NULL DEFAULT 0,
-    cargo_count INTEGER NOT NULL DEFAULT 0,
-    recipe_count INTEGER NOT NULL DEFAULT 0,
-    byproduct_count INTEGER NOT NULL DEFAULT 0,
-    failure_count INTEGER NOT NULL DEFAULT 0,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    last_error TEXT,
-    updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS game_catalog_refresh_targets (
-    run_id INTEGER NOT NULL,
-    sequence INTEGER NOT NULL,
-    catalog_key TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    target_id TEXT NOT NULL,
-    item_type INTEGER NOT NULL,
-    name TEXT,
-    tag TEXT,
-    tier INTEGER,
-    rarity TEXT,
-    icon_asset_name TEXT,
-    state TEXT NOT NULL DEFAULT 'pending',
-    attempt_count INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (run_id, catalog_key),
-    FOREIGN KEY (run_id) REFERENCES game_catalog_refresh_runs(id) ON DELETE CASCADE
-  );
   CREATE TABLE IF NOT EXISTS craft_plan_settings (
     plan_key TEXT PRIMARY KEY,
     config_json TEXT NOT NULL,
@@ -602,7 +594,7 @@ export const schemaBootstrapSql = `
     last_checked_at TEXT,
     last_alert_at TEXT,
     last_baseline_window_days INTEGER,
-    last_baseline_average REAL,
+    last_baseline_average TEXT,
     last_error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -625,11 +617,11 @@ export const schemaBootstrapSql = `
     market_claim_id TEXT,
     market_claim_name TEXT,
     seller_name TEXT,
-    quantity REAL,
-    unit_price REAL,
-    total_value REAL,
+    quantity TEXT,
+    unit_price TEXT,
+    total_value TEXT,
     baseline_window_days INTEGER NOT NULL,
-    baseline_average REAL NOT NULL,
+    baseline_average TEXT NOT NULL,
     sales_count INTEGER NOT NULL DEFAULT 0,
     discount_percent REAL NOT NULL,
     dm_status TEXT NOT NULL DEFAULT 'pending',
@@ -654,19 +646,35 @@ export const schemaBootstrapSql = `
     contribution_key TEXT PRIMARY KEY,
     claim_id TEXT NOT NULL,
     craft_entity_id TEXT NOT NULL,
-    contributor_entity_id TEXT NOT NULL,
+    contributor_entity_id TEXT,
     contributor_name TEXT NOT NULL,
+    attribution_confidence TEXT NOT NULL DEFAULT 'unknown'
+      CHECK (attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback', 'unknown')),
     profession TEXT,
     craft_label TEXT,
     structure_name TEXT,
     item_tier TEXT,
-    contributed_progress REAL NOT NULL DEFAULT 0,
-    contributed_xp REAL NOT NULL DEFAULT 0,
-    contribution_count REAL NOT NULL DEFAULT 0,
+    contributed_progress TEXT NOT NULL DEFAULT '0',
+    contributed_xp TEXT NOT NULL DEFAULT '0',
+    contribution_count TEXT NOT NULL DEFAULT '0',
     first_contributed_at TEXT,
     last_contributed_at TEXT,
     first_seen TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS production_contribution_events (
+    source_key TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL,
+    region_id TEXT NOT NULL,
+    craft_entity_id TEXT NOT NULL,
+    contributor_entity_id TEXT,
+    attribution_confidence TEXT NOT NULL DEFAULT 'unknown'
+      CHECK (attribution_confidence IN ('authoritative', 'matched_action', 'owner_fallback', 'unknown')),
+    contributed_progress TEXT NOT NULL,
+    contributed_xp TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
     raw_json TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS admin_audit_log (
@@ -751,6 +759,9 @@ export const schemaBootstrapSql = `
     attempts INTEGER NOT NULL DEFAULT 0,
     next_attempt_at TEXT NOT NULL,
     locked_at TEXT,
+    locked_by TEXT,
+    lease_token TEXT,
+    lease_expires_at TEXT,
     sent_at TEXT,
     skipped_at TEXT,
     failed_at TEXT,
@@ -865,11 +876,10 @@ export const schemaBootstrapSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_market_events_claim_time ON market_events (claim_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_market_trades_claim_time ON market_trades (claim_id, occurred_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_market_buy_orders_region ON market_buy_orders_current (claim_id, region_id, active, unit_price DESC);
-  CREATE INDEX IF NOT EXISTS idx_market_buy_orders_item ON market_buy_orders_current (claim_id, region_id, item_id, item_type, active);
-  CREATE INDEX IF NOT EXISTS idx_market_regional_sale_avg_item ON market_regional_sale_averages_current (claim_id, region_id, item_id, item_type);
-  CREATE INDEX IF NOT EXISTS idx_global_market_price_item_time ON global_market_price_snapshots (item_type, item_id, captured_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_global_market_price_time ON global_market_price_snapshots (captured_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_market_trades_claim_item_time
+    ON market_trades (claim_id, item_id, item_type, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_market_trades_claim_region_item_time
+    ON market_trades (claim_id, region_id, item_id, item_type, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_craft_plan_settings_updated ON craft_plan_settings (updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_craft_plan_progress_snapshots_claim_time
     ON craft_plan_progress_audit_snapshots (claim_id, captured_at DESC);
@@ -889,6 +899,8 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_production_claim_status ON production_jobs (claim_id, status, last_seen DESC);
   CREATE INDEX IF NOT EXISTS idx_production_contrib_claim ON production_contributions (claim_id, last_contributed_at DESC);
   CREATE INDEX IF NOT EXISTS idx_production_contrib_profession ON production_contributions (claim_id, profession, contributed_progress DESC);
+  CREATE INDEX IF NOT EXISTS idx_production_contrib_events_claim ON production_contribution_events (claim_id, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_production_contrib_events_craft ON production_contribution_events (claim_id, craft_entity_id, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_delivery_time ON discord_delivery_log (occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_discord_notification_outbox_status ON discord_notification_outbox (status, next_attempt_at, id);
   CREATE INDEX IF NOT EXISTS idx_discord_craft_plan_report_occurrences_time ON discord_craft_plan_report_occurrences (scheduled_at DESC);
@@ -898,8 +910,6 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_discord_warnings_user ON discord_warnings (guild_id, user_id, active);
   CREATE INDEX IF NOT EXISTS idx_discord_mod_notes_user ON discord_mod_notes (guild_id, user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_user_accounts_status ON user_accounts (character_status, last_login_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_recipe_catalog_kind_target ON recipe_catalog_entries (kind, target_id);
-  CREATE INDEX IF NOT EXISTS idx_recipe_catalog_synced ON recipe_catalog_entries (last_synced_at);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_entities_kind_target ON game_catalog_entities (kind, target_id);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_recipes_source ON game_catalog_recipes (source_kind, source_id);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_recipe_outputs_output ON game_catalog_recipe_outputs (output_key, is_primary_output DESC, recipe_key);
@@ -909,10 +919,8 @@ export const schemaBootstrapSql = `
   CREATE INDEX IF NOT EXISTS idx_game_catalog_item_list_outputs_output_producer ON game_catalog_item_list_outputs (output_key, producer_key);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_item_list_possibility_outputs_output ON game_catalog_item_list_possibility_outputs (output_key, item_list_id);
   CREATE INDEX IF NOT EXISTS idx_game_catalog_resource_completion_outputs_output ON game_catalog_resource_completion_outputs (output_key, resource_id);
-  CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_runs_status_time ON game_catalog_refresh_runs (status, started_at DESC, completed_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_runs_updated_at ON game_catalog_refresh_runs (updated_at DESC, id DESC);
-  CREATE INDEX IF NOT EXISTS idx_game_catalog_refresh_targets_queue ON game_catalog_refresh_targets (run_id, state, sequence);
   CREATE INDEX IF NOT EXISTS idx_domain_payload_claim ON domain_payload_current (claim_id, domain);
+  ${operationalHistoryRetentionSchemaSql}
 `;
 
 export function applySchemaBootstrap(db) {

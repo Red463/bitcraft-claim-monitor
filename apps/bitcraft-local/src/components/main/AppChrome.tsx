@@ -1,14 +1,13 @@
 import React from "react";
+import { TriangleAlert } from "lucide-react";
 import { parseDateValue, toNumber, type AnyRecord } from "../../main-app-data";
 import { unique } from "../../utils/array";
-import { formatNumber } from "../../utils/format";
 import { DataTable } from "./DataTable";
-import { Info } from "./Stats";
 import { AsyncState } from "./AsyncState";
 
 /*
  * Shared chrome for the public app: page headers, loading/error states, the
- * BitJita warning banner, and the sidebar refresh status widget.
+ * live-data warning banner, and the sidebar refresh status widget.
  */
 
 export function Header({ title, children }: { title: string; children?: React.ReactNode }) {
@@ -46,40 +45,6 @@ export type ApiStatusDiagnostics = {
   warnings: string[];
 };
 
-export function ApiStatusBanner({ warnings, lastUpdated, diagnostics }: { warnings: string[]; lastUpdated: Date | null; diagnostics: ApiStatusDiagnostics }) {
-  const uniqueWarnings = unique(warnings).slice(0, 6);
-  if (!uniqueWarnings.length) return null;
-  const diagnosticLog = JSON.stringify({ ...diagnostics, warnings: uniqueWarnings }, null, 2);
-  return (
-    <section className="api-status-banner">
-      <div className="api-status-main">
-        <AsyncState kind="stale" title="BitJita refresh issue" detail="Showing latest saved data. Some live details may be stale." compact />
-        <small className="api-status-meta">{lastUpdated ? `Last successful refresh: ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Waiting for a successful refresh."}</small>
-      </div>
-      <details className="api-status-details">
-        <summary>Details</summary>
-        <div className="api-status-diagnostic-grid">
-          <Info label="Page" value={diagnostics.page} />
-          <Info label="Settlement ID" value={diagnostics.claimId} />
-          <Info label="Warnings" value={formatNumber(uniqueWarnings.length)} />
-          <Info label="Refresh state" value={diagnostics.loading ? "Refreshing" : "Idle"} />
-          <Info label="Members loaded" value={formatNumber(diagnostics.dataCounts.members)} />
-          <Info label="Crafts loaded" value={formatNumber(diagnostics.dataCounts.crafts)} />
-        </div>
-        <ul>
-          {uniqueWarnings.map((warning) => <li key={warning}>{warning}</li>)}
-        </ul>
-        <div className="api-status-log">
-          {/* The diagnostic block is intentionally copyable so users can send
-              enough context to debug transient BitJita/API issues. */}
-          <span>Copyable diagnostic context</span>
-          <code>{diagnosticLog}</code>
-        </div>
-      </details>
-    </section>
-  );
-}
-
 function collectorTimeLabel(value: unknown): string {
   const date = parseDateValue(value);
   return date ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting";
@@ -90,13 +55,36 @@ export function RefreshStatus({
   lastUpdated,
   collectorStatus,
   intervalSeconds,
+  warnings,
+  diagnostics,
 }: {
   loading: boolean;
   lastUpdated: Date | null;
   collectorStatus: AnyRecord | null | undefined;
   intervalSeconds: number;
+  warnings: string[];
+  diagnostics: ApiStatusDiagnostics;
 }) {
   const collectors = Object.entries((collectorStatus?.collectors ?? {}) as Record<string, AnyRecord>);
+  const warningDetails = unique(warnings).slice(0, 6);
+  const diagnosticLog = JSON.stringify({ ...diagnostics, warnings: warningDetails }, null, 2);
+  const [warningOpen, setWarningOpen] = React.useState(false);
+  const warningRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!warningOpen) return undefined;
+    const closeOnOutside = (event: PointerEvent) => {
+      if (!warningRef.current?.contains(event.target as Node)) setWarningOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setWarningOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [warningOpen]);
   const collectorDetail = (collector: AnyRecord) => {
     if (collector.running) {
       const hasProgress = collector.progressCurrent != null && collector.progressTotal != null;
@@ -106,20 +94,35 @@ export function RefreshStatus({
     return collector.lastError ? `Error: ${collector.lastError}` : `Updated ${collectorTimeLabel(collector.lastSuccessAt)}`;
   };
   return (
-    <div className="refresh-status" aria-label={`Display refreshes every ${intervalSeconds} seconds`} tabIndex={0}>
+    <div className="refresh-status" aria-label={`Live updates apply immediately; local fallback refreshes every ${intervalSeconds} seconds`} tabIndex={0}>
       <span className={`refresh-dot ${loading ? "refreshing" : ""}`} />
       <span className="refresh-copy">
         <small>{loading ? "Refreshing" : "Last refresh"}</small>
         <time>{lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Waiting..."}</time>
       </span>
+      {warningDetails.length ? (
+        <div className="refresh-warning" ref={warningRef} onMouseEnter={() => setWarningOpen(true)} onMouseLeave={() => {
+          if (!warningRef.current?.contains(document.activeElement)) setWarningOpen(false);
+        }}>
+          <button type="button" aria-expanded={warningOpen} aria-controls="refresh-warning-details" aria-label={`${warningDetails.length} refresh warning${warningDetails.length === 1 ? "" : "s"}. Technical warning details.`} onFocus={() => setWarningOpen(true)} onClick={() => setWarningOpen(true)}>
+            <TriangleAlert size={16} />
+          </button>
+          {warningOpen ? <div className="refresh-warning-panel" id="refresh-warning-details" role="dialog" aria-label="Refresh warning details">
+            <strong>Technical warning details</strong>
+            <ul>{warningDetails.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+            <span>Copyable diagnostic context</span>
+            <code>{diagnosticLog}</code>
+          </div> : null}
+        </div>
+      ) : null}
       {collectors.length ? (
         <div className="refresh-breakdown" role="tooltip">
-          {/* This hover panel reports server background collectors. It is
-              diagnostic only; public pages may still be reading live BitJita
-              data through the local proxy. */}
+          {/* This hover panel reports background reconciliation. It is
+              diagnostic only; page data can also come directly from a current
+              provider generation. */}
           <header>
-            <strong>Collector status</strong>
-            <span>{collectorStatus?.intervalMs ? `Server every ${Math.round(toNumber(collectorStatus.intervalMs) / 1000)}s` : "Server schedule"}</span>
+            <strong>Reconciliation status</strong>
+            <span>{collectorStatus?.intervalMs ? `Reconciliation every ${Math.round(toNumber(collectorStatus.intervalMs) / 1000)}s` : "Reconciliation schedule"}</span>
           </header>
           <div className="refresh-breakdown-list">
             {collectors.map(([key, collector]) => (
@@ -143,8 +146,8 @@ export function ApiErrorState({ message }: { message: string }) {
     <section className="api-error-state">
       <AsyncState
         kind="error"
-        title="Unable to refresh BitJita data"
-        detail="BitJita may be having a temporary issue. The app will recover automatically when the next refresh succeeds."
+        title="Unable to refresh live game data"
+        detail="The data provider may be having a temporary issue. The app will recover automatically when the next refresh succeeds."
         action={<details>
           <summary>Technical detail</summary>
           <code>{message}</code>

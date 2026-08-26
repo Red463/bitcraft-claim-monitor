@@ -87,7 +87,15 @@ test("map mobile queries do not duplicate desktop player-control declarations", 
   for (const selector of duplicatedDesktopSelectors) {
     assert.equal(mobile.includes(selector), false, `${selector} belongs to the desktop owning block`);
   }
-  assert.match(mobile, /\.map-frame\s*\{[^}]*min-height:\s*420px;[^}]*height:\s*58dvh;/s);
+});
+
+test("native map controls stay viewport-contained with touch-sized phone toggles", () => {
+  const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+  const phone = extractMediaBody(mapCss, "(max-width: 620px)");
+
+  assert.match(mapCss, /\.native-map-controls\s*\{[^}]*position:\s*absolute[^}]*z-index:/s);
+  assert.match(mapCss, /\.native-map-layers-popover\s*\{[^}]*max-height:\s*min\([^}]*overflow:\s*auto/s);
+  assert.match(phone, /\.native-map-layer-row\s*\{[^}]*min-height:\s*44px/s);
 });
 
 test("Bot Setup, Notifications, and Diagnostics share one semantic status info row", () => {
@@ -245,9 +253,7 @@ test("shared command panel primitives use neutral class names", () => {
     "../src/pages/PublicCraftFinderPage.tsx",
     "../src/pages/ResearchPage.tsx",
     "../src/pages/RegionPage.tsx",
-    "../src/pages/market/BuyOrderFinder.tsx",
     "../src/pages/market/DealWatchlist.tsx",
-    "../src/pages/market/PriceFinder.tsx",
   ];
   const forbidden = [];
   for (const relativePath of checkedFiles) {
@@ -485,10 +491,7 @@ test("market page styles live in the market stylesheet", () => {
     ".market-analytics",
     ".market-best-leaderboard",
     ".price-finder",
-    ".buy-order-opportunities",
-    ".opportunity-strip",
     ".pagination-row",
-    ".price-recommendation",
     ".deal-watch-action",
     ".deal-watch-add-card",
     ".deal-watchlist-section",
@@ -803,8 +806,7 @@ test("map page styles live in the map stylesheet", () => {
   const mapCss = readFileSync(mapCssUrl, "utf8");
   const mapSelectors = [
     ".map-panel.full-height",
-    ".map-topbar",
-    ".map-frame",
+    ".native-map-host",
     ".map-focus",
     ".map-workspace",
     ".map-resource-panel",
@@ -846,7 +848,6 @@ test("admin page and loader styles live in the admin stylesheet", () => {
     ".admin-tabs",
     ".admin-section",
     ".admin-metrics",
-    ".collector-settings-list",
     ".scheduled-job-list",
     ".scheduled-job-row",
     ".database-browser",

@@ -1,0 +1,180 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdir, rm } from "node:fs/promises";
+import { createServer, request } from "node:http";
+import { DatabaseSync } from "node:sqlite";
+import test from "node:test";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const appDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+async function availablePort() {
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+async function startTestServer(t, { nodeEnv = "development", environment = {} } = {}) {
+  const port = await availablePort();
+  const dataDir = path.join(appDir, `.test-host-profiles-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  await mkdir(dataDir, { recursive: true });
+  const child = spawn(process.execPath, ["server.mjs"], {
+    cwd: appDir,
+    env: {
+      ...process.env,
+      NODE_ENV: nodeEnv,
+      BITCRAFT_TEST: "true",
+      LEGAL_CONFIGURATION_CONFIRMED: "true",
+      ENABLE_SERVER_POLLING: "false",
+      ENABLE_SCHEDULED_JOBS: "false",
+      ENABLE_RELAY_PROVIDER: "false",
+      ENABLE_RELAY_GLOBAL_CATALOG: "false",
+      BITCRAFT_PROCESS_ROLE: "all",
+      APP_HOST: "127.0.0.1",
+      APP_PORT: String(port),
+      BITCRAFT_LOCAL_DATA_DIR: dataDir,
+      ...environment,
+    },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const origin = `http://127.0.0.1:${port}`;
+  t.after(async () => {
+    if (child.exitCode == null) {
+      const exited = new Promise((resolve) => child.once("exit", resolve));
+      child.kill();
+      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 3_000))]);
+    }
+    await rm(dataDir, { recursive: true, force: true });
+  });
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    try {
+      const health = nodeEnv === "production"
+        ? await requestAsHost(origin, "/api/local/health", { host: "app.timbersteeltrade.com" })
+        : await fetch(`${origin}/api/local/health`);
+      if (health.status === 200 || health.ok) return { origin, dataDir };
+    } catch {
+      // Server is still starting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for the test server: ${stderr}`);
+}
+
+async function requestAsHost(origin, pathname, { method = "GET", host } = {}) {
+  const { port } = new URL(origin);
+  return new Promise((resolve, reject) => {
+    const clientRequest = request({
+      hostname: "127.0.0.1",
+      port,
+      method,
+      path: pathname,
+      headers: { host },
+    }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { body += chunk; });
+      response.on("end", () => resolve({ status: response.statusCode, headers: response.headers, body }));
+    });
+    clientRequest.on("error", reject);
+    clientRequest.end();
+  });
+}
+
+function requestAsPublicHost(origin, pathname, options = {}) {
+  return requestAsHost(origin, pathname, { ...options, host: "public.localhost" });
+}
+
+test("public hosts receive only the public profile and public API namespace", async (t) => {
+  const { origin } = await startTestServer(t);
+
+  const profile = await requestAsPublicHost(origin, "/api/profile");
+  assert.equal(profile.status, 200);
+  assert.match(profile.headers["content-type"] ?? "", /^application\/json/);
+  assert.deepEqual(JSON.parse(profile.body), {
+    profile: {
+      id: "public",
+      origin: "https://claim-monitor.com",
+      allowsAdmin: false,
+      allowsDiscord: false,
+    },
+    features: {
+      publicProfileEnabled: false,
+      publicCollaborationEnabled: false,
+      publicLegalConfigurationConfirmed: false,
+    },
+  });
+
+  assert.equal((await requestAsPublicHost(origin, "/api/local/health")).status, 404);
+  assert.equal((await requestAsPublicHost(origin, "/api/local/admin/status")).status, 404);
+  assert.equal((await requestAsPublicHost(origin, "/api/discord/interactions", { method: "POST" })).status, 404);
+  assert.equal((await requestAsPublicHost(origin, "/api/public/settlements/search?q=oak")).status, 404);
+  assert.equal((await requestAsPublicHost(origin, "/bot")).status, 404);
+  assert.equal((await requestAsPublicHost(origin, "/?page=admin")).status, 404);
+  assert.equal((await requestAsHost(origin, "/api/public/settlements/search?q=oak", { host: "127.0.0.1" })).status, 404);
+});
+
+test("production rejects public.localhost even in the test runtime", async (t) => {
+  const { origin } = await startTestServer(t, { nodeEnv: "production" });
+  assert.equal((await requestAsPublicHost(origin, "/api/profile")).status, 421);
+});
+
+test("production accepts only the direct loopback health probe without a canonical host", async (t) => {
+  const { origin } = await startTestServer(t, { nodeEnv: "production" });
+
+  assert.equal((await requestAsHost(origin, "/api/local/health", { host: "127.0.0.1" })).status, 200);
+  assert.equal((await requestAsHost(origin, "/api/profile", { host: "127.0.0.1" })).status, 421);
+  assert.equal((await requestAsHost(origin, "/api/local/members", { host: "127.0.0.1" })).status, 421);
+});
+
+test("enabled public settlement reads leave Timbersteel settings, repositories, history, and outboxes byte-identical", async (t) => {
+  const relayPort = await availablePort();
+  const relay = createServer((req, res) => {
+    const url = new URL(req.url, `http://127.0.0.1:${relayPort}`);
+    res.setHeader("content-type", "application/json");
+    if (url.pathname === "/health") return res.end(JSON.stringify({ sources: {
+      "bitcraft-live-19": { database: "bitcraft-live-19", port: 3019, schema_cached: true, connectivity: "live", tables_live: 274, tables_total: 274 },
+    } }));
+    if (url.pathname === "/cache-health") return res.end(JSON.stringify({ ready: true, regions: [{ region: 19, ready: true }] }));
+    if (url.pathname === "/claim" && url.searchParams.get("name") === "oak") {
+      return res.end(JSON.stringify([{ entity_id: "42", name: "Oak Haven", region: 19, tier: 4 }]));
+    }
+    if (url.pathname === "/claim/42") return res.end(JSON.stringify({ entity_id: "42", name: "Oak Haven", region: 19, tier: 4 }));
+    res.statusCode = 404;
+    return res.end(JSON.stringify({ error: "missing" }));
+  });
+  await new Promise((resolve) => relay.listen(relayPort, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => relay.close(resolve)));
+  const { origin, dataDir } = await startTestServer(t, { environment: {
+    PUBLIC_PROFILE_ENABLED: "true",
+    BITCRAFT_RELAY_ORIGIN: `http://127.0.0.1:${relayPort}`,
+  } });
+  const db = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"));
+  const protectedTables = [
+    "app_settings", "craft_plan_settings", "domain_payload_current", "settlement_state_current",
+    "market_events", "market_trades", "activity_events", "provider_transition_outbox", "discord_notification_outbox",
+  ];
+  const fingerprint = () => JSON.stringify(Object.fromEntries(protectedTables.map((table) => [
+    table,
+    db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
+  ])));
+  try {
+    const before = fingerprint();
+
+    const search = await requestAsPublicHost(origin, "/api/public/settlements/search?q=oak");
+    const snapshot = await requestAsPublicHost(origin, "/api/public/settlements/42?domains=claim");
+
+    assert.equal(search.status, 200);
+    assert.equal(snapshot.status, 200);
+    assert.equal(fingerprint(), before);
+    assert.equal(JSON.parse(snapshot.body).claimId, "42");
+  } finally {
+    db.close();
+  }
+});

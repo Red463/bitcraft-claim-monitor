@@ -15,6 +15,14 @@ export type MarketActivityToastHelpers = {
   key: (event: AnyRecord) => string;
 };
 
+function formatDealInteger(value: unknown): string {
+  const exact = String(value ?? "").trim();
+  if (!/^\d+(?:\.5)?$/.test(exact)) return formatNumber(value);
+  const [whole, fraction] = exact.split(".");
+  const formatted = BigInt(whole).toLocaleString();
+  return fraction ? `${formatted}.${fraction}` : formatted;
+}
+
 const marketSaleEventTypes = new Set(["market_sale", "market_sale_confirmed"]);
 const marketActivityEventTypes = new Set(["market_new_listing", ...marketSaleEventTypes]);
 const productionActivityEventTypes = new Set(["production_started", "production_completed"]);
@@ -236,8 +244,13 @@ export function productionActivityQueueToastDrafts(
 
 export function dealAlertToastDraft(alert: AnyRecord): ToastNoticeDraft {
   const discount = Math.round(toNumber(alert.discountPercent));
-  const price = `${formatNumber(alert.unitPrice)}g`;
-  const baseline = `${formatNumber(Math.round(toNumber(alert.baselineAverage)))}g ${alert.baselineWindowDays}-day average`;
+  const liveMedian = alert.baselineKind === "current-sell-median";
+  const price = `${liveMedian ? formatDealInteger(alert.unitPrice) : formatNumber(alert.unitPrice)}g`;
+  const baselinePrice = `${liveMedian ? formatDealInteger(alert.baselineAverage) : formatNumber(Math.round(toNumber(alert.baselineAverage)))}g`;
+  const sampleCount = Math.max(0, Math.round(toNumber(alert.sampleCount)));
+  const baseline = liveMedian
+    ? `${baselinePrice} live median from ${sampleCount} ${sampleCount === 1 ? "listing" : "listings"}`
+    : `${baselinePrice} ${alert.baselineWindowDays}-day average`;
   const itemName = String(alert.itemName ?? "Unknown item");
   const metaLabel = usefulMarketLabel(alert.sellerName, alert.sellerUsername, alert.ownerUsername, alert.ownerName, alert.owner, itemName);
   return {

@@ -1,0 +1,102 @@
+# Live Relay side-effect migration
+
+This execution slice applies the live-first policy to history and notification
+side effects. Current browser data already comes from committed Relay
+generations; this slice removes the remaining dependency on a periodic
+BitJita-backed collector before production lifecycle and settlement events can
+be observed.
+
+## Global constraints
+
+- A committed Relay generation is the only current game-state input.
+- Current-generation publication must not wait for history, analytics, or
+  Discord delivery.
+- Side effects run without a browser and are serialized/idempotent.
+- Last-good generations remain readable during Relay outages.
+- Missing or malformed source data must not be converted to zero or used to
+  close production jobs.
+- SQLite remains for genuine lifecycle/history, deduplication, outbox, and the
+  minimal restart-safe transition checkpoint.
+- Craft contributor identity and exact deltas are accepted only through the
+  proven positive regional progressive-action transaction mapping.
+  Completed-sale evidence is accepted only through the separately proven,
+  fail-closed closed-listing mapping.
+
+## Task 1 — Production lifecycle from committed Relay crafts
+
+- Add an event-driven server-side coordinator that receives current-state
+  commit notifications and reacts only when `crafts` changed for the configured
+  claim.
+- Coalesce overlapping craft generations and process them sequentially.
+- Read the just-committed `crafts` snapshot from `currentStateRepository`,
+  enrich it from the live local catalog, and feed the existing production
+  lifecycle/history/Discord path.
+- Do not run the lifecycle path for a stale claim, missing snapshot, or
+  malformed craft payload. Preserve existing production rows rather than
+  interpreting missing data as completion.
+- The repository commit returns before production history or Discord delivery
+  completes. Failures are recorded in collector health but do not roll back the
+  current generation.
+- Remove production lifecycle execution from the periodic settlement snapshot
+  loop so a craft generation is processed exactly once by one freshness owner.
+- Replace the separate contribution collector once contributor semantics are
+  proven; current production lifecycle publication must remain independent.
+- Add focused tests that fail without the event-driven behavior, including
+  coalescing, configured-claim fencing, non-blocking commit notification, and
+  failure recovery.
+
+## Task 2 — Settlement transitions from committed Relay domains
+
+- Compose the settlement transition input from committed Relay `claim`,
+  `members`, `inventories`, and `market` generations.
+- Trigger transition evaluation after relevant complete generations commit;
+  never wait for the periodic BitJita collector.
+- Preserve exact treasury/supply values until the existing activity formatter
+  intentionally formats them.
+- Do not invent a building count from storage-only inventory buildings. Keep
+  the last proven value or mark that metric unavailable until a complete typed
+  building projection is connected.
+- Retain `settlement_state_current` only as the minimal restart-safe transition
+  checkpoint and document its measured independent ownership.
+- Add focused restart, missing-domain, exact-value, and no-duplicate-event
+  tests.
+
+## Task 3 — Retire migrated current-data collector ownership
+
+- Retire periodic current-state acquisition for `claim`, `members`,
+  `citizens`, `players`, `inventories`, `crafts`, `market`, and catalog skills.
+  A provider commit now publishes each of those domains immediately; no page or
+  live side effect waits for the reconciliation cadence.
+- Remove obsolete current-data collector settings, status controls, prepared
+  statements, and writers. `domain_payload_current` remains the provider-owned
+  normalized, atomic last-good boundary: a reconciliation task cannot overwrite
+  its Relay provenance or freshness.
+- Subscribe only to progressive-action rows for active monitored-claim craft
+  IDs and append positive transaction deltas immediately.
+- Completed sales are derived immediately from uniquely correlated Relay
+  closed-listing evidence. Remove the former sale reconciler, its schedule,
+  resume state, admin control, and market API calls together.
+- Durable event receipts and the indexed contribution aggregate update in one
+  transaction without delaying current generation publication. Admin exposes
+  subscription health rather than an acquisition cadence. Focused tests prove
+  current features remain usable with scheduled ingestion disabled.
+
+## Task 4 — Retire legacy browser, proxy, helper, and command acquisition
+
+- Remove the legacy browser endpoint map and compatibility loader. Domain pages
+  read the current committed local generation on navigation; focused-route
+  pages make no unused central request.
+- Remove `/api/bitjita/*` and the dashboard, player-details, passive-crafts,
+  and production-crafts helper routes with their dead acquisition functions
+  and in-process response caches.
+- Read Discord `/supplies`, `/online`, and `/crafts` from complete,
+  configured-claim-fenced Relay generations and the local catalog. Preserve
+  exact decimal-string IDs and report unavailable/partial inputs explicitly.
+- Reconcile Craft Plan buildings from the committed construction generation.
+  If that generation is unavailable, leave targets pending rather than
+  guessing or delaying the save on an upstream fetch.
+- Remove the final craft-contributor evidence call, cache, telemetry, settings,
+  and reconciler after the authoritative Relay mapping is proven.
+- Add no replacement SQL current cache. Retain SQLite only where the table
+  inventory records independent history, user, operational, restart, indexing,
+  or process-sharing value.
