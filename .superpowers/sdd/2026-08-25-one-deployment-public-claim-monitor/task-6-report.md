@@ -183,3 +183,25 @@ Date: 2026-08-26
   - PASS: `1` test, `1` passed, `0` failed, confirming the transient child-server transport failure.
 - Final unchanged `corepack pnpm --filter @workspace/bitcraft-local test` rerun
   - PASS: `2,724` tests; `2,721` passed, `0` failed, `3` expected environment skips.
+
+## Fix round 3: fail-closed address cleanup
+
+Date: 2026-08-26
+
+### Change and safety proof
+
+- `capturePublicPlanFragmentSecret` now returns `false` immediately when `history.replaceState` throws. It never calls `sessionStorage.setItem` after an unconfirmed address cleanup, so a fragment that the browser refuses to remove cannot also become a stored bearer.
+- A later `sessionStorage.setItem` failure still returns `false` only after the address-cleanup call succeeded. The normal cleanup-plus-storage path and boolean-only return contract are unchanged.
+- No gateway, route, UI, server, schema, service, dependency, version, or changelog changed.
+
+### RED/GREEN evidence
+
+- RED: `node --experimental-strip-types --test test/public-plan-secrets.test.mjs` ran `4` tests: `3` passed and `1` failed. When `replaceState` threw, capture incorrectly returned `true` instead of `false` and fell through to the storage write.
+- GREEN: the same command passed `4/4`. The cleanup-throw case records one attempted replacement, zero storage writes, a `false` result, and a source fragment remaining only because the simulated browser rejected cleanup. The storage-throw-after-cleanup case proves the clean token-free replacement still occurred and returned `false`; the existing success case remains green.
+
+### Verification
+
+- `node --experimental-strip-types --test test/public-plan-secrets.test.mjs test/public-plan-client.test.mjs test/public-plan-access-ui.test.mjs test/public-shell.test.mjs test/appshell-import-boundary.test.mjs`
+  - PASS: `22` tests, `22` passed, `0` failed.
+- `corepack pnpm --filter @workspace/bitcraft-local run build`
+  - PASS: server/provider/bindings TypeScript, asset verification, frontend TypeScript, Vite production build (`1,945` modules), and Relay runtime boundary verification.

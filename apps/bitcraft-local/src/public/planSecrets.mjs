@@ -21,7 +21,7 @@ export function capturePublicPlanFragmentSecret({ location, history, sessionStor
   try {
     history?.replaceState?.(null, "", `${location.pathname}${location.search ?? ""}`);
   } catch {
-    // A browser-owned history failure must not make the secret available to application state.
+    return false;
   }
   try {
     sessionStorage?.setItem?.(key, token);

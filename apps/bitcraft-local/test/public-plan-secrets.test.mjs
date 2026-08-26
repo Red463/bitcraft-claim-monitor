@@ -49,7 +49,28 @@ test("public plan fragment secrets move to per-tab storage, leave the address ba
   }), false);
 });
 
-test("public plan fragment cleanup does not depend on session storage availability", () => {
+test("public plan fragment cleanup failure stops before session storage", () => {
+  assert.ok(secrets, "public plan secret helper must exist");
+  const replacements = [];
+  const writes = [];
+  const location = {
+    pathname: "/shared-plans/plan-9",
+    search: "",
+    hash: "#share=cleanup-failure-secret",
+  };
+  const result = secrets.capturePublicPlanFragmentSecret({
+    location,
+    history: { replaceState: (...args) => { replacements.push(args); throw new Error("history disabled"); } },
+    sessionStorage: { setItem: (...args) => writes.push(args) },
+  });
+
+  assert.equal(result, false);
+  assert.deepEqual(replacements, [[null, "", "/shared-plans/plan-9"]], "address cleanup is attempted once");
+  assert.deepEqual(writes, [], "an unclean address must never gain a stored bearer");
+  assert.equal(location.hash, "#share=cleanup-failure-secret", "the fragment remains only because the browser rejected cleanup");
+});
+
+test("successful public plan fragment cleanup survives later session storage failure", () => {
   assert.ok(secrets, "public plan secret helper must exist");
   const replacements = [];
   const result = secrets.capturePublicPlanFragmentSecret({
