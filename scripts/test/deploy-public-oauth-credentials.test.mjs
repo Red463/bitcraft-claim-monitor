@@ -33,6 +33,10 @@ PUBLIC_DISCORD_OAUTH_CLIENT_SECRET=
 DISCORD_BOT_TOKEN=existing-timbersteel-secret
 `;
 
+const legacyEnvironment = `BITCRAFT_DEPLOYMENT_MODE=canonical
+DISCORD_BOT_TOKEN=existing-timbersteel-secret
+`;
+
 function disabledPublicProfile() {
   return {
     profile: { id: "public" },
@@ -133,6 +137,28 @@ test("installer atomically changes only public OAuth credentials and restarts on
     assert.equal(readFileSync(environmentPath, "utf8"), originalEnvironment
       .replace("PUBLIC_DISCORD_OAUTH_CLIENT_ID=", `PUBLIC_DISCORD_OAUTH_CLIENT_ID=${credentials.clientId}`)
       .replace("PUBLIC_DISCORD_OAUTH_CLIENT_SECRET=", `PUBLIC_DISCORD_OAUTH_CLIENT_SECRET=${credentials.clientSecret}`));
+    assert.deepEqual(fake.restarts, ["bitcraft-claim-monitor-relay.service"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("installer adds only credential keys when legacy production omits public configuration", async () => {
+  const root = mkdtempSync(join(tmpdir(), "claim-monitor-public-oauth-legacy-"));
+  const environmentPath = join(root, "relay.env");
+  writeFileSync(environmentPath, legacyEnvironment);
+  chmodSync(environmentPath, 0o600);
+  const fake = runtime();
+
+  try {
+    await installer.installPublicOAuthCredentials({
+      environmentPath,
+      credentials,
+      operations: fake.operations,
+      enforceRootOwnership: false,
+    });
+    assert.equal(readFileSync(environmentPath, "utf8"), `${legacyEnvironment}PUBLIC_DISCORD_OAUTH_CLIENT_ID=${credentials.clientId}\nPUBLIC_DISCORD_OAUTH_CLIENT_SECRET=${credentials.clientSecret}\n`);
+    assert.doesNotMatch(readFileSync(environmentPath, "utf8"), /PUBLIC_PROFILE_ENABLED|PUBLIC_COLLABORATION_ENABLED|PUBLIC_LEGAL_CONFIGURATION_CONFIRMED|PUBLIC_ORIGIN/);
     assert.deepEqual(fake.restarts, ["bitcraft-claim-monitor-relay.service"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
