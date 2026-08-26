@@ -7946,6 +7946,7 @@ const publicAdminRequest = createPublicAdminRouter({
     },
     oauth: { enabled: resolvedPublicOAuthConfig.enabled },
     rateTotals: {
+      publicReads: publicDataApiRequest.health(),
       limiter: rateLimit.stats(),
       routes: routePerformanceTelemetry.snapshot().rateLimits,
     },

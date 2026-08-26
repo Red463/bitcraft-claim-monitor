@@ -56,20 +56,24 @@ test("public moderation health and exact lookups expose sanitized metadata witho
   f.db.close();
 });
 
-test("account suspension revokes sessions and capabilities, gives members 423, and keeps bearer denial generic", () => {
+test("account suspension revokes sessions temporarily while collaboration capabilities survive restore", () => {
   assert.ok(moderationModule, "public moderation module must exist");
   const f = fixture();
   const result = f.moderation.setAccountSuspended({ accountId: f.ownerId, suspended: true });
   assert.equal(result.account.status, "suspended");
   assert.equal(result.revoked.sessions, 1);
-  assert.ok(result.revoked.invites >= 1);
-  assert.ok(result.revoked.shareLinks >= 1);
+  assert.equal(result.revoked.invites, 0);
+  assert.equal(result.revoked.shareLinks, 0);
   assert.throws(() => f.plans.planForUser(f.plan.id, f.editorId), { status: 423, code: "plan_suspended" });
   assert.throws(() => f.plans.planForShare(f.plan.id, f.share.token), { status: 404, code: "plan_not_found" });
 
   const restored = f.moderation.setAccountSuspended({ accountId: f.ownerId, suspended: false });
   assert.equal(restored.account.status, "active");
   assert.equal(f.plans.planForUser(f.plan.id, f.editorId).status, "active");
+  assert.equal(f.plans.planForShare(f.plan.id, f.share.token).role, "bearer");
+  const revision = f.plans.inviteAccessRevision({ inviteId: f.pendingInvite.id, token: f.pendingInvite.token });
+  const viewerId = Number(f.db.prepare("INSERT INTO public_user_accounts (discord_id, discord_username, settings_json, created_at) VALUES ('333', 'viewer', '{}', '2026-08-26T12:00:00.000Z')").run().lastInsertRowid);
+  assert.equal(f.plans.acceptInvite({ inviteId: f.pendingInvite.id, userId: viewerId, token: f.pendingInvite.token, expectedAccessRevision: revision }).role, "viewer");
   f.db.close();
 });
 
@@ -79,11 +83,11 @@ test("plan moderation suspend/restore and exact invite/share revocation never ed
   const before = f.db.prepare("SELECT document_json FROM public_craft_plans WHERE id = ?").get(f.plan.id).document_json;
   const suspended = f.moderation.setPlanSuspended({ planId: f.plan.id, suspended: true });
   assert.equal(suspended.plan.status, "suspended");
-  assert.equal(suspended.revoked.invites, 1);
-  assert.equal(suspended.revoked.shareLinks, 1);
+  assert.equal(suspended.revoked.invites, 0);
+  assert.equal(suspended.revoked.shareLinks, 0);
   assert.throws(() => f.plans.planForUser(f.plan.id, f.editorId), { status: 423, code: "plan_suspended" });
   assert.equal(f.moderation.setPlanSuspended({ planId: f.plan.id, suspended: false }).plan.status, "active");
-  assert.throws(() => f.plans.planForShare(f.plan.id, f.share.token), { status: 404, code: "plan_not_found" });
+  assert.equal(f.plans.planForShare(f.plan.id, f.share.token).role, "bearer");
   const newInvite = f.plans.createInvite({ planId: f.plan.id, actorUserId: f.ownerId, role: "viewer", expectedAccessRevision: 7 });
   assert.equal(f.moderation.revokeInvite({ planId: f.plan.id, inviteId: newInvite.id }).revoked, true);
   const newShare = f.plans.createShareLink({ planId: f.plan.id, actorUserId: f.ownerId, label: "Second", expectedAccessRevision: 9 });

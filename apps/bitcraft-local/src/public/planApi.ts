@@ -136,6 +136,32 @@ export async function loadSharedPublicPlan({
   return payload.plan;
 }
 
+export async function loadSharedPublicPlanComputation({
+  planId,
+  pathname,
+  sessionStorage,
+  signal,
+  fetchImpl = fetch,
+}: {
+  planId: string;
+  pathname: string;
+  sessionStorage: Storage;
+  signal?: AbortSignal;
+  fetchImpl?: FetchLike;
+}): Promise<Record<string, unknown>> {
+  const response = await fetchImpl(`/api/public/shared-plans/${encodeURIComponent(planId)}/computation`, {
+    credentials: "same-origin",
+    cache: "no-store",
+    signal,
+    headers: { accept: "application/json", ...authorization(pathname, sessionStorage) },
+  });
+  const payload = await readResponse(response);
+  if (!response.ok || !payload.computation || typeof payload.computation !== "object" || Array.isArray(payload.computation)) {
+    throw sharedPlanError(response.status, payload);
+  }
+  return payload.computation as Record<string, unknown>;
+}
+
 async function postInviteAcceptance({
   inviteId,
   pathname,

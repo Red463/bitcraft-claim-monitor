@@ -233,12 +233,11 @@ test("public plan router implements the complete collaboration API with conditio
   assert.equal((await call(f.router, "PATCH", `/api/public/plans/${planId}/status`, request(f, { ifMatch: '"11"', body: { status: "active" } }))).status, 200);
   assert.equal((await call(f.router, "POST", `/api/public/plans/${planId}/transfer`, request(f, { ifMatch: '"12"', body: { userId: editor.userId } }))).status, 200);
 
-  assert.equal((await call(f.router, "PATCH", `/api/public/plans/${planId}/status`, request(editor, { ifMatch: '"13"', body: { status: "suspended" } }))).status, 200);
-  assert.equal((await call(f.router, "GET", `/api/public/plans/${planId}`, request(f, { origin: null, csrf: false }))).status, 423);
-  assert.equal((await call(f.router, "GET", `/api/public/shared-plans/${planId}`, bearerRequest)).status, 404);
-  assert.equal((await call(f.router, "PATCH", `/api/public/plans/${planId}/status`, request(editor, { ifMatch: '"14"', body: { status: "active" } }))).status, 200);
-  assert.equal((await call(f.router, "DELETE", `/api/public/plans/${planId}/members/${f.userId}`, request(editor, { ifMatch: '"15"' }))).status, 200);
-  assert.equal((await call(f.router, "DELETE", `/api/public/plans/${planId}`, request(editor, { ifMatch: '"16"' }))).status, 200);
+  const ownerSuspension = await call(f.router, "PATCH", `/api/public/plans/${planId}/status`, request(editor, { ifMatch: '"13"', body: { status: "suspended" } }));
+  assert.equal(ownerSuspension.status, 403);
+  assert.equal(json(ownerSuspension).code, "moderation_required");
+  assert.equal((await call(f.router, "DELETE", `/api/public/plans/${planId}/members/${f.userId}`, request(editor, { ifMatch: '"13"' }))).status, 200);
+  assert.equal((await call(f.router, "DELETE", `/api/public/plans/${planId}`, request(editor, { ifMatch: '"14"' }))).status, 200);
   assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM public_craft_plans WHERE id = ?").get(planId).count, 0);
   f.db.close();
 });

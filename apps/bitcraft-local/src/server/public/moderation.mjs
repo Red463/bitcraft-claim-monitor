@@ -176,16 +176,6 @@ export function createPublicModerationRepository(db, { now = () => new Date() } 
                 status = 'suspended', access_revision = access_revision + 1, updated_at = ?
             WHERE owner_user_id = ? AND status <> 'suspended'
           `).run(account.id, suspendedAt, account.id);
-          revoked.invites = count(db.prepare(`
-            UPDATE public_craft_plan_invites SET revoked_at = ?
-            WHERE revoked_at IS NULL AND accepted_at IS NULL
-              AND (created_by_user_id = ? OR plan_id IN (SELECT id FROM public_craft_plans WHERE owner_user_id = ?))
-          `).run(suspendedAt, account.id, account.id));
-          revoked.shareLinks = count(db.prepare(`
-            UPDATE public_craft_plan_share_links SET revoked_at = ?
-            WHERE revoked_at IS NULL
-              AND (created_by_user_id = ? OR plan_id IN (SELECT id FROM public_craft_plans WHERE owner_user_id = ?))
-          `).run(suspendedAt, account.id, account.id));
         } else {
           db.prepare("UPDATE public_user_accounts SET status = 'active', suspended_at = NULL WHERE id = ?").run(account.id);
           db.prepare(`
@@ -214,14 +204,6 @@ export function createPublicModerationRepository(db, { now = () => new Date() } 
                 status = 'suspended', access_revision = access_revision + 1, updated_at = ?
             WHERE id = ?
           `).run(updatedAt, String(planId));
-          revoked.invites = count(db.prepare(`
-            UPDATE public_craft_plan_invites SET revoked_at = ?
-            WHERE plan_id = ? AND accepted_at IS NULL AND revoked_at IS NULL
-          `).run(updatedAt, String(planId)));
-          revoked.shareLinks = count(db.prepare(`
-            UPDATE public_craft_plan_share_links SET revoked_at = ?
-            WHERE plan_id = ? AND revoked_at IS NULL
-          `).run(updatedAt, String(planId)));
         } else if (!suspended && String(plan.status) === "suspended") {
           if (plan.moderation_suspended_account_id != null) {
             throw new PublicModerationError("Restore the suspended owner account before restoring this plan.", 409, "owner_suspended");

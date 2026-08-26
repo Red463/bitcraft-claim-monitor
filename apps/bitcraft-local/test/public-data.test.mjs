@@ -31,11 +31,6 @@ test("canonical unsigned-64 conversion rejects unsafe numbers and preserves exac
 
 test("public settlement and catalog boundaries reject rounded numeric identifiers", async () => {
   const unsafeId = Number.MAX_SAFE_INTEGER + 1;
-  assert.throws(
-    () => publicData.publicSettlementHints([{ entity_id: unsafeId, name: "Oak", region: 19 }], "oak"),
-    { name: "PublicDataError", status: 502 },
-  );
-
   const service = publicData.createPublicDataService({ http: {}, normalizers });
   await assert.rejects(service.snapshot(unsafeId, "claim"), { name: "PublicDataError", status: 400 });
 
@@ -45,23 +40,6 @@ test("public settlement and catalog boundaries reject rounded numeric identifier
   });
   assert.throws(() => catalog.search("rounded"), { name: "PublicDataError", status: 502 });
   assert.throws(() => catalog.recipe("item", unsafeId), { name: "PublicDataError", status: 400 });
-});
-
-test("public settlement hints rank exact, prefix, then substring matches and expose only safe fields", () => {
-  const rows = [
-    { entity_id: "4", name: "West Oak", region: 19, owner_player_username: "D", secret: "no" },
-    { entity_id: "2", name: "Oakland", region: 7, owner_player_username: "B", tier: 4 },
-    { entity_id: "3", name: "Oak", region: 8, owner_player_username: "C", tier: 5 },
-    { entity_id: "1", name: "oak", region: 9, owner_player_username: "A", tier: 6 },
-    { entity_id: "5", name: "Birch", region: 10 },
-  ];
-
-  assert.deepEqual(publicData.publicSettlementHints(rows, "OAK"), [
-    { claimId: "1", name: "oak", regionId: "9", tier: 6, ownerName: "A" },
-    { claimId: "3", name: "Oak", regionId: "8", tier: 5, ownerName: "C" },
-    { claimId: "2", name: "Oakland", regionId: "7", tier: 4, ownerName: "B" },
-    { claimId: "4", name: "West Oak", regionId: "19", ownerName: "D" },
-  ]);
 });
 
 test("public response cache singleflights identical work and serves fresh values", async () => {
@@ -198,8 +176,8 @@ test("public settlement service searches names and revalidates exact IDs without
       searchClaims: async (query) => {
         calls.push(["search", query]);
         return [
-          { entity_id: "42", name: "Oakland", region: 19, owner_player_username: "Owner" },
-          { entity_id: "41", name: "Oak", region: 7, owner_player_username: "Exact" },
+          { claimId: "41", name: "Oak", regionId: "7", ownerName: "Exact" },
+          { claimId: "42", name: "Oakland", regionId: "19", ownerName: "Owner" },
         ];
       },
       claim: async (id) => {
@@ -217,6 +195,32 @@ test("public settlement service searches names and revalidates exact IDs without
   assert.deepEqual(byId.hints, [{ claimId: "42", name: "Exact ID", regionId: "19" }]);
   assert.deepEqual(calls, [["search", "oak"], ["claim", "42"]]);
   assert.equal("configuredClaimId" in byId, false);
+});
+
+test("public read limiter exposes sanitized search and snapshot totals and saturation", async () => {
+  let now = 0;
+  const rateLimiter = publicData.createPublicIpRateLimiter({ now: () => now, maxBuckets: 2 });
+  const router = publicData.createPublicApiRouter({
+    data: { searchSettlements: async () => ({ hints: [] }), snapshot: async () => ({ claimId: "42" }) },
+    catalog: { search: () => ({}), recipe: () => ({}) },
+    serveIcon: async () => false,
+    rateLimiter,
+  });
+  const response = () => ({ writeHead() {}, end() {} });
+  await router({ method: "GET", url: new URL("https://claim-monitor.com/api/public/settlements/search?q=oak"), res: response(), address: "one" });
+  await router({ method: "GET", url: new URL("https://claim-monitor.com/api/public/settlements/42"), res: response(), address: "two" });
+  await router({ method: "GET", url: new URL("https://claim-monitor.com/api/public/settlements/search?q=oak"), res: response(), address: "three" });
+
+  assert.deepEqual(router.health(), {
+    capacity: 2,
+    buckets: 2,
+    saturated: true,
+    totals: { accepted: 2, rejected: 1 },
+    byKind: { search: { accepted: 1, rejected: 1 }, snapshot: { accepted: 1, rejected: 0 } },
+  });
+  now = 600_001;
+  await router({ method: "GET", url: new URL("https://claim-monitor.com/api/public/settlements/search?q=oak"), res: response(), address: "three" });
+  assert.equal(router.health().saturated, false);
 });
 
 test("public settlement search classifies malformed Relay JSON as malformed data", async () => {

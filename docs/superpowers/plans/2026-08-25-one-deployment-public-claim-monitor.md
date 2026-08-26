@@ -172,4 +172,3 @@ Final verification:
 3. Confirm cookies/preferences, configured claim, active plan, worker/history/notifications/Discord/Admin/bot/outbox behavior are unchanged.
 4. Confirm cross-profile denial and zero public writes to Timbersteel repositories/outbox.
 5. Confirm disabling public flags restores Timbersteel-only behavior without schema rollback.
-

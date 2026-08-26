@@ -25,6 +25,7 @@ export * from "./mapSpatialProjection.ts";
 export * from "./mapSpatialSession.ts";
 export * from "./mapSpatialScopeManager.ts";
 export * from "./normalizers.ts";
+export * from "./settlementHints.ts";
 export * from "./playerDataService.ts";
 export * from "./playerPresenceService.ts";
 export * from "./persistedRuntimeHealth.ts";

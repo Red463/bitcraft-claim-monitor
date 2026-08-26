@@ -58,6 +58,7 @@ export async function runPrivacyRetention(db, {
   const plan = privacyRetentionPlan(now);
   const counts = {
     user_sessions: rowCount(db, "SELECT COUNT(*) AS count FROM user_sessions WHERE expires_at < ?", plan.now),
+    public_user_sessions: rowCount(db, "SELECT COUNT(*) AS count FROM public_user_sessions WHERE expires_at <= ?", plan.now),
     admin_sessions: rowCount(db, "SELECT COUNT(*) AS count FROM admin_sessions WHERE expires_at < ?", plan.now),
     market_deal_alerts: rowCount(db, "SELECT COUNT(*) AS count FROM market_deal_alerts WHERE created_at < ?", plan.marketAlerts),
     analytics_events: rowCount(db, "SELECT COUNT(*) AS count FROM analytics_events WHERE occurred_at < ?", plan.analytics),
@@ -98,6 +99,7 @@ export async function runPrivacyRetention(db, {
   if (dryRun) return { dryRun: true, plan, counts };
 
   counts.user_sessions = deleteCount(db, "DELETE FROM user_sessions WHERE expires_at < ?", plan.now);
+  counts.public_user_sessions = deleteCount(db, "DELETE FROM public_user_sessions WHERE expires_at <= ?", plan.now);
   counts.admin_sessions = deleteCount(db, "DELETE FROM admin_sessions WHERE expires_at < ?", plan.now);
   counts.market_deal_alerts = deleteCount(db, "DELETE FROM market_deal_alerts WHERE created_at < ?", plan.marketAlerts);
   counts.analytics_events = deleteCount(db, "DELETE FROM analytics_events WHERE occurred_at < ?", plan.analytics);

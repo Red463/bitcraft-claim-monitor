@@ -386,7 +386,7 @@ test("public plan revisions and lifecycle enforce ACL, archive, suspension, tran
     code: "plan_archived",
   });
   repository.updateStatus({ planId: plan.id, actorUserId: ownerId, status: "active", expectedAccessRevision: 2 });
-  repository.updateStatus({ planId: plan.id, actorUserId: ownerId, status: "suspended", expectedAccessRevision: 3 });
+  db.prepare("UPDATE public_craft_plans SET status = 'suspended', moderation_previous_status = 'active', access_revision = 4 WHERE id = ?").run(plan.id);
   assert.throws(() => repository.planForUser(plan.id, editorId), { name: "PublicPlanError", status: 423, code: "plan_suspended" });
   assert.deepEqual(repository.listPlans(ownerId), [], "owners must not recover suspended documents from the collection route");
   assert.deepEqual(repository.listPlans(editorId), [], "editors must not recover suspended documents from the collection route");
@@ -398,7 +398,7 @@ test("public plan revisions and lifecycle enforce ACL, archive, suspension, tran
   `).get(plan.id, ownerId, publicPlans.publicPlanTokenHash("share-token", "lifecycle-hmac-key"), "2026-08-25T10:00:00.000Z");
   assert.equal(share.id, "share-lifecycle");
   assert.throws(() => repository.planForShare(plan.id, "share-token"), { name: "PublicPlanError", status: 404 });
-  repository.updateStatus({ planId: plan.id, actorUserId: ownerId, status: "active", expectedAccessRevision: 4 });
+  db.prepare("UPDATE public_craft_plans SET status = 'active', moderation_previous_status = NULL, access_revision = 5 WHERE id = ?").run(plan.id);
 
   const promoted = repository.updateMember({ planId: plan.id, actorUserId: ownerId, userId: viewerId, role: "editor", expectedAccessRevision: 5 });
   assert.equal(promoted.revisions.access, 6);
@@ -424,6 +424,31 @@ test("public plan revisions and lifecycle enforce ACL, archive, suspension, tran
   assert.deepEqual(deleted, { ok: true });
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM public_craft_plans WHERE id = ?").get(plan.id).count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM public_craft_plan_events WHERE plan_id = ?").get(plan.id).count, 0);
+  db.close();
+});
+
+test("public plan owners cannot enter or escape the Admin-owned suspended state", () => {
+  const db = publicPlanDatabase();
+  const ownerId = addPublicUser(db, "moderation-boundary-owner");
+  const repository = publicPlans.createPublicPlanRepository(db, {
+    now: () => new Date("2026-08-25T10:00:00.000Z"),
+    randomBytes: (size) => Buffer.alloc(size, 211),
+    tokenHmacKey: "moderation-boundary-key",
+  });
+  const plan = repository.createPlan({ ownerUserId: ownerId, claimId: "42", title: "Boundary plan", document: emptyDocument() });
+
+  assert.throws(
+    () => repository.updateStatus({ planId: plan.id, actorUserId: ownerId, status: "suspended", expectedAccessRevision: 1 }),
+    { name: "PublicPlanError", status: 403, code: "moderation_required" },
+  );
+  assert.equal(db.prepare("SELECT status, access_revision FROM public_craft_plans WHERE id = ?").get(plan.id).status, "active");
+
+  db.prepare("UPDATE public_craft_plans SET status = 'suspended', moderation_previous_status = 'active', access_revision = 2 WHERE id = ?").run(plan.id);
+  assert.throws(
+    () => repository.updateStatus({ planId: plan.id, actorUserId: ownerId, status: "active", expectedAccessRevision: 2 }),
+    { name: "PublicPlanError", status: 423, code: "plan_suspended" },
+  );
+  assert.deepEqual({ ...db.prepare("SELECT status, access_revision FROM public_craft_plans WHERE id = ?").get(plan.id) }, { status: "suspended", access_revision: 2 });
   db.close();
 });
 

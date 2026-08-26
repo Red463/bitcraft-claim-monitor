@@ -65,38 +65,6 @@ function wireRecord(value, label) {
   return value;
 }
 
-export function publicSettlementHints(value, query) {
-  if (!Array.isArray(value)) throw new PublicDataError("Relay claim search is malformed.", 502);
-  const needle = String(query).normalize("NFKC").toLocaleLowerCase();
-  return value.map((value, index) => {
-    const row = wireRecord(value, `Relay claim search row ${index}`);
-    const claimId = canonicalUnsigned64(row.entity_id);
-    const regionId = canonicalUnsigned64(row.region);
-    const name = String(row.name ?? "").normalize("NFKC").trim();
-    if (!claimId || !regionId || !name || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(name)) {
-      throw new PublicDataError(`Relay claim search row ${index} is malformed.`, 502);
-    }
-    const comparable = name.toLocaleLowerCase();
-    const rank = comparable === needle ? 0 : comparable.startsWith(needle) ? 1 : comparable.includes(needle) ? 2 : 3;
-    const tier = Number(row.tier);
-    return {
-      rank,
-      hint: {
-        claimId,
-        name,
-        regionId,
-        ...(Number.isInteger(tier) && tier >= 0 ? { tier } : {}),
-        ...(String(row.owner_player_username ?? "").trim() ? { ownerName: String(row.owner_player_username).trim() } : {}),
-      },
-    };
-  }).filter(({ rank }) => rank < 3)
-    .sort((left, right) => left.rank - right.rank
-      || left.hint.name.toLocaleLowerCase().localeCompare(right.hint.name.toLocaleLowerCase())
-      || (BigInt(left.hint.claimId) < BigInt(right.hint.claimId) ? -1 : 1))
-    .slice(0, 20)
-    .map(({ hint }) => hint);
-}
-
 export function createBoundedStaleCache({ freshMs, staleMs, maxEntries, maxBytes, maxEntryBytes = maxBytes, now = Date.now, canServeStale = () => true }) {
   const entries = new Map();
   const inflight = new Map();
@@ -198,6 +166,11 @@ export function createPublicIpRateLimiter({ now = Date.now, maxBuckets = 4096 } 
   const buckets = new Map();
   const bucketCapacity = Number.isInteger(maxBuckets) && maxBuckets > 0 ? maxBuckets : 4096;
   let operations = 0;
+  const totals = { accepted: 0, rejected: 0 };
+  const byKind = {
+    search: { accepted: 0, rejected: 0 },
+    snapshot: { accepted: 0, rejected: 0 },
+  };
 
   function expireBucket(bucket, at) {
     const policy = PUBLIC_IP_LIMITS[bucket.kind];
@@ -231,6 +204,8 @@ export function createPublicIpRateLimiter({ now = Date.now, maxBuckets = 4096 } 
     if (!bucket && buckets.size >= bucketCapacity) {
       pruneExpired(at);
       if (buckets.size >= bucketCapacity) {
+        totals.rejected += 1;
+        byKind[kind].rejected += 1;
         return { allowed: false, retryAfter: capacityRetryAfter(at) };
       }
     }
@@ -242,13 +217,27 @@ export function createPublicIpRateLimiter({ now = Date.now, maxBuckets = 4096 } 
       if (burst.length >= policy.burst) waits.push(burst[0] + policy.burstMs - at);
       if (bucket.timestamps.length >= policy.sustained) waits.push(bucket.timestamps[0] + policy.sustainedMs - at);
       buckets.set(key, bucket);
+      totals.rejected += 1;
+      byKind[kind].rejected += 1;
       return { allowed: false, retryAfter: Math.max(1, Math.ceil(Math.max(...waits) / 1000)) };
     }
     bucket.timestamps.push(at);
     buckets.set(key, bucket);
+    totals.accepted += 1;
+    byKind[kind].accepted += 1;
     return { allowed: true, retryAfter: 0 };
   }
-  return { take };
+  function stats() {
+    pruneExpired(now());
+    return {
+      capacity: bucketCapacity,
+      buckets: buckets.size,
+      saturated: buckets.size >= bucketCapacity,
+      totals: { ...totals },
+      byKind: { search: { ...byKind.search }, snapshot: { ...byKind.snapshot } },
+    };
+  }
+  return { take, stats };
 }
 
 function relayStatus(error) {
@@ -257,7 +246,7 @@ function relayStatus(error) {
 }
 
 function isMalformedRelayError(error) {
-  return error?.code === "RELAY_MALFORMED_JSON";
+  return error?.code === "RELAY_MALFORMED_JSON" || error?.code === "RELAY_MALFORMED_SETTLEMENT_HINTS";
 }
 
 function unavailableRelayError(error) {
@@ -371,7 +360,8 @@ export function createPublicDataService({ http, normalizers, topologyFromPayload
       }
       try {
         const wire = await gate.run(() => http.searchClaims(query.value));
-        return { query: query.value, hints: publicSettlementHints(wire, query.value) };
+        if (!Array.isArray(wire)) throw new PublicDataError("Relay claim search response is malformed.", 502);
+        return { query: query.value, hints: wire.slice(0, 20) };
       } catch (error) {
         if (error instanceof PublicDataError) throw error;
         if (isMalformedRelayError(error)) {
@@ -666,7 +656,7 @@ export function createPublicApiRouter({ data, catalog, serveIcon, rateLimiter = 
     const decision = rateLimiter.take(address, kind);
     if (!decision.allowed) throw new PublicDataError("Public request limit reached.", 429, { retryAfter: decision.retryAfter });
   }
-  return async function route({ method, url, res, address = "unknown" }) {
+  const route = async function route({ method, url, res, address = "unknown" }) {
     if (method !== "GET") return false;
     const { pathname, searchParams } = url;
     try {
@@ -701,4 +691,6 @@ export function createPublicApiRouter({ data, catalog, serveIcon, rateLimiter = 
       return true;
     }
   };
+  route.health = () => rateLimiter.stats();
+  return route;
 }

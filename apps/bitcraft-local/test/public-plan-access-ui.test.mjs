@@ -23,7 +23,7 @@ function capturePlanSecret(window, fragment) {
   });
 }
 
-test("the mounted shared-plan route performs a token-free bearer read and renders only safe basic plan state", async () => {
+test("the mounted shared-plan route renders bearer-redacted aggregate computation without source details", async () => {
   const token = "mounted-reusable-share-secret";
   const dom = installDom("http://localhost/shared-plans/plan-7");
   await capturePlanSecret(dom.window, `#share=${token}`);
@@ -31,15 +31,22 @@ test("the mounted shared-plan route performs a token-free bearer read and render
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init = {}) => {
     calls.push([String(input), init]);
-    return json(200, {
-      plan: {
+    if (String(input).endsWith("/computation")) return json(200, {
+      computation: {
+        available: true,
+        plan: {
+          materials: [{ key: "items:7", name: "Timber", required: 10, available: 4, inProgress: 1, missing: 5, sources: [{ storageId: "must-not-render" }] }],
+          totals: { missingItems: 1 },
+        },
+      },
+    });
+    return json(200, { plan: {
         id: "plan-7",
         title: "Shared bridge plan",
         claimId: "42",
         role: "bearer",
         document: { targets: [{ catalogKey: "items:7", quantity: "1" }, { catalogKey: "cargo:8", quantity: "2" }] },
-      },
-    });
+      } });
   };
   const vite = await createViteServer({ root: appRoot, appType: "custom", logLevel: "silent", server: { middlewareMode: true } });
   let view;
@@ -48,16 +55,44 @@ test("the mounted shared-plan route performs a token-free bearer read and render
     view = await mount(React.createElement(PublicAppShell, { route: { id: "shared-plan", params: { id: "plan-7" } } }));
     await dom.flush();
 
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 2);
     assert.equal(calls[0][0], "/api/public/shared-plans/plan-7");
+    assert.equal(calls[1][0], "/api/public/shared-plans/plan-7/computation");
     assert.doesNotMatch(calls[0][0], /[?#]|mounted-reusable-share-secret/);
     assert.equal(calls[0][1].headers.authorization, `Bearer ${token}`);
     assert.match(document.body.textContent, /Shared bridge plan/);
     assert.match(document.body.textContent, /Settlement #42/);
     assert.match(document.body.textContent, /2 targets/);
+    assert.match(document.body.textContent, /Timber/);
+    assert.match(document.body.textContent, /Required 10/);
+    assert.match(document.body.textContent, /Available 4/);
+    assert.match(document.body.textContent, /Remaining 5/);
+    assert.doesNotMatch(document.body.textContent, /must-not-render|storageId|sources/i);
     assert.doesNotMatch(document.body.textContent, new RegExp(token));
     assert.doesNotMatch(document.title, new RegExp(token));
     assert.equal(window.location.hash, "");
+  } finally {
+    if (view) await view.unmount();
+    await vite.close();
+    globalThis.fetch = originalFetch;
+    dom.restore();
+  }
+});
+
+test("the mounted shared-plan route shows an explicit unavailable computation state", async () => {
+  const dom = installDom("http://localhost/shared-plans/plan-unavailable");
+  await capturePlanSecret(dom.window, "#share=unavailable-share-secret");
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => String(input).endsWith("/computation")
+    ? json(200, { computation: { available: false, warning: "Current settlement data could not be loaded." } })
+    : json(200, { plan: { id: "plan-unavailable", title: "Offline plan", claimId: "42", role: "bearer", document: { targets: [] } } });
+  const vite = await createViteServer({ root: appRoot, appType: "custom", logLevel: "silent", server: { middlewareMode: true } });
+  let view;
+  try {
+    const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
+    view = await mount(React.createElement(PublicAppShell, { route: { id: "shared-plan", params: { id: "plan-unavailable" } } }));
+    await dom.flush();
+    assert.match(document.body.textContent, /Current settlement data could not be loaded/);
   } finally {
     if (view) await view.unmount();
     await vite.close();

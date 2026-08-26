@@ -402,12 +402,18 @@ export function createPublicPlanRepository(db, {
     },
     updateStatus({ planId, actorUserId, status, expectedAccessRevision }) {
       const normalizedStatus = String(status);
-      if (!new Set(["active", "archived", "suspended"]).has(normalizedStatus)) {
-        throw new PublicPlanError("Public plan status must be active, archived, or suspended.");
+      if (normalizedStatus === "suspended") {
+        throw new PublicPlanError("Only Claim Monitor administrators can suspend public plans.", 403, "moderation_required");
+      }
+      if (!new Set(["active", "archived"]).has(normalizedStatus)) {
+        throw new PublicPlanError("Public plan status must be active or archived.");
       }
       return transaction(db, () => {
         const plan = ownerPlan(planId, actorUserId);
         requireExpectedRevision(plan, expectedAccessRevision);
+        if (String(plan.status) === "suspended") {
+          throw new PublicPlanError("Public plan is suspended.", 423, "plan_suspended");
+        }
         if (String(plan.status) === "archived" && normalizedStatus !== "active") {
           throw new PublicPlanError("Archived public plans must be unarchived before other changes.", 423, "plan_archived");
         }

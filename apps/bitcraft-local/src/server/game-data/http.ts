@@ -1,3 +1,5 @@
+import { normalizeSettlementHints } from "./settlementHints.ts";
+
 type Fetcher = typeof fetch;
 
 export type RelayHttpClientOptions = {
@@ -47,9 +49,9 @@ export class RelayHttpClient {
     return this.#request(`/claim/${encodeURIComponent(claimId)}`);
   }
 
-  searchClaims(name: string) {
+  async searchClaims(name: string) {
     const parameters = new URLSearchParams({ name });
-    return this.#request(`/claim?${parameters}`);
+    return normalizeSettlementHints(await this.#request(`/claim?${parameters}`), name);
   }
 
   members(claimId: string) {

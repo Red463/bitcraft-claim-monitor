@@ -11,6 +11,7 @@ test("Public service Admin routes remain inside the current Timbersteel Admin gu
 
 test("Public service Admin health uses sanitized runtime status sources", () => {
   assert.match(server, /publicDataService\.health\(\)/);
+  assert.match(server, /publicReads: publicDataApiRequest\.health\(\)/);
   assert.match(server, /rateLimit\.stats\(\)/);
   assert.match(server, /routePerformanceTelemetry\.snapshot\(\)\.rateLimits/);
   assert.doesNotMatch(server, /healthSnapshot:[\s\S]{0,800}(?:botToken|clientSecret|tokenHmacKey)/);

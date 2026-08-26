@@ -80,13 +80,24 @@ test("public sessions and legal acceptances use only public-prefixed tables", ()
   db.close();
 });
 
-test("public data export contains only public account, acceptance, settings, and session metadata", () => {
+test("public data export includes isolated collaboration records without secrets or collaborator identity", () => {
   const db = database();
   const repository = createPublicIdentityRepository(db);
   const account = repository.upsertAccount({ discordId: "77", username: "Exporter" }, "2026-08-25T10:00:00.000Z");
   db.prepare("UPDATE public_user_accounts SET settings_json = ? WHERE id = ?").run('{"compact":true}', account.id);
   repository.insertSession({ tokenHash: "secret-session-hash", userId: account.id, expiresAt: "2026-09-24T10:00:00.000Z", createdAt: "2026-08-25T10:00:00.000Z" });
   repository.acceptLegal({ userId: account.id, version: "2026-08-25", termsDigest: "terms", privacyDigest: "privacy", acceptedAt: "2026-08-25T10:00:00.000Z", source: "oauth" });
+  const collaborator = repository.upsertAccount({ discordId: "88", username: "PrivateCollaborator", globalName: "Do not export" }, "2026-08-25T10:00:00.000Z");
+  const document = JSON.stringify({ schemaVersion: 1, targets: [{ catalogKey: "items:7", quantity: "3" }], routeOverrides: {}, multipliers: {}, sectionOverrides: {}, rowNameOverrides: {} });
+  db.prepare(`INSERT INTO public_craft_plans (id, owner_user_id, claim_id, title, document_json, status, document_revision, access_revision, created_at, updated_at)
+    VALUES ('owned-plan', ?, '42', 'Owned plan', ?, 'active', 2, 4, '2026-08-25T10:00:00.000Z', '2026-08-25T10:30:00.000Z')`).run(account.id, document);
+  db.prepare(`INSERT INTO public_craft_plans (id, owner_user_id, claim_id, title, document_json, status, document_revision, access_revision, created_at, updated_at)
+    VALUES ('member-plan', ?, '99', 'Member plan', ?, 'active', 1, 1, '2026-08-25T10:00:00.000Z', '2026-08-25T10:00:00.000Z')`).run(collaborator.id, document);
+  db.prepare("INSERT INTO public_craft_plan_members (plan_id, user_id, role, created_at, updated_at) VALUES ('member-plan', ?, 'editor', '2026-08-25T10:05:00.000Z', '2026-08-25T10:05:00.000Z')").run(account.id);
+  db.prepare("INSERT INTO public_craft_plan_invites (id, plan_id, created_by_user_id, role, token_hash, expires_at, accepted_at, accepted_by_user_id, created_at) VALUES ('invite-export', 'owned-plan', ?, 'viewer', 'secret-invite-hmac', '2026-09-01T10:00:00.000Z', '2026-08-25T10:10:00.000Z', ?, '2026-08-25T10:00:00.000Z')").run(account.id, collaborator.id);
+  db.prepare("INSERT INTO public_craft_plan_share_links (id, plan_id, created_by_user_id, label, token_hash, created_at) VALUES ('share-export', 'owned-plan', ?, 'Community view', 'secret-share-hmac', '2026-08-25T10:00:00.000Z')").run(account.id);
+  db.prepare("INSERT INTO public_craft_plan_events (plan_id, actor_user_id, event_type, payload_json, created_at) VALUES ('owned-plan', ?, 'member.updated', ?, '2026-08-25T10:15:00.000Z')")
+    .run(collaborator.id, JSON.stringify({ userId: collaborator.id, role: "viewer", token: "raw-bearer-secret", token_hash: "event-secret-hash", label: "Safe label" }));
 
   const exported = repository.exportAccount(account.id, {
     legalVersion: "2026-08-25",
@@ -101,7 +112,14 @@ test("public data export contains only public account, acceptance, settings, and
     expiresAt: "2026-09-24T10:00:00.000Z",
     reauthenticatedAt: null,
   }]);
-  assert.doesNotMatch(JSON.stringify(exported), /secret-session-hash|character|admin/i);
+  assert.equal(exported.collaboration.ownedPlans[0].id, "owned-plan");
+  assert.deepEqual(exported.collaboration.ownedPlans[0].document.targets, [{ catalogKey: "items:7", quantity: "3" }]);
+  assert.deepEqual(exported.collaboration.memberships, [{ planId: "member-plan", title: "Member plan", claimId: "99", status: "active", role: "editor", createdAt: "2026-08-25T10:05:00.000Z", updatedAt: "2026-08-25T10:05:00.000Z" }]);
+  assert.deepEqual(exported.collaboration.invites[0], { id: "invite-export", planId: "owned-plan", role: "viewer", status: "accepted", expiresAt: "2026-09-01T10:00:00.000Z", createdAt: "2026-08-25T10:00:00.000Z", acceptedAt: "2026-08-25T10:10:00.000Z", revokedAt: null });
+  assert.deepEqual(exported.collaboration.shareLinks[0], { id: "share-export", planId: "owned-plan", label: "Community view", status: "active", createdAt: "2026-08-25T10:00:00.000Z", revokedAt: null });
+  assert.deepEqual(exported.collaboration.events[0].actor, { relationship: "other" });
+  assert.deepEqual(exported.collaboration.events[0].payload, { role: "viewer", label: "Safe label" });
+  assert.doesNotMatch(JSON.stringify(exported), /secret-session-hash|secret-invite-hmac|secret-share-hmac|raw-bearer-secret|event-secret-hash|PrivateCollaborator|Do not export|character|admin|csrf/i);
   db.close();
 });
 

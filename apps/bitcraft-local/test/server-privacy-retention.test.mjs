@@ -61,6 +61,28 @@ test("retention dry-run is non-mutating and execution warns once then routes ina
   db.close();
 });
 
+test("privacy retention previews and deletes expired public sessions without changing current sessions", async () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  const userId = Number(db.prepare(`
+    INSERT INTO public_user_accounts (discord_id, discord_username, settings_json, created_at)
+    VALUES ('public-session-user', 'Public', '{}', '2026-01-01T00:00:00.000Z')
+  `).run().lastInsertRowid);
+  const insertSession = db.prepare("INSERT INTO public_user_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)");
+  insertSession.run("expired-public-session", userId, "2026-08-25T11:59:59.000Z", "2026-08-01T00:00:00.000Z");
+  insertSession.run("boundary-public-session", userId, "2026-08-26T12:00:00.000Z", "2026-08-01T00:00:00.000Z");
+  insertSession.run("current-public-session", userId, "2026-08-27T00:00:00.000Z", "2026-08-25T00:00:00.000Z");
+
+  const dryRun = await runPrivacyRetention(db, { now: new Date("2026-08-26T12:00:00.000Z"), dryRun: true });
+  assert.equal(dryRun.counts.public_user_sessions, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM public_user_sessions").get().count, 3);
+
+  const applied = await runPrivacyRetention(db, { now: new Date("2026-08-26T12:00:00.000Z") });
+  assert.equal(applied.counts.public_user_sessions, 2);
+  assert.deepEqual(db.prepare("SELECT token_hash FROM public_user_sessions ORDER BY token_hash").all().map((row) => row.token_hash), ["current-public-session"]);
+  db.close();
+});
+
 test("public inactivity purges only planless accounts without accepted editor membership after 24 months", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON");
