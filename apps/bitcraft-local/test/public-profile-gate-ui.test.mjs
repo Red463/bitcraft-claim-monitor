@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { createServer as createViteServer } from "vite";
 import { React, installDom, mount } from "./react-dom-test-harness.mjs";
+import { resolvePublicRoute } from "../src/public/routes.mjs";
 
 const appRoot = fileURLToPath(new URL("..", import.meta.url));
 const disabledFeatures = {
@@ -55,12 +56,96 @@ test("enabled read-only profile presents settlement search without unfinished pl
   try {
     const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
     view = await mount(React.createElement(PublicAppShell, {
-      route: { id: "home", params: {} },
+      route: resolvePublicRoute("/"),
       features: { ...disabledFeatures, publicProfileEnabled: true, publicLegalConfigurationConfirmed: true },
     }));
-    assert.ok(document.querySelector("#public-settlement-search"));
-    assert.match(document.body.textContent, /Search for a settlement/i);
+    const search = document.querySelector("#public-settlement-search");
+    assert.ok(search);
+    assert.equal(document.querySelector('label[for="public-settlement-search"]')?.textContent, "FIND A BITCRAFT SETTLEMENT");
+    assert.equal(search.getAttribute("placeholder"), "Settlement name or exact claim ID");
+    assert.match(document.body.textContent, /Enter at least 3 characters from the settlement name, or paste the exact claim ID\./);
     assert.doesNotMatch(document.body.textContent, /being prepared/i);
+  } finally {
+    if (view) await view.unmount();
+    await vite.close();
+    dom.restore();
+  }
+});
+
+test("first-time public visitors receive compact settlement selection guidance", async () => {
+  const dom = installDom("http://localhost/");
+  const vite = await createViteServer({ root: appRoot, appType: "custom", logLevel: "silent", server: { middlewareMode: true } });
+  let view;
+  try {
+    const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
+    view = await mount(React.createElement(PublicAppShell, {
+      route: resolvePublicRoute("/"),
+      features: { ...disabledFeatures, publicProfileEnabled: true, publicLegalConfigurationConfirmed: true },
+    }));
+
+    assert.match(document.body.textContent, /Welcome to Claim Monitor/);
+    assert.match(document.body.textContent, /current, read-only data/i);
+    assert.match(document.body.textContent, /Enter at least three characters/i);
+    assert.match(document.body.textContent, /Select the correct result/i);
+    assert.match(document.body.textContent, /Use the settlement navigation/i);
+    assert.match(document.body.textContent, /does not continuously monitor public settlements/i);
+    assert.match(document.body.textContent, /public history, notifications, or Discord services/i);
+  } finally {
+    if (view) await view.unmount();
+    await vite.close();
+    dom.restore();
+  }
+});
+
+test("returning public visitors receive compact search until clearing recents restores onboarding", async () => {
+  const dom = installDom("http://localhost/");
+  window.localStorage.setItem("claim-monitor.public.recent-settlements", JSON.stringify([
+    { claimId: "1369094286819518507", name: "Basin of Cairn", regionId: "19" },
+  ]));
+  const vite = await createViteServer({ root: appRoot, appType: "custom", logLevel: "silent", server: { middlewareMode: true } });
+  let view;
+  try {
+    const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
+    view = await mount(React.createElement(PublicAppShell, {
+      route: resolvePublicRoute("/"),
+      features: { ...disabledFeatures, publicProfileEnabled: true, publicLegalConfigurationConfirmed: true },
+    }));
+
+    assert.doesNotMatch(document.body.textContent, /Welcome to Claim Monitor/);
+    assert.match(document.body.textContent, /Recent settlements/);
+    assert.match(document.body.textContent, /Basin of Cairn/);
+    assert.ok(document.querySelector("#public-settlement-search"));
+
+    window.localStorage.removeItem("claim-monitor.public.recent-settlements");
+    await view.unmount();
+    view = await mount(React.createElement(PublicAppShell, {
+      route: resolvePublicRoute("/"),
+      features: { ...disabledFeatures, publicProfileEnabled: true, publicLegalConfigurationConfirmed: true },
+    }));
+    assert.match(document.body.textContent, /Welcome to Claim Monitor/);
+    assert.doesNotMatch(document.body.textContent, /Recent settlements/);
+  } finally {
+    if (view) await view.unmount();
+    await vite.close();
+    dom.restore();
+  }
+});
+
+test("public Help explains settlement selection and on-demand limitations", async () => {
+  const dom = installDom("http://localhost/help");
+  const vite = await createViteServer({ root: appRoot, appType: "custom", logLevel: "silent", server: { middlewareMode: true } });
+  let view;
+  try {
+    const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
+    view = await mount(React.createElement(PublicAppShell, {
+      route: { id: "help", params: {} },
+      features: { ...disabledFeatures, publicProfileEnabled: true, publicLegalConfigurationConfirmed: true },
+    }));
+
+    assert.match(document.body.textContent, /Finding a settlement/i);
+    assert.match(document.body.textContent, /at least three characters/i);
+    assert.match(document.body.textContent, /loaded on demand/i);
+    assert.match(document.body.textContent, /no public history, alerts, notifications, or Discord services/i);
   } finally {
     if (view) await view.unmount();
     await vite.close();

@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.63.0-beta.11] - 2026-08-26
+
+### Added
+
+- Added a first-visit welcome that explains Claim Monitor and guides visitors through finding and opening a BitCraft settlement.
+
+### Changed
+
+- Improved public settlement search guidance and Help content, while returning visitors now see their recent settlements without repeated onboarding.
+
 ## [0.63.0-beta.10] - 2026-08-26
 
 ### Added
