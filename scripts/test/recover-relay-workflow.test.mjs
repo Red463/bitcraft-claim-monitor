@@ -17,5 +17,6 @@ test("recovery is manual, protected, pinned, and narrowly targets the stuck Rela
   assert.match(workflow, /for directory in map-overview map-tiles map-road-tiles/);
   assert.match(workflow, /sudo mv \/var\/lib\/bitcraft-claim-monitor-relay\/\\\$directory \\\$quarantine\//);
   assert.match(workflow, /127\.0\.0\.1:19430\/api\/local\/health/);
+  assert.match(workflow, /--header 'Host: app\.timbersteeltrade\.com'/);
   assert.doesNotMatch(workflow, /journalctl|cat \/etc|printenv/);
 });

@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.63.0-beta.2] - 2026-08-26
+
+### Fixed
+
+- Fixed internal deployment and recovery health probes after introducing the exact production host boundary.
+
 ## [0.63.0-beta.1] - 2026-08-26
 
 ### Added

@@ -19,6 +19,7 @@ test("Relay updater has only isolated defaults", () => {
     /WEB_SERVICE="\$\{WEB_SERVICE:-bitcraft-claim-monitor-relay\.service\}"/,
     /WORKER_SERVICE="\$\{WORKER_SERVICE:-bitcraft-claim-monitor-relay-worker\.service\}"/,
     /HEALTH_URL="\$\{HEALTH_URL:-http:\/\/127\.0\.0\.1:19430\/api\/local\/health\}"/,
+    /HEALTH_HOST="\$\{HEALTH_HOST:-app\.timbersteeltrade\.com\}"/,
     /PUBLIC_URL="\$\{PUBLIC_URL:-https:\/\/relay\.timbersteeltrade\.com\}"/,
     /LOG_DIR="\$\{LOG_DIR:-\/var\/log\/bitcraft-claim-monitor-relay\}"/,
     /LOG_FILE="\$\{LOG_FILE:-\}"/,
@@ -159,7 +160,8 @@ test("every runtime-user Git boundary uses the isolated Relay HOME", () => {
 test("Relay updater waits for service and release health", () => {
   assert.match(script, /wait_for_service\(\)/);
   assert.match(script, /wait_for_health\(\)/);
-  assert.match(script, /curl -fsS --connect-timeout 1 --max-time 10 "\$HEALTH_URL"/);
+  assert.match(script, /curl -fsS --connect-timeout 1 --max-time 10 --header "Host: \$HEALTH_HOST" "\$HEALTH_URL"/);
+  assert.match(script, /curl -v --max-time 5 --header "Host: \$HEALTH_HOST" "\$HEALTH_URL"/);
   assert.match(script, /sleep 2/);
   assert.match(script, /Waiting for web health/);
 });

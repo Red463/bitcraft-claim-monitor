@@ -41,6 +41,31 @@ test("host profiles use exact hosts and trust forwarded hosts only from loopback
   }, { isProduction: true })?.id, "public");
 });
 
+test("production permits only an explicit direct loopback health probe exception", () => {
+  assert.equal(hostProfiles.resolveHostProfile({
+    host: "127.0.0.1:19430",
+    remoteAddress: "127.0.0.1",
+  }, {
+    isProduction: true,
+    allowDirectLoopbackHealthHost: true,
+  })?.id, "timbersteel");
+
+  for (const request of [
+    { host: "127.0.0.1:19430", remoteAddress: "203.0.113.9" },
+    { host: "127.0.0.1:19430", forwardedHost: "unknown.example", remoteAddress: "127.0.0.1" },
+    { host: "127.0.0.1:19430", forwardedHost: "invalid host", remoteAddress: "127.0.0.1" },
+  ]) {
+    assert.equal(hostProfiles.resolveHostProfile(request, {
+      isProduction: true,
+      allowDirectLoopbackHealthHost: true,
+    }), null);
+  }
+  assert.equal(hostProfiles.resolveHostProfile({
+    host: "127.0.0.1:19430",
+    remoteAddress: "127.0.0.1",
+  }, { isProduction: true }), null);
+});
+
 test("public host router handles every non-public API path before downstream routing", () => {
   assert.ok(hostRouter, "host profile router must exist");
   const sent = [];
