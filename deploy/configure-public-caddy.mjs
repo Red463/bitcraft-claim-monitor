@@ -254,7 +254,7 @@ export function acceptedPublicCaddyState({ timbersteel, publicProfile, www }) {
   return timbersteel.status === 200
     && timbersteel.body?.ok === true
     && publicFeaturesDisabled(publicProfile)
-    && www.status === 308
+    && www.status === 301
     && typeof www.location === "string"
     && www.location.startsWith(`https://${PUBLIC_APEX}/`);
 }
