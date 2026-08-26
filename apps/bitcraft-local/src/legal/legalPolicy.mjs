@@ -414,6 +414,7 @@ const claimMonitorProviders = Object.freeze([
 
 const claimMonitorRetention = Object.freeze([
   { key: "account", label: "Discord account profile, settings, and legal acceptance", rule: "Until account deletion" },
+  { key: "inactive-account", label: "Inactive public accounts", rule: "Purge-eligible after 24 months without login only when there is no owned plan and no accepted editor membership; viewer-only memberships do not exempt the account and are removed during purge", months: 24 },
   { key: "sessions", label: "Signed-in sessions", rule: "30 days", days: 30 },
   { key: "reauthentication", label: "Recent deletion reauthentication", rule: "10 minutes", days: 0 },
   { key: "plans", label: "Saved plans and their memberships", rule: "Until the owner deletes or transfers them, or deletes the account after choosing each plan's disposition" },

@@ -9,6 +9,7 @@ import {
   reviewPublicDeletion,
   startPublicDiscordLogin,
   startPublicPrivacyReauthentication,
+  deletePublicAccountProfile,
 } from "../src/public/accountApi.ts";
 
 function fetchRecorder(responseBody = { ok: true }) {
@@ -42,6 +43,7 @@ test("public account mutations carry exact JSON bodies and the public session CS
   await acceptPublicLegal("public-csrf", fetch.fetchImpl);
   await startPublicPrivacyReauthentication("public-csrf", fetch.fetchImpl);
   await reviewPublicDeletion("public-csrf", fetch.fetchImpl);
+  await deletePublicAccountProfile([{ planId: "plan-1", action: "delete" }], "public-csrf", fetch.fetchImpl);
   await logoutPublicSession("public-csrf", fetch.fetchImpl);
 
   assert.deepEqual(fetch.calls.map(([input]) => input), [
@@ -49,12 +51,14 @@ test("public account mutations carry exact JSON bodies and the public session CS
     "/api/public/auth/legal/accept",
     "/api/public/auth/privacy/reauth/start",
     "/api/public/auth/privacy/deletion-preflight",
+    "/api/public/auth/privacy/delete",
     "/api/public/auth/logout",
   ]);
   assert.deepEqual(JSON.parse(fetch.calls[0][1].body), { acceptedTerms: true, ageConfirmed: true, returnTo: "/settings" });
   for (const [, init] of fetch.calls.slice(1)) assert.equal(init.headers["x-csrf-token"], "public-csrf");
   assert.equal(JSON.parse(fetch.calls[1][1].body).acceptedTerms, true);
   assert.equal(JSON.parse(fetch.calls[1][1].body).ageConfirmed, true);
+  assert.deepEqual(JSON.parse(fetch.calls[4][1].body), { dispositions: [{ planId: "plan-1", action: "delete" }] });
 });
 
 test("public account client surfaces sanitized API errors", async () => {

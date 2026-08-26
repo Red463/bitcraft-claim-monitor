@@ -18,6 +18,8 @@ import { createPublicAuthRouter } from "./src/server/public/authRouter.mjs";
 import { createPublicIdentityRepository } from "./src/server/public/identity.mjs";
 import { createPublicPlanRouter } from "./src/server/public/planRouter.mjs";
 import { createPublicPlanComputationService, createPublicPlanRepository } from "./src/server/public/publicPlans.mjs";
+import { createPublicModerationRepository } from "./src/server/public/moderation.mjs";
+import { createPublicAdminRouter } from "./src/server/public/adminRouter.mjs";
 import { mimeType, routeGroup, securityHeaders, shouldFallbackToFrontend, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
 import { createGameIconFallbackService, serveGameIconRequest } from "./src/server/gameIconFallback.mjs";
@@ -290,9 +292,12 @@ import {
   unlinkUserCharacter,
 } from "./src/server/userPrivacy.mjs";
 import { deleteUserAccount } from "./src/server/accountDeletion.mjs";
+import { deletePublicAccount, publicAccountDeletionReview } from "./src/server/public/accountDeletion.mjs";
 import {
+  coordinatePublicPrivacyDeletion,
   coordinatePrivacyDeletion,
   readDeletionLedger,
+  replayPublicPrivacyDeletions,
   replayPrivacyDeletions,
 } from "./src/server/privacyDeletionLedger.mjs";
 import { runPrivacyRetention } from "./src/server/privacyRetention.mjs";
@@ -1234,6 +1239,18 @@ async function runPrivacyRetentionJob() {
         userId: account.id,
         discordId: account.discordId,
         deletionKey: privacyDeletionKey(),
+        randomUUID: () => operationId,
+      }),
+    }),
+    deleteInactivePublicAccount: async (account) => coordinatePublicPrivacyDeletion({
+      ledgerPath: privacyLedgerPath,
+      key: privacyLedgerKey(),
+      discordId: account.discordId,
+      deleteAccount: (operationId) => deletePublicAccount(db, {
+        userId: account.id,
+        discordId: account.discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions: [],
         randomUUID: () => operationId,
       }),
     }),
@@ -7869,6 +7886,21 @@ const publicAuthRequest = createPublicAuthRouter({
       && configuredPublicFeatures.publicCollaborationEnabled
       && configuredPublicFeatures.publicLegalConfigurationConfirmed,
   },
+  deletion: {
+    review: (userId) => publicAccountDeletionReview(db, userId),
+    deleteAccount: ({ userId, discordId, dispositions }) => coordinatePublicPrivacyDeletion({
+      ledgerPath: privacyLedgerPath,
+      key: privacyLedgerKey(),
+      discordId,
+      deleteAccount: (operationId) => deletePublicAccount(db, {
+        userId,
+        discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions,
+        randomUUID: () => operationId,
+      }),
+    }),
+  },
 });
 const configuredPublicPlanTokenHmacKey = String(process.env.PUBLIC_PLAN_TOKEN_HMAC_KEY ?? "").trim();
 const publicPlanRepository = configuredPublicFeatures.publicCollaborationEnabled && configuredPublicPlanTokenHmacKey
@@ -7885,6 +7917,40 @@ const publicPlanRequest = publicPlanRepository && publicPlanComputation
       computation: publicPlanComputation,
     })
   : null;
+const publicModerationRepository = createPublicModerationRepository(db);
+const publicAdminRequest = createPublicAdminRouter({
+  repository: publicModerationRepository,
+  privacy: {
+    review: (userId) => publicAccountDeletionReview(db, userId),
+    deleteAccount: ({ userId, discordId, dispositions }) => coordinatePublicPrivacyDeletion({
+      ledgerPath: privacyLedgerPath,
+      key: privacyLedgerKey(),
+      discordId,
+      deleteAccount: (operationId) => deletePublicAccount(db, {
+        userId,
+        discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions,
+        randomUUID: () => operationId,
+      }),
+    }),
+  },
+  hasPermission: adminHasPermission,
+  audit,
+  healthSnapshot: () => ({
+    cache: publicDataService.health(),
+    gate: {
+      profileEnabled: configuredPublicFeatures.publicProfileEnabled,
+      collaborationEnabled: configuredPublicFeatures.publicCollaborationEnabled,
+      legalConfigurationConfirmed: configuredPublicFeatures.publicLegalConfigurationConfirmed,
+    },
+    oauth: { enabled: resolvedPublicOAuthConfig.enabled },
+    rateTotals: {
+      limiter: rateLimit.stats(),
+      routes: routePerformanceTelemetry.snapshot().rateLimits,
+    },
+  }),
+});
 async function publicApiRequest(request) {
   const isLegalRequest = request.url.pathname === "/api/public/legal";
   const isAuthRequest = request.url.pathname.startsWith("/api/public/auth/");
@@ -9087,6 +9153,7 @@ const server = createServer(async (req, res) => {
       if (!requireAdminMutation(req, res, user)) return;
       const requiredPermission = adminPermissionFor(req.method, url.pathname);
       if (!requireAdminPermission(req, res, user, requiredPermission)) return;
+      if (await publicAdminRequest({ req, res, user, method: req.method, url })) return;
       if (req.method === "GET" && url.pathname === "/api/local/admin/status") return send(res, 200, databaseStatus());
       if (req.method === "GET" && url.pathname === "/api/local/admin/empire-membership") {
         return send(res, 200, empireMembershipAdminPayload());
@@ -10887,11 +10954,35 @@ function replayCurrentPrivacyDeletionLedger() {
   });
 }
 
+function replayCurrentPublicPrivacyDeletionLedger() {
+  const key = privacyLedgerKey();
+  const keys = privacyLedgerVerificationKeys();
+  const records = readDeletionLedger(privacyLedgerPath, keys);
+  const accounts = db.prepare("SELECT id, discord_id AS discordId FROM public_user_accounts").all();
+  return replayPublicPrivacyDeletions({
+    records,
+    accounts,
+    key,
+    keys,
+    deleteAccount: (account) => {
+      const dispositions = publicAccountDeletionReview(db, account.id).ownedPlans
+        .map((plan) => ({ planId: plan.id, action: "delete" }));
+      return deletePublicAccount(db, {
+        userId: account.id,
+        discordId: account.discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions,
+      });
+    },
+  });
+}
+
 assertCanonicalDiscordGatewayReady(deploymentRuntime, {
   settings: getDiscordSettingsRaw(),
   webSocketAvailable: typeof WebSocket === "function",
 });
 replayCurrentPrivacyDeletionLedger();
+replayCurrentPublicPrivacyDeletionLedger();
 await relayClaimScopeFence.reconcile(currentClaimId());
 
 if (processRoleConfig.serveHttp) {

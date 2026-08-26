@@ -20,6 +20,11 @@ test("Claim Monitor publishes a distinct accurate policy under the same controll
     assert.match(text, new RegExp(phrase, "i"));
   }
   assert.doesNotMatch(text, /continuous monitoring|Discord bot|Discord services|Featurebase|analytics events/i);
+  const inactivity = policy.retention.find((rule) => rule.key === "inactive-account");
+  assert.match(inactivity.rule, /24 months/i);
+  assert.match(inactivity.rule, /owned plan/i);
+  assert.match(inactivity.rule, /accepted editor/i);
+  assert.match(inactivity.rule, /viewer-only/i);
 });
 
 test("Claim Monitor document digests are distinct from Timbersteel documents", async () => {

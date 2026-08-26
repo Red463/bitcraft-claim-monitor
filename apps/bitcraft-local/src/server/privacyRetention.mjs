@@ -52,6 +52,7 @@ export async function runPrivacyRetention(db, {
   now = new Date(),
   dryRun = false,
   deleteInactiveAccount = async () => undefined,
+  deleteInactivePublicAccount = async () => undefined,
   sendInactiveWarning = async () => undefined,
 } = {}) {
   const plan = privacyRetentionPlan(now);
@@ -75,8 +76,25 @@ export async function runPrivacyRetention(db, {
   `).all(plan.inactiveWarn);
   const toDelete = inactive.filter((account) => String(account.inactiveSince) <= plan.inactiveDelete);
   const toWarn = inactive.filter((account) => String(account.inactiveSince) > plan.inactiveDelete && !account.warningSentAt);
+  const inactivePublic = db.prepare(`
+    SELECT account.id, account.discord_id AS discordId,
+      account.discord_username AS username,
+      COALESCE(account.last_login_at, account.created_at) AS inactiveSince
+    FROM public_user_accounts AS account
+    WHERE COALESCE(account.last_login_at, account.created_at) <= ?
+      AND NOT EXISTS (
+        SELECT 1 FROM public_craft_plans AS owned
+        WHERE owned.owner_user_id = account.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM public_craft_plan_members AS member
+        WHERE member.user_id = account.id AND member.role = 'editor'
+      )
+    ORDER BY account.id
+  `).all(plan.inactiveDelete);
   counts.inactive_accounts = toDelete.length;
   counts.inactivity_warnings = toWarn.length;
+  counts.public_inactive_accounts = inactivePublic.length;
   if (dryRun) return { dryRun: true, plan, counts };
 
   counts.user_sessions = deleteCount(db, "DELETE FROM user_sessions WHERE expires_at < ?", plan.now);
@@ -117,5 +135,14 @@ export async function runPrivacyRetention(db, {
       deletions.push({ userId: account.id, deleted: false, error: error instanceof Error ? error.message : String(error) });
     }
   }
-  return { dryRun: false, plan, counts, warnings, deletions };
+  const publicDeletions = [];
+  for (const account of inactivePublic) {
+    try {
+      await deleteInactivePublicAccount(account);
+      publicDeletions.push({ userId: account.id, deleted: true });
+    } catch (error) {
+      publicDeletions.push({ userId: account.id, deleted: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { dryRun: false, plan, counts, warnings, deletions, publicDeletions };
 }

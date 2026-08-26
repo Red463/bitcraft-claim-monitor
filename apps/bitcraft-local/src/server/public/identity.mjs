@@ -54,7 +54,7 @@ export function createPublicIdentityRepository(db) {
     SELECT account.*
     FROM public_user_sessions AS session
     JOIN public_user_accounts AS account ON account.id = session.user_id
-    WHERE session.token_hash = ? AND session.expires_at > ?
+    WHERE session.token_hash = ? AND session.expires_at > ? AND account.status = 'active'
   `);
   const currentLegalAcceptance = db.prepare(`
     SELECT * FROM public_user_legal_acceptances

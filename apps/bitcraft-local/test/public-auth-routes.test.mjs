@@ -8,6 +8,7 @@ import { legalPolicyDigests } from "../src/server/legalPolicyDigest.mjs";
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import { createPublicAuthRouter } from "../src/server/public/authRouter.mjs";
 import { createPublicIdentityRepository } from "../src/server/public/identity.mjs";
+import { deletePublicAccount, publicAccountDeletionReview } from "../src/server/public/accountDeletion.mjs";
 import { sessionTokenHash } from "../src/server/serverSessions.mjs";
 
 function recorder() {
@@ -27,7 +28,7 @@ function request({ cookie = "", origin = "https://claim-monitor.com", csrf = "",
   return { headers: { cookie, host: "claim-monitor.com", ...(origin === null ? {} : { origin }), ...(csrf ? { "x-csrf-token": csrf } : {}) }, body };
 }
 
-function fixture({ fetchImpl } = {}) {
+function fixture({ fetchImpl, deletion } = {}) {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON");
   applySchemaBootstrap(db);
@@ -51,6 +52,7 @@ function fixture({ fetchImpl } = {}) {
     now: () => new Date("2026-08-25T10:00:00.000Z"),
     randomBytes: (size) => Buffer.alloc(size, randomIndex++),
     readRequestJson: async (req) => req.body ?? {},
+    deletion,
   });
   return { db, repository, router, policy, snapshot };
 }
@@ -255,6 +257,59 @@ test("public deletion preflight requires same-account recent reauthentication an
   });
   assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM public_user_accounts").get().count, 1);
   assert.equal(await f.router({ req: request({ cookie: login.sessionCookie, csrf: csrfToken }), method: "DELETE", url: new URL("https://claim-monitor.com/api/public/auth/privacy/account"), res: recorder() }), false);
+  f.db.close();
+});
+
+test("public deletion preflight lists owned dispositions and deletion clears the public session only", async () => {
+  let dbRef;
+  const deletion = {
+    review: (userId) => publicAccountDeletionReview(dbRef, userId),
+    deleteAccount: ({ userId, discordId, dispositions }) => deletePublicAccount(dbRef, {
+      userId,
+      discordId,
+      dispositions,
+      deletionKey: "public-deletion-key",
+      now: () => new Date("2026-08-25T10:00:00.000Z"),
+      randomUUID: () => "public-delete-receipt",
+    }),
+  };
+  const discord = discordFetch("444555666777888999");
+  const f = fixture({ fetchImpl: discord.fetchImpl, deletion });
+  dbRef = f.db;
+  const login = await oauthLogin(f, "444555666777888999");
+  const owner = f.db.prepare("SELECT * FROM public_user_accounts WHERE discord_id = '444555666777888999'").get();
+  const editor = f.repository.upsertAccount({ discordId: "555666777888999000", username: "Editor" }, "2026-08-25T09:00:00.000Z");
+  f.db.prepare(`
+    INSERT INTO public_craft_plans (id, owner_user_id, claim_id, title, document_json, status, document_revision, access_revision, created_at, updated_at)
+    VALUES ('plan-delete-flow', ?, '42', 'Delete flow', '{"schemaVersion":1,"targets":[],"routeOverrides":{},"multipliers":{},"sectionOverrides":{},"rowNameOverrides":{}}', 'active', 1, 1, '2026-08-25T09:00:00.000Z', '2026-08-25T09:00:00.000Z')
+  `).run(owner.id);
+  f.db.prepare("INSERT INTO public_craft_plan_members (plan_id, user_id, role, created_at, updated_at) VALUES ('plan-delete-flow', ?, 'editor', '2026-08-25T09:00:00.000Z', '2026-08-25T09:00:00.000Z')").run(editor.id);
+  f.db.prepare("INSERT INTO user_accounts (discord_id, discord_username, character_status, settings_json, created_at) VALUES ('444555666777888999', 'Timbersteel', 'unlinked', '{}', '2026-01-01T00:00:00.000Z')").run();
+  const me = await call(f.router, "GET", "/api/public/auth/session", request({ cookie: login.sessionCookie, origin: "" }));
+  const csrfToken = json(me.res).csrfToken;
+  const start = await call(f.router, "POST", "/api/public/auth/privacy/reauth/start", request({ cookie: login.sessionCookie, csrf: csrfToken }));
+  const stateCookie = cookiePair(start.res, "__Host-cm_oauth_state");
+  const state = new URL(json(start.res).authorizeUrl).searchParams.get("state");
+  const callback = await call(f.router, "GET", `/api/public/auth/discord/callback?code=reauth-code&state=${encodeURIComponent(state)}`, request({ cookie: `${login.sessionCookie}; ${stateCookie}`, origin: "" }));
+  const proofCookie = cookiePair(callback.res, "__Host-cm_privacy_reauth");
+  const deletionCookie = `${login.sessionCookie}; ${proofCookie}`;
+
+  const preflight = await call(f.router, "POST", "/api/public/auth/privacy/deletion-preflight", request({ cookie: deletionCookie, csrf: csrfToken }));
+  assert.equal(preflight.res.status, 200);
+  assert.equal(json(preflight.res).ownedPlans[0].id, "plan-delete-flow");
+  assert.equal(json(preflight.res).ownedPlans[0].acceptedEditors[0].userId, editor.id);
+  assert.equal(json(preflight.res).canDelete, false);
+
+  const removed = await call(f.router, "POST", "/api/public/auth/privacy/delete", request({
+    cookie: deletionCookie,
+    csrf: csrfToken,
+    body: { dispositions: [{ planId: "plan-delete-flow", action: "transfer", userId: editor.id }] },
+  }));
+  assert.equal(removed.res.status, 200);
+  assert.equal(json(removed.res).receiptId, "public-delete-receipt");
+  assert.match(cookiePair(removed.res, "__Host-cm_user_session"), /^__Host-cm_user_session=$/);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM public_user_accounts WHERE id = ?").get(owner.id).count, 0);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM user_accounts WHERE discord_id = '444555666777888999'").get().count, 1);
   f.db.close();
 });
 

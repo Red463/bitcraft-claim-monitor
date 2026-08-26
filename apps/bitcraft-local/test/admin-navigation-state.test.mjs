@@ -27,6 +27,17 @@ test("admin navigation removes configuration state outside Configuration", () =>
   );
 });
 
+test("admin navigation accepts the focused Public service console", () => {
+  assert.deepEqual(parseAdminLocation("?page=admin&admin=public-service"), {
+    tab: "public-service",
+    configurationSection: "general",
+  });
+  assert.equal(
+    adminSearchWithTab("?page=admin&config=privacy", "public-service"),
+    "?page=admin&admin=public-service",
+  );
+});
+
 test("bot navigation validates and serializes the selected section", () => {
   assert.equal(parseBotSectionLocation("?section=community"), "community");
   assert.equal(parseBotSectionLocation("?section=unknown"), "setup");

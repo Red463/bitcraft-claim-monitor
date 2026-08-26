@@ -23,6 +23,9 @@ test("public account settings exposes sign-in, legal acceptance, export, logout,
     "Sign out",
     "Reauthenticate with Discord",
     "Review account deletion",
+    "Transfer to accepted editor",
+    "Permanently delete plan",
+    "Delete Claim Monitor account",
   ]) assert.match(account, new RegExp(label));
   assert.match(account, /privacy@claim-monitor\.com/);
   assert.doesNotMatch(account, /api\/local|Featurebase|character link|admin/i);

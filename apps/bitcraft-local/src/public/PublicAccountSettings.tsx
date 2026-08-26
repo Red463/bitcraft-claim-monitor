@@ -3,6 +3,7 @@ import { Download, LogIn, LogOut, ShieldCheck, UserRound } from "lucide-react";
 
 import {
   acceptPublicLegal,
+  deletePublicAccountProfile,
   loadPublicLegal,
   loadPublicSession,
   logoutPublicSession,
@@ -13,6 +14,8 @@ import {
   type PublicSession,
 } from "./accountApi";
 
+type DeletionReview = Awaited<ReturnType<typeof reviewPublicDeletion>>;
+
 export function PublicAccountSettings({ page }: { page: "account" | "settings" }) {
   const [session, setSession] = React.useState<PublicSession | null>(null);
   const [policy, setPolicy] = React.useState<PublicLegalPolicy | null>(null);
@@ -21,6 +24,9 @@ export function PublicAccountSettings({ page }: { page: "account" | "settings" }
   const [message, setMessage] = React.useState("");
   const [acceptedTerms, setAcceptedTerms] = React.useState(false);
   const [ageConfirmed, setAgeConfirmed] = React.useState(false);
+  const [deletionReview, setDeletionReview] = React.useState<DeletionReview | null>(null);
+  const [dispositions, setDispositions] = React.useState<Record<string, string>>({});
+  const [deletionConfirmed, setDeletionConfirmed] = React.useState(false);
 
   React.useEffect(() => {
     let active = true;
@@ -51,6 +57,10 @@ export function PublicAccountSettings({ page }: { page: "account" | "settings" }
   }
 
   const csrfToken = session?.csrfToken ?? "";
+  const ownedPlans = deletionReview?.ownedPlans ?? [];
+  const deletionReady = Boolean(deletionReview)
+    && ownedPlans.every((plan) => Boolean(dispositions[plan.id]))
+    && deletionConfirmed;
   const title = page === "account" ? "Account" : "Settings";
   if (loading) return <section className="public-panel public-account-panel" role="status">Loading account settings…</section>;
 
@@ -88,8 +98,31 @@ export function PublicAccountSettings({ page }: { page: "account" | "settings" }
         <p>Download an export at any time. Account-deletion review requires a fresh sign-in with the same Discord account.</p>
         <div className="public-account-actions">
           <button className="toolbar-button" disabled={!csrfToken || busy === "reauth"} onClick={() => void perform("reauth", async () => { const response = await startPublicPrivacyReauthentication(csrfToken); window.location.assign(response.authorizeUrl); })}><ShieldCheck size={16} /> Reauthenticate with Discord</button>
-          <button className="toolbar-button danger" disabled={!csrfToken || busy === "delete"} onClick={() => void perform("delete", async () => { const result = await reviewPublicDeletion(csrfToken); if (result.planDispositionReviewRequired) setMessage("Recent sign-in confirmed. Final deletion will remain unavailable until owned plans can be reviewed safely."); })}>Review account deletion</button>
+          <button className="toolbar-button danger" disabled={!csrfToken || busy === "delete-review"} onClick={() => void perform("delete-review", async () => { const result = await reviewPublicDeletion(csrfToken); setDeletionReview(result); setDispositions({}); setDeletionConfirmed(false); setMessage(result.planDispositionReviewRequired ? "Recent sign-in confirmed. Choose what happens to every owned plan." : "Recent sign-in confirmed. Review the permanent deletion below."); })}>Review account deletion</button>
         </div>
+        {deletionReview ? <div className="public-deletion-review">
+          <h3>Owned plan dispositions</h3>
+          {ownedPlans.length ? ownedPlans.map((plan) => <label key={plan.id}>
+            <span><strong>{plan.title}</strong> · settlement #{plan.claimId}</span>
+            <select aria-label={`Disposition for ${plan.title}`} value={dispositions[plan.id] ?? ""} onChange={(event) => setDispositions((current) => ({ ...current, [plan.id]: event.target.value }))}>
+              <option value="">Choose an action</option>
+              <option value="delete">Permanently delete plan</option>
+              {plan.acceptedEditors.map((editor) => <option key={editor.userId} value={`transfer:${editor.userId}`}>Transfer to accepted editor · {editor.globalName || editor.username || editor.userId}</option>)}
+            </select>
+          </label>) : <p>This account owns no plans.</p>}
+          <label className="public-check"><input type="checkbox" checked={deletionConfirmed} onChange={(event) => setDeletionConfirmed(event.target.checked)} /> I understand this permanently deletes the public Claim Monitor account and any plans marked for deletion.</label>
+          <button className="toolbar-button danger" disabled={!deletionReady || busy === "delete-account"} onClick={() => void perform("delete-account", async () => {
+            const selected = ownedPlans.map((plan) => {
+              const value = dispositions[plan.id];
+              if (value === "delete") return { planId: plan.id, action: "delete" as const };
+              return { planId: plan.id, action: "transfer" as const, userId: Number(value.split(":")[1]) };
+            });
+            const receipt = await deletePublicAccountProfile(selected, csrfToken);
+            setDeletionReview(null);
+            setSession({ ...session, user: null, csrfToken: null });
+            setMessage(`Claim Monitor account deleted. Receipt ${receipt.receiptId}.`);
+          })}>Delete Claim Monitor account</button>
+        </div> : null}
         <p>Questions or rights requests: <a href="mailto:privacy@claim-monitor.com">privacy@claim-monitor.com</a>.</p>
       </div>
     </>}

@@ -66,6 +66,7 @@ export function createPublicAuthRouter({
   fetchImpl = fetch,
   now = () => new Date(),
   randomBytes = cryptoRandomBytes,
+  deletion = null,
   readRequestJson = (req) => readJson(req, BODY_LIMITS.auth),
   send = sendJson,
 } = {}) {
@@ -138,6 +139,18 @@ export function createPublicAuthRouter({
       fetchImpl,
       now: () => now().getTime(),
     });
+  }
+
+  function hasRecentDeletionReauthentication(req, session) {
+    const proof = readPublicPrivacyReauthCookie(req, stateSecret, { now });
+    const stored = repository.sessionByToken(session.tokenHash, session.user.id);
+    return Boolean(
+      proof
+      && Number(proof.userId) === Number(session.user.id)
+      && String(proof.discordId) === String(session.user.discord_id)
+      && String(proof.sessionTokenHash) === session.tokenHash
+      && String(stored?.reauthenticated_at ?? "") === String(proof.reauthenticatedAt)
+    );
   }
 
   async function handleStart(req, res) {
@@ -331,27 +344,57 @@ export function createPublicAuthRouter({
     if (method === "POST" && pathname === "/api/public/auth/privacy/deletion-preflight") {
       const session = requireSession(req, res, { mutation: true, allowStaleLegal: true });
       if (!session) return true;
-      const proof = readPublicPrivacyReauthCookie(req, stateSecret, { now });
-      const stored = repository.sessionByToken(session.tokenHash, session.user.id);
-      if (
-        !proof
-        || Number(proof.userId) !== Number(session.user.id)
-        || String(proof.discordId) !== String(session.user.discord_id)
-        || String(proof.sessionTokenHash) !== session.tokenHash
-        || String(stored?.reauthenticated_at ?? "") !== String(proof.reauthenticatedAt)
-      ) {
+      if (!hasRecentDeletionReauthentication(req, session)) {
         send(res, 403, {
           error: "Reauthenticate with Discord before reviewing account deletion",
           code: "recent_discord_reauthentication_required",
         }, { "set-cookie": clearPublicPrivacyReauthCookie() });
         return true;
       }
+      const review = typeof deletion?.review === "function"
+        ? deletion.review(session.user.id)
+        : { ownedPlans: null, canDelete: false };
       send(res, 200, {
         ok: true,
         recentlyReauthenticated: true,
-        canDelete: false,
-        planDispositionReviewRequired: true,
+        canDelete: Boolean(review.canDelete),
+        planDispositionReviewRequired: !review.canDelete,
+        ...(Array.isArray(review.ownedPlans) ? { ownedPlans: review.ownedPlans } : {}),
       });
+      return true;
+    }
+    if (method === "POST" && pathname === "/api/public/auth/privacy/delete") {
+      const session = requireSession(req, res, { mutation: true, allowStaleLegal: true });
+      if (!session) return true;
+      if (!hasRecentDeletionReauthentication(req, session)) {
+        send(res, 403, {
+          error: "Reauthenticate with Discord before deleting the account",
+          code: "recent_discord_reauthentication_required",
+        }, { "set-cookie": clearPublicPrivacyReauthCookie() });
+        return true;
+      }
+      if (typeof deletion?.deleteAccount !== "function") {
+        send(res, 503, { error: "Public account deletion is temporarily unavailable", code: "public_account_deletion_unavailable" });
+        return true;
+      }
+      try {
+        const body = await readRequestJson(req);
+        const receipt = await deletion.deleteAccount({
+          userId: session.user.id,
+          discordId: String(session.user.discord_id),
+          dispositions: body.dispositions,
+        });
+        send(res, 200, receipt, {
+          "cache-control": "no-store",
+          "set-cookie": [clearPublicUserSessionCookie(), clearPublicOAuthStateCookie(), clearPublicPrivacyReauthCookie()],
+        });
+      } catch (error) {
+        const status = Number(error?.status);
+        send(res, Number.isInteger(status) && status >= 400 && status < 500 ? status : 503, {
+          error: Number.isInteger(status) && status >= 400 && status < 500 ? error.message : "Public account deletion is temporarily unavailable",
+          code: Number.isInteger(status) && status >= 400 && status < 500 ? error.code : "public_account_deletion_unavailable",
+        }, { "cache-control": "no-store" });
+      }
       return true;
     }
     return false;

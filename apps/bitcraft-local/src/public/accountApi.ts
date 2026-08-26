@@ -102,7 +102,26 @@ export function reviewPublicDeletion(csrfToken: string, fetchImpl: FetchLike = f
   return publicJson<{
     ok: true;
     recentlyReauthenticated: true;
-    canDelete: false;
-    planDispositionReviewRequired: true;
+    canDelete: boolean;
+    planDispositionReviewRequired: boolean;
+    ownedPlans?: Array<{
+      id: string;
+      title: string;
+      claimId: string;
+      status: string;
+      acceptedEditors: Array<{ userId: number; username: string; globalName: string }>;
+    }>;
   }>("/api/public/auth/privacy/deletion-preflight", mutation({}, csrfToken), fetchImpl);
+}
+
+export function deletePublicAccountProfile(
+  dispositions: Array<{ planId: string; action: "delete" | "transfer"; userId?: number }>,
+  csrfToken: string,
+  fetchImpl: FetchLike = fetch,
+) {
+  return publicJson<{ receiptId: string; deletedAt: string }>(
+    "/api/public/auth/privacy/delete",
+    mutation({ dispositions }, csrfToken),
+    fetchImpl,
+  );
 }

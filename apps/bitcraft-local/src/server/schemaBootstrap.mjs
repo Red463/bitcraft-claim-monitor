@@ -116,7 +116,9 @@ export const schemaBootstrapSql = `
     discord_avatar TEXT,
     settings_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
-    last_login_at TEXT
+    last_login_at TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+    suspended_at TEXT
   );
   CREATE TABLE IF NOT EXISTS public_user_sessions (
     token_hash TEXT PRIMARY KEY,
@@ -151,6 +153,8 @@ export const schemaBootstrapSql = `
     access_revision INTEGER NOT NULL DEFAULT 1 CHECK (access_revision >= 1),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    moderation_previous_status TEXT,
+    moderation_suspended_account_id INTEGER,
     FOREIGN KEY (owner_user_id) REFERENCES public_user_accounts(id) ON DELETE RESTRICT
   );
   CREATE TABLE IF NOT EXISTS public_craft_plan_members (
@@ -193,6 +197,7 @@ export const schemaBootstrapSql = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     plan_id TEXT NOT NULL,
     actor_user_id INTEGER,
+    actor_deleted_marker TEXT,
     event_type TEXT NOT NULL,
     payload_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
