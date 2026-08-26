@@ -60,6 +60,8 @@ import {
 } from "../bot/lazySections";
 import { TablePanel, ToolbarButton } from "../main/AppChrome";
 import { BotMobileSectionNav } from "../bot/BotMobileSectionNav";
+import { BotHealthSummary } from "../bot/BotHealthSummary";
+import { deriveBotHealth } from "../bot/botHealth";
 import { AdminPopupsSection } from "./AdminPopupsSection";
 import { AdminConfigurationNav } from "./AdminConfigurationNav";
 import { AdminAccessSection } from "./AdminAccessSection";
@@ -1090,6 +1092,19 @@ export function AdminPanel({
     { label: "Choose notification channels", done: Boolean(Object.values(draft.discord?.notificationChannels ?? {}).some(Boolean)), detail: "Route app, supply, craft and moderation messages." },
     { label: "Register slash commands", done: Boolean(status?.discord?.registeredCommandsAt), detail: status?.discord?.registeredCommandsAt ? `Last registered ${dateLabel(status.discord.registeredCommandsAt)}.` : "Use Tests & Commands after settings are saved." },
   ];
+  const botHealth = deriveBotHealth({
+    enabled: Boolean(draft.discord.enabled),
+    tokenConfigured: Boolean(draft.discord.botTokenConfigured),
+    gatewayConnected: Boolean(status?.discord?.gateway?.connected),
+    gatewayError: status?.discord?.gateway?.lastError ? String(status.discord.gateway.lastError) : null,
+    rulesEnabled: Object.values(draft.discord.notify).filter(Boolean).length,
+    lastDeliveryStatus: discordDelivery.status ? String(discordDelivery.status) : null,
+    lastDeliveryLabel: discordDeliveryLabel,
+    setupSteps: botWorkflowItems.map((item) => ({
+      ...item,
+      section: item.label === "Choose notification channels" ? "notifications" as const : item.label === "Register slash commands" ? "tests" as const : "setup" as const,
+    })),
+  });
 
 
   function renderDiscordToolResult(result: AnyRecord) {
@@ -1895,31 +1910,17 @@ export function AdminPanel({
       ) : null}
 
       {tab === "discord" ? (
-        <div className="admin-section bot-dashboard">
+        <div className="admin-section bot-dashboard bot-console-workspace">
           {botOnly ? (
             <>
-              <div className="bot-overview">
-                <div><MessageCircle size={19} /><strong>{draft.discord.enabled ? "Bot Enabled" : "Bot Disabled"}</strong><span>Slash commands and notification delivery</span></div>
-                <div><Bell size={19} /><strong>{Object.values(draft.discord.notify).filter(Boolean).length} Rules On</strong><span>Notification categories currently enabled</span></div>
-                <div><Command size={19} /><strong>{draft.discord.botTokenConfigured ? "Token Set" : "Token Missing"}</strong><span>{draft.discord.botTokenConfigured ? `Configured via ${draft.discord.botTokenSource ?? "server"}` : "Add a bot token to send messages"}</span></div>
-                <div><Activity size={19} /><strong>{discordDelivery.status ?? "No delivery"}</strong><span>{discordDeliveryLabel}</span></div>
-              </div>
-              <section className="bot-workflow-card" aria-label="Bot setup workflow">
-                {botWorkflowItems.map((item) => (
-                  <button key={item.label} type="button" onClick={() => item.label === "Connect bot" ? setBotSection("setup") : item.label === "Sync Discord server" ? setBotSection("setup") : item.label === "Choose notification channels" ? setBotSection("notifications") : setBotSection("tests")}>
-                    <span className={item.done ? "done" : ""}>{item.done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</span>
-                    <strong>{item.label}</strong>
-                    <small>{item.detail}</small>
-                  </button>
-                ))}
-              </section>
+              <BotHealthSummary health={botHealth} onSelectSection={setBotSection} />
             </>
           ) : null}
-          <div className={botOnly ? "bot-layout" : ""}>
+          <div className={botOnly ? "bot-layout bot-console-layout" : ""}>
           <React.Suspense fallback={<div className="loading">Loading Discord controls...</div>}>
           {botOnly ? (
             <>
-              <div className="bot-desktop-section-nav">
+              <div className="bot-desktop-section-nav bot-console-nav">
                 <BotSectionNav active={botSection} onSelect={setBotSection} />
               </div>
               <BotMobileSectionNav active={botSection} onSelect={setBotSection} />

@@ -433,6 +433,183 @@ test("regional market rotation does not evict an unapplied session before its ti
   await runtime.stop();
 });
 
+test("regional market runtime forwards its bounded all-region order capacity", async () => {
+  let startedConfig = null;
+  const runtime = new runtimeModule.RelayRegionalMarketRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    maxOrders: 20_000,
+    maxClosedListings: 25_000,
+    maxStalls: 5_000,
+    maxApplyRows: 50_000,
+    createSession: () => ({
+      start: async (config) => { startedConfig = config; },
+      stop: async () => {},
+      health: () => ({ connected: true, applied: true }),
+    }),
+    currentStateRepository: {
+      read: () => null,
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+    scheduleRotation: () => () => {},
+    poolOptions: { staggerMs: 0, sleep: async () => {}, scheduleSweep: () => () => {} },
+  });
+  await runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    primaryRegionId: "19",
+    activeRegionIds: ["19"],
+  });
+
+  assert.equal(startedConfig.maxOrders, 20_000);
+  assert.equal(startedConfig.maxClosedListings, 25_000);
+  assert.equal(startedConfig.maxStalls, 5_000);
+  assert.equal(startedConfig.maxApplyRows, 50_000);
+  await runtime.stop();
+});
+
+test("regional market warming replaces a disconnected regional session", async () => {
+  const starts = [];
+  const stops = [];
+  const sessionStates = new Map();
+  const runtime = new runtimeModule.RelayRegionalMarketRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: () => {
+      let regionId = "";
+      const state = { connected: true, applied: true, lastError: null };
+      return {
+        start: async (config) => {
+          regionId = config.regionId;
+          starts.push(regionId);
+          sessionStates.set(regionId, state);
+        },
+        stop: async () => { stops.push(regionId); },
+        health: () => ({ ...state }),
+      };
+    },
+    currentStateRepository: {
+      read: () => null,
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+    scheduleRotation: () => () => {},
+    poolOptions: {
+      maxSessions: 2,
+      staggerMs: 0,
+      sleep: async () => {},
+      scheduleSweep: () => () => {},
+    },
+  });
+  await runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    primaryRegionId: "19",
+    activeRegionIds: ["7", "19"],
+  });
+  await runtime.warmActiveRegions();
+  sessionStates.get("7").connected = false;
+
+  await runtime.warmActiveRegions();
+
+  assert.deepEqual(starts, ["19", "7", "7"]);
+  assert.deepEqual(stops, ["7"]);
+  assert.equal(runtime.health().pool.sessions.find((entry) => entry.regionId === "7").health.connected, true);
+  await runtime.stop();
+});
+
+test("regional market warming replaces a disconnected primary session", async () => {
+  const starts = [];
+  const sessionStates = new Map();
+  const runtime = new runtimeModule.RelayRegionalMarketRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: () => {
+      let regionId = "";
+      const state = { connected: true, applied: true, lastError: null };
+      return {
+        start: async (config) => {
+          regionId = config.regionId;
+          starts.push(regionId);
+          sessionStates.set(regionId, state);
+        },
+        stop: async () => {},
+        health: () => ({ ...state }),
+      };
+    },
+    currentStateRepository: {
+      read: () => null,
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+    scheduleRotation: () => () => {},
+    poolOptions: {
+      maxSessions: 1,
+      staggerMs: 0,
+      sleep: async () => {},
+      scheduleSweep: () => () => {},
+    },
+  });
+  await runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    primaryRegionId: "19",
+    activeRegionIds: ["19"],
+  });
+  sessionStates.get("19").connected = false;
+
+  await runtime.warmActiveRegions();
+
+  assert.deepEqual(starts, ["19", "19"]);
+  assert.equal(runtime.health().pool.sessions[0].health.connected, true);
+  await runtime.stop();
+});
+
+test("regional market warming refreshes healthy secondary leases before idle cleanup", async () => {
+  let nowMs = 1_785_412_800_000;
+  const runtime = new runtimeModule.RelayRegionalMarketRuntime({
+    manifest: { schemas: { regional: { fingerprint: "regional-v1", bindingsGenerated: true } } },
+    discoverTopology: async () => topology(),
+    createSession: () => ({
+      start: async () => {},
+      stop: async () => {},
+      health: () => ({ connected: true, applied: true }),
+    }),
+    currentStateRepository: {
+      read: () => null,
+      nextGeneration: () => 1,
+      commitGeneration: () => {},
+    },
+    now: () => nowMs,
+    scheduleRotation: () => () => {},
+    poolOptions: {
+      maxSessions: 3,
+      idleCloseMs: 300_000,
+      staggerMs: 0,
+      now: () => nowMs,
+      sleep: async () => {},
+      scheduleSweep: () => () => {},
+    },
+  });
+  await runtime.start({
+    relayBaseUrl: "https://relay.example",
+    claimId: "1369094286777412590",
+    primaryRegionId: "19",
+    activeRegionIds: ["7", "9", "19"],
+  });
+  await runtime.warmActiveRegions();
+  nowMs += 15_000;
+
+  await runtime.warmActiveRegions();
+
+  const secondaryLastUsed = runtime.health().pool.sessions
+    .filter((entry) => entry.regionId !== "19")
+    .map((entry) => entry.lastUsedAt);
+  assert.equal(secondaryLastUsed.includes(nowMs), true);
+  await runtime.stop();
+});
+
 test("regional market runtime does not publish a rejected region in a later generation", async () => {
   assert.ok(runtimeModule, "regional market runtime module must exist");
   const handlers = new Map();

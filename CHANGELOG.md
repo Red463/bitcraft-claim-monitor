@@ -9,6 +9,175 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.62.0-beta.20] - 2026-08-25
+
+### Fixed
+
+- Prevented valid closed market listings from producing false missing-settlement warnings when their settlement or seller had no active order.
+
+## [0.62.0-beta.19] - 2026-08-25
+
+### Changed
+
+- Tightened the Global Market command bar and aligned its region and freshness controls.
+- Restyled Global Market map actions to match the application control system.
+
+### Fixed
+
+- Kept the configured settlement name visible in the sidebar when navigating to pages that do not load settlement data.
+
+## [0.62.0-beta.18] - 2026-08-25
+
+### Fixed
+
+- Prevented the Global Market from warning that the catalog runtime is stopped when a healthy worker heartbeat is available.
+
+## [0.62.0-beta.17] - 2026-08-25
+
+### Fixed
+
+- Prevented the web process from reporting healthy worker-owned Market subscriptions as stale or disconnected.
+
+## [0.62.0-beta.16] - 2026-08-25
+
+### Changed
+
+- Expanded Global Market region selection to every Relay-ready region.
+- Replaced recoverable regional warm-up warnings with a compact neutral live-data status.
+
+### Fixed
+
+- Reconnected failed regional market sessions automatically and kept healthy regional feeds subscribed.
+- Prevented valid all-region market data from exceeding legacy order and listing safety limits.
+- Reserved Global Market error alerts for genuine source failures while retaining last-good data during recovery.
+
+## [0.62.0-beta.15] - 2026-08-25
+
+### Changed
+
+- Clarified Global Market pricing with in-game sell-order and buy-order terminology.
+- Renamed trading route columns to “Buy from” and “Sell to” so each step describes the action to take.
+
+## [0.62.0-beta.14] - 2026-08-25
+
+### Changed
+
+- Added semantic ask, bid, spread, and profit colours throughout the Global Market workspaces.
+- Consolidated degraded Global Market messaging into a compact expandable alert.
+
+### Fixed
+
+- Prevented healthy live regional market sessions from being reported as stale solely because their retained snapshot is old.
+- Prevented Global Market search suggestions from reopening after an item is selected and live data refreshes.
+
+## [0.62.0-beta.13] - 2026-08-25
+
+### Fixed
+
+- Removed the duplicate divider beneath the Dashboard settlement status.
+- Fixed overlapping titles and descriptions in the command search popup.
+
+## [0.62.0-beta.12] - 2026-08-25
+
+### Fixed
+
+- Fixed GitHub registration of the scheduled Relay schema-drift workflow so its manual and scheduled triggers run correctly.
+
+## [0.62.0-beta.11] - 2026-08-25
+
+### Added
+
+- Added scheduled Relay schema-drift detection that prepares a pinned, tested bindings update for review without auto-merging or auto-deploying it.
+
+### Fixed
+
+- Restored live global region data after validating the current Relay global schema against regenerated bindings.
+- Prevented deployments from publishing bindings that no longer match either live Relay schema.
+
+## [0.62.0-beta.10] - 2026-08-25
+
+### Changed
+
+- Consolidated Map freshness messaging into its health/status surface instead of repeating stale-catalog warnings inside the Resource Finder.
+
+### Fixed
+
+- Removed the continuous backing strip behind the Map filter controls and made Map tool windows fully opaque on desktop and mobile.
+
+## [0.62.0-beta.9] - 2026-08-25
+
+### Changed
+
+- Rebalanced the Obsidian Ledger palette to neutral graphite blacks, removing the unintended green-gold cast while retaining gold for deliberate accents.
+
+### Fixed
+
+- Migrated Market and Bot/Admin views using either earlier built-in palette to the corrected neutral default without replacing custom themes.
+
+## [0.62.0-beta.8] - 2026-08-25
+
+### Changed
+
+- Applied the Obsidian Ledger neutral palette, sharper panel geometry, and flatter operational surfaces across the maintained application and Bot/Admin views.
+- Replaced repeated page-title heroes with the contextual title in the application utility bar.
+- Simplified the application footer into a quieter provenance and support strip.
+
+### Fixed
+
+- Migrated browsers using the previous built-in theme to the new Obsidian default while preserving deliberately customised themes.
+- Fixed Global Market warnings overflowing its compact command panel and removed obsolete floating-tool styling.
+
+## [0.62.0-beta.7] - 2026-08-25
+
+### Fixed
+
+- Improved the Local Market command panel on phones so its section label and explainer remain easy to scan.
+
+## [0.62.0-beta.6] - 2026-08-24
+
+### Fixed
+
+- Fixed the shared desktop table minimum width overriding Global Market’s mobile regional-price cards.
+
+## [0.62.0-beta.5] - 2026-08-24
+
+### Fixed
+
+- Fixed live Global Market item details retaining a wide intrinsic grid track on phones after the outer workspace had collapsed.
+
+## [0.62.0-beta.4] - 2026-08-24
+
+### Fixed
+
+- Improved the selected Global Market item header on phones so navigation, identity, and actions no longer compete for one cramped row.
+
+## [0.62.0-beta.3] - 2026-08-24
+
+### Fixed
+
+- Fixed the selected Global Market instrument being clipped on phones when live order data widened its implicit grid track.
+
+## [0.62.0-beta.2] - 2026-08-24
+
+### Fixed
+
+- Fixed regional price comparisons showing “Unknown region” when live orders supplied a region ID without an optional region name.
+
+## [0.62.0-beta.1] - 2026-08-24
+
+### Added
+
+- Added contextual workspace modes and an anchored application utility bar across the maintained app.
+- Added a regional best-price comparison book to Global Market item browsing.
+- Added a health-and-exceptions summary to the Discord Bot and Admin console.
+
+### Changed
+
+- Refreshed the whole application with the Obsidian Ledger visual system for denser, clearer settlement operations.
+- Reworked Dashboard into a settlement command centre that prioritises current health and exceptions.
+- Reworked Global Market into a search-first split exchange with persistent catalogue context and a mobile drill-in flow.
+- Improved Map immersion, mobile regional-price scanning, responsive page density, and selected-item clarity.
+
 ## [0.61.1-beta.1] - 2026-08-23
 
 ### Fixed

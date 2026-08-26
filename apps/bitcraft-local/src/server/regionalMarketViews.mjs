@@ -138,6 +138,7 @@ export function regionalMarketStatus(snapshot, options = {}) {
       confidence: "unknown",
       ageMs: null,
       warnings: ["Relay regional market has not loaded yet."],
+      errors: [],
     };
   }
   const current = record(snapshot);
@@ -178,12 +179,14 @@ export function regionalMarketStatus(snapshot, options = {}) {
       : []),
     ...missingRegionIds.map((regionId) => `Relay regional market has not loaded region ${regionId} yet.`),
   ];
+  const errors = [];
   if (!loadedRegions.length) {
     return {
       freshness: "unavailable",
       confidence: current.confidence === "authoritative" ? "partial" : String(current.confidence ?? "unknown"),
       ageMs: null,
       warnings: [...new Set(warnings)],
+      errors,
     };
   }
 
@@ -193,37 +196,57 @@ export function regionalMarketStatus(snapshot, options = {}) {
   });
   const knownAges = ages.filter((age) => age != null);
   const ageMs = knownAges.length ? Math.max(...knownAges) : null;
+  const runtime = record(options.runtimeHealth);
+  const persistedSubscription = record(runtime.subscription);
+  const persistedConnectedAndApplied = runtime.persisted === true
+    && persistedSubscription.connected === true
+    && persistedSubscription.applied === true
+    && !persistedSubscription.lastError
+    && !runtime.lastError;
+  const pool = record(runtime.pool);
+  const sessions = Array.isArray(pool.sessions) ? pool.sessions.map(record) : [];
+  const sessionHealth = (regionId) => {
+    const session = sessions.find((entry) => String(entry.regionId ?? "") === regionId);
+    return session ? record(session.health) : null;
+  };
   let freshness = missingRegionIds.length ? "stale" : "fresh";
   for (const [index, region] of loadedRegions.entries()) {
     const regionId = String(region.regionId);
     const age = ages[index];
+    const health = sessionHealth(regionId);
+    const connectedAndApplied = persistedConnectedAndApplied || (
+      runtime.running === true
+      && health?.connected === true
+      && health.applied === true
+      && !health.lastError
+    );
     if (age == null) {
       freshness = "stale";
       warnings.push(`Relay regional market region ${regionId} has no valid receive time.`);
-    } else if (age > staleAfterMs) {
+    } else if (age > staleAfterMs && !connectedAndApplied) {
       freshness = "stale";
       warnings.push(`Relay regional market region ${regionId} is older than ${staleAfterMs}ms.`);
     }
   }
   if (current.lastError) {
     freshness = "stale";
-    warnings.push(String(current.lastError));
+    errors.push(String(current.lastError));
   }
-  const runtime = record(options.runtimeHealth);
   if (runtime.running === true) {
-    const pool = record(runtime.pool);
-    const sessions = Array.isArray(pool.sessions) ? pool.sessions.map(record) : [];
     for (const regionId of targetRegionIds) {
-      const session = sessions.find((entry) => String(entry.regionId ?? "") === regionId);
-      if (!session) continue;
-      const health = record(session.health);
+      const health = sessionHealth(regionId);
+      if (!health) continue;
       if (health.connected === false) {
         freshness = "stale";
         warnings.push(`Relay regional market region ${regionId} is disconnected.`);
       }
+      if (health.applied === false) {
+        freshness = "stale";
+        warnings.push(`Relay regional market region ${regionId} has not applied yet.`);
+      }
       if (health.lastError) {
         freshness = "stale";
-        warnings.push(String(health.lastError));
+        errors.push(String(health.lastError));
       }
     }
   }
@@ -234,6 +257,7 @@ export function regionalMarketStatus(snapshot, options = {}) {
       : String(current.confidence ?? "unknown"),
     ageMs,
     warnings: [...new Set(warnings)],
+    errors: [...new Set(errors)],
   };
 }
 
@@ -244,6 +268,7 @@ export function globalCatalogStatus(catalogSource, options = {}) {
       confidence: "unknown",
       ageMs: null,
       warnings: ["Relay global catalog has not loaded yet."],
+      errors: [],
     };
   }
   const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
@@ -254,24 +279,30 @@ export function globalCatalogStatus(catalogSource, options = {}) {
   const subscription = record(options.runtimeHealth?.subscription);
   const runtimeError = subscription.lastError ?? runtime.lastError;
   const runtimeExpected = options.runtimeExpected === true;
+  const runtimeAvailable = runtime.running === true || runtime.persisted === true;
+  const runtimeHealthy = runtimeAvailable
+    && subscription.connected === true
+    && subscription.applied === true
+    && !runtimeError;
   const runtimeUnhealthy = runtimeError
-    || (runtime.running === true && (
+    || (runtimeAvailable && (
       subscription.connected !== true
       || subscription.applied !== true
     ))
-    || (runtimeExpected && runtime.running !== true);
+    || (runtimeExpected && !runtimeAvailable);
   const catalogStale = Boolean(runtimeUnhealthy)
     || catalogAgeMs == null
-    || catalogAgeMs > staleAfterMs;
+    || (catalogAgeMs > staleAfterMs && !runtimeHealthy);
   const warnings = [];
+  const errors = [];
   if (catalogStale) {
     if (runtimeError) {
-      warnings.push(`Relay global catalog error: ${String(runtimeError)}`);
-    } else if ((runtime.running === true || runtimeExpected) && subscription.connected !== true) {
+      errors.push(`Relay global catalog error: ${String(runtimeError)}`);
+    } else if ((runtimeAvailable || runtimeExpected) && subscription.connected !== true) {
       warnings.push("Relay global catalog subscription is disconnected.");
-    } else if ((runtime.running === true || runtimeExpected) && subscription.applied !== true) {
+    } else if ((runtimeAvailable || runtimeExpected) && subscription.applied !== true) {
       warnings.push("Relay global catalog subscription has not applied yet.");
-    } else if (runtimeExpected && runtime.running !== true) {
+    } else if (runtimeExpected && !runtimeAvailable) {
       warnings.push("Relay global catalog runtime is not running.");
     } else if (catalogAgeMs == null) {
       warnings.push("Relay global catalog has no valid receive time.");
@@ -284,6 +315,7 @@ export function globalCatalogStatus(catalogSource, options = {}) {
     confidence: catalogStale ? "partial" : "authoritative",
     ageMs: catalogAgeMs,
     warnings: [...new Set(warnings)],
+    errors: [...new Set(errors)],
   };
 }
 
@@ -300,6 +332,10 @@ export function combinedMarketStatus(orderStatus, catalogSource, options = {}) {
     ...(Array.isArray(orders.warnings) ? orders.warnings.map(String) : []),
     ...catalog.warnings,
   ];
+  const errors = [
+    ...(Array.isArray(orders.errors) ? orders.errors.map(String) : []),
+    ...(Array.isArray(catalog.errors) ? catalog.errors.map(String) : []),
+  ];
   const orderAgeMs = Number.isFinite(Number(orders.ageMs)) ? Number(orders.ageMs) : null;
   const ageMs = [orderAgeMs, catalog.ageMs].filter((age) => age != null);
   return {
@@ -313,6 +349,7 @@ export function combinedMarketStatus(orderStatus, catalogSource, options = {}) {
       : "authoritative",
     ageMs: ageMs.length ? Math.max(...ageMs) : null,
     warnings: [...new Set(warnings)],
+    errors: [...new Set(errors)],
   };
 }
 

@@ -2,7 +2,7 @@
 .toast {
   pointer-events: auto;
   border: 1px solid rgba(108,123,145,.28);
-  border-radius: 9px;
+  border-radius: var(--radius-panel);
   background:
     radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--active-bg) 22%, transparent), transparent 40%),
     linear-gradient(180deg, rgba(11,16,22,.98), rgba(5,8,13,.99));
@@ -19,7 +19,7 @@
 .toast-item-icon {
   width: 38px;
   height: 38px;
-  border-radius: 9px;
+  border-radius: var(--radius-panel);
   display: grid;
   place-items: center;
   color: var(--active-color);
@@ -29,19 +29,17 @@
 }
 .toast.production .toast-icon { color: var(--good); background: rgba(99,235,165,.1); border-color: rgba(99,235,165,.28); }
 .toast-item-icon.tier-framed { grid-template-columns: 1fr; gap: 0; color: var(--tier-text); background: var(--tier-bg); border-color: var(--tier-border); box-shadow: 0 0 0 2px var(--tier-bg), inset 0 1px 0 rgba(255,255,255,.08); }
-.toast-item-icon .item-thumb { width: 34px; height: 34px; border: 0; border-radius: 7px; background: transparent; box-shadow: none; }
+.toast-item-icon .item-thumb { width: 34px; height: 34px; border: 0; border-radius: var(--radius-control); background: transparent; box-shadow: none; }
 .toast-item-icon .item-thumb img { padding: 2px; background: transparent; }
 .toast strong { display: block; color: #fff; font-size: 13px; font-weight: 800; margin-bottom: 4px; }
 .toast p { margin: 0; color: #aab5c4; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .toast-event-time { display: block; margin-top: 2px; color: #7f8b9d; font-size: 10.5px; line-height: 1.25; }
-.toast button { width: 27px; height: 27px; border: 1px solid transparent; border-radius: 7px; color: #8793a4; background: transparent; display: grid; place-items: center; cursor: pointer; transition: color .16s ease, background .16s ease, border-color .16s ease; }
+.toast button { width: 27px; height: 27px; border: 1px solid transparent; border-radius: var(--radius-control); color: #8793a4; background: transparent; display: grid; place-items: center; cursor: pointer; transition: color .16s ease, background .16s ease, border-color .16s ease; }
 .toast button:hover { color: var(--active-color); background: var(--gold-dim); border-color: var(--active-border); }
-
-.floating-actions .notification-button b { position: absolute; top: 3px; right: 3px; min-width: 16px; height: 16px; border: 1px solid color-mix(in srgb, var(--card-bottom) 80%, #000); border-radius: 99px; padding: 0 4px; background: linear-gradient(180deg, color-mix(in srgb, var(--active-color) 92%, #fff), var(--active-color)); color: var(--card-bottom); font-size: 9px; font-weight: 800; line-height: 14px; text-align: center; box-shadow: 0 6px 14px color-mix(in srgb, var(--active-color) 22%, transparent); }
 
 .notification-sound-settings { gap: 12px; }
 .notification-sound-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr); gap: 12px; align-items: end; }
-.notification-volume-field > div { min-height: 39px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 10px; align-items: center; padding: 0 11px; }
+.notification-volume-field > div { min-height: 39px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel-2); display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 10px; align-items: center; padding: 0 11px; }
 .notification-volume-field input[type="range"] { --volume-percent: 55%; width: 100%; height: 18px; appearance: none; background: linear-gradient(90deg, var(--active-color) 0 var(--volume-percent), rgba(108,123,145,.42) var(--volume-percent) 100%); border-radius: 99px; cursor: pointer; }
 .notification-volume-field input[type="range"]::-webkit-slider-runnable-track { height: 7px; border-radius: 99px; background: transparent; }
 .notification-volume-field input[type="range"]::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; margin-top: -4.5px; border: 2px solid var(--active-color); border-radius: 50%; background: var(--active-color); box-shadow: 0 0 0 3px rgba(245,201,74,.14); }
@@ -50,7 +48,7 @@
 .notification-volume-field input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: 2px solid var(--active-color); border-radius: 50%; background: var(--active-color); box-shadow: 0 0 0 3px rgba(245,201,74,.14); }
 .notification-volume-field strong { color: var(--text); font-size: 12px; text-align: right; }
 .notification-sound-type-list { display: grid; gap: 8px; }
-.notification-sound-type-row { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); padding: 9px; display: grid; grid-template-columns: minmax(150px, 1fr) minmax(160px, 220px) 34px; gap: 10px; align-items: center; }
+.notification-sound-type-row { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel-2); padding: 9px; display: grid; grid-template-columns: minmax(150px, 1fr) minmax(160px, 220px) 34px; gap: 10px; align-items: center; }
 .notification-sound-type-row > div { display: grid; gap: 2px; min-width: 0; }
 .notification-sound-type-row strong { color: var(--text); font-size: 12px; }
 .notification-sound-type-row span { color: var(--muted); font-size: var(--font-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -60,11 +58,11 @@
 .notice-drawer { margin-left: auto; width: min(430px, 100vw); height: 100dvh; max-height: 100dvh; overflow: auto; border-left: 1px solid var(--border); background: radial-gradient(circle at top left, color-mix(in srgb, var(--active-bg) 22%, transparent), transparent 34%), linear-gradient(180deg, var(--card-top), var(--card-bottom)); padding: 20px; display: grid; align-content: start; gap: 16px; animation: drawer-enter .2s ease-out; box-shadow: -24px 0 70px rgba(0,0,0,.46); }
 .notice-drawer header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .notice-drawer h2 { display: flex; gap: 9px; align-items: center; color: var(--active-color); font-size: 24px; }
-.notice-drawer h2 svg { width: 34px; height: 34px; padding: 8px; border: 1px solid var(--active-border); border-radius: 9px; background: var(--gold-dim); }
-.notice-drawer header button { border: 1px solid var(--border); border-radius: 8px; width: 34px; height: 34px; display: grid; place-items: center; background: var(--panel-2); color: var(--muted); cursor: pointer; transition: border-color .16s ease, color .16s ease, background .16s ease; }
+.notice-drawer h2 svg { width: 34px; height: 34px; padding: 8px; border: 1px solid var(--active-border); border-radius: var(--radius-panel); background: var(--gold-dim); }
+.notice-drawer header button { border: 1px solid var(--border); border-radius: var(--radius-panel); width: 34px; height: 34px; display: grid; place-items: center; background: var(--panel-2); color: var(--muted); cursor: pointer; transition: border-color .16s ease, color .16s ease, background .16s ease; }
 .notice-drawer header button:hover { border-color: var(--hover-border); background: var(--gold-dim); color: var(--active-color); }
 .notice-list { display: grid; gap: 8px; }
-.notice-list button { position: relative; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(180deg, var(--card-top), var(--card-bottom)); color: var(--muted); min-height: 74px; padding: 11px; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 3px 10px; text-align: left; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.025); transition: border-color .16s ease, background .16s ease, transform .16s ease; }
+.notice-list button { position: relative; width: 100%; border: 1px solid var(--border); border-radius: var(--radius-panel); background: linear-gradient(180deg, var(--card-top), var(--card-bottom)); color: var(--muted); min-height: 74px; padding: 11px; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 3px 10px; text-align: left; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.025); transition: border-color .16s ease, background .16s ease, transform .16s ease; }
 .notice-list button.unread { border-color: var(--active-border); }
 .notice-list button.unread::before { content: ""; position: absolute; right: 9px; top: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--active-color); }
 .notice-list button:hover { border-color: var(--hover-border); background: linear-gradient(180deg, color-mix(in srgb, var(--card-top) 88%, var(--active-bg)), var(--card-bottom)); transform: translateX(-2px); }

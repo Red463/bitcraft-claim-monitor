@@ -59,9 +59,31 @@ test("Overview top deals uses exact sortable values and omits unproven map data"
 
   assert.match(overview, /<DataTable[\s\S]*scrollLabel="Top global market deals"/);
   assert.match(overview, /\["Item",[\s\S]*deal\.itemName/);
-  assert.match(overview, /\["Buy at",[\s\S]*\(deal\) => deal\.buyPrice/);
+  assert.match(overview, /\["Buy from",[\s\S]*\(deal\) => deal\.buyPrice/);
   assert.match(overview, /\["Profit",[\s\S]*\(deal\) => deal\.profit/);
   assert.doesNotMatch(overview, /\["Map"/);
+});
+
+test("Global Market describes game orders without ask and bid jargon", () => {
+  const overview = source("../src/pages/market/MarketOverview.tsx");
+  const deals = source("../src/pages/market/MarketDeals.tsx");
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+  const favorites = source("../src/pages/market/MarketFavorites.tsx");
+  const css = source("../src/styles/market.css");
+
+  for (const routes of [overview, deals]) {
+    assert.match(routes, /\["Buy from"/);
+    assert.match(routes, /\["Sell to"/);
+  }
+  assert.match(browse, /label="Lowest Sell Order"/);
+  assert.match(browse, /label="Highest Buy Order"/);
+  assert.match(browse, /<th>Lowest sell order<\/th><th>Sell quantity<\/th><th>Highest buy order<\/th><th>Buy quantity<\/th>/);
+  assert.match(browse, />Sell orders \(\{sells\.length\}\)<\/button>/);
+  assert.match(browse, />Buy orders \(\{buys\.length\}\)<\/button>/);
+  assert.match(favorites, /<span>Lowest sell /);
+  assert.match(favorites, /<span>Highest buy /);
+  assert.match(css, /content: "Lowest sell order"/);
+  assert.match(css, /content: "Highest buy order"/);
 });
 
 test("Deals sorts exact current-order values and omits unproven map data", () => {
@@ -87,6 +109,20 @@ test("Browse sorts the complete filtered order book before pagination", () => {
   assert.match(orderWorkspace, /\["Total",[\s\S]*multiplyDecimal\(order\.unitPrice, order\.quantity\)/);
   assert.match(orderWorkspace, /\["Map",[\s\S]*undefined,\s*false\]/);
   assert.doesNotMatch(orderWorkspace, /<span>Sort<\/span>/);
+});
+
+test("Market command bar and map actions use the compact Obsidian control treatment", () => {
+  const marketPage = source("../src/pages/MarketPage.tsx");
+  const browse = source("../src/pages/market/MarketBrowse.tsx");
+  const css = source("../src/styles/market.css");
+
+  assert.match(marketPage, /className="global-market-toolbar-controls"/);
+  assert.match(browse, /className="market-map-button"/);
+  assert.match(browse, /aria-label="Show order on map"/);
+  assert.match(css, /\.global-market-command\s*\{[^}]*min-height:\s*56px;[^}]*padding:\s*8px 10px;/s);
+  assert.match(css, /\.global-market-command\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto;/s);
+  assert.match(css, /\.market-map-button\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;[^}]*background:\s*var\(--surface-1\);/s);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.global-market-toolbar-controls\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*1fr;/s);
 });
 
 test("Browse consolidates availability and preserves an explicit result return path", () => {
@@ -164,6 +200,20 @@ test("Overview and Deals use generation-invalidated local Relay projections", ()
   assert.doesNotMatch(deals, /Live order generation updated/);
   assert.doesNotMatch(deals, /Maximum distance/);
   assert.doesNotMatch(deals, /Route distance and map coordinates will appear/);
+});
+
+test("Global Market keeps enough live regional sessions for the complete Relay topology", () => {
+  const server = source("../server.mjs");
+
+  assert.match(server, /RELAY_MARKET_REGION_MAX_SESSIONS \?\? 16/);
+  assert.match(server, /RELAY_MARKET_REGION_IDLE_CLOSE_MS \?\? 300_000/);
+  assert.match(server, /RELAY_MARKET_REGION_MAX_ORDERS \?\? 20_000/);
+  assert.match(server, /RELAY_MARKET_REGION_MAX_CLOSED_LISTINGS \?\? 25_000/);
+  assert.match(server, /RELAY_MARKET_REGION_MAX_STALLS \?\? 5_000/);
+  assert.match(server, /RELAY_MARKET_REGION_MAX_APPLY_ROWS \?\? 50_000/);
+  assert.match(server, /persistRelayRuntimeDomainHeartbeats\([\s\S]*regionalMarketRuntimeHeartbeat\(\)[\s\S]*\["regional-market"\]/);
+  assert.match(server, /runtimeHealth:\s*gameDataProviderHealth\(\)\.regionalMarket/);
+  assert.match(server, /runtimeHealth:\s*gameDataProviderHealth\(\)\.globalCatalog/);
 });
 
 test("Browse follows the central page cycle and keeps history non-blocking", () => {

@@ -9,7 +9,7 @@ import { MiniStat } from "../../components/main/Stats";
 import { toNumber, type AnyRecord } from "../../main-app-data";
 import { updateQueryState } from "../../navigation";
 import { createDelayedRefreshTask } from "../../refresh/pageRefresh.mjs";
-import { formatCompactNumber, formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
+import { formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
 import type { MapFocus } from "../map/mapUtils";
 import type { MarketItemKey, MarketRefreshProps } from "./globalMarket";
 import {
@@ -19,7 +19,7 @@ import {
   marketItemType,
   normalizeMarketOrders,
 } from "./globalMarket";
-import { availabilityFlags, exactMarketInteger, nextOptionIndex, type MarketAvailability } from "./marketUi";
+import { availabilityFlags, exactMarketInteger, marketPriceClass, marketSuggestionResults, nextOptionIndex, regionalMarketQuotes, type MarketAvailability } from "./marketUi";
 import { MarketPriceChart } from "./MarketPriceChart";
 
 type Props = MarketRefreshProps & {
@@ -87,6 +87,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const [range, setRange] = React.useState<"24h" | "7d" | "30d" | "all">("30d");
   const [page, setPage] = React.useState(1);
   const catalogScrollRef = React.useRef(0);
+  const suggestionsOpenRef = React.useRef(false);
   const generationSequence = useGameDataGeneration(claimId, ["catalogs", "regional-market"]);
   const availabilityFilter = availabilityFlags(availability);
 
@@ -113,7 +114,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
         const items = Array.isArray(payload.items) ? payload.items : [];
         const categories = Array.isArray(payload.categories) ? payload.categories.map(String) : [];
         setCatalogItems(items);
-        setSuggestions(query.trim().length >= 2 && selectedItem?.name !== query.trim() ? items.slice(0, 12) : []);
+        setSuggestions(marketSuggestionResults(items, query, suggestionsOpenRef.current));
         setActiveSuggestion(-1);
         setCatalogState({ loading: false, error: "", categories });
       })
@@ -124,7 +125,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       refresh.cancel();
       controller.abort();
     };
-  }, [availability, catalogSort, category, generationSequence, query, refreshSequence, regionId, selectedItem?.name]);
+  }, [availability, catalogSort, category, generationSequence, query, refreshSequence, regionId]);
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -195,6 +196,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
 
   function chooseItem(item: AnyRecord) {
     catalogScrollRef.current = window.scrollY;
+    suggestionsOpenRef.current = false;
     setSelectedItem(item);
     setSuggestions([]);
     setPage(1);
@@ -214,6 +216,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   }
 
   function showResults() {
+    suggestionsOpenRef.current = false;
     setSelectedItem(null);
     setDetailState((current) => ({ ...current, detail: null, history: null, error: "", historyError: "" }));
     setSuggestions([]);
@@ -242,6 +245,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
       return;
     }
     if (event.key === "Escape") {
+      suggestionsOpenRef.current = false;
       setSuggestions([]);
       setActiveSuggestion(-1);
     }
@@ -268,17 +272,7 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const pageCount = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
   const sells = orders.filter((order) => order.side === "sell");
   const buys = orders.filter((order) => order.side === "buy");
-  const regionSummaries = React.useMemo(() => {
-    const byRegion = new Map<string, { name: string; sells: number; buys: number; quantity: bigint }>();
-    for (const order of orders) {
-      const key = String(order.regionId ?? "unknown");
-      const current = byRegion.get(key) ?? { name: order.regionName || (order.regionId ? `R${order.regionId}` : "Unknown region"), sells: 0, buys: 0, quantity: 0n };
-      current[order.side === "sell" ? "sells" : "buys"] += 1;
-      current.quantity += exactMarketInteger(order.quantity);
-      byRegion.set(key, current);
-    }
-    return [...byRegion.entries()].sort(([left], [right]) => toNumber(left) - toNumber(right));
-  }, [orders]);
+  const regionalQuotes = React.useMemo(() => regionalMarketQuotes(orders), [orders]);
   const bestSellOrder = sells.reduce<AnyRecord | null>((best, order) => (
     best == null || compareDecimal(order.unitPrice, best.unitPrice) < 0 ? order : best
   ), null);
@@ -296,13 +290,15 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
   const hasCatalogFilters = Boolean(query || category || availability !== (mode === "buy" ? "buy" : "any") || catalogSort !== "name");
 
   return (
-    <section className="global-market-workspace market-browse">
+    <section className={`global-market-workspace market-workspace market-browse ${selectedItem ? "has-selection" : ""}`}>
+      <div className="market-split-exchange">
+      <section className="market-catalog-pane" aria-label="Market item catalogue">
       <div className="global-market-searchbar">
         <label className="field market-catalog-search">
           <span>{mode === "buy" ? "Find an item with buy orders" : "Search global catalog"}</span>
           <div className="suggestion-anchor">
             <Search size={16} />
-            <input value={query} onChange={(event) => { setQuery(event.target.value); setSelectedItem(null); setActiveSuggestion(-1); }} onKeyDown={onSuggestionKeyDown} placeholder="Item or cargo name" role="combobox" aria-autocomplete="list" aria-expanded={suggestions.length > 0} aria-controls={`${mode}-market-suggestions`} aria-activedescendant={activeSuggestion >= 0 ? `${mode}-market-option-${activeSuggestion}` : undefined} />
+            <input value={query} onFocus={() => { suggestionsOpenRef.current = true; setSuggestions(marketSuggestionResults(catalogItems, query, true)); }} onChange={(event) => { suggestionsOpenRef.current = true; setQuery(event.target.value); setSelectedItem(null); setActiveSuggestion(-1); }} onKeyDown={onSuggestionKeyDown} placeholder="Item or cargo name" role="combobox" aria-autocomplete="list" aria-expanded={suggestions.length > 0} aria-controls={`${mode}-market-suggestions`} aria-activedescendant={activeSuggestion >= 0 ? `${mode}-market-option-${activeSuggestion}` : undefined} />
             {suggestions.length ? <div className="suggestion-menu" id={`${mode}-market-suggestions`} role="listbox">{suggestions.map((item, index) => (
               <button id={`${mode}-market-option-${index}`} role="option" aria-selected={activeSuggestion === index} key={`${item.itemType}-${item.id}`} type="button" onMouseEnter={() => setActiveSuggestion(index)} onClick={() => chooseItem(item)}>
                 <ItemIcon item={item} /><strong>{item.name}</strong>{item.tier ? <TierBadge tier={item.tier} /> : null}<small>{item.rarityStr ? <RarityBadge rarity={item.rarityStr} /> : null}{item.tag ?? ""}</small>
@@ -312,27 +308,30 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
         </label>
         {mode === "browse" ? <>
           <label className="field"><span>Category</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">All categories</option>{catalogState.categories.map((entry) => <option key={entry}>{entry}</option>)}</select></label>
-          <label className="field"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)}><option value="relevance">Relevance</option><option value="name">Item name</option><option value="orders">Order count</option><option value="lowest-sell">Lowest sell</option><option value="highest-buy">Highest buy</option><option value="spread">Smallest spread</option></select></label>
+          <label className="field"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)}><option value="relevance">Relevance</option><option value="name">Item name</option><option value="orders">Order count</option><option value="lowest-sell">Lowest sell order</option><option value="highest-buy">Highest buy order</option><option value="spread">Smallest spread</option></select></label>
           <label className="field market-availability-field"><span>Availability</span><select value={availability} onChange={(event) => setAvailability(event.target.value as MarketAvailability)}><option value="any">Any</option><option value="sell">For sale</option><option value="buy">Wanted</option><option value="both">Both</option></select></label>
           <div className="market-filter-actions"><button className="toolbar-button" type="button" disabled={!hasCatalogFilters} onClick={clearCatalogFilters}><X size={14} /> Clear filters</button></div>
         </> : null}
       </div>
       {catalogState.error ? <div className="error">Market search unavailable: {catalogState.error}</div> : null}
-      {!selectedItem ? mode === "browse" ? (
+      {mode === "browse" ? (
         <div className="market-catalog-results" aria-label="Market item catalog">
           {catalogState.loading && !catalogItems.length ? <div className="market-loading-strip">Loading market catalog…</div> : null}
           {catalogItems.map((item) => (
-            <button className="market-catalog-result" type="button" key={`${item.itemType}-${item.id}`} onClick={() => chooseItem(item)}>
+            <button className={`market-catalog-result ${selectedKey?.itemType === item.itemType && selectedKey?.itemId === item.id ? "active" : ""}`} aria-pressed={selectedKey?.itemType === item.itemType && selectedKey?.itemId === item.id} type="button" key={`${item.itemType}-${item.id}`} onClick={() => chooseItem(item)}>
               <ItemIcon item={item} />
               <span className="market-catalog-result-name"><strong>{item.name}</strong><small>{item.category || "Uncategorised"}</small></span>
-              <span><small>Lowest sell</small><strong>{item.lowestSellPrice == null ? "Unavailable" : formatGoldAmount(item.lowestSellPrice)}</strong><small>{item.lowestSellLocation || "No seller location"}</small></span>
-              <span><small>Highest buy</small><strong>{item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount(item.highestBuyPrice)}</strong><small>{item.highestBuyLocation || "No buyer location"}</small></span>
-              <span><small>Spread</small><strong>{item.lowestSellPrice == null || item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount((exactMarketInteger(item.lowestSellPrice) - exactMarketInteger(item.highestBuyPrice)).toString())}</strong><small>{formatNumber(item.orderCount)} current orders</small></span>
+              <span className="market-catalog-quote market-catalog-quote-primary"><small>Lowest sell order</small><strong className={marketPriceClass(item.lowestSellPrice == null ? "neutral" : "ask")}>{item.lowestSellPrice == null ? "Unavailable" : formatGoldAmount(item.lowestSellPrice)}</strong><small>{item.lowestSellLocation || "No seller location"}</small></span>
+              <span className="market-catalog-quote market-catalog-quote-secondary"><small>Highest buy order</small><strong className={marketPriceClass(item.highestBuyPrice == null ? "neutral" : "bid")}>{item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount(item.highestBuyPrice)}</strong><small>{item.highestBuyLocation || "No buyer location"}</small></span>
+              <span className="market-catalog-quote market-catalog-quote-secondary"><small>Spread</small><strong className={marketPriceClass("profit", item.lowestSellPrice == null || item.highestBuyPrice == null ? null : (exactMarketInteger(item.lowestSellPrice) - exactMarketInteger(item.highestBuyPrice)).toString())}>{item.lowestSellPrice == null || item.highestBuyPrice == null ? "Unavailable" : formatGoldAmount((exactMarketInteger(item.lowestSellPrice) - exactMarketInteger(item.highestBuyPrice)).toString())}</strong><small>{formatNumber(item.orderCount)} current orders</small></span>
             </button>
           ))}
           {!catalogState.loading && !catalogItems.length ? <div className="empty-state"><ShoppingBag size={28} /><strong>No catalog items match these filters</strong><span>Clear a filter or search for another item or cargo name.</span></div> : null}
         </div>
-      ) : <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>Choose an item to inspect live demand</strong><span>Buy orders are loaded live after item selection; no monitored-settlement cache is used.</span></div> : (
+      ) : null}
+      </section>
+      <section className="market-instrument-pane" aria-label="Selected item regional market">
+      {!selectedItem ? <div className="empty-state market-global-empty"><ShoppingBag size={28} /><strong>Choose an item to compare regions</strong><span>Select an item to compare the lowest sell orders and highest buy orders across active regions.</span></div> : (
         <div className="market-item-detail">
           <header>
             <div className="market-item-heading">
@@ -357,19 +356,28 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
           {freshnessNotice ? <div className="info">{freshnessNotice}</div> : null}
           {detailState.loading && !detailState.detail ? <div className="market-loading-strip">Loading live orders and locally observed history…</div> : null}
           <div className="metric-grid market-order-summary">
-            <MiniStat icon={<ArrowDownUp />} label="Best Sell" value={bestSell == null ? "—" : `${formatNumber(bestSell)}g`} />
-            <MiniStat icon={<ArrowDownUp />} label="Best Buy" value={bestBuy == null ? "—" : `${formatNumber(bestBuy)}g`} />
-            <MiniStat icon={<ArrowDownUp />} label="Spread" value={spread == null ? "—" : `${formatNumber(spread)}g`} />
+            <MiniStat icon={<ArrowDownUp />} label="Lowest Sell Order" value={<span className={marketPriceClass(bestSell == null ? "neutral" : "ask")}>{bestSell == null ? "—" : `${formatNumber(bestSell)}g`}</span>} />
+            <MiniStat icon={<ArrowDownUp />} label="Highest Buy Order" value={<span className={marketPriceClass(bestBuy == null ? "neutral" : "bid")}>{bestBuy == null ? "—" : `${formatNumber(bestBuy)}g`}</span>} />
+            <MiniStat icon={<ArrowDownUp />} label="Spread" value={<span className={marketPriceClass("profit", spread)}>{spread == null ? "—" : `${formatNumber(spread)}g`}</span>} />
           </div>
-          <div className="market-depth-summary" aria-label="Current market depth"><span><small>Liquidity</small><strong>{formatNumber(orders.reduce((sum, order) => sum + exactMarketInteger(order.quantity), 0n))} units</strong></span><span><small>Orders</small><strong>{formatNumber(sells.length)} sell · {formatNumber(buys.length)} buy</strong></span><span><small>Best sell location</small><strong>{bestSellOrder?.claimName || bestSellOrder?.regionName || "Unavailable"}</strong></span><span><small>Best buy location</small><strong>{bestBuyOrder?.claimName || bestBuyOrder?.regionName || "Unavailable"}</strong></span></div>
-          {regionSummaries.length ? <div className="market-region-summaries" aria-label="Regional order summaries">{regionSummaries.map(([key, summary]) => <span key={key}><b>{summary.name}</b>{formatNumber(summary.sells)} sell · {formatNumber(summary.buys)} buy · {formatCompactNumber(summary.quantity)} units</span>)}</div> : null}
+          <div className="market-depth-summary" aria-label="Current market depth"><span><small>Liquidity</small><strong>{formatNumber(orders.reduce((sum, order) => sum + exactMarketInteger(order.quantity), 0n))} units</strong></span><span><small>Orders</small><strong>{formatNumber(sells.length)} sell orders · {formatNumber(buys.length)} buy orders</strong></span><span><small>Lowest sell location</small><strong>{bestSellOrder?.claimName || bestSellOrder?.regionName || "Unavailable"}</strong></span><span><small>Highest buy location</small><strong>{bestBuyOrder?.claimName || bestBuyOrder?.regionName || "Unavailable"}</strong></span></div>
+          {regionalQuotes.length ? <div className="market-regional-book table-wrap" role="region" aria-label="Regional order comparison" tabIndex={0}>
+            <table><thead><tr><th>Region</th><th>Lowest sell order</th><th>Sell quantity</th><th>Highest buy order</th><th>Buy quantity</th><th>Orders</th><th>Seen</th></tr></thead><tbody>
+              {regionalQuotes.map((quote, index) => <tr className="market-region-card" key={quote.regionKey}>
+                <th scope="row"><span>{index === 0 && quote.bestSell != null ? "Best price" : "Region"}</span>{quote.regionName}</th>
+                <td><span className={marketPriceClass(quote.bestSell == null ? "neutral" : "ask")}>{quote.bestSell == null ? "—" : formatGoldAmount(quote.bestSell)}</span></td><td>{formatNumber(quote.sellQuantity)}</td>
+                <td><span className={marketPriceClass(quote.bestBuy == null ? "neutral" : "bid")}>{quote.bestBuy == null ? "—" : formatGoldAmount(quote.bestBuy)}</span></td><td>{formatNumber(quote.buyQuantity)}</td>
+                <td>{formatNumber(quote.sellOrders + quote.buyOrders)}</td><td>{quote.lastSeen ? timeAgo(quote.lastSeen) : "—"}</td>
+              </tr>)}
+            </tbody></table>
+          </div> : null}
           <div className="tabs market-order-tabs">
             <button className={detailTab === "orders" ? "active" : ""} onClick={() => setDetailTab("orders")}>Orders</button>
             <button className={detailTab === "stats" ? "active" : ""} onClick={() => setDetailTab("stats")}>Stats</button>
           </div>
           {detailTab === "orders" ? <>
             <div className="market-order-filters">
-              <div className="tabs market-order-tabs"><button className={orderTab === "sell" ? "active" : ""} onClick={() => { setOrderTab("sell"); setPage(1); }}>Sell ({sells.length})</button><button className={orderTab === "buy" ? "active" : ""} onClick={() => { setOrderTab("buy"); setPage(1); }}>Buy ({buys.length})</button></div>
+              <div className="tabs market-order-tabs"><button className={orderTab === "sell" ? "active" : ""} onClick={() => { setOrderTab("sell"); setPage(1); }}>Sell orders ({sells.length})</button><button className={orderTab === "buy" ? "active" : ""} onClick={() => { setOrderTab("buy"); setPage(1); }}>Buy orders ({buys.length})</button></div>
               <label className="field"><span>Minimum quantity</span><input type="number" min="0" value={minimumQuantity} onChange={(event) => setMinimumQuantity(event.target.value)} /></label>
               {orderTab === "buy" ? <label className="field"><span>Minimum price</span><input type="number" min="0" value={minimumPrice} onChange={(event) => setMinimumPrice(event.target.value)} /></label> : null}
               <label className="field"><span>Settlement or region</span><input value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)} /></label>
@@ -382,13 +390,13 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
               scrollLabel={`${orderTab} market orders table`}
               emptyState={`No ${orderTab} orders match these filters.`}
               columns={[
-                ["Price", (order) => formatGoldAmount(order.unitPrice), (order) => order.unitPrice],
+                ["Price", (order) => <span className={marketPriceClass(orderTab === "sell" ? "ask" : "bid")}>{formatGoldAmount(order.unitPrice)}</span>, (order) => order.unitPrice],
                 ["Quantity", (order) => formatNumber(order.quantity), (order) => order.quantity],
                 ["Total", (order) => formatGoldAmount(multiplyDecimal(order.unitPrice, order.quantity)), (order) => multiplyDecimal(order.unitPrice, order.quantity)],
                 ["Region", (order) => order.regionName || (order.regionId ? `R${order.regionId}` : "—"), (order) => order.regionName || String(order.regionId ?? "")],
                 ["Settlement", (order) => order.claimName || "Unknown settlement", (order) => order.claimName],
                 [orderTab === "buy" ? "Buyer" : "Seller", (order) => order.ownerName || "—", (order) => order.ownerName],
-                ["Map", (order) => order.locationX != null && order.locationZ != null ? <button className="icon-button" title="Show on map" onClick={() => onShowMap({ name: order.claimName || selectedItem.name, locationX: order.locationX, locationZ: order.locationZ }, String(order.regionId ?? ""))}><MapPin size={15} /></button> : "—", undefined, false],
+                ["Map", (order) => order.locationX != null && order.locationZ != null ? <button className="market-map-button" type="button" title="Show on map" aria-label="Show order on map" onClick={() => onShowMap({ name: order.claimName || selectedItem.name, locationX: order.locationX, locationZ: order.locationZ }, String(order.regionId ?? ""))}><MapPin size={15} /></button> : "—", undefined, false],
               ]}
             />
             <div className="pagination-row"><span>Page {Math.min(page, pageCount)} of {pageCount} · {formatNumber(filteredOrders.length)} orders</span><div><button className="toolbar-button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button><button className="toolbar-button" disabled={page >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Next</button></div></div>
@@ -405,6 +413,8 @@ export function MarketBrowse({ claimId, mode, regionId, favorites, onToggleFavor
           )}
         </div>
       )}
+      </section>
+      </div>
     </section>
   );
 }

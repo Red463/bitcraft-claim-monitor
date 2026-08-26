@@ -4,20 +4,37 @@ import test from "node:test";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
-test("shared page headers own consistent spacing in the application stylesheet", () => {
+test("shell-owned page headers keep route headings accessible without repeating the visible title", () => {
   const app = read("../src/styles.css");
-  const members = read("../src/styles/members.css");
-  const dashboard = read("../src/styles/dashboard.css");
+  const header = read("../src/components/main/PageHeader.tsx");
 
-  assert.match(app, /\.panel\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
-  assert.match(app, /\.members-topbar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;[^}]*gap:\s*16px;/s);
-  assert.match(app, /\.members-topbar\s*\{[^}]*min-width:\s*0;/s);
-  assert.match(app, /\.members-topbar > \*\s*\{[^}]*min-width:\s*0;/s);
-  assert.match(app, /\.members-topbar p\s*\{[^}]*margin:\s*8px 0 0;/s);
-  assert.match(app, /\.dashboard-top-meta\s*\{[^}]*column-gap:\s*12px;[^}]*row-gap:\s*8px;[^}]*flex-wrap:\s*wrap;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s);
-  assert.match(app, /@media \(max-width:\s*920px\)[\s\S]*\.members-topbar\s*\{\s*grid-template-columns:\s*1fr;\s*\}[\s\S]*\.dashboard-top-meta\s*\{\s*justify-content:\s*flex-start;\s*\}/s);
-  assert.doesNotMatch(members, /^\.members-topbar(?:\s|\{|h2|p)/m);
-  assert.doesNotMatch(dashboard, /^\.dashboard-top-meta\s*\{/m);
+  assert.match(header, /className="page-header-copy route-title-copy"/);
+  assert.match(app, /\.route-title-copy\s*\{[^}]*position:\s*absolute;[^}]*width:\s*1px;[^}]*clip-path:\s*inset\(50%\)/s);
+  assert.match(app, /\.page-header:has\(\.page-header-aside\)\s*\{[^}]*border-bottom:\s*1px solid var\(--line-subtle\)/s);
+  assert.match(app, /\.page-header:not\(:has\(\.page-header-aside\)\)\s*\{[^}]*display:\s*contents/s);
+});
+
+test("legacy conventional pages use the same shell-owned route-title contract", () => {
+  for (const path of [
+    "../src/pages/MarketPage.tsx",
+    "../src/pages/SettlementMarketPage.tsx",
+    "../src/pages/LeaderboardPage.tsx",
+    "../src/pages/ActivityPage.tsx",
+    "../src/pages/RegionPage.tsx",
+    "../src/pages/CraftCalculatorPage.tsx",
+    "../src/pages/PublicCraftFinderPage.tsx",
+    "../src/pages/SyncPage.tsx",
+    "../src/pages/CraftPlanningPage.tsx",
+    "../src/pages/EmpiresPage.tsx",
+  ]) {
+    assert.match(read(path), /className="route-title-copy"/, path);
+  }
+});
+
+test("settlement market hides only route title copy and leaves ranking controls interactive", () => {
+  const page = read("../src/pages/SettlementMarketPage.tsx");
+  assert.match(page, /<header className="members-topbar market-topbar">\s*<div className="route-title-copy">\s*<h2>/s);
+  assert.doesNotMatch(page, /market-best-toolbar[\s\S]{0,180}className="route-title-copy"/s);
 });
 
 test("shared header metadata groups keep their spacing without dashboard route CSS", () => {

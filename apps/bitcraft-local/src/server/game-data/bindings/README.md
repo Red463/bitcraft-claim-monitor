@@ -35,3 +35,9 @@ references to it. Both generated `types.ts` files contain one documented repair
 copied exactly from schema type `PlayerVoteAnswer`: the unit variants `None`,
 `No`, and `Yes`. Binding verification must fail if this repair disappears or
 the schema definition changes.
+
+`scripts/check-relay-schema-drift.mjs` hashes both exact live schema responses.
+Deployments run this guard before testing or packaging. The scheduled
+`relay-schema-drift.yml` workflow uses the pinned official CLI and its audited
+archive digest to regenerate changed bindings, run the full test/build checks,
+and open a review PR. It never merges or deploys a generated update automatically.

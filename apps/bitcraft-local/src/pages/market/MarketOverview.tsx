@@ -4,9 +4,9 @@ import { DataTable } from "../../components/main/DataTable";
 import { ItemLabel } from "../../components/main/ItemDisplay";
 import type { AnyRecord } from "../../main-app-data";
 import { formatGoldAmount, formatNumber, timeAgo } from "../../utils/format";
-import { marketFreshnessNotice, type MarketItemKey, type MarketRefreshProps } from "./globalMarket";
+import { type MarketItemKey, type MarketRefreshProps } from "./globalMarket";
 import { MarketFavorites } from "./MarketFavorites";
-import { exactMarketInteger } from "./marketUi";
+import { exactMarketInteger, marketPriceClass } from "./marketUi";
 
 type Props = MarketRefreshProps & {
   claimId: string;
@@ -41,7 +41,6 @@ export function MarketOverview({
   const liquid: AnyRecord[] = Array.isArray(data.mostLiquid) ? data.mostLiquid : [];
   const generatedAt = data.generatedAt ? new Date(data.generatedAt) : null;
   const observedSince = data.observedSince ? String(data.observedSince) : null;
-  const freshnessNotice = marketFreshnessNotice(data);
 
   return (
     <section className="global-market-workspace market-overview">
@@ -49,8 +48,6 @@ export function MarketOverview({
         <div><strong>{regionId ? `Region ${regionId} market` : "All active regions"}</strong><span>{generatedAt ? `Generation updated ${timeAgo(generatedAt.toISOString())}` : "Waiting for the first live order generation"}</span></div>
         {data.freshness === "fresh" ? <span className="status-pill">Live sources</span> : <span className="status-pill warning">{data.freshness === "stale" ? "Stale data" : "Unavailable"}</span>}
       </div>
-      {freshnessNotice ? <div className="info">{freshnessNotice}</div> : null}
-      {state.error ? <div className="error">Overview unavailable: {state.error}. The last rendered generation remains visible.</div> : null}
       <MarketFavorites claimId={claimId} regionId={regionId} favorites={favorites} onOpenItem={onOpenItem} refreshSequence={refreshSequence} refreshHeaders={refreshHeaders} trackRefresh={trackRefresh} />
       <div className="market-overview-grid">
         <section className="market-overview-section market-overview-wide">
@@ -59,9 +56,9 @@ export function MarketOverview({
             rows={deals.slice(0, 8)}
             columns={[
               ["Item", (deal) => <button className="market-item-link" onClick={() => onOpenItem(itemShape(deal))}><ItemLabel item={itemShape({ ...deal, iconAssetName: deal.itemIconAssetName })} /></button>, (deal) => String(deal.itemName ?? "")],
-              ["Buy at", (deal) => <span className="market-price-location"><strong>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span>, (deal) => deal.buyPrice],
-              ["Sell at", (deal) => <span className="market-price-location"><strong>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span>, (deal) => deal.sellPrice],
-              ["Profit", (deal) => <span className="positive">{formatGoldAmount(deal.profit)}</span>, (deal) => deal.profit],
+              ["Buy from", (deal) => <span className="market-price-location"><strong className={marketPriceClass("ask")}>{formatGoldAmount(deal.buyPrice)}</strong><small>{deal.buyLocation ?? "Unknown"} · R{deal.buyRegionId ?? "?"}</small></span>, (deal) => deal.buyPrice],
+              ["Sell to", (deal) => <span className="market-price-location"><strong className={marketPriceClass("bid")}>{formatGoldAmount(deal.sellPrice)}</strong><small>{deal.sellLocation ?? "Unknown"} · R{deal.sellRegionId ?? "?"}</small></span>, (deal) => deal.sellPrice],
+              ["Profit", (deal) => <span className={marketPriceClass("profit", deal.profit)}>{formatGoldAmount(deal.profit)}</span>, (deal) => deal.profit],
               ["Qty", (deal) => formatNumber(deal.maxQuantity), (deal) => deal.maxQuantity],
             ]}
             emptyState={state.loading ? "Loading live deals…" : "No profitable current-order routes."}

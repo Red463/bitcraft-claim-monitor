@@ -27,6 +27,8 @@ try {
   // RED starts with the navigation-label helpers absent.
 }
 
+const { normalizeBootstrap } = await import("../src/api/bootstrap.ts");
+
 test("route-state helpers distinguish explicit navigation from normalization", () => {
   assert.equal(typeof routeStateModule.writePageLocation, "function");
   assert.match(routeState, /export type NavigationMode = "push" \| "replace"/);
@@ -162,11 +164,26 @@ test("settlement navigation labels derive from the configured claim name", () =>
   assert.equal(navigationLabelsModule.settlementMarketTitle(null), "Settlement Market");
 });
 
+test("settlement navigation identity survives pages without claim data", () => {
+  const bootstrap = normalizeBootstrap({
+    config: { claimId: "123", claimName: " Timbersteel Trade ", refreshSeconds: 30 },
+    auth: {},
+    legal: {},
+    build: {},
+  });
+
+  assert.equal(bootstrap.config.claimName, "Timbersteel Trade");
+  assert.match(appShell, /settlementNamesByClaim/);
+  assert.match(appShell, /initialBootstrap\.config\.claimName/);
+  assert.match(appShell, /settlementNavigationLabel\(settlementName\)/);
+  assert.doesNotMatch(appShell, /settlementNavigationLabel\(data\.claim\.name\)/);
+});
+
 test("navigation and page headings use the approved settlement naming", () => {
   assert.match(navigation, /\["craft-monitor", "Craft Monitor", Factory\]/);
   assert.match(navigation, /\["settlement-market", "Local Market", CircleDollarSign\]/);
   assert.match(navigation, /\["region", "Region", Globe2\]/);
-  assert.match(appShell, /group\.id === "settlement"\s*\?\s*settlementNavigationLabel\(data\.claim\.name\)\s*:\s*group\.label/);
+  assert.match(appShell, /group\.id === "settlement"\s*\?\s*settlementNavigationLabel\(settlementName\)\s*:\s*group\.label/);
   assert.match(productionPage, /title="Craft Monitor"/);
   assert.match(settlementMarketPage, /<h2>\{settlementMarketTitle\(data\.claim\?\.name\)\}<\/h2>/);
 });

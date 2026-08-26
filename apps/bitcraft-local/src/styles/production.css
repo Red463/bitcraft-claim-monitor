@@ -3,7 +3,7 @@
 .crafter-pills strong { color: var(--text); }
 .crafter-pills > .crafter-pill { font: inherit; cursor: pointer; }
 .production-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.production-card { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); overflow: hidden; display: flex; flex-direction: column; min-height: 226px; }
+.production-card { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel); overflow: hidden; display: flex; flex-direction: column; min-height: 226px; }
 .production-card { transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
 .production-card:hover { transform: translateY(-1px); border-color: rgba(240,198,79,.34); }
 .production-card.active-work { border-color: rgba(78,226,138,.58); box-shadow: inset 0 0 0 1px rgba(78,226,138,.12); }
@@ -22,9 +22,9 @@
 .craft-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; min-height: 36px; }
 .craft-title.has-icon { grid-template-columns: 36px minmax(0, 1fr) auto; }
 .craft-title h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.15; }
-.craft-title .item-thumb { width: 36px; height: 36px; border-radius: 8px; }
+.craft-title .item-thumb { width: 36px; height: 36px; border-radius: var(--radius-panel); }
 .craft-title .tier-badge { justify-self: end; }
-.production-member-banner { min-height: 43px; border: 1px solid rgba(116,182,255,.32); background: rgba(116,182,255,.08); border-radius: 7px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.production-member-banner { min-height: 43px; border: 1px solid rgba(116,182,255,.32); background: rgba(116,182,255,.08); border-radius: var(--radius-control); padding: 8px 12px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .production-member-banner svg, .production-member-banner strong { color: var(--copper); }
 .production-member-banner small { margin-left: auto; color: var(--muted); }
 
@@ -48,10 +48,10 @@
 .production-page .mini-stat {
   min-height: 112px;
   border: 1px solid rgba(108,123,145,.24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+    var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
   grid-template-columns: 44px minmax(0, 1fr);
@@ -61,7 +61,7 @@
   width: 42px;
   height: 42px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--radius-dialog);
   background: rgba(255,255,255,.035);
   color: #f3c532;
 }
@@ -131,7 +131,7 @@
 .production-page .select-control,
 .production-page .segmented button {
   border-color: rgba(154,168,190,.28);
-  background: #080d14;
+  background: var(--surface-1);
 }
 .production-page .segmented button.active {
   color: #f0c64f;
@@ -147,7 +147,7 @@
 .production-private-toggle {
   min-height: 38px;
   border: 1px solid rgba(154,168,190,.22);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: rgba(5,8,12,.78);
   padding: 0 10px;
   display: inline-flex;
@@ -227,10 +227,10 @@
 }
 .production-page .production-card {
   border-color: rgba(108,123,145,.24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+    var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   min-height: 260px;
 }
@@ -321,14 +321,14 @@
 }
 .production-page .progress-meta strong { color: #f0c64f; }
 .production-page .eligibility-pill {
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   min-height: 31px;
   font-weight: 700;
 }
 .production-page .contributors {
   border-top-color: rgba(154,168,190,.14);
   background: rgba(5,8,12,.4);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   padding: 10px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -372,10 +372,10 @@
   margin-top: 8px;
   border-top: 0;
   border: 1px solid rgba(108,123,145,.24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+    var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
   padding: 18px;
 }
@@ -405,7 +405,7 @@
 }
 .production-page .settlement-passive-crafts .table-wrap {
   border-color: rgba(108,123,145,.24);
-  background-color: #090e15;
+  background-color: var(--surface-2);
   background-image: none;
 }
 .production-page .settlement-passive-crafts th {

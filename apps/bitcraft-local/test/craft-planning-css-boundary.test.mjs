@@ -45,7 +45,7 @@ test("Craft planning item details use an intentional loading strip and close con
   const loadingMatch = css.match(/\.craft-plan-detail-loading\s*\{([^}]+)\}/);
   assert.ok(loadingMatch, "detail loading-strip CSS should exist");
   assert.match(loadingMatch[1], /display:\s*flex/);
-  assert.match(loadingMatch[1], /border-radius:\s*8px/);
+  assert.match(loadingMatch[1], /border-radius:\s*var\(--radius-panel\)/);
   assert.match(loadingMatch[1], /background:/);
 
   const closeMatch = css.match(/\.craft-plan-need-detail \.modal-header \.icon-button\s*\{([^}]+)\}/);

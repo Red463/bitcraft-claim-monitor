@@ -26,12 +26,13 @@ function harness(options = {}) {
     createSession: (regionId) => {
       const session = {
         regionId,
+        connected: true,
         start: async () => {
           starts.push(regionId);
           if (options.failRegion === regionId) throw new Error(`region ${regionId} failed`);
         },
         stop: async () => stops.push(regionId),
-        health: () => ({ connected: true, regionId }),
+        health: () => ({ connected: session.connected, regionId }),
       };
       sessions.set(regionId, session);
       return session;
@@ -130,4 +131,22 @@ test("adaptive region pool counts in-flight opens against its hard connection ca
   assert.equal(results.filter((result) => result.status === "rejected").length, 1);
   assert.match(results.find((result) => result.status === "rejected").reason.message, /capacity/i);
   assert.equal(state.pool.health().sessions.length, 2);
+});
+
+test("adaptive region pool replaces a disconnected session when it is acquired again", async () => {
+  const state = harness({ maxSessions: 2 });
+  await state.pool.start({
+    primaryRegionId: "19",
+    activeRegionIds: ["19", "20"],
+  });
+  const first = await state.pool.acquire("20");
+  await first.release();
+  state.sessions.get("20").connected = false;
+
+  const replacement = await state.pool.acquire("20");
+
+  assert.deepEqual(state.stops, ["20"]);
+  assert.deepEqual(state.starts, ["19", "20", "20"]);
+  assert.equal(state.pool.health().sessions.find((entry) => entry.regionId === "20").health.connected, true);
+  await replacement.release();
 });

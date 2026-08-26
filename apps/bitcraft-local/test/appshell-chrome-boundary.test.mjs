@@ -2,21 +2,25 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
-test("floating action rail can be collapsed with persisted state and accessible toggle", () => {
+test("application shell exposes contextual Obsidian Ledger surface modes", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  assert.match(appShell, /surfaceModeForPanel\(active\)/);
+  assert.match(appShell, /surface-mode-\$\{surfaceMode\}/);
+  assert.match(appShell, /surface-mode-bot/);
+});
 
-  assert.match(appShell, /usePersistedState\("layout\.floatingActionsCollapsed", false\)/);
-  assert.match(appShell, /useState\(false\).*mobileFloatingActionsOpen|mobileFloatingActionsOpen.*useState\(false\)/s);
-  assert.match(appShell, /isNarrowViewport\s*\?\s*!mobileFloatingActionsOpen\s*:\s*floatingActionsCollapsed/);
-  assert.match(appShell, /isNarrowViewport\s*\?\s*setMobileFloatingActionsOpen/);
-  assert.match(appShell, /floating-actions-collapsed/);
-  assert.match(appShell, /aria-expanded=\{!narrowAwareFloatingActionsCollapsed\}/);
-  assert.match(appShell, /Hide tools/);
-  assert.match(appShell, /Show tools/);
+test("application tools use one anchored utility bar", () => {
+  const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const utility = readFileSync(new URL("../src/components/main/AppUtilityBar.tsx", import.meta.url), "utf8");
+  assert.match(appShell, /<AppUtilityBar/);
+  assert.doesNotMatch(appShell, /layout\.floatingActionsCollapsed|mobileFloatingActionsOpen|floating-actions/);
+  assert.match(utility, /aria-label="Application tools"/);
+  assert.match(utility, /Search commands/);
 });
 
 test("global refresh uses the page-cycle lifecycle with consistent manual feedback", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const utility = readFileSync(new URL("../src/components/main/AppUtilityBar.tsx", import.meta.url), "utf8");
 
   assert.match(appShell, /createPageRefreshController/);
   assert.match(appShell, /createPageRefreshTaskCoordinator/);
@@ -25,15 +29,14 @@ test("global refresh uses the page-cycle lifecycle with consistent manual feedba
   assert.match(appShell, /requestManualRefresh/);
   assert.match(appShell, /pageRefreshCycle/);
   assert.match(appShell, /pageRefreshCoordinator/);
-  assert.match(appShell, /aria-busy=\{manualRefreshIsRefreshing\}/);
-  assert.match(appShell, /aria-disabled=\{manualRefreshButtonDisabled\}/);
+  assert.match(utility, /aria-busy=\{refreshing\}/);
+  assert.match(utility, /aria-disabled=\{refreshDisabled\}/);
   assert.match(appShell, /manualRefreshButtonLabel/);
-  assert.match(appShell, /is-refreshing/);
+  assert.match(utility, /is-refreshing/);
   assert.match(appShell, /const manualRefreshIsCoolingDown = !manualRefreshIsRefreshing && manualRefreshCooldownMs > 0/);
-  assert.match(appShell, /manualRefreshIsCoolingDown \? "is-cooldown"/);
-  assert.match(appShell, /className="refresh-cooldown-countdown"/);
-  assert.match(appShell, /\{manualRefreshCooldownSeconds\}s/);
-  assert.match(appShell, /manualRefreshIsCoolingDown\s*\?\s*\(\s*<span[\s\S]*:\s*\(\s*<RefreshCw size=\{18\}/);
+  assert.match(utility, /coolingDownSeconds > 0 \? "is-cooldown"/);
+  assert.match(utility, /className="refresh-cooldown-countdown"/);
+  assert.match(utility, /\{coolingDownSeconds\}s/);
   assert.match(appShell, /role="status"[^>]*aria-live="polite"/s);
   assert.match(appShell, /Data refreshed/);
   assert.match(appShell, /Refresh available in/);
@@ -54,24 +57,26 @@ test("page cadence is centralized while notification and deal timers stay indepe
   assert.doesNotMatch(appShell, /schedule\(setRefreshToken|schedule\(setHistoryAutoRefreshToken/);
 });
 
-test("floating action rail CSS slides collapsed rail offscreen with reduced motion support", () => {
+test("obsolete floating action rail CSS is removed after tools move to the utility bar", () => {
   const css = readFileSync(new URL("../src/styles/app-chrome.css", import.meta.url), "utf8");
 
-  assert.match(css, /\.floating-actions\.floating-actions-collapsed\s*\{[^}]*translateX\(calc\(100% - 24px\)\)/s);
-  assert.match(css, /\.floating-actions\.floating-actions-collapsed\s+\.floating-action-item\s*\{[^}]*pointer-events:\s*none/s);
-  assert.match(css, /\.floating-actions-toggle/);
-  assert.match(css, /\.floating-actions\.floating-actions-collapsed\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s);
-  assert.match(css, /\.floating-actions\s+\.floating-actions-toggle\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/s);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
+  assert.doesNotMatch(css, /\.floating-actions|\.floating-action-item|\.floating-actions-toggle/);
+  assert.match(css, /\.app-utility-refresh\.is-refreshing\s+svg/);
 });
-test("footer shows the app version and build id", () => {
+test("footer presents build provenance and secondary actions in a flat two-part layout", () => {
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
   assert.match(appShell, /fetch\(`\$\{LOCAL_API\}\/health`, \{ cache: "no-store" \}\)/);
   assert.match(appShell, /setAppBuildId/);
   assert.match(appShell, /appBuildIdRef/);
   assert.match(appShell, /footer-build/);
+  assert.match(appShell, /className="footer-primary"/);
+  assert.match(appShell, /className="footer-secondary"/);
   assert.match(appShell, /APP_VERSION/);
+  assert.match(css, /\.app-footer\s*\{[^}]*border-top:\s*1px solid var\(--line-subtle\)[^}]*background:\s*var\(--canvas\)[^}]*box-shadow:\s*none/s);
+  const buildRule = css.match(/\.app-footer \.footer-build\s*\{(?<body>[^}]+)\}/)?.groups?.body ?? "";
+  assert.doesNotMatch(buildRule, /border|border-radius|background|padding/);
 });
 
 test("dedicated map mode keeps the map route while omitting optional application chrome", () => {
@@ -82,7 +87,8 @@ test("dedicated map mode keeps the map route while omitting optional application
   assert.match(appShell, /!dedicatedMapView \? \([\s\S]*className="mobile-shell-bar"/);
   assert.match(appShell, /\{!dedicatedMapView && active !== "admin" \? <footer className="app-footer">/);
   assert.match(appShell, /app-shell[^`]*\$\{dedicatedMapView \? "map-dedicated-shell" : ""\}/);
-  assert.match(appShell, /\{!dedicatedMapView \? \([\s\S]*release-update-banner[\s\S]*floating-actions/);
+  assert.match(appShell, /!dedicatedMapView \? <AppUtilityBar/);
+  assert.match(appShell, /\{!dedicatedMapView \? \([\s\S]*release-update-banner/);
   assert.match(appShell, /LegalAcceptanceDialog/);
 });
 test("shared refresh chrome is provider-neutral during the Relay migration", () => {

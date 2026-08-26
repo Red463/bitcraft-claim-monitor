@@ -23,10 +23,10 @@
 .activity-panel .mini-stat {
   min-height: 112px;
   border: 1px solid rgba(108,123,145,.24);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 100% 0%, rgba(22,32,43,.1), transparent 38%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+    var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.2);
   padding: 18px;
   grid-template-columns: 44px minmax(0, 1fr);
@@ -37,7 +37,7 @@
   width: 42px;
   height: 42px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--radius-dialog);
   background: rgba(255,255,255,.035);
   color: #f3c532;
 }
@@ -113,8 +113,8 @@
   min-width: 0;
   height: 38px;
   border: 1px solid rgba(154,168,190,.28);
-  border-radius: 7px;
-  background: #080d14;
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
   color: #f4f7fb;
   padding: 0 12px;
   outline: 0;
@@ -135,7 +135,7 @@
 .activity-filters button {
   min-height: 38px;
   border: 1px solid rgba(108,123,145,.22);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: linear-gradient(180deg, rgba(11,16,22,.94), rgba(6,9,14,.96));
   color: #b8c2cf;
   padding: 0 8px 0 13px;
@@ -159,7 +159,7 @@
 
 .activity-filters strong {
   min-width: 27px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: rgba(255,255,255,.055);
   color: #fff;
   padding: 4px 7px;
@@ -206,10 +206,10 @@
   position: relative;
   min-height: 78px;
   border: 1px solid rgba(108,123,145,.22);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 0% 0%, rgba(240,198,79,.045), transparent 34%),
-    linear-gradient(180deg, rgba(11,16,22,.97), rgba(6,9,14,.99));
+    var(--surface-2);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 10px 24px rgba(0,0,0,.18);
   padding: 13px 14px;
   display: grid;
@@ -244,7 +244,7 @@
 .activity-event-icon {
   width: 42px;
   height: 42px;
-  border-radius: 14px;
+  border-radius: var(--radius-dialog);
   background: rgba(255,255,255,.035);
   color: #aab5c4;
   display: grid;
@@ -291,7 +291,7 @@
 
 .activity-event-body small {
   width: fit-content;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: rgba(255,255,255,.045);
   color: #aab5c4;
   padding: 4px 8px;
@@ -311,7 +311,7 @@
   min-height: 220px;
   margin-left: -19px;
   border: 1px dashed rgba(108,123,145,.3);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(6,9,14,.6);
   color: #aab5c4;
 }
@@ -319,7 +319,7 @@
 .activity-search-loading {
   min-height: 42px;
   border: 1px solid rgba(86,213,255,.2);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: rgba(86,213,255,.055);
   color: #d8ecff;
   display: inline-flex;

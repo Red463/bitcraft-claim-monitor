@@ -161,9 +161,10 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
   ].filter(Boolean).slice(0, 4) as Array<{ icon: React.ReactNode; count: React.ReactNode; title: string; body: string; panel: ActivePanel; tone: string }>;
   return (
     <div className="dashboard-page">
+      <section className="dashboard-command-state">
       <PageHeader
-        title="Dashboard"
-        description={`Real-time summary of ${claim.name ?? "the monitored settlement"}`}
+        title="Settlement command centre"
+        description={`Live operating picture for ${claim.name ?? "the monitored settlement"}`}
         meta={<div className="dashboard-top-meta">
           <div className="dashboard-meta-cluster">
             <span className="dashboard-region-line"><Globe2 size={15} /> {claimRegionLabel}</span>
@@ -172,8 +173,9 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
           <span className="dashboard-claim-link"><TierBadge tier={claim.tier} /> {claim.name ?? "Monitored Settlement"}</span>
         </div>}
       />
+      </section>
 
-      <section className="dashboard-kpis" data-tour="dashboard-summary">
+      <section className="dashboard-kpis dashboard-command-metrics" data-tour="dashboard-summary">
         <DashboardMetric icon={<Users />} label="Members" value={members.length} detail={`${onlineCount} online now`} onClick={() => onNavigate("members")} />
         <DashboardMetric icon={<Package />} label="Supply Status" value={formatDaysAndHours(supplyDays)} detail={`${formatNumber(supplies)} stored`} progress={supplyPct} tone="green" onClick={() => onNavigate("inventory")} />
         <DashboardMetric icon={<CircleDollarSign />} label="Treasury" value={`${formatNumber(treasury)}g`} detail={`${signedDelta(treasuryNetToday, 0, "g")} net today`} tone="gold" onClick={() => onNavigate("activity")} />
@@ -218,7 +220,7 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
           </div>
         </article>
 
-        <article className="dashboard-card dashboard-card-activity">
+        <article className="dashboard-card dashboard-card-activity dashboard-live-activity">
           <DashboardCardHeader title="Gather Next" icon={<Target size={15} />} action="Open plan" onClick={() => onNavigate("planning")} />
           <div className="dashboard-feed">
             {gatherNextPreview.length ? gatherNextPreview.map((item) => (
@@ -269,7 +271,7 @@ export function Dashboard({ data, activity, marketHistory, dashboardSummary, las
           <div className="dashboard-total-row"><span>Total Production XP</span><strong>{formatNumber(totalProductionXp)}</strong></div>
         </article>
 
-        <article className="dashboard-card dashboard-card-attention">
+        <article className="dashboard-card dashboard-card-attention dashboard-exceptions">
           <DashboardCardHeader title="Needs Attention" icon={<AlertTriangle size={15} />} />
           <div className="dashboard-alert-list">
             {attention.length ? attention.map((item) => (

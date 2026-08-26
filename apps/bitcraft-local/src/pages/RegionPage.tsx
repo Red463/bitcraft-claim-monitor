@@ -92,7 +92,7 @@ export function Region({ data }: { data: ReturnType<typeof normalizeData> }) {
   return (
     <div className="panel region-panel" data-tour="region-page">
       <header className="members-topbar region-topbar">
-        <div>
+        <div className="route-title-copy">
           <h2>{data.claim.regionName ?? "Region"}</h2>
           <p>{formatNumber(allRows.length)} settlements ranked by weighted score: tier, treasury, and tiles</p>
         </div>

@@ -1,5 +1,5 @@
 .server-health-page { gap: 12px; }
-.server-health-command { display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); padding: 12px 14px; }
+.server-health-command { display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel-2); padding: 12px 14px; }
 .server-health-command > div:first-child { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .server-health-command strong, .server-health-command small { display: block; }
 .server-health-command small { color: var(--muted); margin-top: 2px; }
@@ -8,13 +8,13 @@
 .server-health-command.critical { border-color: rgba(239,100,97,.55); background: rgba(239,100,97,.08); }
 .server-health-command.critical > div:first-child > svg { color: var(--danger); }
 .server-health-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
-.server-health-metrics article { min-height: 78px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 10px 12px; }
+.server-health-metrics article { min-height: 78px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel); padding: 10px 12px; }
 .server-health-metrics article > span { color: var(--gold); display: flex; }
 .server-health-metrics small, .server-health-metrics strong, .server-health-metrics em { display: block; }
 .server-health-metrics small, .server-health-metrics em { color: var(--muted); font-size: 11px; font-style: normal; }
 .server-health-metrics strong { font-size: 18px; margin: 2px 0; }
 .server-health-services > div:last-child { display: flex; flex-wrap: wrap; gap: 8px; }
-.server-health-services article { flex: 1 1 260px; display: grid; grid-template-columns: auto 1fr auto; gap: 9px; align-items: center; background: rgba(0,0,0,.12); border-radius: 7px; padding: 9px; }
+.server-health-services article { flex: 1 1 260px; display: grid; grid-template-columns: auto 1fr auto; gap: 9px; align-items: center; background: rgba(0,0,0,.12); border-radius: var(--radius-control); padding: 9px; }
 .server-health-services article small { display: block; color: var(--muted); }
 .health-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
 .health-dot.healthy { background: var(--good); }.health-dot.warning { background: var(--gold); }.health-dot.critical { background: var(--danger); }
@@ -32,8 +32,8 @@
 .server-health-chart-empty { min-height: 110px; display: grid; place-items: center; color: var(--muted); text-align: center; }
 .server-health-page table code { display: block; max-width: 620px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d7e4ff; }
 .server-health-log-filters { display: flex; flex-wrap: wrap; gap: 7px; }
-.server-health-log-filters select, .server-health-log-filters input { min-height: 34px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); color: var(--text); padding: 6px 9px; }
+.server-health-log-filters select, .server-health-log-filters input { min-height: 34px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel-2); color: var(--text); padding: 6px 9px; }
 .server-health-log-list { max-height: 420px; overflow: auto; display: grid; gap: 6px; }
-.server-health-log-list article { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: start; gap: 9px; padding: 8px; background: rgba(0,0,0,.12); border-radius: 7px; }
+.server-health-log-list article { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: start; gap: 9px; padding: 8px; background: rgba(0,0,0,.12); border-radius: var(--radius-control); }
 .server-health-log-list p { margin: 2px 0 0; color: var(--muted); overflow-wrap: anywhere; }.server-health-log-list time { color: var(--muted); font-size: 11px; white-space: nowrap; }
 @media (max-width: 900px) { .server-health-command { align-items: flex-start; flex-direction: column; }.server-health-charts, .server-health-runtime-grid { grid-template-columns: 1fr; }.server-health-log-list article { grid-template-columns: auto minmax(0,1fr); }.server-health-log-list time { grid-column: 2; } }

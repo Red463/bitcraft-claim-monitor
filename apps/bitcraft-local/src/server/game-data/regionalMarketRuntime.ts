@@ -56,6 +56,10 @@ type RuntimeDependencies = {
   poolOptions?: PoolOptions;
   rotationMs?: number;
   applyTimeoutMs?: number;
+  maxOrders?: number;
+  maxClosedListings?: number;
+  maxStalls?: number;
+  maxApplyRows?: number;
   now?: () => number;
   scheduleRotation?: (callback: () => void, intervalMs: number) => () => void;
   onCurrentPublished?: (input: TransitionInput) => Promise<void> | void;
@@ -153,6 +157,10 @@ export class RelayRegionalMarketRuntime {
   readonly #poolOptions: PoolOptions;
   readonly #rotationMs: number;
   readonly #applyTimeoutMs: number;
+  readonly #maxOrders: number | undefined;
+  readonly #maxClosedListings: number | undefined;
+  readonly #maxStalls: number | undefined;
+  readonly #maxApplyRows: number | undefined;
   readonly #now: () => number;
   readonly #scheduleRotation: NonNullable<RuntimeDependencies["scheduleRotation"]>;
   readonly #onCurrentPublished: RuntimeDependencies["onCurrentPublished"];
@@ -189,6 +197,22 @@ export class RelayRegionalMarketRuntime {
       throw new TypeError("Relay regional market apply timeout must be at least 1000ms");
     }
     this.#applyTimeoutMs = applyTimeoutMs;
+    if (dependencies.maxOrders != null && (!Number.isSafeInteger(dependencies.maxOrders) || dependencies.maxOrders < 1)) {
+      throw new TypeError("Relay regional market maxOrders must be a positive safe integer");
+    }
+    this.#maxOrders = dependencies.maxOrders;
+    for (const [label, value] of [
+      ["maxClosedListings", dependencies.maxClosedListings],
+      ["maxStalls", dependencies.maxStalls],
+      ["maxApplyRows", dependencies.maxApplyRows],
+    ] as const) {
+      if (value != null && (!Number.isSafeInteger(value) || value < 1)) {
+        throw new TypeError(`Relay regional market ${label} must be a positive safe integer`);
+      }
+    }
+    this.#maxClosedListings = dependencies.maxClosedListings;
+    this.#maxStalls = dependencies.maxStalls;
+    this.#maxApplyRows = dependencies.maxApplyRows;
     this.#now = dependencies.now ?? Date.now;
     this.#scheduleRotation = dependencies.scheduleRotation ?? ((callback, intervalMs) => {
       const timer = setInterval(callback, intervalMs);
@@ -286,13 +310,27 @@ export class RelayRegionalMarketRuntime {
     const pool = this.#pool;
     const primaryRegionId = this.#primaryRegionId;
     if (!pool || !this.#started || !primaryRegionId) return;
+    let primaryLease: Awaited<ReturnType<AdaptiveRegionSessionPool["acquire"]>> | null = null;
+    try {
+      primaryLease = await pool.acquire(primaryRegionId);
+    } catch (error) {
+      this.#lastError = error instanceof Error ? error.message : String(error);
+    } finally {
+      await primaryLease?.release();
+    }
     const candidates = this.#activeRegionIds.filter((regionId) => (
       regionId !== primaryRegionId
     ));
     if (!candidates.length) return;
     const poolHealth = pool.health();
-    const openRegionIds = new Set(poolHealth.sessions.map((entry) => entry.regionId));
+    const openRegionIds = new Set(poolHealth.sessions
+      .filter((entry) => {
+        const health = asRecord(entry.health);
+        return health.connected !== false && !health.lastError;
+      })
+      .map((entry) => entry.regionId));
     let targetRegionId: string | null = null;
+    let targetAlreadyOpen = false;
     for (let offset = 0; offset < candidates.length; offset += 1) {
       const index = (this.#rotationCursor + offset) % candidates.length;
       const regionId = candidates[index];
@@ -301,9 +339,14 @@ export class RelayRegionalMarketRuntime {
       this.#rotationCursor = (index + 1) % candidates.length;
       break;
     }
-    if (!targetRegionId) return;
+    if (!targetRegionId) {
+      const index = this.#rotationCursor % candidates.length;
+      targetRegionId = candidates[index];
+      targetAlreadyOpen = true;
+      this.#rotationCursor = (index + 1) % candidates.length;
+    }
 
-    if (poolHealth.sessions.length >= poolHealth.maxSessions) {
+    if (!targetAlreadyOpen && poolHealth.sessions.length >= poolHealth.maxSessions) {
       const evictable = poolHealth.sessions
         .filter((entry) => !entry.pinned && entry.leases === 0)
         .sort((left, right) => (
@@ -355,6 +398,10 @@ export class RelayRegionalMarketRuntime {
             manifest: this.#manifest,
             generation: 1,
             regionId,
+            ...(this.#maxOrders == null ? {} : { maxOrders: this.#maxOrders }),
+            ...(this.#maxClosedListings == null ? {} : { maxClosedListings: this.#maxClosedListings }),
+            ...(this.#maxStalls == null ? {} : { maxStalls: this.#maxStalls }),
+            ...(this.#maxApplyRows == null ? {} : { maxApplyRows: this.#maxApplyRows }),
           });
         } catch (error) {
           if (this.#activeSessionIds.get(regionId) === sessionId) {

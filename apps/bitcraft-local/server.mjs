@@ -51,6 +51,7 @@ import {
 import { createMarketTransitionDispatcher } from "./src/server/marketTransitionDispatcher.mjs";
 import { recordProductionJobs as recordProductionJobsFromSnapshot } from "./src/server/productionLifecycle.mjs";
 import { relayActiveRegions } from "./src/server/relayActiveRegions.mjs";
+import { readyMarketRegionIds } from "./src/server/marketRegionScope.mjs";
 import { mapResourceRegionCatalog, nameMapResourceRegionCatalog } from "./src/server/mapResourceRegions.mjs";
 import { MAP_RESOURCE_LEASE_ACQUISITION_LIMIT, MapResourcePageError, buildMapResourcePartitionPayload, createMapResourceCursorCodec, mapResourceSelectionLeasePlan, parseMapResourcePartitionScope, parseMapResourceSelectionScope } from "./src/server/mapResourcePages.mjs";
 import {
@@ -837,9 +838,13 @@ const relayRegionalMarketRuntime = new RelayRegionalMarketRuntime({
       observedAt,
     }),
   rotationMs: Math.max(1_000, Number(process.env.RELAY_MARKET_REGION_ROTATION_MS ?? 15_000)),
+  maxOrders: Math.max(5_000, Number(process.env.RELAY_MARKET_REGION_MAX_ORDERS ?? 20_000)),
+  maxClosedListings: Math.max(10_000, Number(process.env.RELAY_MARKET_REGION_MAX_CLOSED_LISTINGS ?? 25_000)),
+  maxStalls: Math.max(1_000, Number(process.env.RELAY_MARKET_REGION_MAX_STALLS ?? 5_000)),
+  maxApplyRows: Math.max(25_000, Number(process.env.RELAY_MARKET_REGION_MAX_APPLY_ROWS ?? 50_000)),
   poolOptions: {
-    maxSessions: Math.max(1, Number(process.env.RELAY_MARKET_REGION_MAX_SESSIONS ?? 4)),
-    idleCloseMs: Math.max(10_000, Number(process.env.RELAY_MARKET_REGION_IDLE_CLOSE_MS ?? 60_000)),
+    maxSessions: Math.max(1, Number(process.env.RELAY_MARKET_REGION_MAX_SESSIONS ?? 16)),
+    idleCloseMs: Math.max(10_000, Number(process.env.RELAY_MARKET_REGION_IDLE_CLOSE_MS ?? 300_000)),
     staggerMs: Math.max(0, Number(process.env.RELAY_MARKET_REGION_STAGGER_MS ?? 250)),
   },
 });
@@ -1036,6 +1041,38 @@ function gameDataProviderHealth() {
     regionClaims,
     empires,
     mapResources: sanitizedMapResourceHealth(relayMapResourceRuntime.health()),
+  };
+}
+
+function regionalMarketRuntimeHeartbeat() {
+  const runtime = relayRegionalMarketRuntime.health();
+  const sessions = Array.isArray(runtime?.pool?.sessions) ? runtime.pool.sessions : [];
+  const activeRegionIds = Array.isArray(runtime?.activeRegionIds) ? runtime.activeRegionIds.map(String) : [];
+  const sessionByRegion = new Map(sessions.map((session) => [String(session?.regionId ?? ""), session?.health ?? {}]));
+  const healthy = runtime.running === true
+    && activeRegionIds.length > 0
+    && activeRegionIds.every((regionId) => {
+      const health = sessionByRegion.get(regionId);
+      return health?.connected === true && health.applied === true && !health.lastError;
+    });
+  const lastError = runtime.lastError
+    ?? sessions.map((session) => session?.health?.lastError).find(Boolean)
+    ?? null;
+  const lastAppliedAt = sessions
+    .map((session) => String(session?.health?.lastAppliedAt ?? ""))
+    .filter(Boolean)
+    .sort()
+    .at(-1) ?? null;
+  return {
+    ...runtime,
+    subscription: {
+      connected: healthy,
+      applied: healthy,
+      lastAppliedAt,
+      lastError,
+      typedState: healthy ? "connected" : "disconnected",
+    },
+    lastError,
   };
 }
 function globalRegionSubscriptionHealth() {
@@ -1669,6 +1706,7 @@ function publicBootstrapConfig() {
   const settings = getSettings();
   return {
     claimId: settings.claimId,
+    claimName: String(currentStateRepository.read(settings.claimId, "claim")?.data?.name ?? "").trim(),
     syncUrl: settings.syncUrl,
     excludedMemberIds: settings.excludedMemberIds,
     theme: settings.theme,
@@ -6278,7 +6316,7 @@ function currentBuyOrderBaselineKeys(snapshot, regionId, allowedRegionIds) {
 function marketBuyOrders(claimId, params = {}, allowedRegionIds = []) {
   const id = String(claimId ?? "").trim();
   const current = currentStateRepository.read(id, "regional-market");
-  const runtimeHealth = relayRegionalMarketRuntime.health();
+  const runtimeHealth = gameDataProviderHealth().regionalMarket;
   let history = {
     baselines: new Map(),
     historyObservedSince: null,
@@ -6403,11 +6441,11 @@ function regionalMarketReadScope(claimId) {
     : [];
   const runtimeActiveRegionIds = relayRegionalMarketRuntime.health().activeRegionIds;
   const configuredActiveRegionIds = configuredRegionalMarketRegionIds(claimId);
-  const allowedRegionIds = configuredActiveRegionIds.length
-    ? configuredActiveRegionIds
-    : runtimeActiveRegionIds.length
-      ? runtimeActiveRegionIds
-      : persistedActiveRegionIds;
+  const allowedRegionIds = readyMarketRegionIds(gameDataProviderHealth(), [
+    ...runtimeActiveRegionIds,
+    ...persistedActiveRegionIds,
+    ...configuredActiveRegionIds,
+  ]);
   return { current, allowedRegionIds };
 }
 
@@ -6452,7 +6490,7 @@ function regionalMarketRegionRows(claimId) {
       const status = regionalMarketStatus(current, {
         regionId,
         allowedRegionIds,
-        runtimeHealth: relayRegionalMarketRuntime.health(),
+        runtimeHealth: gameDataProviderHealth().regionalMarket,
         staleAfterMs: relayRegionalMarketStaleMs,
       });
       return {
@@ -6471,14 +6509,14 @@ function regionalMarketResponseStatus(current, regionId, allowedRegionIds) {
   const orderStatus = regionalMarketStatus(current, {
     regionId,
     allowedRegionIds,
-    runtimeHealth: relayRegionalMarketRuntime.health(),
+    runtimeHealth: gameDataProviderHealth().regionalMarket,
     staleAfterMs: relayRegionalMarketStaleMs,
   });
   return combinedMarketStatus(
     orderStatus,
     providerCatalogRepository.getSourceState(),
     {
-      runtimeHealth: relayGlobalCatalogRuntime.health(),
+      runtimeHealth: gameDataProviderHealth().globalCatalog,
       staleAfterMs: relayGlobalCatalogStaleMs,
     },
   );
@@ -6567,7 +6605,7 @@ function regionalMarketObservedTrades(claimId, regionId, allowedRegionIds, optio
 
 function globalCatalogReadStatus() {
   const source = providerCatalogRepository.getSourceState();
-  const runtime = relayGlobalCatalogRuntime.health();
+  const runtime = gameDataProviderHealth().globalCatalog;
   return {
     ...globalCatalogStatus(source, {
       runtimeHealth: runtime,
@@ -10690,9 +10728,9 @@ function startBackgroundTasks() {
       }
       if (!relayRegionalMarketStarted) {
         try {
-          const settings = getSettings();
-          const activeRegionIds = parseRegionIds(
-            `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+          const activeRegionIds = readyMarketRegionIds(
+            relayProvider.health(),
+            configuredRegionalMarketRegionIds(claimId),
           );
           await relayRegionalMarketRuntime.start({
             relayBaseUrl,
@@ -10706,18 +10744,26 @@ function startBackgroundTasks() {
         }
       } else {
         try {
-          const settings = getSettings();
           await relayRegionalMarketRuntime.reconcile({
             relayBaseUrl,
             claimId,
             primaryRegionId: regionId,
-            activeRegionIds: parseRegionIds(
-              `${regionId},${settings.defaultRegion},${settings.additionalActiveRegions}`,
+            activeRegionIds: readyMarketRegionIds(
+              relayProvider.health(),
+              configuredRegionalMarketRegionIds(claimId),
             ),
           });
         } catch (error) {
           if (!isTestRuntime) console.warn(`Relay regional-market reconcile failed: ${errorMessage(error)}`);
         }
+      }
+      try {
+        await persistRelayRuntimeDomainHeartbeats(
+          regionalMarketRuntimeHeartbeat(),
+          ["regional-market"],
+        );
+      } catch (error) {
+        if (!isTestRuntime) console.warn(`Relay regional-market heartbeat failed: ${errorMessage(error)}`);
       }
       if (!relayEmpireStarted) {
         try {

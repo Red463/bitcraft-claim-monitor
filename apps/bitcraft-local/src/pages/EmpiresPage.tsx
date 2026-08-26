@@ -442,7 +442,7 @@ export function Empires({
   return (
     <div className="panel empires-page">
       <header className="page-title-row" data-tour="empires-page">
-        <div>
+        <div className="route-title-copy">
           <h2>Empires</h2>
           <p>Regional empire overview and claimed watchtower scouting.</p>
         </div>

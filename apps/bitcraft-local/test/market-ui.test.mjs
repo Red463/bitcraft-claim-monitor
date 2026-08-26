@@ -4,9 +4,43 @@ import test from "node:test";
 import {
   availabilityFlags,
   marketChartPoints,
+  marketPriceClass,
+  marketSuggestionResults,
   nextOptionIndex,
   nextTabIndex,
+  regionalMarketQuotes,
 } from "../src/pages/market/marketUi.ts";
+
+test("catalog refresh cannot reopen suggestions after an item selection", () => {
+  const refreshedItems = [
+    { id: "1", name: "Simple Plank" },
+    { id: "2", name: "Simple Plank Output" },
+  ];
+
+  assert.deepEqual(marketSuggestionResults(refreshedItems, "simple plank", false), []);
+  assert.deepEqual(marketSuggestionResults(refreshedItems, "simple plank", true), refreshedItems);
+});
+
+test("market price roles map to stable semantic classes", () => {
+  assert.equal(marketPriceClass("ask"), "market-price market-price-ask");
+  assert.equal(marketPriceClass("bid"), "market-price market-price-bid");
+  assert.equal(marketPriceClass("profit", "135"), "market-price market-price-profit");
+  assert.equal(marketPriceClass("profit", "0"), "market-price market-price-neutral");
+  assert.equal(marketPriceClass("profit", "-5"), "market-price market-price-loss");
+  assert.equal(marketPriceClass("neutral"), "market-price market-price-neutral");
+});
+
+test("regional quotes preserve exact values and sort by best ask", () => {
+  const quotes = regionalMarketQuotes([
+    { side: "sell", regionId: "19", regionName: "Shardvale", unitPrice: "340", quantity: "3", lastSeen: "2026-08-24T20:00:00Z" },
+    { side: "sell", regionId: "19", regionName: "Shardvale", unitPrice: "360", quantity: "4", lastSeen: "2026-08-24T20:01:00Z" },
+    { side: "buy", regionId: "19", regionName: "Shardvale", unitPrice: "320", quantity: "12", lastSeen: "2026-08-24T20:02:00Z" },
+    { side: "sell", regionId: "22", unitPrice: "90071992547409931", quantity: "5", lastSeen: "2026-08-24T19:59:00Z" },
+  ]);
+  assert.deepEqual(quotes[0], { regionKey: "19", regionId: "19", regionName: "Shardvale", bestSell: "340", bestBuy: "320", sellQuantity: "7", buyQuantity: "12", sellOrders: 2, buyOrders: 1, lastSeen: "2026-08-24T20:02:00Z" });
+  assert.equal(quotes[1].bestSell, "90071992547409931");
+  assert.equal(quotes[1].regionName, "R22");
+});
 
 test("market availability modes map to the existing catalog contract", () => {
   assert.deepEqual(availabilityFlags("any"), { availableOnly: false, hasSell: false, hasBuy: false });

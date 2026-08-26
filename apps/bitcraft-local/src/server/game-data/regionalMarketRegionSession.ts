@@ -429,6 +429,17 @@ export class RelayRegionalMarketRegionSession {
         `Relay regional market order ${index} owner id`,
       ));
     }
+    for (const [index, value] of rows(connection.db.closedListingState).entries()) {
+      const row = wireRecord(value, `Relay regional market closed listing ${index}`);
+      claimIds.push(decimalInteger(
+        row.claimEntityId ?? row.claim_entity_id,
+        `Relay regional market closed listing ${index} claim id`,
+      ));
+      ownerIds.push(decimalInteger(
+        row.ownerEntityId ?? row.owner_entity_id,
+        `Relay regional market closed listing ${index} owner id`,
+      ));
+    }
     for (const [index, value] of rows(connection.db.buildingState).entries()) {
       const row = wireRecord(value, `Relay regional market stall building ${index}`);
       claimIds.push(decimalInteger(

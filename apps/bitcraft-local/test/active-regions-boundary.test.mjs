@@ -12,7 +12,8 @@ test("active region helpers live outside the legacy MainPages bundle", () => {
   const activeRegionsUrl = new URL("../src/hooks/useActiveRegions.ts", import.meta.url);
 
   assert.equal(existsSync(activeRegionsUrl), true);
-  assert.equal(marketPage.includes('import { activeRegionLabel, useActiveRegions } from "../hooks/useActiveRegions";'), true);
+  assert.equal(marketPage.includes('import { activeRegionLabel, type ActiveRegion } from "../hooks/useActiveRegions";'), true);
+  assert.match(marketPage, /marketRegionScopeUrl\(claimId\)/);
   assert.doesNotMatch(mainPages, /type\s+ActiveRegion\s*=/);
   assert.doesNotMatch(mainPages, /function\s+activeRegionLabel\s*\(/);
   assert.doesNotMatch(mainPages, /function\s+useActiveRegions\s*\(/);

@@ -32,7 +32,7 @@ export function SyncPanel({ syncUrl }: { syncUrl: string }) {
   return (
     <div className="panel sync-panel" data-tour="sync-page">
       <header className="members-topbar sync-topbar">
-        <div>
+        <div className="route-title-copy">
           <h2>Sync</h2>
           <p>Embedded BitCraft Sync materials and goals board</p>
         </div>

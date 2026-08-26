@@ -119,7 +119,7 @@ export function PublicCraftFinder({ providerData, providerLoading, providerError
   return (
     <section className="public-craft-finder" data-tour="publiccrafts-page">
       <header className="members-topbar public-craft-topbar">
-        <div>
+        <div className="route-title-copy">
           <h2>Public Craft Finder</h2>
           <p>{providerLoading && !providerData ? "Loading public jobs..." : `${skillName} - ${formatNumber(filteredJobs.length)} public job${filteredJobs.length === 1 ? "" : "s"}${filteredJobs.length > visibleJobs.length ? ` - top ${visibleJobs.length} shown` : ""}`}</p>
         </div>

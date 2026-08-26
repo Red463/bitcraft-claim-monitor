@@ -17,10 +17,8 @@
   min-height: 126px;
   position: relative;
   border: 1px solid var(--border);
-  border-radius: 7px;
-  background:
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--active-bg) 16%, transparent), transparent 38%),
-    linear-gradient(180deg, var(--card-top), var(--card-bottom));
+  border-radius: var(--radius-panel);
+  background: var(--surface-2);
   color: var(--muted);
   padding: 20px 20px 16px;
   display: grid;
@@ -29,16 +27,16 @@
   gap: 5px 16px;
   text-align: left;
   cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+  box-shadow: none;
   overflow: hidden;
 }
-.dashboard-metric:hover { border-color: var(--hover-border); background: linear-gradient(180deg, color-mix(in srgb, var(--card-top) 84%, var(--active-bg)), var(--card-bottom)); }
+.dashboard-metric:hover { border-color: var(--hover-border); background: var(--surface-3); }
 .dashboard-metric-icon {
   grid-row: 1 / 4;
   width: 48px;
   height: 48px;
-  border-radius: 14px;
-  background: linear-gradient(145deg, color-mix(in srgb, var(--icon-bg) 82%, var(--active-bg)), var(--icon-bg));
+  border-radius: var(--radius-dialog);
+  background: var(--surface-1);
   color: var(--active-color);
   display: grid;
   place-items: center;
@@ -66,15 +64,13 @@
 .dashboard-card {
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 7px;
-  background:
-    radial-gradient(circle at 95% 0%, color-mix(in srgb, var(--active-bg) 14%, transparent), transparent 38%),
-    linear-gradient(180deg, var(--card-top), var(--card-bottom));
+  border-radius: var(--radius-panel);
+  background: var(--surface-2);
   padding: 20px;
   display: grid;
   gap: 14px;
   align-content: start;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+  box-shadow: none;
 }
 .dashboard-card-chart { grid-area: treasury; min-height: 350px; }
 .dashboard-card-supply { grid-area: supply; min-height: 350px; }
@@ -82,6 +78,18 @@
 .dashboard-card-members { grid-area: members; }
 .dashboard-card-production { grid-area: production; }
 .dashboard-card-attention { grid-area: attention; }
+
+/* Obsidian Ledger command-centre hierarchy */
+.dashboard-command-state { padding-bottom: var(--space-2); }
+.dashboard-command-state .page-header { padding: 0; }
+.dashboard-command-metrics { gap: var(--space-3); }
+.dashboard-command-metrics .dashboard-metric { min-height: 102px; padding: 14px; border-color: var(--line-subtle); border-radius: var(--radius-panel); background: var(--surface-1); }
+.dashboard-command-metrics .dashboard-metric-icon { width: 38px; height: 38px; border-radius: var(--radius-control); }
+.dashboard-command-metrics .dashboard-metric-icon svg { width: 22px; height: 22px; }
+.dashboard-card { border-color: var(--line-subtle); border-radius: var(--radius-panel); background: var(--surface-1); box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%); }
+.dashboard-card-attention { grid-area: activity; border-color: color-mix(in srgb, var(--active-color) 28%, var(--line-subtle)); }
+.dashboard-card-activity { grid-area: attention; }
+.dashboard-money-row strong, .dashboard-supply-lead strong, .dashboard-metric strong, .dashboard-feed time { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
 .dashboard-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .dashboard-card-header h3 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--card-title); text-transform: uppercase; font-size: 12px; font-weight: 800; letter-spacing: .055em; }
 .dashboard-card-title-icon { display: inline-flex; color: var(--active-color); }
@@ -101,7 +109,7 @@
 .dashboard-card-header button {
   min-height: 31px;
   border: 1px solid rgba(118,134,157,.32);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: rgba(6,10,15,.96);
   color: #cbd4df;
   padding: 0 13px;
@@ -139,7 +147,7 @@
 .dashboard-chart-active-dot { fill: var(--active-color); stroke: #090d13; stroke-width: 3; pointer-events: none; }
 .dashboard-chart-hit { fill: transparent; cursor: crosshair; outline: none; }
 .dashboard-chart-hit:focus-visible { fill: rgba(247,200,54,.16); stroke: var(--active-color); stroke-width: 2; }
-.dashboard-chart-tooltip { position: absolute; top: 8px; z-index: 2; display: grid; gap: 1px; min-width: 94px; padding: 7px 9px; border: 1px solid rgba(247,200,54,.44); border-radius: 6px; color: #f8fafc; background: rgba(7,11,17,.96); box-shadow: 0 8px 18px rgba(0,0,0,.28); transform: translateX(-50%); pointer-events: none; }
+.dashboard-chart-tooltip { position: absolute; top: 8px; z-index: 2; display: grid; gap: 1px; min-width: 94px; padding: 7px 9px; border: 1px solid rgba(247,200,54,.44); border-radius: var(--radius-control); color: #f8fafc; background: rgba(7,11,17,.96); box-shadow: 0 8px 18px rgba(0,0,0,.28); transform: translateX(-50%); pointer-events: none; }
 .dashboard-chart-tooltip span { color: #aab5c4; font-size: 11px; }
 .dashboard-chart-tooltip strong { color: var(--active-color); font-size: 13px; }
 .dashboard-chart-axis {
@@ -155,7 +163,7 @@
 .dashboard-chart-empty {
   min-height: 230px;
   border: 1px dashed rgba(154,168,190,.2);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   display: grid;
   place-items: center;
   align-content: center;
@@ -184,7 +192,7 @@
 .dashboard-feed-row {
   min-height: 62px;
   border: 1px solid rgba(118,134,157,.16);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: rgba(5,8,12,.78);
   color: #c8d2df;
   padding: 11px 13px;
@@ -221,7 +229,7 @@
   cursor: pointer;
 }
 .dashboard-member-list button:hover { background: rgba(255,255,255,.025); }
-.dashboard-avatar { width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #6b4f27, #0b0f14); color: #fff; display: grid; place-items: center; position: relative; font-weight: 800; }
+.dashboard-avatar { width: 38px; height: 38px; border-radius: var(--radius-panel); background: linear-gradient(135deg, #6b4f27, #0b0f14); color: #fff; display: grid; place-items: center; position: relative; font-weight: 800; }
 .dashboard-avatar .online-dot { position: absolute; right: -2px; bottom: -2px; margin: 0; border: 2px solid #0c141f; }
 .dashboard-member-copy,
 .dashboard-member-session { display: grid; gap: 5px; min-width: 0; }
@@ -243,7 +251,7 @@
   text-align: left;
 }
 .dashboard-production-list button:hover strong { color: var(--active-color); }
-.dashboard-item-icon { grid-row: span 2; width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; color: #d6bf77; background: rgba(255,255,255,.055); overflow: hidden; }
+.dashboard-item-icon { grid-row: span 2; width: 30px; height: 30px; border-radius: var(--radius-control); display: grid; place-items: center; color: #d6bf77; background: rgba(255,255,255,.055); overflow: hidden; }
 .dashboard-item-icon .item-thumb { width: 30px; height: 30px; border: 0; border-radius: inherit; background: transparent; }
 .dashboard-production-list strong { color: #fff; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dashboard-production-list b { color: #fff; font-size: 13px; }
@@ -266,7 +274,7 @@
   cursor: pointer;
 }
 .dashboard-alert-list button:hover { background: rgba(255,255,255,.025); }
-.dashboard-alert-list button > span { grid-row: span 2; width: 34px; height: 28px; border-radius: 14px; display: grid; place-items: center; color: var(--card-bottom); background: var(--active-color); font-weight: 800; font-size: 12px; }
+.dashboard-alert-list button > span { grid-row: span 2; width: 34px; height: 28px; border-radius: var(--radius-dialog); display: grid; place-items: center; color: var(--card-bottom); background: var(--active-color); font-weight: 800; font-size: 12px; }
 .dashboard-alert-list button.danger > span { background: #dc5959; color: #fff; }
 .dashboard-alert-list button.blue > span { background: #3e8be5; color: #08111b; }
 .dashboard-alert-list button.purple > span { background: #8a4be4; color: #fff; }
@@ -276,7 +284,7 @@
 .dashboard-empty {
   min-height: 76px;
   border: 1px dashed rgba(118,134,157,.2);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   display: grid;
   place-items: center;
   color: #93a0b2;
@@ -293,8 +301,8 @@
   .dashboard-main-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas:
-      "treasury supply"
       "activity activity"
+      "treasury supply"
       "members production"
       "attention attention";
   }
@@ -315,9 +323,9 @@
   .dashboard-kpis, .dashboard-main-grid { grid-template-columns: 1fr; }
   .dashboard-main-grid {
     grid-template-areas:
+      "activity"
       "supply"
       "treasury"
-      "activity"
       "members"
       "production"
       "attention";

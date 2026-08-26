@@ -40,13 +40,11 @@ test("Map page removes its banner and exposes a dedicated-tab control only in th
   assert.match(narrowMapCss, /\.map-panel\.is-dedicated \.map-workspace\.native-tools\s*\{[^}]*height:\s*100dvh;[^}]*min-height:\s*100dvh;/s);
 });
 
-test("Map fullscreen control clears the expanded application tools rail", () => {
+test("Map fullscreen control has a stable edge offset without legacy tool-rail coupling", () => {
   const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
 
-  assert.match(
-    mapCss,
-    /body:has\(\.floating-actions:not\(\.floating-actions-collapsed\)\) \.map-dedicated-tab-link\s*\{[^}]*right:\s*4\.75rem;/s,
-  );
+  assert.doesNotMatch(mapCss, /floating-actions/);
+  assert.match(mapCss, /\.map-dedicated-tab-link\s*\{[^}]*right:\s*0\.75rem;/s);
 });
 
 test("Map page supplies the complete player panel to the native map", () => {
@@ -92,6 +90,26 @@ test("Native map tool panels keep close controls compact and resource results as
   assert.match(mapCss, /\.map-player-list label\s*\{[^}]*grid-template-columns:\s*[^;]+;/s);
   assert.match(mapCss, /\.map-player-row-colour\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*1;/s);
   assert.match(mapCss, /\.map-resource-filters\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s);
+});
+
+test("Map chrome keeps independent controls and floating windows opaque", () => {
+  const mapCss = readFileSync(new URL("../src/styles/map.css", import.meta.url), "utf8");
+  const chromeStart = mapCss.indexOf("/* Obsidian Ledger immersive map chrome */");
+  const immersiveChrome = mapCss.slice(chromeStart, mapCss.indexOf("@media (max-width: 700px)", chromeStart));
+
+  assert.match(immersiveChrome, /--map-chrome-bg:\s*var\(--surface-1\)/);
+  assert.match(immersiveChrome, /\.map-chrome\s*\{[^}]*backdrop-filter:\s*none;/s);
+  assert.match(immersiveChrome, /\.native-map-controls\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s);
+  assert.match(immersiveChrome, /\.native-map-tool-trigger,\s*\.native-map-region-select\s*\{[^}]*background:\s*var\(--map-chrome-bg\);[^}]*box-shadow:\s*none;/s);
+  assert.match(immersiveChrome, /\.native-map-tool-panel\s*\{[^}]*border-color:\s*var\(--map-chrome-border,\s*var\(--line-strong\)\);[^}]*background:\s*var\(--map-chrome-bg,\s*var\(--surface-1\)\);[^}]*box-shadow:\s*var\(--map-chrome-shadow,\s*0 12px 32px rgb\(0 0 0 \/ 34%\)\);/s);
+});
+
+test("Map freshness warnings live in the health surface instead of repeating inside resource tools", () => {
+  const mapPage = readFileSync(new URL("../src/pages/MapPage.tsx", import.meta.url), "utf8");
+  const finder = readFileSync(new URL("../src/pages/map/MapResourceFinderPanel.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(mapPage, /resourceNotice|setResourceNotice/);
+  assert.doesNotMatch(finder, /\bnotice\b/);
 });
 
 test("Map Resource Finder uses the shared icon fallback for compound item identities", () => {
@@ -419,7 +437,7 @@ test("Native map exposes persisted layer controls without clearing dense selecti
   assert.match(preferences, /key: "debug", label: "Debug information", defaultVisible: false/);
   assert.match(nativeMap, /const debugInformationVisible = layerVisibility\.debug === true/);
   assert.match(nativeMap, /const accessibleFeatures = debugInformationVisible\s*\?/);
-  assert.match(nativeMap, /\{debugInformationVisible \? <div className="native-map-status"/);
+  assert.match(nativeMap, /\{debugInformationVisible \? <div className="native-map-status map-status-chip map-chrome"/);
   assert.match(nativeMap, /\{debugInformationVisible && accessibleFeatures\.length \? <details className="native-map-accessible-points"/);
   assert.doesNotMatch(control, /setResourceIds|setEnemyTypes|resourceIds\s*=|enemyTypes\s*=/);
   assert.match(control, /aria-describedby/);

@@ -218,17 +218,34 @@ export class AdaptiveRegionSessionPool {
   }
 
   async #ensureSession(regionId: string, pinned: boolean): Promise<SessionEntry> {
-    const existing = this.#sessions.get(regionId);
-    if (existing) {
-      existing.pinned ||= pinned;
-      existing.lastUsedAt = this.#now();
-      return existing;
-    }
     const opening = this.#opening.get(regionId);
     if (opening) {
       const entry = await opening;
       entry.pinned ||= pinned;
       return entry;
+    }
+    const existing = this.#sessions.get(regionId);
+    if (existing) {
+      const health = existing.session.health?.();
+      const healthRecord = health && typeof health === "object" && !Array.isArray(health)
+        ? health as Record<string, unknown>
+        : {};
+      const disconnected = healthRecord.connected === false || Boolean(healthRecord.lastError);
+      if (disconnected && existing.leases === 0) {
+        const replacement = (async () => {
+          await this.#closeEntry(existing);
+          return this.#openSession(regionId, pinned || existing.pinned, true);
+        })();
+        this.#opening.set(regionId, replacement);
+        try {
+          return await replacement;
+        } finally {
+          if (this.#opening.get(regionId) === replacement) this.#opening.delete(regionId);
+        }
+      }
+      existing.pinned ||= pinned;
+      existing.lastUsedAt = this.#now();
+      return existing;
     }
     const promise = this.#openSession(regionId, pinned);
     this.#opening.set(regionId, promise);
@@ -239,8 +256,8 @@ export class AdaptiveRegionSessionPool {
     }
   }
 
-  async #openSession(regionId: string, pinned: boolean): Promise<SessionEntry> {
-    if (this.#sessions.size + this.#opening.size >= this.#maxSessions) {
+  async #openSession(regionId: string, pinned: boolean, replacing = false): Promise<SessionEntry> {
+    if (!replacing && this.#sessions.size + this.#opening.size >= this.#maxSessions) {
       const evictable = [...this.#sessions.values()]
         .filter((entry) => !entry.pinned && entry.leases === 0)
         .sort((left, right) => left.lastUsedAt - right.lastUsedAt || regionOrder(left.regionId, right.regionId))[0];

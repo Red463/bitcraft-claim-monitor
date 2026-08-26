@@ -48,7 +48,6 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, dedi
   const [resourceRegions, setResourceRegions] = usePersistedState<string[]>("map.regions", data.claim.regionId != null ? [String(data.claim.regionId)] : []);
   const [resources, setResources] = React.useState<AnyRecord[]>([]);
   const [resourceError, setResourceError] = React.useState("");
-  const [resourceNotice, setResourceNotice] = React.useState("");
   const [resourceCatalogLoaded, setResourceCatalogLoaded] = React.useState(false);
   const [mapResourceRegions, setMapResourceRegions] = React.useState<AnyRecord[]>([]);
   React.useEffect(() => {
@@ -114,9 +113,6 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, dedi
           .map((creature) => ({ ...creature, id: `enemy:${creature.enemyType}`, mapKind: "enemy", mapId: String(creature.enemyType), mapSortOrder: 100000 + toNumber(creature.enemyType), tag: "Huntable Animal" }));
         setResources([...resourceRows, ...creatureRows].sort((a, b) => toNumber(a.mapSortOrder) - toNumber(b.mapSortOrder) || String(a.name).localeCompare(String(b.name))));
         setResourceError("");
-        setResourceNotice(String(catalogPayload.freshness ?? "") === "stale"
-          ? String(catalogPayload.warnings?.[0] ?? "Relay catalog is stale.")
-          : "");
         setResourceCatalogLoaded(true);
       })
       .catch((error) => {
@@ -299,7 +295,6 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, dedi
     catalogCount={resources.length}
     catalogLoaded={resourceCatalogLoaded}
     error={resourceError}
-    notice={resourceNotice}
     onSearchChange={setResourceSearch}
     onTierChange={setResourceTier}
     onCategoryChange={setResourceCategory}
@@ -310,9 +305,9 @@ export function MapPanel({ data, focus, onClearFocus, activeRegionScopeKey, dedi
   />;
   const regionControl = <MapRegionSelect value={resourceRegionValue} options={resourceRegionOptions} onChange={setResourceRegion} />;
   return (
-    <div className={`panel map-panel full-height has-native-tools ${focus && !dedicated ? "has-focus" : ""} ${dedicated ? "is-dedicated" : ""}`}>
+    <div className={`panel map-panel map-surface full-height has-native-tools ${focus && !dedicated ? "has-focus" : ""} ${dedicated ? "is-dedicated" : ""}`}>
       {!dedicated && focus ? (
-        <div className="map-focus">
+        <div className="map-focus map-selection-banner map-chrome">
           <MapPin size={17} />
           <div><strong>{focus.name}</strong><span>{focus.locationX}, {focus.locationZ}</span></div>
           <button className="mini-action" onClick={onClearFocus}>Clear</button>
