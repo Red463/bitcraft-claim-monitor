@@ -2,61 +2,70 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { publicSettlementPath, publicStorageKey, resolvePublicRoute } from "../src/public/routes.mjs";
-import { addRecentSettlement, readRecentSettlements, settlementPreferenceKey } from "../src/public/preferences.mjs";
+import { publicClaimPath, publicStorageKey, resolvePublicRoute } from "../src/public/routes.mjs";
+import { addRecentClaim, claimPreferenceKey, readRecentClaims } from "../src/public/preferences.mjs";
 import { createVisibleRefreshController } from "../src/public/visibleRefresh.mjs";
 
-test("public routes expose only the public claim-monitor feature matrix", () => {
-  assert.deepEqual(resolvePublicRoute("/settlements/42/members"), { id: "members", params: { claimId: "42" } });
-  assert.deepEqual(resolvePublicRoute("/settlements/42/inventory"), { id: "inventory", params: { claimId: "42" } });
-  assert.deepEqual(resolvePublicRoute("/settlements/42/crafts"), { id: "crafts", params: { claimId: "42" } });
+test("public routes use claim URLs and canonicalize legacy bookmarks", () => {
+  assert.deepEqual(resolvePublicRoute("/"), { id: "home", params: {} });
+  assert.deepEqual(resolvePublicRoute("/claims/42"), { id: "dashboard", params: { claimId: "42" } });
+  assert.deepEqual(resolvePublicRoute("/claims/42/professions"), { id: "professions", params: { claimId: "42" } });
+  assert.deepEqual(resolvePublicRoute("/settlements/42/members"), {
+    id: "members",
+    params: { claimId: "42" },
+    canonicalPath: "/claims/42/members",
+  });
+  assert.deepEqual(resolvePublicRoute("/claims/42/map"), {
+    id: "coming-soon",
+    params: { claimId: "42", feature: "map" },
+  });
   assert.deepEqual(resolvePublicRoute("/calculator"), { id: "calculator", params: {} });
   assert.deepEqual(resolvePublicRoute("/settings"), { id: "settings", params: {} });
-  assert.deepEqual(resolvePublicRoute("/leaderboard"), { id: "not-found", params: {} });
-  assert.deepEqual(resolvePublicRoute("/map"), { id: "not-found", params: {} });
   assert.deepEqual(resolvePublicRoute("/admin"), { id: "not-found", params: {} });
 });
 
 test("public name and exact-ID search hints select their server claim IDs", () => {
   assert.equal(
-    publicSettlementPath({ claimId: "42", name: "Northwatch", regionId: "7" }),
-    "/settlements/42",
+    publicClaimPath({ claimId: "42", name: "Northwatch", regionId: "7" }),
+    "/claims/42",
     "name-search hints must select the server claimId",
   );
   assert.equal(
-    publicSettlementPath({ claimId: "18446744073709551615", name: "Exact match", regionId: "7" }),
-    "/settlements/18446744073709551615",
+    publicClaimPath({ claimId: "18446744073709551615", name: "Exact match", regionId: "7" }),
+    "/claims/18446744073709551615",
     "exact-ID search hints must preserve the complete canonical claimId",
   );
-  assert.equal(publicSettlementPath({ entityId: "42" }), null, "legacy entityId must not become a public URL authority");
+  assert.equal(publicClaimPath({ entityId: "42" }), null, "legacy entityId must not become a public URL authority");
+  assert.equal(publicClaimPath({ claimId: "18446744073709551616" }), null, "overflowing claim IDs must remain invalid");
 });
 
 test("public route declarations include every runtime route helper used by the shell", () => {
   const declarations = readFileSync(new URL("../src/public/routes.d.mts", import.meta.url), "utf8");
-  assert.match(declarations, /export function publicSettlementPath\(/);
-  for (const routeId of ["members", "inventory", "crafts", "calculator", "account", "settings", "help", "terms", "privacy"]) {
+  assert.match(declarations, /export function publicClaimPath\(/);
+  assert.match(declarations, /canonicalPath\?: string/);
+  for (const routeId of ["home", "dashboard", "members", "professions", "inventory", "crafts", "calculator", "account", "settings", "help", "terms", "privacy", "coming-soon"]) {
     assert.match(declarations, new RegExp(`"${routeId}"`), `${routeId} must remain represented in the public route declaration`);
   }
 });
 
-test("recent settlements and view preferences stay in the public claim namespace", () => {
+test("claim-named preferences retain existing recent-claim storage", () => {
   const storage = new Map();
   const localStorage = {
     getItem: (key) => storage.get(key) ?? null,
     setItem: (key, value) => storage.set(key, value),
   };
 
-  addRecentSettlement(localStorage, { claimId: "42", name: "Northwatch", regionId: "7" });
-  addRecentSettlement(localStorage, { claimId: "19", name: "Riverbend", regionId: "7" });
-  addRecentSettlement(localStorage, { claimId: "42", name: "Northwatch Updated", regionId: "7" });
+  addRecentClaim(localStorage, { claimId: "42", name: "Northwatch", regionId: "7" });
+  addRecentClaim(localStorage, { claimId: "19", name: "Riverbend", regionId: "7" });
+  addRecentClaim(localStorage, { claimId: "42", name: "Northwatch Updated", regionId: "7" });
 
-  assert.deepEqual(readRecentSettlements(localStorage), [
+  assert.deepEqual(readRecentClaims(localStorage), [
     { claimId: "42", name: "Northwatch Updated", regionId: "7" },
     { claimId: "19", name: "Riverbend", regionId: "7" },
   ]);
-  assert.equal(settlementPreferenceKey("42", "inventory-filter"), "claim-monitor.public.settlement.42.inventory-filter");
+  assert.equal(claimPreferenceKey("42", "inventory-filter"), "claim-monitor.public.settlement.42.inventory-filter");
   assert.equal(publicStorageKey("recent-settlements"), "claim-monitor.public.recent-settlements");
-  assert.throws(() => settlementPreferenceKey("42/other", "inventory-filter"), /claim/i);
+  assert.throws(() => claimPreferenceKey("42/other", "inventory-filter"), /claim/i);
 });
 
 test("visible refresh pauses while hidden, catches up once, and does not bypass server cache", async () => {
