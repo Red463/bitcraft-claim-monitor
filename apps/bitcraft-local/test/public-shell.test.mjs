@@ -97,7 +97,9 @@ test("public shell stays isolated from Timbersteel bootstrap, featurebase, analy
   const root = readFileSync(new URL("../src/public/PublicRoot.tsx", import.meta.url), "utf8");
   const shell = readFileSync(new URL("../src/public/PublicAppShell.tsx", import.meta.url), "utf8");
   const api = readFileSync(new URL("../src/public/api.ts", import.meta.url), "utf8");
-  const joined = `${root}\n${shell}\n${api}`;
+  const planAccess = readFileSync(new URL("../src/public/PublicPlanAccessPage.tsx", import.meta.url), "utf8");
+  const planApi = readFileSync(new URL("../src/public/planApi.ts", import.meta.url), "utf8");
+  const joined = `${root}\n${shell}\n${api}\n${planAccess}\n${planApi}`;
 
   for (const forbidden of ["TimbersteelRoot", "loadBootstrap", "Featurebase", "analytics", "useGameDataGeneration", "Admin", "BotControlApp", "/api/local/"]) {
     assert.equal(joined.includes(forbidden), false, `public shell must not depend on ${forbidden}`);

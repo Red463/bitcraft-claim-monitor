@@ -14,14 +14,20 @@ function headerValue(req, name) {
   return String(Array.isArray(value) ? value[0] ?? "" : value ?? "").trim();
 }
 
-function parseIfMatch(req, { create = false } = {}) {
+function parseIfMatch(req, { create = false, allowMissing = false, expectedKind = "" } = {}) {
   const raw = headerValue(req, "if-match");
+  if (!raw && allowMissing) return null;
   if (!raw) throw new PublicPlanError("If-Match is required for public plan mutations.", 428, "revision_required");
   if (create) {
     if (raw !== "*") throw new PublicPlanError("New public plans require If-Match: *.", 409, "revision_conflict");
     return "*";
   }
-  const normalized = raw.replace(/^W\//, "").replace(/^"(\d+)"$/, "$1");
+  const canonical = raw.replace(/^W\//, "");
+  const tagged = /^"([a-z]+):(\d+)"$/.exec(canonical);
+  if (tagged && tagged[1] !== expectedKind) {
+    throw new PublicPlanError("Public plan If-Match revision is invalid.", 400, "revision_invalid");
+  }
+  const normalized = tagged?.[2] ?? canonical.replace(/^"(\d+)"$/, "$1");
   if (!/^[1-9]\d*$/.test(normalized) || !Number.isSafeInteger(Number(normalized))) {
     throw new PublicPlanError("Public plan If-Match revision is invalid.", 400, "revision_invalid");
   }
@@ -67,7 +73,7 @@ export function createPublicPlanRouter({
     return user ? { user } : null;
   }
 
-  function requireSession(req, res, { mutation = false, create = false } = {}) {
+  function requireSession(req, res, { mutation = false, create = false, allowMissingIfMatch = false, ifMatchKind = "" } = {}) {
     const current = session(req);
     if (!current) {
       send(res, 401, { error: "Discord sign-in required", code: "public_session_required" });
@@ -93,7 +99,7 @@ export function createPublicPlanRouter({
         return null;
       }
       try {
-        current.ifMatch = parseIfMatch(req, { create });
+        current.ifMatch = parseIfMatch(req, { create, allowMissing: allowMissingIfMatch, expectedKind: ifMatchKind });
       } catch (error) {
         send(res, error.status, publicPlanErrorBody(error));
         return null;
@@ -143,12 +149,22 @@ export function createPublicPlanRouter({
 
       const inviteAcceptance = pathname.match(/^\/api\/public\/invites\/([^/]+)\/accept$/);
       if (method === "POST" && inviteAcceptance) {
-        const current = requireSession(req, res, { mutation: true });
+        const current = requireSession(req, res, { mutation: true, allowMissingIfMatch: true, ifMatchKind: "access" });
         if (!current) return true;
+        const token = bearerToken(req);
+        if (current.ifMatch == null) {
+          const access = repository.inviteAccessRevision({ inviteId: inviteAcceptance[1], token });
+          send(res, 428, {
+            error: "If-Match is required for public plan mutations.",
+            code: "revision_required",
+            currentRevisions: { access },
+          }, { "cache-control": "no-store" });
+          return true;
+        }
         const plan = repository.acceptInvite({
           inviteId: inviteAcceptance[1],
           userId: current.user.id,
-          token: bearerToken(req),
+          token,
           expectedAccessRevision: current.ifMatch,
         });
         send(res, 200, { plan }, { "cache-control": "no-store" });

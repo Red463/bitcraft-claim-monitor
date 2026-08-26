@@ -17,14 +17,18 @@ function fragmentToken(hash) {
 export function capturePublicPlanFragmentSecret({ location, history, sessionStorage } = {}) {
   const key = secretKey(location?.pathname);
   const token = fragmentToken(location?.hash);
-  if (!key || !token) return null;
+  if (!key || !token) return false;
+  try {
+    history?.replaceState?.(null, "", `${location.pathname}${location.search ?? ""}`);
+  } catch {
+    // A browser-owned history failure must not make the secret available to application state.
+  }
   try {
     sessionStorage?.setItem?.(key, token);
   } catch {
-    return null;
+    return false;
   }
-  history?.replaceState?.(null, "", `${location.pathname}${location.search ?? ""}`);
-  return token;
+  return true;
 }
 
 export function publicPlanAuthorization(pathname, sessionStorage) {

@@ -200,6 +200,22 @@ export function createPublicPlanRepository(db, {
     return supplied.length === expected.length && timingSafeEqual(supplied, expected);
   }
 
+  function invitationForToken(inviteId, token, currentTime) {
+    const invite = db.prepare(`
+      SELECT invite.*, plan.owner_user_id, plan.document_revision, plan.access_revision, plan.status
+      FROM public_craft_plan_invites AS invite
+      JOIN public_craft_plans AS plan ON plan.id = invite.plan_id
+      WHERE invite.id = ?
+    `).get(String(inviteId));
+    if (!invite || !tokenMatches(token, invite.token_hash) || invite.accepted_at || invite.revoked_at) {
+      throw new PublicPlanError("Public plan invitation was not found.", 404, "invite_not_found");
+    }
+    if (String(invite.expires_at) <= currentTime) {
+      throw new PublicPlanError("Public plan invitation has expired.", 410, "invite_expired");
+    }
+    return invite;
+  }
+
   function requireExpectedRevision(plan, expectedRevision, kind = "access") {
     if (expectedRevision == null || expectedRevision === "") {
       throw new PublicPlanError("If-Match is required for public plan mutations.", 428, "revision_required");
@@ -616,21 +632,14 @@ export function createPublicPlanRepository(db, {
       }
       return planView({ ...row, role: "bearer" });
     },
+    inviteAccessRevision({ inviteId, token }) {
+      const invite = invitationForToken(inviteId, token, now().toISOString());
+      return Number(invite.access_revision);
+    },
     acceptInvite({ inviteId, userId, token, expectedAccessRevision }) {
       return transaction(db, () => {
-        const invite = db.prepare(`
-          SELECT invite.*, plan.owner_user_id, plan.document_revision, plan.access_revision, plan.status
-          FROM public_craft_plan_invites AS invite
-          JOIN public_craft_plans AS plan ON plan.id = invite.plan_id
-          WHERE invite.id = ?
-        `).get(String(inviteId));
-        if (!invite || !tokenMatches(token, invite.token_hash) || invite.accepted_at || invite.revoked_at) {
-          throw new PublicPlanError("Public plan invitation was not found.", 404, "invite_not_found");
-        }
         const acceptedAt = now().toISOString();
-        if (String(invite.expires_at) <= acceptedAt) {
-          throw new PublicPlanError("Public plan invitation has expired.", 410, "invite_expired");
-        }
+        const invite = invitationForToken(inviteId, token, acceptedAt);
         requireExpectedRevision(invite, expectedAccessRevision);
         requireMutablePlan(invite);
         if (Number(invite.owner_user_id) === Number(userId)) {

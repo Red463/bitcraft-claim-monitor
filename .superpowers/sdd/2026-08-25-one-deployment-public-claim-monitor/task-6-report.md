@@ -143,3 +143,43 @@ Date: 2026-08-26
 ### Deferred by instruction
 
 - Malformed JSON response mapping and invitation clock consistency were not changed in this round.
+
+## Fix round 2: production bearer-route integration
+
+Date: 2026-08-26
+
+### Approved design ruling
+
+- Invite links retain the exact approved `/invites/<inviteId>#token=<secret>` form. No revision, token, or other authentication metadata was added to the query string.
+- One explicit Accept action first sends a token-authorized, CSRF-protected, exact-origin POST without `If-Match`. The server validates the HMAC token and returns non-mutating `428 revision_required` metadata containing only the current access revision. The same explicit action retries once with `If-Match: "access:<revision>"`; a `409` is never retried automatically.
+- Shared routes perform their read automatically through a focused public-only gateway. Invite routes automatically read only the public session; accepting remains an explicit button action.
+
+### Changes and safety proof
+
+- `capturePublicPlanFragmentSecret` now attempts `history.replaceState` immediately after validating the route fragment and before touching `sessionStorage`. A storage exception therefore cannot retain the secret in the address bar. The helper returns only `true`/`false`, never plaintext.
+- Added `planApi.ts` as the only shared/invite plan gateway. It obtains Authorization exclusively through `publicPlanAuthorization`, sends only relative token-free API paths with same-origin credentials and no-store caching, and maps server failures to fixed safe messages/codes instead of exposing server echoes.
+- Added `PublicPlanAccessPage.tsx` and routed real `shared-plan` and `invite` shell states to it. Shared reads render only loading/error/basic title, settlement, and target-count state. Invite rendering contains no token state and cannot POST until a signed-in, legally current user explicitly selects Accept.
+- Successful invite acceptance and terminal `404` replay/revocation or `410` expiry clear the one-time invite secret. `409` preserves it for a later explicit retry. Share secrets are never cleared by reads and remain per-tab until tab close or explicit clear.
+- The revision probe calls the repository's HMAC-validated invitation lookup and performs no database write, event, log, or revision increment. Invalid/replayed/revoked tokens receive generic `404` without revision metadata; expired tokens receive `410`. The subsequent conditional mutation retains its existing transaction.
+- No schema, service, dependency, Timbersteel import, Timbersteel plan source, audit/history, Discord, outbox, version, or changelog changed.
+
+### RED/GREEN evidence
+
+- Fragment capture RED: `3` tests, `1` pass, `2` fail. Normal capture returned the plaintext token, and storage failure returned before address cleanup. GREEN: `3/3`; normal capture returns `true`, storage failure returns `false`, and both remove the fragment before storage.
+- Invite revision discovery RED: targeted `1` test, `0` pass, `1` fail; a missing `If-Match` returned generic `428` before bearer validation and could not provide a safe revision. GREEN: `1/1`; invalid bearer returns `404`, valid bearer returns non-mutating `{ access: 2 }`, and tagged `If-Match: "access:2"` accepts once and increments the access revision once.
+- Production gateway RED: `4` tests, `0` pass, `4` fail because no gateway module existed. GREEN: `4/4`; shared and invite fetches carried stored Authorization on token-free paths, the invite action made exactly two conditional calls, `409` did not retry, and terminal invitation states cleared storage.
+- Mounted route RED: `8` combined UI/shell tests, `5` pass, `3` fail; neither real route issued a fetch and the plan access component did not exist. GREEN: `8/8`; the mounted shared route loaded basic plan state, while the mounted invite route issued only its session GET until the Accept button click.
+- Error-object sanitization RED: targeted `1` test, `0` pass, `1` fail because a malicious token echo in the server `code` field remained on the client error. GREEN: `1/1` after allow-listing public error codes; message, code, revision metadata, DOM text, and title contain no token.
+
+### Verification
+
+- `node --experimental-strip-types --test test/public-plan-secrets.test.mjs test/public-plan-client.test.mjs test/public-plan-access-ui.test.mjs test/public-shell.test.mjs test/appshell-import-boundary.test.mjs test/public-plan-routes.test.mjs test/public-plans.test.mjs test/public-router.test.mjs`
+  - PASS: `42` tests, `42` passed, `0` failed.
+- `corepack pnpm --filter @workspace/bitcraft-local run build`
+  - PASS: server/provider/bindings TypeScript, asset verification, frontend TypeScript, Vite production build (`1,945` modules), and Relay runtime boundary verification.
+- First `corepack pnpm --filter @workspace/bitcraft-local test`
+  - `2,724` tests: `2,720` passed, `1` failed, `3` skipped. The unrelated host-profile byte-isolation test's child HTTP server reset one connection with `ECONNRESET`; no host-profile/server file was changed by this round.
+- Exact isolated rerun: `node --experimental-strip-types --test --test-name-pattern "enabled public settlement reads leave Timbersteel settings, repositories, history, and outboxes byte-identical" test/host-profile-boundaries.test.mjs`
+  - PASS: `1` test, `1` passed, `0` failed, confirming the transient child-server transport failure.
+- Final unchanged `corepack pnpm --filter @workspace/bitcraft-local test` rerun
+  - PASS: `2,724` tests; `2,721` passed, `0` failed, `3` expected environment skips.

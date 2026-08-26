@@ -25,7 +25,7 @@ test("public plan fragment secrets move to per-tab storage, leave the address ba
   };
   const history = { replaceState: (...args) => replacements.push(args) };
 
-  assert.equal(secrets.capturePublicPlanFragmentSecret({ location, history, sessionStorage }), "one-time-share-secret");
+  assert.equal(secrets.capturePublicPlanFragmentSecret({ location, history, sessionStorage }), true);
   assert.deepEqual(replacements, [[null, "", "/shared-plans/plan-7?mode=compact"]]);
   assert.deepEqual(secrets.publicPlanAuthorization("/shared-plans/plan-7", sessionStorage), {
     authorization: "Bearer one-time-share-secret",
@@ -38,7 +38,7 @@ test("public plan fragment secrets move to per-tab storage, leave the address ba
     location: { pathname: "/invites/invite-8", search: "", hash: "#token=one-time-invite-secret" },
     history,
     sessionStorage,
-  }), "one-time-invite-secret");
+  }), true);
   assert.deepEqual(secrets.publicPlanAuthorization("/invites/invite-8", sessionStorage), {
     authorization: "Bearer one-time-invite-secret",
   });
@@ -46,7 +46,25 @@ test("public plan fragment secrets move to per-tab storage, leave the address ba
     location: { pathname: "/plans/plan-7", search: "", hash: "#token=must-not-store" },
     history,
     sessionStorage,
-  }), null);
+  }), false);
+});
+
+test("public plan fragment cleanup does not depend on session storage availability", () => {
+  assert.ok(secrets, "public plan secret helper must exist");
+  const replacements = [];
+  const result = secrets.capturePublicPlanFragmentSecret({
+    location: {
+      pathname: "/invites/invite-9",
+      search: "",
+      hash: "#token=must-leave-the-address-bar",
+    },
+    history: { replaceState: (...args) => replacements.push(args) },
+    sessionStorage: { setItem: () => { throw new Error("storage disabled"); } },
+  });
+
+  assert.equal(result, false, "fragment capture reports only storage success, never the plaintext token");
+  assert.deepEqual(replacements, [[null, "", "/invites/invite-9"]]);
+  assert.doesNotMatch(JSON.stringify({ result, replacements }), /must-leave-the-address-bar/);
 });
 
 test("the production entrypoint captures plan fragments before host-profile requests", () => {

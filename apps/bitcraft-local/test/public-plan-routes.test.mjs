@@ -130,6 +130,48 @@ test("public plan creation requires session, current legal, exact origin, CSRF, 
   f.db.close();
 });
 
+test("invite acceptance discovers its token-authorized access revision without mutating, then accepts one tagged revision", async () => {
+  const f = fixture();
+  const invited = addAcceptedRouteUser(f, "Revision Probe Invitee");
+  const plan = f.repository.createPlan({
+    ownerUserId: f.userId,
+    claimId: "42",
+    title: "Revision probe plan",
+    document: emptyDocument(),
+  });
+  const invite = f.repository.createInvite({
+    planId: plan.id,
+    actorUserId: f.userId,
+    role: "viewer",
+    expectedAccessRevision: 1,
+  });
+  const path = `/api/public/invites/${invite.id}/accept`;
+
+  const unknown = await call(f.router, "POST", path, request(invited, {
+    authorization: "Bearer not-the-invitation-token",
+  }));
+  assert.equal(unknown.status, 404, "an invalid bearer must not reveal a plan revision");
+  assert.equal("currentRevisions" in json(unknown), false);
+
+  const probe = await call(f.router, "POST", path, request(invited, {
+    authorization: `Bearer ${invite.token}`,
+  }));
+  assert.equal(probe.status, 428);
+  assert.deepEqual(json(probe).currentRevisions, { access: 2 });
+  assert.doesNotMatch(probe.body, new RegExp(invite.token));
+  assert.equal(f.db.prepare("SELECT accepted_at FROM public_craft_plan_invites WHERE id = ?").get(invite.id).accepted_at, null);
+  assert.equal(f.db.prepare("SELECT access_revision FROM public_craft_plans WHERE id = ?").get(plan.id).access_revision, 2);
+
+  const accepted = await call(f.router, "POST", path, request(invited, {
+    ifMatch: '"access:2"',
+    authorization: `Bearer ${invite.token}`,
+  }));
+  assert.equal(accepted.status, 200);
+  assert.equal(json(accepted).plan.role, "viewer");
+  assert.equal(f.db.prepare("SELECT access_revision FROM public_craft_plans WHERE id = ?").get(plan.id).access_revision, 3);
+  f.db.close();
+});
+
 test("public plan router implements the complete collaboration API with conditional revisions", async () => {
   const f = fixture();
   f.db.prepare(`
