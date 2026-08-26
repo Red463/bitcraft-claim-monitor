@@ -143,7 +143,7 @@ test("Relay updater retains three releases only after success", () => {
 test("every runtime-user Git boundary uses the isolated Relay HOME", () => {
   assert.match(
     script,
-    /run_git_as_user\(\) \{\s+sudo -u "\$RUN_USER" env HOME="\$RUN_HOME" \\\s+GIT_SSH_COMMAND="ssh -F \$RUN_SSH_CONFIG" git "\$@"/,
+    /run_git_as_user\(\) \{\s+sudo -u "\$RUN_USER" env HOME="\$RUN_HOME" \\\s+GIT_NO_REPLACE_OBJECTS=1 \\\s+GIT_SSH_COMMAND="ssh -F \$RUN_SSH_CONFIG" git "\$@"/,
   );
   for (const operation of [
     /run_git_as_user[\s\\]+-C "\$SOURCE_DIR" fetch --prune origin main/,
@@ -204,6 +204,8 @@ test("Relay updater snapshots and restores every live install target transaction
     "$BACKUP_HELPER_PATH",
     "$BACKUP_CRYPTO_HELPER_PATH",
     "$PRIVACY_REPLAY_HELPER_PATH",
+    "$PUBLIC_CADDY_HELPER_PATH",
+    "$PUBLIC_CADDY_REFERENCE_PATH",
     "$UPDATER_PATH",
     "$CURRENT_LINK",
     "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service",
@@ -234,7 +236,7 @@ test("Relay rollback accumulates every restore failure and retains incomplete sn
     script.indexOf("restore_service_runtime()"),
   );
   assert.match(restore, /local status=0/);
-  assert.equal((restore.match(/restore_live_path [^\n]+ \|\| status=1/g) || []).length, 17);
+  assert.equal((restore.match(/restore_live_path [^\n]+ \|\| status=1/g) || []).length, 19);
   assert.match(restore, /systemctl daemon-reload \|\| status=1/);
   assert.match(restore, /return "\$status"/);
   assert.match(script, /rollback_attempted=1/);

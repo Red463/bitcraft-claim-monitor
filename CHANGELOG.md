@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.63.0-beta.3] - 2026-08-26
+
+### Added
+
+- Added a protected, revision-bound workflow for the one-time `claim-monitor.com` Caddy bootstrap with validation, root-only backup, idempotent routing, health verification, and automatic rollback.
+
 ## [0.63.0-beta.2] - 2026-08-26
 
 ### Fixed
