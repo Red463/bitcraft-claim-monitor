@@ -282,8 +282,9 @@ test("server collection paginates listings and protects production mutations", a
       const channelId = decodeURIComponent(url.pathname.split("/")[5] ?? "");
       const payload = await requestJson(req);
       const recipientId = channelId.startsWith("dm-") ? channelId.slice(3) : "";
+      const messageId = `message-${discordDirectMessages.length + discordChannelMessages.length + 1}`;
       if (recipientId) {
-        discordDirectMessages.push({ recipientId, payload });
+        discordDirectMessages.push({ id: messageId, recipientId, payload });
         if (discordAssignmentRace?.recipientId === recipientId) {
           const race = discordAssignmentRace;
           discordAssignmentRace = null;
@@ -293,9 +294,9 @@ test("server collection paginates listings and protects production mutations", a
           });
         }
       } else {
-        discordChannelMessages.push({ channelId, payload });
+        discordChannelMessages.push({ id: messageId, channelId, payload });
       }
-      return json(res, { id: `message-${discordDirectMessages.length + discordChannelMessages.length}`, channel_id: channelId });
+      return json(res, { id: messageId, channel_id: channelId });
     }
     if (url.pathname === "/api/cache-test") {
       proxyCacheRequests += 1;
@@ -1800,8 +1801,11 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({ kind: "basic" }),
   });
   assert.equal(basicDiscordSandboxTest.status, 200);
-  assert.equal(discordChannelMessages.at(-1)?.channelId, "666666666666666666");
-  assert.deepEqual(discordChannelMessages.at(-1)?.payload.allowed_mentions, { parse: [] });
+  const basicDiscordSandboxResult = (await basicDiscordSandboxTest.json()).result;
+  const basicDiscordSandboxMessage = discordChannelMessages.find((message) => message.id === basicDiscordSandboxResult.id);
+  assert.equal(basicDiscordSandboxResult.channel_id, "666666666666666666");
+  assert.equal(basicDiscordSandboxMessage?.channelId, "666666666666666666");
+  assert.deepEqual(basicDiscordSandboxMessage?.payload.allowed_mentions, { parse: [] });
   const directMessagesBeforeSaleSandboxTest = discordDirectMessages.length;
   const saleDiscordSandboxTest = await fetch(`${origin}/api/local/admin/discord/test`, {
     method: "POST",
@@ -1809,17 +1813,23 @@ test("server collection paginates listings and protects production mutations", a
     body: JSON.stringify({ kind: "sale" }),
   });
   assert.equal(saleDiscordSandboxTest.status, 200);
+  const saleDiscordSandboxResult = (await saleDiscordSandboxTest.json()).result;
+  const saleDiscordSandboxMessage = discordChannelMessages.find((message) => message.id === saleDiscordSandboxResult.id);
   assert.equal(discordDirectMessages.length, directMessagesBeforeSaleSandboxTest);
-  assert.equal(discordChannelMessages.at(-1)?.channelId, "666666666666666666");
-  assert.deepEqual(discordChannelMessages.at(-1)?.payload.allowed_mentions, { parse: [] });
+  assert.equal(saleDiscordSandboxResult.channel_id, "666666666666666666");
+  assert.equal(saleDiscordSandboxMessage?.channelId, "666666666666666666");
+  assert.deepEqual(saleDiscordSandboxMessage?.payload.allowed_mentions, { parse: [] });
   const craftPlanDiscordSandboxTest = await fetch(`${origin}/api/local/admin/discord/craft-plan-report/test`, {
     method: "POST",
     headers: { cookie, origin, "content-type": "application/json", "x-csrf-token": auth.csrfToken },
     body: JSON.stringify({ reportType: "overview" }),
   });
   assert.equal(craftPlanDiscordSandboxTest.status, 200);
-  assert.equal(discordChannelMessages.at(-1)?.channelId, "666666666666666666");
-  assert.deepEqual(discordChannelMessages.at(-1)?.payload.allowed_mentions, { parse: [] });
+  const craftPlanDiscordSandboxResult = (await craftPlanDiscordSandboxTest.json()).result.response;
+  const craftPlanDiscordSandboxMessage = discordChannelMessages.find((message) => message.id === craftPlanDiscordSandboxResult.id);
+  assert.equal(craftPlanDiscordSandboxResult.channel_id, "666666666666666666");
+  assert.equal(craftPlanDiscordSandboxMessage?.channelId, "666666666666666666");
+  assert.deepEqual(craftPlanDiscordSandboxMessage?.payload.allowed_mentions, { parse: [] });
   const sandboxDeliveryDb = new DatabaseSync(path.join(dataDir, "bitcraft-local.sqlite"), { readOnly: true });
   const sandboxDeliveries = sandboxDeliveryDb.prepare(`
     SELECT channel_id, metadata_json
