@@ -105,15 +105,16 @@ test("visible refresh pauses while hidden, catches up once, and does not bypass 
 test("public shell stays isolated from Timbersteel bootstrap, featurebase, analytics, and app shell imports", () => {
   const root = readFileSync(new URL("../src/public/PublicRoot.tsx", import.meta.url), "utf8");
   const shell = readFileSync(new URL("../src/public/PublicAppShell.tsx", import.meta.url), "utf8");
+  const claimPages = readFileSync(new URL("../src/public/PublicClaimPages.tsx", import.meta.url), "utf8");
   const api = readFileSync(new URL("../src/public/api.ts", import.meta.url), "utf8");
   const planAccess = readFileSync(new URL("../src/public/PublicPlanAccessPage.tsx", import.meta.url), "utf8");
   const planApi = readFileSync(new URL("../src/public/planApi.ts", import.meta.url), "utf8");
-  const joined = `${root}\n${shell}\n${api}\n${planAccess}\n${planApi}`;
+  const joined = `${root}\n${shell}\n${claimPages}\n${api}\n${planAccess}\n${planApi}`;
 
   for (const forbidden of ["TimbersteelRoot", "loadBootstrap", "Featurebase", "analytics", "useGameDataGeneration", "Admin", "BotControlApp", "/api/local/"]) {
     assert.equal(joined.includes(forbidden), false, `public shell must not depend on ${forbidden}`);
   }
   assert.doesNotMatch(joined, /from\s+["']\.\.\/AppShell["']/);
   assert.match(api, /\/api\/public\/settlements/);
-  assert.match(shell, /catalogKey/);
+  assert.match(claimPages, /catalogKey/);
 });
