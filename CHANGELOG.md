@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.63.0-beta.7] - 2026-08-26
+
+### Fixed
+
+- Fixed public Caddy acceptance to require the actual permanent redirect status emitted by the reviewed configuration.
+
 ## [0.63.0-beta.6] - 2026-08-26
 
 ### Fixed

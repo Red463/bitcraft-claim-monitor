@@ -193,7 +193,7 @@ test("acceptance requires external Timbersteel, exact public redirect, and all p
         },
       },
     },
-    www: { status: 308, location: "https://claim-monitor.com/example?one=two" },
+    www: { status: 301, location: "https://claim-monitor.com/example?one=two" },
   }), true);
 
   for (const mutate of [
@@ -201,6 +201,7 @@ test("acceptance requires external Timbersteel, exact public redirect, and all p
     (value) => { value.publicProfile.body.features.publicProfileEnabled = true; },
     (value) => { value.publicProfile.body.features.publicCollaborationEnabled = true; },
     (value) => { value.publicProfile.body.features.publicLegalConfigurationConfirmed = true; },
+    (value) => { value.www.status = 308; },
     (value) => { value.www.location = "https://app.timbersteeltrade.com/"; },
   ]) {
     const value = structuredClone({
@@ -216,7 +217,7 @@ test("acceptance requires external Timbersteel, exact public redirect, and all p
           },
         },
       },
-      www: { status: 308, location: "https://claim-monitor.com/" },
+      www: { status: 301, location: "https://claim-monitor.com/" },
     });
     mutate(value);
     assert.equal(publicCaddy.acceptedPublicCaddyState(value), false);
