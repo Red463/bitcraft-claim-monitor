@@ -7,6 +7,11 @@ import { createServer as createViteServer } from "vite";
 import { React, act, installDom, mount } from "./react-dom-test-harness.mjs";
 
 const appRoot = fileURLToPath(new URL("..", import.meta.url));
+const collaborationFeatures = {
+  publicProfileEnabled: true,
+  publicCollaborationEnabled: true,
+  publicLegalConfigurationConfirmed: true,
+};
 
 function json(status, body) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -51,7 +56,7 @@ test("plan editor keeps an unsaved draft on conflict and offers reload and copy 
   let view;
   try {
     const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
-    view = await mount(React.createElement(PublicAppShell, { route: { id: "plan", params: { id: "plan-7" } } }));
+    view = await mount(React.createElement(PublicAppShell, { route: { id: "plan", params: { id: "plan-7" } }, features: collaborationFeatures }));
     await dom.flush();
 
     const editor = document.querySelector("textarea[aria-label='Plan document JSON']");
@@ -90,7 +95,7 @@ test("my plans renders owned and shared roles and exposes creation", async () =>
   let view;
   try {
     const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
-    view = await mount(React.createElement(PublicAppShell, { route: { id: "plans", params: {} } }));
+    view = await mount(React.createElement(PublicAppShell, { route: { id: "plans", params: {} }, features: collaborationFeatures }));
     await dom.flush();
     assert.match(document.body.textContent, /My plans/);
     assert.match(document.body.textContent, /North wall/);
@@ -121,7 +126,7 @@ test("cloning navigates to the returned plan instead of editing it under the sou
   let view;
   try {
     const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
-    view = await mount(React.createElement(PublicAppShell, { route: { id: "plan", params: { id: "plan-7" } } }));
+    view = await mount(React.createElement(PublicAppShell, { route: { id: "plan", params: { id: "plan-7" } }, features: collaborationFeatures }));
     await dom.flush();
     const clone = [...document.querySelectorAll("button")].find((button) => button.textContent.includes("Clone"));
     assert.ok(clone);
@@ -153,7 +158,7 @@ test("access mutations reload full plan details instead of replacing them with a
   let view;
   try {
     const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
-    view = await mount(React.createElement(PublicAppShell, { route: { id: "plan", params: { id: "plan-7" } } }));
+    view = await mount(React.createElement(PublicAppShell, { route: { id: "plan", params: { id: "plan-7" } }, features: collaborationFeatures }));
     await dom.flush();
     assert.match(document.body.textContent, /Forge Editor/);
     const archive = [...document.querySelectorAll("button")].find((button) => button.textContent.includes("Archive"));
@@ -200,7 +205,7 @@ test("access refresh does not rebase an unsaved draft onto a newer server docume
   let view;
   try {
     const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
-    view = await mount(React.createElement(PublicAppShell, { route: { id: "plan", params: { id: "plan-7" } } }));
+    view = await mount(React.createElement(PublicAppShell, { route: { id: "plan", params: { id: "plan-7" } }, features: collaborationFeatures }));
     await dom.flush();
 
     const editor = document.querySelector("textarea[aria-label='Plan document JSON']");

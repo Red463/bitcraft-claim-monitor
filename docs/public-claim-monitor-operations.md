@@ -227,6 +227,13 @@ PUBLIC_COLLABORATION_ENABLED=false
 PUBLIC_LEGAL_CONFIGURATION_CONFIRMED=true
 ```
 
+Run the manual **Enable public Claim Monitor read-only profile** workflow
+from production `main`, enter `claim-monitor.com` exactly, and admit its
+`relay-cutover` approval. The revision-bound helper applies only these public
+Stage 1 values, restarts only the web service, verifies the worker PID is
+unchanged, and rolls the environment back if public search or Timbersteel
+health does not pass.
+
 Leave public OAuth credentials blank unless they have already been installed
 dormant through the protected Stage 2 credential workflow while all three
 public gates were `false`. Restart only the existing web service; do not stop

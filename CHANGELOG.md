@@ -9,6 +9,21 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.63.0-beta.10] - 2026-08-26
+
+### Added
+
+- Added a protected workflow for enabling the anonymous Claim Monitor read-only profile after the dormant deployment stage.
+
+### Changed
+
+- Replaced the disabled public shell's misleading settlement search and unfinished placeholder with an explicit maintenance state.
+- Kept public account and plan navigation hidden until collaboration is enabled.
+
+### Security
+
+- Added atomic rollback, revision binding, worker isolation, and post-activation settlement-search verification to the Stage 1 public rollout.
+
 ## [0.63.0-beta.9] - 2026-08-26
 
 ### Fixed
