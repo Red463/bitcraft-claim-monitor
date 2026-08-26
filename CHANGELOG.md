@@ -9,6 +9,26 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.63.0-beta.1] - 2026-08-26
+
+### Added
+
+- Added a separate Claim Monitor public profile where visitors can find settlements and view current overview, member, inventory, craft, catalogue, recipe, icon, and calculator data on demand.
+- Added isolated public Discord accounts and collaborative craft plans with owner, editor, viewer, invitation, anonymous sharing, revision, archive, transfer, clone, export, deletion, and retention workflows.
+- Added Public service health, moderation, capability revocation, and privacy operations to the existing Timbersteel Admin console.
+
+### Changed
+
+- Extended the existing single web deployment to serve `app.timbersteeltrade.com` and `claim-monitor.com` as isolated host profiles while retaining the existing Timbersteel worker, database, history, notifications, Discord, Admin, bot, plans, cookies, and browser preferences.
+- Added staged public-service rollout and non-destructive rollback controls, with the public profile and collaboration disabled by default.
+- Published separate Claim Monitor legal and privacy behavior covering anonymous Relay lookups, public accounts, plans, sharing links, exports, deletion, moderation, and retention.
+
+### Security
+
+- Enforced exact host, origin, CSRF, session, OAuth callback, guild, configured-claim, and cross-profile API boundaries before sensitive session or application work.
+- Isolated public accounts, cookies, legal acceptance, plans, HMAC-protected bearer links, rate limits, caches, audit events, and privacy recovery from Timbersteel administration and operational data.
+- Restricted owner-role changes to existing owners, protected the final active owner, and prevented public plan owners from overriding administrator suspensions.
+
 ## [0.62.0-beta.20] - 2026-08-25
 
 ### Fixed
