@@ -28,6 +28,21 @@ export function AppFrame({
     previousMobileOpen.current = mobileOpen;
   }, [mobileOpen]);
 
+  React.useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    if (mobileOpen) document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [mobileOpen]);
+
+  React.useEffect(() => {
+    if (!mobileOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mobileOpen]);
+
   const resolvedShellClassName = shellClassName ?? "app-shell";
   const onRequestClose = () => setMobileOpen(false);
 

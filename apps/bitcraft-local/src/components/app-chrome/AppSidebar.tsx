@@ -17,7 +17,19 @@ export function AppSidebar({
   onRequestClose,
 }: AppSidebarProps) {
   const [tooltip, setTooltip] = React.useState<Tooltip | null>(null);
-  const mobileNavigationUnavailable = !mobileOpen;
+  const [isNarrowViewport, setIsNarrowViewport] = React.useState(() => window.matchMedia("(max-width: 920px)").matches);
+  const mobileNavigationUnavailable = isNarrowViewport && !mobileOpen;
+
+  React.useEffect(() => {
+    const narrowViewport = window.matchMedia("(max-width: 920px)");
+    const updateNarrowViewport = () => setIsNarrowViewport(narrowViewport.matches);
+    narrowViewport.addEventListener("change", updateNarrowViewport);
+    return () => narrowViewport.removeEventListener("change", updateNarrowViewport);
+  }, []);
+
+  React.useEffect(() => {
+    setTooltip(null);
+  }, [collapsed, mobileOpen]);
 
   const showTooltip = (element: HTMLElement, label: string) => {
     if (!collapsed) return;
@@ -111,7 +123,7 @@ export function AppSidebar({
                         onBlur={() => setTooltip(null)}
                         onClick={(event) => {
                           item.onActivate?.(event);
-                          if (!event.defaultPrevented) onRequestClose();
+                          if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) onRequestClose();
                         }}
                       >
                         <Icon size={16} />
