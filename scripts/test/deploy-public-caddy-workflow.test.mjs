@@ -37,7 +37,8 @@ test("public Caddy workflow is manual, main-only, approval-protected, and verifi
   assert.match(workflow, /workflow_dispatch:[\s\S]*confirmation:[\s\S]*type: string/);
   assert.match(workflow, /GITHUB_REF.*refs\/heads\/main/);
   assert.match(workflow, /CUTOVER_CONFIRMATION.*claim-monitor\.com/);
-  assert.match(workflow, /environment: relay-cutover/);
+  assert.match(workflow, /approve:[\s\S]*needs: verify[\s\S]*environment: relay-cutover/);
+  assert.match(workflow, /configure:[\s\S]*needs: approve[\s\S]*environment: relay-preview/);
   assert.match(workflow, /public-caddy-bootstrap-v2/);
   assert.match(workflow, /--revision '\$GITHUB_SHA' --configure-public-caddy --confirmation 'claim-monitor\.com'/);
   assert.match(workflow, /https:\/\/app\.timbersteeltrade\.com\/api\/local\/health/);
