@@ -118,3 +118,11 @@ test("public shell stays isolated from Timbersteel bootstrap, featurebase, analy
   assert.match(api, /\/api\/public\/settlements/);
   assert.match(claimPages, /catalogKey/);
 });
+
+test("public profile composes the shared application chrome", () => {
+  const chrome = readFileSync(new URL("../src/public/PublicChrome.tsx", import.meta.url), "utf8");
+  for (const component of ["AppFrame", "AppSidebar", "AppUtilityBar", "AppFooter"]) {
+    assert.match(chrome, new RegExp(`<${component}`));
+  }
+  assert.doesNotMatch(chrome, /public-app-shell|public-sidebar/);
+});

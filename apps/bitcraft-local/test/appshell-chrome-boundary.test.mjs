@@ -166,3 +166,11 @@ test("dedicated AppShell supplies every existing chrome capability to shared com
   }
 });
 
+test("both profiles keep one shared frame contract", () => {
+  const dedicated = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
+  const publicChrome = readFileSync(new URL("../src/public/PublicChrome.tsx", import.meta.url), "utf8");
+  assert.match(dedicated, /<AppFrame/);
+  assert.match(publicChrome, /<AppFrame/);
+  assert.doesNotMatch(publicChrome, /from\s+["']\.\.\/AppShell["']/);
+});
+

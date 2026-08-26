@@ -17,11 +17,11 @@ export function AppSidebar({
   onRequestClose,
 }: AppSidebarProps) {
   const [tooltip, setTooltip] = React.useState<Tooltip | null>(null);
-  const [isNarrowViewport, setIsNarrowViewport] = React.useState(() => window.matchMedia("(max-width: 920px)").matches);
+  const [isNarrowViewport, setIsNarrowViewport] = React.useState(() => window.matchMedia("(max-width: 760px)").matches);
   const mobileNavigationUnavailable = isNarrowViewport && !mobileOpen;
 
   React.useEffect(() => {
-    const narrowViewport = window.matchMedia("(max-width: 920px)");
+    const narrowViewport = window.matchMedia("(max-width: 760px)");
     const updateNarrowViewport = () => setIsNarrowViewport(narrowViewport.matches);
     narrowViewport.addEventListener("change", updateNarrowViewport);
     return () => narrowViewport.removeEventListener("change", updateNarrowViewport);

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const appFrame = readFileSync(new URL("../src/components/app-chrome/AppFrame.tsx", import.meta.url), "utf8");
+const appSidebar = readFileSync(new URL("../src/components/app-chrome/AppSidebar.tsx", import.meta.url), "utf8");
 const shellCss = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 const chromeCss = readFileSync(new URL("../src/styles/app-chrome.css", import.meta.url), "utf8");
 const dashboardCss = readFileSync(new URL("../src/styles/dashboard.css", import.meta.url), "utf8");
@@ -16,8 +17,10 @@ test("narrow shell separates brand from route and compacts the anchored utility 
   assert.match(appFrame, /className="mobile-shell-route"/);
   assert.match(shellCss, /\.mobile-shell-bar\s*>\s*span\s*\{[^}]*display:\s*grid[^}]*margin-right:\s*44px/s);
   assert.match(shellCss, /\.mobile-shell-route\s*\{[^}]*text-overflow:\s*ellipsis/s);
-  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*\.app-utility-bar\s*\{[^}]*min-height:\s*42px/s);
-  assert.match(chromeCss, /@media \(max-width:\s*920px\)[\s\S]*\.app-utility-context\s*\{[^}]*display:\s*none/s);
+  assert.match(shellCss, /@media \(max-width:\s*760px\)[\s\S]*\.app-sidebar\.mobile-open/s);
+  assert.match(appSidebar, /matchMedia\("\(max-width: 760px\)"\)/);
+  assert.match(chromeCss, /@media \(max-width:\s*760px\)[\s\S]*\.app-utility-bar\s*\{[^}]*min-height:\s*42px/s);
+  assert.match(chromeCss, /@media \(max-width:\s*760px\)[\s\S]*\.app-utility-context\s*\{[^}]*display:\s*none/s);
   assert.match(chromeCss, /@media \(max-width:\s*540px\)[\s\S]*\.app-utility-command span,\s*\.app-utility-command kbd\s*\{[^}]*display:\s*none/s);
 });
 

@@ -211,7 +211,7 @@ test("narrow navigation exposes an accessible grouped drawer", () => {
 });
 
 test("closed narrow drawer is hidden from accessibility and keyboard navigation without disabling desktop sidebar", () => {
-  assert.match(appSidebar, /window\.matchMedia\("\(max-width: 920px\)"\)/);
+  assert.match(appSidebar, /window\.matchMedia\("\(max-width: 760px\)"\)/);
   assert.match(appSidebar, /const mobileNavigationUnavailable = isNarrowViewport && !mobileOpen/);
   assert.match(appSidebar, /inert=\{mobileNavigationUnavailable \? true : undefined\}/);
   assert.match(appSidebar, /aria-hidden=\{mobileNavigationUnavailable \? true : undefined\}/);
@@ -232,7 +232,7 @@ test("restricted navigation has distinct expanded, collapsed, and mobile styling
   assert.match(shellCss, /\.nav-destination\.is-restricted/);
   assert.match(shellCss, /\.nav-access-lock/);
   assert.match(shellCss, /\.sidebar-collapsed nav a \.nav-access-lock/);
-  assert.match(shellCss, /@media \(max-width: 920px\)[\s\S]*?\.nav-access-lock/);
+  assert.match(shellCss, /@media \(max-width: 760px\)[\s\S]*?\.nav-access-lock/);
 });
 
 test("route links expose collapsed labels while route changes retain scroll orientation", () => {
