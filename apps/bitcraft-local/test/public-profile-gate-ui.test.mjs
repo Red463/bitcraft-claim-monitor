@@ -24,7 +24,7 @@ test("disabled public profile renders maintenance without an operable settlement
       features: disabledFeatures,
     }));
     assert.match(document.body.textContent, /not enabled yet/i);
-    assert.equal(document.querySelector("#public-settlement-search"), null);
+    assert.equal(document.querySelector("#home-claim-finder-input"), null);
     assert.doesNotMatch(document.body.textContent, /Not found|being prepared/i);
   } finally {
     if (view) await view.unmount();
@@ -41,7 +41,7 @@ test("public shell fails closed when a caller omits server-owned feature flags",
     const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
     view = await mount(React.createElement(PublicAppShell, { route: { id: "home", params: {} } }));
     assert.match(document.body.textContent, /not enabled yet/i);
-    assert.equal(document.querySelector("#public-settlement-search"), null);
+    assert.equal(document.querySelector("#home-claim-finder-input"), null);
   } finally {
     if (view) await view.unmount();
     await vite.close();
@@ -59,11 +59,11 @@ test("enabled read-only profile presents settlement search without unfinished pl
       route: resolvePublicRoute("/"),
       features: { ...disabledFeatures, publicProfileEnabled: true, publicLegalConfigurationConfirmed: true },
     }));
-    const search = document.querySelector("#public-settlement-search");
+    const search = document.querySelector("#home-claim-finder-input");
     assert.ok(search);
-    assert.equal(document.querySelector('label[for="public-settlement-search"]')?.textContent, "FIND A BITCRAFT SETTLEMENT");
-    assert.equal(search.getAttribute("placeholder"), "Settlement name or exact claim ID");
-    assert.match(document.body.textContent, /Enter at least 3 characters from the settlement name, or paste the exact claim ID\./);
+    assert.equal(document.querySelector('label[for="home-claim-finder-input"]')?.textContent, "FIND A BITCRAFT CLAIM");
+    assert.equal(search.getAttribute("placeholder"), "Claim name or exact claim ID");
+    assert.match(document.body.textContent, /Enter at least 3 characters from the claim name, or paste the exact claim ID\./);
     assert.doesNotMatch(document.body.textContent, /being prepared/i);
   } finally {
     if (view) await view.unmount();
@@ -112,9 +112,9 @@ test("returning public visitors receive compact search until clearing recents re
     }));
 
     assert.doesNotMatch(document.body.textContent, /Welcome to Claim Monitor/);
-    assert.match(document.body.textContent, /Recent settlements/);
+    assert.match(document.body.textContent, /Recent claims/);
     assert.match(document.body.textContent, /Basin of Cairn/);
-    assert.ok(document.querySelector("#public-settlement-search"));
+    assert.ok(document.querySelector("#home-claim-finder-input"));
 
     window.localStorage.removeItem("claim-monitor.public.recent-settlements");
     await view.unmount();
@@ -123,7 +123,7 @@ test("returning public visitors receive compact search until clearing recents re
       features: { ...disabledFeatures, publicProfileEnabled: true, publicLegalConfigurationConfirmed: true },
     }));
     assert.match(document.body.textContent, /Welcome to Claim Monitor/);
-    assert.doesNotMatch(document.body.textContent, /Recent settlements/);
+    assert.doesNotMatch(document.body.textContent, /Recent claims/);
   } finally {
     if (view) await view.unmount();
     await vite.close();

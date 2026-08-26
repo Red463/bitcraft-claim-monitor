@@ -1,15 +1,16 @@
 import React from "react";
-import { ChevronRight, Hammer, Search } from "lucide-react";
+import { Hammer } from "lucide-react";
 import type { FrontendProfile } from "../api/profile";
-import { searchPublicCatalog, searchPublicClaims, type PublicHint } from "./api";
+import { searchPublicCatalog } from "./api";
 import { PublicAccountSettings } from "./PublicAccountSettings";
+import { PublicClaimFinder } from "./PublicClaimFinder";
 import { PublicClaimPages } from "./PublicClaimPages";
 import { PublicChrome } from "./PublicChrome";
 import { PublicLegalPage } from "./PublicLegalPage";
 import { PublicPlanAccessPage } from "./PublicPlanAccessPage";
 import { PublicPlansPage } from "./PublicPlansPage";
 import { readRecentClaims } from "./preferences.mjs";
-import { publicClaimPath, type PublicRoute } from "./routes.mjs";
+import type { PublicRoute } from "./routes.mjs";
 import { usePublicSnapshot } from "./usePublicSnapshot";
 
 type PublicFeatures = FrontendProfile["features"];
@@ -23,11 +24,9 @@ function WelcomePanel() {
   return <section className="public-panel public-welcome"><header><p className="public-eyebrow">Public BitCraft settlement data</p><h1>Welcome to Claim Monitor</h1><p>Claim Monitor provides current, read-only data for BitCraft settlements, including the overview, members and professions, shared inventory, and crafts.</p></header><ol><li><strong>Find your settlement</strong><span>Enter at least three characters from its name, or paste the exact claim ID.</span></li><li><strong>Select the correct result</strong><span>Check the settlement name, claim ID, and region before opening it.</span></li><li><strong>Explore current data</strong><span>Use the settlement navigation to open Overview, Members, Inventory, and Craft monitor.</span></li></ol><p className="public-welcome-note">Public data is loaded on demand and refreshes while the page is open. Claim Monitor does not continuously monitor public settlements or provide public history, notifications, or Discord services.</p></section>;
 }
 
-function SearchPanel({ showWelcome = false }: { showWelcome?: boolean }) {
-  const [query, setQuery] = React.useState(""); const [results, setResults] = React.useState<PublicHint[]>([]); const [message, setMessage] = React.useState(""); const [recent] = React.useState(() => readRecentClaims(window.localStorage));
-  async function search(event: React.FormEvent) { event.preventDefault(); setMessage(""); try { const result = await searchPublicClaims(query); setResults(result.hints); if (!result.hints.length) setMessage("No matching settlements found."); } catch (reason) { setMessage(reason instanceof Error ? reason.message : "Search is unavailable."); } }
-  const entries: PublicHint[] = results.length ? results : recent.map((value) => ({ claimId: value.claimId, name: value.name, regionId: value.regionId }));
-  return <>{showWelcome && recent.length === 0 ? <WelcomePanel /> : null}<section className="public-search-panel"><form onSubmit={search}><label htmlFor="public-settlement-search">FIND A BITCRAFT SETTLEMENT</label><p id="public-settlement-search-help">Enter at least 3 characters from the settlement name, or paste the exact claim ID.</p><div><input id="public-settlement-search" aria-describedby="public-settlement-search-help" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Settlement name or exact claim ID" /><button className="toolbar-button primary" type="submit"><Search size={16} /> Search</button></div></form>{message && <p role="status">{message}</p>}{entries.length > 0 && <div className="public-search-results"><span>{results.length ? "Matches" : "Recent settlements"}</span>{entries.map((entry) => { const href = publicClaimPath(entry); return href && <a key={entry.claimId} href={href}><strong>{entry.name}</strong><small>#{entry.claimId} · region {entry.regionId ?? "—"}</small><ChevronRight size={16} /></a>; })}</div>}</section></>;
+function HomeExperience() {
+  const [showWelcome] = React.useState(() => readRecentClaims(window.localStorage).length === 0);
+  return <>{showWelcome ? <WelcomePanel /> : null}<PublicClaimFinder mode="home" idPrefix="home-claim-finder" /></>;
 }
 
 function Calculator() {
@@ -43,7 +42,17 @@ const defaultFeatures: PublicFeatures = { publicProfileEnabled: false, publicCol
 export function PublicAppShell({ route, features = defaultFeatures }: { route: PublicRoute; features?: PublicFeatures }) {
   const snapshotRoute = features.publicProfileEnabled ? route : { id: "not-found", params: {} } as PublicRoute;
   const snapshotController = usePublicSnapshot(snapshotRoute);
-  const openClaimFinder = () => window.requestAnimationFrame(() => document.getElementById("public-settlement-search")?.focus());
+  const [claimFinderOpen, setClaimFinderOpen] = React.useState(false);
+  React.useEffect(() => {
+    const open = (event: KeyboardEvent) => {
+      if (!features.publicProfileEnabled || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      setClaimFinderOpen(true);
+    };
+    document.addEventListener("keydown", open);
+    return () => document.removeEventListener("keydown", open);
+  }, [features.publicProfileEnabled]);
+  const openClaimFinder = () => { if (features.publicProfileEnabled) setClaimFinderOpen(true); };
   if (!features.publicProfileEnabled) return <PublicChrome route={route} features={features} controller={snapshotController} onOpenClaimFinder={openClaimFinder}><div className="page-view public-page-view"><section className="public-panel public-placeholder"><h1>Claim Monitor</h1><p>The public settlement service is not enabled yet.</p></section></div></PublicChrome>;
   const claimPage = ["dashboard", "members", "professions", "inventory", "crafts"].includes(route.id); const identity = route.id === "account" || route.id === "settings"; const legal = route.id === "terms" || route.id === "privacy"; const planAccess = route.id === "shared-plan" || route.id === "invite"; const planWorkspace = ["plans", "plan-new", "plan"].includes(route.id); const collaborationRoute = identity || planAccess || planWorkspace;
   const pageContent = collaborationRoute && !features.publicCollaborationEnabled
@@ -58,5 +67,5 @@ export function PublicAppShell({ route, features = defaultFeatures }: { route: P
                   : planWorkspace ? <PublicPlansPage route={route as { id: "plans" | "plan-new" | "plan"; params: Record<string, string> }} />
                     : route.id === "coming-soon" ? <section className="public-panel public-placeholder"><h1>{ROADMAP_TITLES[route.params.feature] ?? "Claim feature"}</h1><p>This claim feature is coming soon.</p></section>
                       : <Placeholder route={route} />;
-  return <PublicChrome route={route} features={features} controller={snapshotController} onOpenClaimFinder={openClaimFinder}><div className="page-view public-page-view">{!identity && !legal && !planWorkspace && !planAccess ? <SearchPanel showWelcome={route.id === "home"} /> : null}{pageContent}</div></PublicChrome>;
+  return <><PublicChrome route={route} features={features} controller={snapshotController} onOpenClaimFinder={openClaimFinder}><div className="page-view public-page-view">{route.id === "home" ? <HomeExperience /> : null}{pageContent}</div></PublicChrome>{claimFinderOpen ? <PublicClaimFinder mode="dialog" idPrefix="dialog-claim-finder" autoFocus onSelect={() => setClaimFinderOpen(false)} onClose={() => setClaimFinderOpen(false)} /> : null}</>;
 }
