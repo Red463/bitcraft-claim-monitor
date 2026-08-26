@@ -26,6 +26,7 @@ test("failure after unit installation restores every live artifact and prior run
     PRIVACY_REPLAY_HELPER_PATH="$2/lib/replay"
     PUBLIC_CADDY_HELPER_PATH="$2/lib/public-caddy"
     PUBLIC_CADDY_REFERENCE_PATH="$2/config/Caddyfile.public-reference"
+    PUBLIC_OAUTH_HELPER_PATH="$2/lib/public-oauth"
     UPDATER_PATH="$2/bin/updater"
     LOG_FILE="$2/update.log"
     TMPDIR="$2/tmp"
@@ -39,6 +40,7 @@ test("failure after unit installation restores every live artifact and prior run
       "$PRIVACY_REPLAY_HELPER_PATH" \
       "$PUBLIC_CADDY_HELPER_PATH" \
       "$PUBLIC_CADDY_REFERENCE_PATH" \
+      "$PUBLIC_OAUTH_HELPER_PATH" \
       "$UPDATER_PATH" \
       "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service" \
       "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-worker.service" \
@@ -72,6 +74,7 @@ test("failure after unit installation restores every live artifact and prior run
       "$PRIVACY_REPLAY_HELPER_PATH" \
       "$PUBLIC_CADDY_HELPER_PATH" \
       "$PUBLIC_CADDY_REFERENCE_PATH" \
+      "$PUBLIC_OAUTH_HELPER_PATH" \
       "$UPDATER_PATH" \
       "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service" \
       "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-worker.service" \
@@ -97,6 +100,7 @@ test("failure after unit installation restores every live artifact and prior run
       "$PRIVACY_REPLAY_HELPER_PATH" \
       "$PUBLIC_CADDY_HELPER_PATH" \
       "$PUBLIC_CADDY_REFERENCE_PATH" \
+      "$PUBLIC_OAUTH_HELPER_PATH" \
       "$UPDATER_PATH" \
       "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service" \
       "$SYSTEMD_DIR/bitcraft-claim-monitor-relay-worker.service" \
@@ -137,6 +141,7 @@ test("failure after backup timer enable is restored by EXIT cleanup", { skip: !h
     PRIVACY_REPLAY_HELPER_PATH="$2/lib/replay"
     PUBLIC_CADDY_HELPER_PATH="$2/lib/public-caddy"
     PUBLIC_CADDY_REFERENCE_PATH="$2/config/Caddyfile.public-reference"
+    PUBLIC_OAUTH_HELPER_PATH="$2/lib/public-oauth"
     UPDATER_PATH="$2/bin/updater"
     LOG_FILE="$2/update.log"
     TMPDIR="$2/tmp"
@@ -237,7 +242,7 @@ test("individual restore failure attempts every path and retains the recovery sn
 
     [[ "$rollback_status" -ne 0 ]]
     [[ "$cleanup_status" -ne 0 ]]
-    [[ "$(wc -l <"$2/restore-attempts")" -eq 19 ]]
+    [[ "$(wc -l <"$2/restore-attempts")" -eq 20 ]]
     [[ -f "$2/daemon-reload-attempted" ]]
     [[ -d "$transaction_dir" ]]
     grep -Fq "Recovery snapshot retained at: $transaction_dir" "$LOG_FILE"

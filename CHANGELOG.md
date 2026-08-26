@@ -9,6 +9,16 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.63.0-beta.8] - 2026-08-26
+
+### Added
+
+- Added a protected workflow for installing the isolated public Discord OAuth credentials without enabling the public profile or collaboration.
+
+### Security
+
+- Added atomic credential rollback, running-process verification, worker isolation, and disabled-gate enforcement for public OAuth credential installation.
+
 ## [0.63.0-beta.7] - 2026-08-26
 
 ### Fixed
