@@ -316,7 +316,7 @@ export async function installPublicCaddyConfiguration({
   const candidatePath = installFile(livePath, candidate.content, sourceStat, "candidate");
   let installed = false;
   try {
-    runCaddy(["validate", "--config", candidatePath]);
+    runCaddy(["validate", "--config", candidatePath, "--adapter", "caddyfile"]);
     copyFileSync(livePath, backupPath, constants.COPYFILE_EXCL);
     chmodSync(backupPath, 0o600);
     renameSync(candidatePath, livePath);
@@ -328,7 +328,7 @@ export async function installPublicCaddyConfiguration({
     if (installed) {
       const rollbackPath = installFile(livePath, readFileSync(backupPath, "utf8"), sourceStat, "rollback");
       try {
-        runCaddy(["validate", "--config", rollbackPath]);
+        runCaddy(["validate", "--config", rollbackPath, "--adapter", "caddyfile"]);
         renameSync(rollbackPath, livePath);
         runCaddy(["reload", "--config", livePath]);
       } finally {

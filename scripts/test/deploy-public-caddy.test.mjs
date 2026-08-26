@@ -262,6 +262,38 @@ test("successful installation is idempotent and does not replace its original ba
   }
 });
 
+test("temporary Caddy candidates are explicitly parsed as Caddyfiles", async () => {
+  assert.ok(publicCaddy, "public Caddy bootstrap helper must exist");
+  const root = mkdtempSync(join(tmpdir(), "claim-monitor-caddy-adapter-"));
+  const livePath = join(root, "Caddyfile");
+  const referencePath = join(root, "Caddyfile.example");
+  writeFileSync(livePath, liveCaddy);
+  writeFileSync(referencePath, referenceCaddy);
+
+  try {
+    const result = await publicCaddy.installPublicCaddyConfiguration({
+      livePath,
+      referencePath,
+      backupDirectory: root,
+      runCaddy: (args) => {
+        const configPath = args[args.indexOf("--config") + 1];
+        if (!configPath.split(/[\\/]/).at(-1).startsWith("Caddyfile")
+          && !configPath.endsWith(".caddyfile")
+          && !args.includes("--adapter")) {
+          throw new Error("candidate was parsed as native JSON");
+        }
+      },
+      verifyPublicGates: async () => true,
+      verifyAcceptance: async () => true,
+      backupStamp: "adapter",
+    });
+
+    assert.equal(result.changed, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("installation refuses to change Caddy while any public feature gate is enabled", async () => {
   assert.ok(publicCaddy, "public Caddy bootstrap helper must exist");
   const root = mkdtempSync(join(tmpdir(), "claim-monitor-caddy-gates-"));

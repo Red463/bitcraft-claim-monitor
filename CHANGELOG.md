@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.63.0-beta.6] - 2026-08-26
+
+### Fixed
+
+- Fixed production validation of temporary public Caddy candidates by explicitly selecting the Caddyfile adapter.
+
 ## [0.63.0-beta.5] - 2026-08-26
 
 ### Fixed
