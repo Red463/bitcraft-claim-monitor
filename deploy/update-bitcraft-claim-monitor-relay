@@ -13,7 +13,8 @@ BACKUP_CRYPTO_HELPER_PATH="${BACKUP_CRYPTO_HELPER_PATH:-/usr/local/lib/bitcraft-
 PRIVACY_REPLAY_HELPER_PATH="${PRIVACY_REPLAY_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor-relay/replay-privacy-deletions.mjs}"
 UPDATER_PATH="${UPDATER_PATH:-/usr/local/bin/update-bitcraft-claim-monitor-relay}"
 CUTOVER_HELPER_PATH="${CUTOVER_HELPER_PATH:-$CURRENT_LINK/deploy/cutover-relay-production.mjs}"
-PUBLIC_CADDY_HELPER_PATH="${PUBLIC_CADDY_HELPER_PATH:-$CURRENT_LINK/deploy/configure-public-caddy.mjs}"
+PUBLIC_CADDY_HELPER_PATH="${PUBLIC_CADDY_HELPER_PATH:-/usr/local/lib/bitcraft-claim-monitor-relay/configure-public-caddy.mjs}"
+PUBLIC_CADDY_REFERENCE_PATH="${PUBLIC_CADDY_REFERENCE_PATH:-/etc/bitcraft-claim-monitor-relay/Caddyfile.public-reference}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 LOCK_FILE="${LOCK_FILE:-/run/lock/bitcraft-claim-monitor-relay-deploy.lock}"
 KEEP_RELEASES="${KEEP_RELEASES:-3}"
@@ -489,13 +490,30 @@ delegate_cutover_mode() {
   esac
 }
 
+cleanup_public_caddy_staging_root() {
+  local staging_root="$1"
+  rm -f -- \
+    "$staging_root/public-caddy-stage/deploy/configure-public-caddy.mjs" \
+    "$staging_root/public-caddy-stage/deploy/Caddyfile.example"
+  rmdir -- "$staging_root/public-caddy-stage/deploy" 2>/dev/null || true
+  rmdir -- "$staging_root/public-caddy-stage" 2>/dev/null || true
+  rmdir -- "$staging_root" 2>/dev/null || true
+}
+
 delegate_public_caddy_mode() {
-  local active_release
+  local active_release bootstrap_root
   active_release="$(readlink -f "$CURRENT_LINK")"
   [[ -n "$active_release" && "$(basename "$active_release")" == "$REVISION" ]] || {
     printf "Public Caddy configuration requires the active deployed revision.\n" >&2
     return 1
   }
+  bootstrap_root="$(mktemp -d "${TMPDIR:-/tmp}/bitcraft-public-caddy-bootstrap.XXXXXX")"
+  chmod 0700 "$bootstrap_root"
+  if ! stage_public_caddy_helper "$active_release" "$bootstrap_root"; then
+    cleanup_public_caddy_staging_root "$bootstrap_root"
+    return 1
+  fi
+  cleanup_public_caddy_staging_root "$bootstrap_root"
   [[ -f "$PUBLIC_CADDY_HELPER_PATH" && ! -L "$PUBLIC_CADDY_HELPER_PATH" ]] || {
     printf "Public Caddy helper is unavailable.\n" >&2
     return 1
@@ -561,6 +579,7 @@ run_logged() {
 
 run_git_as_user() {
   sudo -u "$RUN_USER" env HOME="$RUN_HOME" \
+    GIT_NO_REPLACE_OBJECTS=1 \
     GIT_SSH_COMMAND="ssh -F $RUN_SSH_CONFIG" git "$@"
 }
 
@@ -712,6 +731,48 @@ prepare_release() {
     "cd '$release_dir' && node deploy/install-relay-build-artifact.mjs --source-root '$BUILD_IMPORT_DIR' --release-dir '$release_dir' --revision '$REVISION'"
 }
 
+stage_public_caddy_helper() {
+  local release_dir="$1"
+  local stage_base="${2:-$transaction_dir}"
+  local stage_dir="$stage_base/public-caddy-stage"
+  local helper_candidate="$stage_dir/deploy/configure-public-caddy.mjs"
+  local reference_candidate="$stage_dir/deploy/Caddyfile.example"
+  [[ -n "$stage_base" && -d "$stage_base" && ! -L "$stage_base" ]] || {
+    printf "Public Caddy staging root is unavailable.\n" >&2
+    return 1
+  }
+  node --check "$release_dir/deploy/configure-public-caddy.mjs" || return 1
+  install -d -o root -g root -m 0700 "$stage_dir" || return 1
+  install -d -o root -g root -m 0700 "$stage_dir/deploy" || return 1
+  run_git_as_user -C "$SOURCE_DIR" show "$REVISION:deploy/configure-public-caddy.mjs" \
+    >"$helper_candidate" || return 1
+  run_git_as_user -C "$SOURCE_DIR" show "$REVISION:deploy/Caddyfile.example" \
+    >"$reference_candidate" || return 1
+  chmod 0600 "$helper_candidate" "$reference_candidate" || return 1
+  [[ -f "$helper_candidate" && ! -L "$helper_candidate" \
+    && -f "$reference_candidate" && ! -L "$reference_candidate" ]] || {
+    printf "Revision-bound public Caddy files are unavailable.\n" >&2
+    return 1
+  }
+  cmp -s -- "$helper_candidate" "$release_dir/deploy/configure-public-caddy.mjs" || {
+    printf "Public Caddy helper differs from the revision-bound candidate release.\n" >&2
+    return 1
+  }
+  cmp -s -- "$reference_candidate" "$release_dir/deploy/Caddyfile.example" || {
+    printf "Public Caddy reference differs from the revision-bound candidate release.\n" >&2
+    return 1
+  }
+  node --check "$helper_candidate" || return 1
+  install -d -o root -g root -m 0755 "$(dirname "$PUBLIC_CADDY_HELPER_PATH")" || return 1
+  install -d -o root -g "$RUN_USER" -m 0750 "$(dirname "$PUBLIC_CADDY_REFERENCE_PATH")" || return 1
+  install -o root -g root -m 0755 "$helper_candidate" "$PUBLIC_CADDY_HELPER_PATH" || return 1
+  install -o root -g root -m 0644 "$reference_candidate" "$PUBLIC_CADDY_REFERENCE_PATH" || return 1
+  cmp -s -- "$helper_candidate" "$PUBLIC_CADDY_HELPER_PATH" || return 1
+  cmp -s -- "$reference_candidate" "$PUBLIC_CADDY_REFERENCE_PATH" || return 1
+  [[ "$(stat -c '%U:%G:%a' "$PUBLIC_CADDY_HELPER_PATH")" == "root:root:755" ]] || return 1
+  [[ "$(stat -c '%U:%G:%a' "$PUBLIC_CADDY_REFERENCE_PATH")" == "root:root:644" ]] || return 1
+}
+
 stage_backup_helper() {
   local release_dir="$1"
   local candidate="$release_dir/deploy/backup-bitcraft-claim-monitor-relay"
@@ -768,6 +829,8 @@ snapshot_live_installation() {
   snapshot_live_path backup-helper "$BACKUP_HELPER_PATH"
   snapshot_live_path backup-crypto-helper "$BACKUP_CRYPTO_HELPER_PATH"
   snapshot_live_path privacy-replay-helper "$PRIVACY_REPLAY_HELPER_PATH"
+  snapshot_live_path public-caddy-helper "$PUBLIC_CADDY_HELPER_PATH"
+  snapshot_live_path public-caddy-reference "$PUBLIC_CADDY_REFERENCE_PATH"
   snapshot_live_path updater "$UPDATER_PATH"
   snapshot_live_path current-link "$CURRENT_LINK"
   snapshot_live_path web-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service"
@@ -795,6 +858,8 @@ restore_live_installation() {
   restore_live_path backup-helper "$BACKUP_HELPER_PATH" || status=1
   restore_live_path backup-crypto-helper "$BACKUP_CRYPTO_HELPER_PATH" || status=1
   restore_live_path privacy-replay-helper "$PRIVACY_REPLAY_HELPER_PATH" || status=1
+  restore_live_path public-caddy-helper "$PUBLIC_CADDY_HELPER_PATH" || status=1
+  restore_live_path public-caddy-reference "$PUBLIC_CADDY_REFERENCE_PATH" || status=1
   restore_live_path updater "$UPDATER_PATH" || status=1
   restore_live_path current-link "$CURRENT_LINK" || status=1
   restore_live_path web-unit "$SYSTEMD_DIR/bitcraft-claim-monitor-relay.service" || status=1
@@ -1101,7 +1166,7 @@ print_failure_summary() {
 main() {
   [[ "${EUID:-$(id -u)}" -eq 0 ]] || { echo "Run this script as root."; exit 1; }
   if [[ "$#" -eq 1 && "$1" == "--capabilities" ]]; then
-    printf "relay-build-artifact-v1\npublic-caddy-bootstrap-v1\n"
+    printf "relay-build-artifact-v1\npublic-caddy-bootstrap-v2\n"
     return
   fi
   parse_args "$@"
@@ -1145,6 +1210,7 @@ main() {
   expected_version="$(node -p "require('$release_dir/apps/bitcraft-local/package.json').version")"
   validate_release_config "$release_dir"
   snapshot_live_installation
+  stage_public_caddy_helper "$release_dir"
   stage_backup_helper "$release_dir"
   local backup_kind
   backup_kind="$(schema_backup_kind "$previous_release" "$release_dir")"

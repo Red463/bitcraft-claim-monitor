@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { request } from "node:http";
+import { request as secureRequest } from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -100,10 +101,64 @@ function assertTimbersteelForwarding(block) {
 }
 
 function assertPublicRouting(apex, www) {
+  if (apex.labels.length !== 1 || apex.labels[0] !== PUBLIC_APEX
+    || www.labels.length !== 1 || www.labels[0] !== PUBLIC_WWW) {
+    throw new Error("The public hosts must use the reviewed standalone site labels.");
+  }
   assertTimbersteelForwarding(apex);
   if (!www.text.includes("redir https://claim-monitor.com{uri} permanent")) {
     throw new Error("The public www host does not redirect to the public apex.");
   }
+}
+
+function caddyTokens(source) {
+  const tokens = [];
+  let token = "";
+  let quote = "";
+  let escaped = false;
+  let comment = false;
+  const flush = () => {
+    if (token) tokens.push(token);
+    token = "";
+  };
+  for (const character of source) {
+    if (comment) {
+      if (character === "\n") comment = false;
+      continue;
+    }
+    if (quote) {
+      token += character;
+      if (escaped) escaped = false;
+      else if (character === "\\" && quote !== "`") escaped = true;
+      else if (character === quote) {
+        quote = "";
+        flush();
+      }
+      continue;
+    }
+    if (character === "#") {
+      flush();
+      comment = true;
+    } else if (character === '"' || character === "'" || character === "`") {
+      flush();
+      quote = character;
+      token = character;
+    } else if (/\s/.test(character)) {
+      flush();
+    } else if (character === "{" || character === "}") {
+      flush();
+      tokens.push(character);
+    } else {
+      token += character;
+    }
+  }
+  flush();
+  if (quote) throw new Error("Caddy configuration is incomplete.");
+  return tokens;
+}
+
+function matchesReviewedBlock(liveBlock, referenceBlock) {
+  return JSON.stringify(caddyTokens(liveBlock.text)) === JSON.stringify(caddyTokens(referenceBlock.text));
 }
 
 export function buildPublicCaddyCandidate(liveSource, referenceSource) {
@@ -120,6 +175,9 @@ export function buildPublicCaddyCandidate(liveSource, referenceSource) {
   }
   if (liveApex && liveWww) {
     assertPublicRouting(liveApex, liveWww);
+    if (!matchesReviewedBlock(liveApex, referenceApex) || !matchesReviewedBlock(liveWww, referenceWww)) {
+      throw new Error("Existing public hosts do not match the reviewed public routing.");
+    }
     return { content: liveSource, changed: false };
   }
 
@@ -133,46 +191,66 @@ function defaultRunCaddy(args) {
   if (result.status !== 0) throw new Error(`Caddy command failed: ${args[0]}.`);
 }
 
-function profileRequest(host, pathname) {
+function profileRequest(host, pathname, { secure = false } = {}) {
   return new Promise((resolve) => {
-    const client = request({
-      hostname: "127.0.0.1",
-      port: 19430,
+    const client = (secure ? secureRequest : request)({
+      hostname: secure ? host : "127.0.0.1",
+      port: secure ? 443 : 19430,
       path: pathname,
       method: "GET",
       headers: { Host: host },
-      timeout: 3_000,
+      servername: secure ? host : undefined,
+      timeout: 5_000,
     }, (response) => {
       let body = "";
       response.setEncoding("utf8");
       response.on("data", (chunk) => { body += chunk; });
       response.on("end", () => {
         try {
-          resolve({ status: response.statusCode, body: JSON.parse(body) });
+          resolve({ status: response.statusCode, location: response.headers.location ?? null, body: JSON.parse(body) });
         } catch {
-          resolve({ status: response.statusCode, body: null });
+          resolve({ status: response.statusCode, location: response.headers.location ?? null, body: null });
         }
       });
     });
     client.on("timeout", () => client.destroy());
-    client.on("error", () => resolve({ status: 0, body: null }));
+    client.on("error", () => resolve({ status: 0, location: null, body: null }));
     client.end();
   });
 }
 
-export async function verifyLocalProfiles() {
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const [timbersteel, publicProfile] = await Promise.all([
-      profileRequest(TIMBERSTEEL_APEX, "/api/local/health"),
-      profileRequest(PUBLIC_APEX, "/api/profile"),
+function publicFeaturesDisabled(publicProfile) {
+  return publicProfile.status === 200
+    && publicProfile.body?.profile?.id === "public"
+    && publicProfile.body?.features?.publicProfileEnabled === false
+    && publicProfile.body?.features?.publicCollaborationEnabled === false
+    && publicProfile.body?.features?.publicLegalConfigurationConfirmed === false;
+}
+
+export function acceptedPublicCaddyState({ timbersteel, publicProfile, www }) {
+  return timbersteel.status === 200
+    && timbersteel.body?.ok === true
+    && publicFeaturesDisabled(publicProfile)
+    && www.status === 308
+    && typeof www.location === "string"
+    && www.location.startsWith(`https://${PUBLIC_APEX}/`);
+}
+
+export async function verifyPublicGatesDisabled() {
+  return publicFeaturesDisabled(await profileRequest(PUBLIC_APEX, "/api/profile"));
+}
+
+export async function verifyPublicCaddyAcceptance() {
+  const markerPath = "/claim-monitor-caddy-check?source=bootstrap";
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const [timbersteel, publicProfile, www] = await Promise.all([
+      profileRequest(TIMBERSTEEL_APEX, "/api/local/health", { secure: true }),
+      profileRequest(PUBLIC_APEX, "/api/profile", { secure: true }),
+      profileRequest(PUBLIC_WWW, markerPath, { secure: true }),
     ]);
-    if (
-      timbersteel.status === 200
-      && timbersteel.body?.ok === true
-      && publicProfile.status === 200
-      && publicProfile.body?.profile?.id === "public"
-    ) return true;
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    if (acceptedPublicCaddyState({ timbersteel, publicProfile, www })
+      && www.location === `https://${PUBLIC_APEX}${markerPath}`) return true;
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
   return false;
 }
@@ -191,21 +269,23 @@ function installFile(targetPath, content, sourceStat, suffix) {
 
 export async function installPublicCaddyConfiguration({
   livePath = "/etc/caddy/Caddyfile",
-  referencePath = "/opt/bitcraft-claim-monitor-relay/current/deploy/Caddyfile.example",
+  referencePath = "/etc/bitcraft-claim-monitor-relay/Caddyfile.public-reference",
   backupDirectory = "/root",
   runCaddy = defaultRunCaddy,
-  verifyLocalProfiles: verifyProfiles = verifyLocalProfiles,
+  verifyPublicGates = verifyPublicGatesDisabled,
+  verifyAcceptance = verifyPublicCaddyAcceptance,
   backupStamp = new Date().toISOString().replaceAll(/[:.]/g, "-"),
 } = {}) {
   const liveSource = readFileSync(livePath, "utf8");
   const referenceSource = readFileSync(referencePath, "utf8");
   const candidate = buildPublicCaddyCandidate(liveSource, referenceSource);
   const sourceStat = statSync(livePath);
+  if (!await verifyPublicGates()) throw new Error("Public feature gates must be disabled before Caddy configuration.");
 
   if (!candidate.changed) {
     runCaddy(["validate", "--config", livePath]);
     runCaddy(["reload", "--config", livePath]);
-    if (!await verifyProfiles()) throw new Error("Local profile verification failed after Caddy reload.");
+    if (!await verifyAcceptance()) throw new Error("External Caddy acceptance verification failed after reload.");
     return { changed: false, backupPath: null };
   }
 
@@ -219,7 +299,7 @@ export async function installPublicCaddyConfiguration({
     renameSync(candidatePath, livePath);
     installed = true;
     runCaddy(["reload", "--config", livePath]);
-    if (!await verifyProfiles()) throw new Error("Local profile verification failed after Caddy reload.");
+    if (!await verifyAcceptance()) throw new Error("External Caddy acceptance verification failed after reload.");
     return { changed: true, backupPath };
   } catch (error) {
     if (installed) {
