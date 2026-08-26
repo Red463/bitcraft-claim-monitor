@@ -40,6 +40,15 @@ www.claim-monitor.com {
 }
 `;
 
+const liveCaddyWithDefaultForwarding = `app.timbersteeltrade.com {
+	reverse_proxy 127.0.0.1:19430
+}
+
+relay.timbersteeltrade.com {
+	redir https://app.timbersteeltrade.com{uri} permanent
+}
+`;
+
 test("candidate merge preserves every live block and adds only the reviewed public hosts", () => {
   assert.ok(publicCaddy, "public Caddy bootstrap helper must exist");
   const candidate = publicCaddy.buildPublicCaddyCandidate(liveCaddy, referenceCaddy);
@@ -51,6 +60,15 @@ test("candidate merge preserves every live block and adds only the reviewed publ
   assert.match(candidate.content, /reverse_proxy 127\.0\.0\.1:19430/);
   assert.match(candidate.content, /redir https:\/\/claim-monitor\.com\{uri\} permanent/);
   assert.match(candidate.content, /relay\.timbersteeltrade\.com/);
+});
+
+test("candidate merge preserves the proven live loopback proxy when Caddy supplies forwarding defaults", () => {
+  assert.ok(publicCaddy, "public Caddy bootstrap helper must exist");
+  const candidate = publicCaddy.buildPublicCaddyCandidate(liveCaddyWithDefaultForwarding, referenceCaddy);
+
+  assert.equal(candidate.changed, true);
+  assert.equal(candidate.content.startsWith(liveCaddyWithDefaultForwarding), true);
+  assert.match(candidate.content, /claim-monitor\.com \{[\s\S]*header_up Host \{host\}/);
 });
 
 test("candidate merge is idempotent and refuses partial or unsafe live public routing", () => {
@@ -65,11 +83,58 @@ test("candidate merge is idempotent and refuses partial or unsafe live public ro
   );
   assert.throws(
     () => publicCaddy.buildPublicCaddyCandidate(
-      liveCaddy.replace("header_up X-Forwarded-Host {host}\n", ""),
+      liveCaddy.replace("reverse_proxy 127.0.0.1:19430", "reverse_proxy 192.0.2.10:19430"),
       referenceCaddy,
+    ),
+    /canonical loopback service/i,
+  );
+  for (const unsafeProxy of [
+    "reverse_proxy 127.0.0.1:19430 192.0.2.10:19430",
+    "reverse_proxy 127.0.0.1:194300",
+    "# reverse_proxy 127.0.0.1:19430",
+  ]) {
+    assert.throws(
+      () => publicCaddy.buildPublicCaddyCandidate(
+        liveCaddyWithDefaultForwarding.replace("reverse_proxy 127.0.0.1:19430", unsafeProxy),
+        referenceCaddy,
+      ),
+      /canonical loopback service/i,
+    );
+  }
+  for (const indirectDirective of ["import additional_proxy", "invoke additional_proxy"]) {
+    assert.throws(
+      () => publicCaddy.buildPublicCaddyCandidate(
+        liveCaddyWithDefaultForwarding.replace(
+          "reverse_proxy 127.0.0.1:19430",
+          `reverse_proxy 127.0.0.1:19430\n\t${indirectDirective}`,
+        ),
+        referenceCaddy,
+      ),
+      /indirect proxy configuration/i,
+    );
+  }
+  assert.throws(
+    () => publicCaddy.buildPublicCaddyCandidate(
+      liveCaddy,
+      referenceCaddy.replaceAll("header_up X-Forwarded-Host {host}\n", ""),
     ),
     /forwarding headers/i,
   );
+  for (const unsafeReference of [
+    referenceCaddy.replaceAll(
+      "header_up X-Forwarded-Host {host}",
+      "# header_up X-Forwarded-Host {host}",
+    ),
+    referenceCaddy.replaceAll(
+      "header_up Host {host}",
+      "header_up Host {host}\n\t\theader_up Host attacker.invalid",
+    ),
+  ]) {
+    assert.throws(
+      () => publicCaddy.buildPublicCaddyCandidate(liveCaddy, unsafeReference),
+      /forwarding headers/i,
+    );
+  }
   assert.throws(
     () => publicCaddy.buildPublicCaddyCandidate(
       referenceCaddy.replace(

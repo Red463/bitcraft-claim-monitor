@@ -9,6 +9,12 @@ Historical release headings have been migrated to `0.MINOR.PATCH-beta.N`. Existi
 
 ## [Unreleased]
 
+## [0.63.0-beta.5] - 2026-08-26
+
+### Fixed
+
+- Fixed public Caddy admission for the existing Timbersteel loopback proxy while retaining strict reviewed headers on the new public host.
+
 ## [0.63.0-beta.4] - 2026-08-26
 
 ### Fixed

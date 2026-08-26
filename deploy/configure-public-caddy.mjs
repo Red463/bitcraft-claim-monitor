@@ -86,17 +86,40 @@ function siteBlock(source, hostname, { required = true } = {}) {
   return matches[0] ?? null;
 }
 
-function assertTimbersteelForwarding(block) {
-  for (const line of [
-    "header_up Host {host}",
-    "header_up X-Forwarded-For {remote_host}",
-    "header_up X-Forwarded-Host {host}",
-    "header_up X-Forwarded-Proto {scheme}",
-  ]) {
-    if (!block.text.includes(line)) throw new Error("The Timbersteel proxy is missing required trusted forwarding headers.");
+function assertCanonicalLoopbackProxy(block) {
+  const directives = block.text
+    .split(/\r?\n/)
+    .map((line) => caddyTokens(line));
+  if (directives.some((tokens) => tokens[0] === "import" || tokens[0] === "invoke")) {
+    throw new Error("The Timbersteel proxy contains indirect proxy configuration.");
   }
-  if (!block.text.includes("reverse_proxy 127.0.0.1:19430")) {
+  const proxyDirectives = directives.filter((tokens) => tokens[0] === "reverse_proxy");
+  const [proxy] = proxyDirectives;
+  const canonical = proxyDirectives.length === 1
+    && proxy[1] === "127.0.0.1:19430"
+    && (proxy.length === 2 || (proxy.length === 3 && proxy[2] === "{"));
+  if (!canonical) {
     throw new Error("The Timbersteel proxy does not target the canonical loopback service.");
+  }
+}
+
+function assertReviewedForwarding(block) {
+  assertCanonicalLoopbackProxy(block);
+  const expectedHeaders = new Set([
+    JSON.stringify(["header_up", "Host", "{", "host", "}"]),
+    JSON.stringify(["header_up", "X-Forwarded-For", "{", "remote_host", "}"]),
+    JSON.stringify(["header_up", "X-Forwarded-Host", "{", "host", "}"]),
+    JSON.stringify(["header_up", "X-Forwarded-Proto", "{", "scheme", "}"]),
+  ]);
+  const headers = block.text
+    .split(/\r?\n/)
+    .map((line) => caddyTokens(line))
+    .filter((tokens) => tokens[0] === "header_up")
+    .map((tokens) => JSON.stringify(tokens));
+  if (headers.length !== expectedHeaders.size
+    || new Set(headers).size !== expectedHeaders.size
+    || headers.some((header) => !expectedHeaders.has(header))) {
+    throw new Error("The Timbersteel proxy is missing required trusted forwarding headers.");
   }
 }
 
@@ -105,7 +128,7 @@ function assertPublicRouting(apex, www) {
     || www.labels.length !== 1 || www.labels[0] !== PUBLIC_WWW) {
     throw new Error("The public hosts must use the reviewed standalone site labels.");
   }
-  assertTimbersteelForwarding(apex);
+  assertReviewedForwarding(apex);
   if (!www.text.includes("redir https://claim-monitor.com{uri} permanent")) {
     throw new Error("The public www host does not redirect to the public apex.");
   }
@@ -163,7 +186,7 @@ function matchesReviewedBlock(liveBlock, referenceBlock) {
 
 export function buildPublicCaddyCandidate(liveSource, referenceSource) {
   const liveTimbersteel = siteBlock(liveSource, TIMBERSTEEL_APEX);
-  assertTimbersteelForwarding(liveTimbersteel);
+  assertCanonicalLoopbackProxy(liveTimbersteel);
   const referenceApex = siteBlock(referenceSource, PUBLIC_APEX);
   const referenceWww = siteBlock(referenceSource, PUBLIC_WWW);
   assertPublicRouting(referenceApex, referenceWww);
