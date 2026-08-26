@@ -7,6 +7,11 @@ import { createServer as createViteServer } from "vite";
 import { React, act, installDom, mount } from "./react-dom-test-harness.mjs";
 
 const appRoot = fileURLToPath(new URL("..", import.meta.url));
+const collaborationFeatures = {
+  publicProfileEnabled: true,
+  publicCollaborationEnabled: true,
+  publicLegalConfigurationConfirmed: true,
+};
 
 function json(status, body) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -52,7 +57,7 @@ test("the mounted shared-plan route renders bearer-redacted aggregate computatio
   let view;
   try {
     const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
-    view = await mount(React.createElement(PublicAppShell, { route: { id: "shared-plan", params: { id: "plan-7" } } }));
+    view = await mount(React.createElement(PublicAppShell, { route: { id: "shared-plan", params: { id: "plan-7" } }, features: collaborationFeatures }));
     await dom.flush();
 
     assert.equal(calls.length, 2);
@@ -90,7 +95,7 @@ test("the mounted shared-plan route shows an explicit unavailable computation st
   let view;
   try {
     const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
-    view = await mount(React.createElement(PublicAppShell, { route: { id: "shared-plan", params: { id: "plan-unavailable" } } }));
+    view = await mount(React.createElement(PublicAppShell, { route: { id: "shared-plan", params: { id: "plan-unavailable" } }, features: collaborationFeatures }));
     await dom.flush();
     assert.match(document.body.textContent, /Current settlement data could not be loaded/);
   } finally {
@@ -126,7 +131,7 @@ test("the mounted invite route never posts before an explicit accept action", as
   let view;
   try {
     const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
-    view = await mount(React.createElement(PublicAppShell, { route: { id: "invite", params: { id: "invite-8" } } }));
+    view = await mount(React.createElement(PublicAppShell, { route: { id: "invite", params: { id: "invite-8" } }, features: collaborationFeatures }));
     await dom.flush();
 
     assert.deepEqual(calls.map(([path, init]) => [path, init.method ?? "GET"]), [["/api/public/auth/session", "GET"]]);
