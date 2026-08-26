@@ -1,9 +1,10 @@
 import React from "react";
-import { Boxes, ChevronRight, Hammer, Home, Search, UserRound, Users } from "lucide-react";
+import { ChevronRight, Hammer, Search } from "lucide-react";
 import type { FrontendProfile } from "../api/profile";
 import { searchPublicCatalog, searchPublicClaims, type PublicHint } from "./api";
 import { PublicAccountSettings } from "./PublicAccountSettings";
 import { PublicClaimPages } from "./PublicClaimPages";
+import { PublicChrome } from "./PublicChrome";
 import { PublicLegalPage } from "./PublicLegalPage";
 import { PublicPlanAccessPage } from "./PublicPlanAccessPage";
 import { PublicPlansPage } from "./PublicPlansPage";
@@ -37,12 +38,25 @@ function Calculator() {
 
 function Help() { return <section className="public-panel public-help"><h1>Help</h1><section><h2>Finding a settlement</h2><p>Enter at least three characters from a BitCraft settlement name, or paste its exact claim ID. Select the correct result by checking its name, claim ID, and region.</p></section><section><h2>Viewing current data</h2><p>Use the settlement navigation to view its Overview, Members and professions, Shared inventory, and Craft monitor pages.</p></section><section><h2>How public data works</h2><p>Settlement data is loaded on demand and refreshes while the page is visible. Public settlements have no public history, alerts, notifications, or Discord services.</p></section></section>; }
 function Placeholder({ route }: { route: PublicRoute }) { return <section className="public-panel public-placeholder"><h1>{title(route)}</h1><p>That public page is not available.</p></section>; }
-function Navigation({ route, collaborationEnabled }: { route: PublicRoute; collaborationEnabled: boolean }) { const claimId = route.params.claimId; const links: Array<[string, string, string, typeof Home]> = claimId ? [["Overview", `/claims/${claimId}`, "dashboard", Home], ["Members", `/claims/${claimId}/members`, "members", Users], ["Professions", `/claims/${claimId}/professions`, "professions", Users], ["Inventory", `/claims/${claimId}/inventory`, "inventory", Boxes], ["Craft monitor", `/claims/${claimId}/crafts`, "crafts", Hammer]] : []; return <aside className="public-sidebar"><a className="brand" href="/"><div><h1>Claim Monitor</h1><span>Public settlement data</span></div></a><nav>{links.map(([label, href, id, Icon]) => <a className={route.id === id ? "active" : ""} href={href} key={id}><Icon size={16} />{label}</a>)}<a className={route.id === "calculator" ? "active" : ""} href="/calculator"><Hammer size={16} />Craft calculator</a><a href="/help">Help</a>{collaborationEnabled && <><a href="/plans">Plans</a><a className={["account", "settings"].includes(route.id) ? "active" : ""} href="/settings"><UserRound size={16} />Account &amp; settings</a></>}<a className={route.id === "terms" ? "active" : ""} href="/terms">Terms</a><a className={route.id === "privacy" ? "active" : ""} href="/privacy">Privacy</a></nav></aside>; }
+const ROADMAP_TITLES: Record<string, string> = { leaderboard: "Leaderboard", construction: "Construction", research: "Research", "local-market": "Local Market", market: "Market", region: "Region", empires: "Empires", map: "Map", activity: "Activity", "public-craft-finder": "Public Craft Finder" };
 const defaultFeatures: PublicFeatures = { publicProfileEnabled: false, publicCollaborationEnabled: false, publicLegalConfigurationConfirmed: false };
 export function PublicAppShell({ route, features = defaultFeatures }: { route: PublicRoute; features?: PublicFeatures }) {
   const snapshotRoute = features.publicProfileEnabled ? route : { id: "not-found", params: {} } as PublicRoute;
   const snapshotController = usePublicSnapshot(snapshotRoute);
-  if (!features.publicProfileEnabled) return <div className="public-app-shell"><Navigation route={route} collaborationEnabled={false} /><main className="public-main"><section className="public-panel public-placeholder"><h1>Claim Monitor</h1><p>The public settlement service is not enabled yet.</p></section></main></div>;
+  const openClaimFinder = () => window.requestAnimationFrame(() => document.getElementById("public-settlement-search")?.focus());
+  if (!features.publicProfileEnabled) return <PublicChrome route={route} features={features} controller={snapshotController} onOpenClaimFinder={openClaimFinder}><div className="page-view public-page-view"><section className="public-panel public-placeholder"><h1>Claim Monitor</h1><p>The public settlement service is not enabled yet.</p></section></div></PublicChrome>;
   const claimPage = ["dashboard", "members", "professions", "inventory", "crafts"].includes(route.id); const identity = route.id === "account" || route.id === "settings"; const legal = route.id === "terms" || route.id === "privacy"; const planAccess = route.id === "shared-plan" || route.id === "invite"; const planWorkspace = ["plans", "plan-new", "plan"].includes(route.id); const collaborationRoute = identity || planAccess || planWorkspace;
-  return <div className="public-app-shell"><Navigation route={route} collaborationEnabled={features.publicCollaborationEnabled} /><main className="public-main">{!identity && !legal && !planWorkspace && !planAccess ? <SearchPanel showWelcome={route.id === "home"} /> : null}{collaborationRoute && !features.publicCollaborationEnabled ? <section className="public-panel public-placeholder"><h1>Collaboration is not enabled yet</h1><p>Public settlement search and current-state pages remain available.</p></section> : claimPage ? <PublicClaimPages route={route} controller={snapshotController} /> : route.id === "calculator" ? <Calculator /> : route.id === "home" ? null : route.id === "help" ? <Help /> : identity ? <PublicAccountSettings page={route.id as "account" | "settings"} /> : legal ? <PublicLegalPage type={route.id as "terms" | "privacy"} /> : planAccess ? <PublicPlanAccessPage route={route as { id: "shared-plan" | "invite"; params: Record<string, string> }} /> : planWorkspace ? <PublicPlansPage route={route as { id: "plans" | "plan-new" | "plan"; params: Record<string, string> }} /> : <Placeholder route={route} />}</main></div>;
+  const pageContent = collaborationRoute && !features.publicCollaborationEnabled
+    ? <section className="public-panel public-placeholder"><h1>Collaboration is not enabled yet</h1><p>Public settlement search and current-state pages remain available.</p></section>
+    : claimPage ? <PublicClaimPages route={route} controller={snapshotController} />
+      : route.id === "calculator" ? <Calculator />
+        : route.id === "home" ? null
+          : route.id === "help" ? <Help />
+            : identity ? <PublicAccountSettings page={route.id as "account" | "settings"} />
+              : legal ? <PublicLegalPage type={route.id as "terms" | "privacy"} />
+                : planAccess ? <PublicPlanAccessPage route={route as { id: "shared-plan" | "invite"; params: Record<string, string> }} />
+                  : planWorkspace ? <PublicPlansPage route={route as { id: "plans" | "plan-new" | "plan"; params: Record<string, string> }} />
+                    : route.id === "coming-soon" ? <section className="public-panel public-placeholder"><h1>{ROADMAP_TITLES[route.params.feature] ?? "Claim feature"}</h1><p>This claim feature is coming soon.</p></section>
+                      : <Placeholder route={route} />;
+  return <PublicChrome route={route} features={features} controller={snapshotController} onOpenClaimFinder={openClaimFinder}><div className="page-view public-page-view">{!identity && !legal && !planWorkspace && !planAccess ? <SearchPanel showWelcome={route.id === "home"} /> : null}{pageContent}</div></PublicChrome>;
 }
