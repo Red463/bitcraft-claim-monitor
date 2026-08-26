@@ -35,6 +35,15 @@ anonymised. Never use ad-hoc SQL for either profile.
 - After restoring SQLite, run the replay helper with explicit database, ledger, and key paths before service start. Startup also replays as a safety net.
 - Retain current and previous ledger verification keys during rotation until every record under the old key ID has expired (90 days). Never rewrite signed historical records.
 - At canonical cutover, the migrated old key is a previous verification key only. Retire that previous verification key as soon as no unexpired record bears its key ID, and never keep it beyond the remaining 90-day signed-record lifetime. Verify both current and configured previous keys before replay; do not log key values.
+- The restore/preflight replay reads the current key path argument plus the
+  comma-separated `PRIVACY_LEDGER_PREVIOUS_KEY_FILES` path configuration. It
+  rejects missing, malformed, duplicate, out-of-root, symlinked, or unverifying
+  key inputs before mutation. Its bounded result contains only record/key counts
+  and per-profile status/scanned/deleted counts.
+- Replay routes `discord:` subjects only through the Timbersteel deletion path
+  and `public-profile:discord:` subjects only through the public account/plan
+  deletion path. Both profiles commit together or roll back together. A receipt
+  for one profile cannot delete the same Discord ID in the other profile.
 - For database-only recovery, preserve the live ledger, restore SQLite, verify the ledger, and replay committed deletions before starting either service.
 - For full-VPS recovery, restore the newest available full-VPS backup, identify and verify the newest ledger captured by it, and replay it before service start. Record that deletions after the backup timestamp may need reconstruction from protected privacy correspondence or non-sensitive audit receipts.
 - Off-VPS hardening is deferred to uniquely named snapshots under `Proton Drive/My files/Timbersteel Claim Monitor/Privacy Recovery/Deletion Ledger/`. Keep the signing key separate. Remove this exception only after upload and restore verification pass.

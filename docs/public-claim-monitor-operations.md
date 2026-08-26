@@ -134,8 +134,15 @@ test -z "$(sqlite3 "$VERIFY_DATABASE" 'PRAGMA foreign_key_check;')"
    copy. This is both signature verification and proof that deleted Timbersteel
    or public accounts will not reappear after restore. A signature/replay error
    blocks rollout. Never run the preflight replay against the live database.
+   Export the exact comma-separated, path-only
+   `PRIVACY_LEDGER_PREVIOUS_KEY_FILES` value from the protected installed
+   environment first. During the current rotation that value is the installed
+   previous-production key path shown below; use an empty value only after the
+   previous key is formally retired. Do not print the environment file or any
+   key contents.
 
 ```sh
+export PRIVACY_LEDGER_PREVIOUS_KEY_FILES="/etc/bitcraft-claim-monitor-relay/privacy-ledger.previous-production.key"
 DATA_DIR="$EVIDENCE" \
 BACKUP_DIR="$BACKUP_ROOT" \
 CONFIG_DIR="/etc/bitcraft-claim-monitor-relay" \
@@ -149,6 +156,15 @@ test "$(sqlite3 "$VERIFY_DATABASE" 'PRAGMA integrity_check;')" = "ok"
 test -z "$(sqlite3 "$VERIFY_DATABASE" 'PRAGMA foreign_key_check;')"
 rm -f -- "$VERIFY_DATABASE"
 ```
+
+The replay verifies every ledger record with the current key plus those
+configured previous keys, then applies the Timbersteel and public-profile
+subjects in one database transaction. Its JSON output contains only overall
+record/key counts and per-profile `status`, `scanned`, and `deleted` counts; it
+never contains account identifiers, receipt subjects, or key values. A public
+status of `not-present` is acceptable only for a verified pre-additive backup.
+Any non-zero exit, other status, invalid/duplicate key configuration, or replay
+error blocks rollout and leaves the verification database unchanged.
 
 5. Capture bounded Timbersteel history/outbox fingerprints before rollout. The
    fixture test is the authoritative proof that public reads perform zero writes

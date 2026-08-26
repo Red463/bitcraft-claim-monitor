@@ -181,3 +181,90 @@ schema rollback.
   persistent HMAC-key generation/backup, encrypted production backup replay,
   and the 24-hour read-only observation are intentionally outstanding operator
   actions, not repository tasks.
+
+## Fix round 1: dual-profile privacy recovery
+
+### Finding and correction
+
+The first Task 8 runbook overstated the deploy restore helper: it verified only
+the current privacy-ledger key and replayed only Timbersteel `user_accounts`.
+The corrected `deploy/replay-privacy-deletions.mjs` now:
+
+- verifies every ledger record with the current key plus the exact
+  comma-separated `PRIVACY_LEDGER_PREVIOUS_KEY_FILES` path configuration;
+- rejects missing, out-of-root, symlinked, malformed, duplicate-file, and
+  duplicate-key-material configuration without printing key values;
+- preserves the existing `replayPrivacyDeletions`/`deleteUserAccount` path for
+  Timbersteel subjects;
+- sends only public-profile subjects through `replayPublicPrivacyDeletions` and
+  Task 7's isolated `deletePublicAccount`, with owned public plans dispositioned
+  to deletion and no Timbersteel table access from that path;
+- applies both profile replays inside one `BEGIN IMMEDIATE` transaction, rolls
+  back every mutation on either-profile failure, and emits a sanitized failure;
+- returns only overall record/key counts plus bounded per-profile
+  status/scanned/deleted counts, never keys, Discord IDs, or receipt subjects;
+  and
+- reports public `not-present` for a valid pre-additive Timbersteel backup while
+  continuing to fail closed on a partial public-schema replay error.
+
+The deployment and privacy runbooks now require the operator to export the
+exact path-only previous-key setting before replay and describe the executable
+transaction, output, pre-additive status, and blocking behavior.
+
+### RED / GREEN evidence
+
+The new deploy CLI test was built in vertical RED/GREEN slices:
+
+- Public restore RED: the old output had no per-profile result and the
+  resurrected public account/plan remained; GREEN removed only public rows.
+- Rotation RED: a previous-key public receipt failed at ledger line 3
+  verification; GREEN accepted current plus configured previous keys.
+- Failure rollback RED: Timbersteel had already been deleted when the public
+  path failed; GREEN retained both profiles after the forced failure.
+- Configuration RED: duplicate and malformed previous key material exited
+  successfully; GREEN rejects both before database mutation.
+- Compatibility RED: a pre-additive database failed with `no such table:
+  public_user_accounts`; GREEN reports public `not-present` and preserves the
+  existing Timbersteel replay result.
+- Redaction RED: the database trigger's arbitrary failure text reached stderr;
+  GREEN returns only the fixed sanitized replay-failure message.
+- Final focused deploy recovery result: 6 passed, 0 failed. The tests also prove
+  idempotent replay and both same-Discord-ID cross-profile directions.
+
+### Fix-round verification
+
+- Focused deploy/ledger/Timbersteel deletion/public deletion contracts:
+  15 passed, 0 failed.
+- Every `scripts/test/deploy-*.test.mjs` contract: 182 total, 167 passed,
+  0 failed, 15 existing Windows/bash skips; 37.1 seconds.
+- Production build: passed server/client compilation, verified 1,462 assets,
+  and returned runtime boundary `{ok:true}`.
+- The first default-concurrency full-suite attempt was stopped after more than
+  six silent minutes with no reported test failure. A bounded rerun completed
+  with five 10-second local server-health startup timeouts under unrestricted
+  file concurrency. The exact three affected server files then passed 10/10 in
+  isolation, proving resource contention rather than a replay failure.
+- Final complete suite with file concurrency capped at four: 2,752 total,
+  2,749 passed, 0 failed, 3 existing Windows symlink skips; 108.7 seconds.
+
+No production service, database, ledger, key, OAuth application, Discord
+message, DNS record, mailbox, backup, or external system was read or mutated by
+these tests. All recovery fixtures used disposable local directories and
+SQLite files.
+
+### Fix-round self-review and concerns
+
+- The production application deletion and ledger modules were reused without
+  modification; the behavioral change is confined to the deploy replay CLI.
+- Same-ID receipts are profile-specific in both directions, public owned plans
+  are removed only inside the public deletion coordinator, and a second replay
+  deletes zero rows.
+- Output and tested failure paths contain no configured keys, Discord IDs, or
+  signed subjects. The database is closed before the bounded success result is
+  printed.
+- The supervised operator must supply the exact installed previous-key path
+  list (or an empty value only after formal retirement); omitting a still-needed
+  previous key correctly blocks verification.
+- The full suite needs bounded file concurrency on this Windows host to avoid
+  starving 10-second server-health fixtures. All tests passed under the bounded
+  schedule; no application timeout or test source was changed.

@@ -939,6 +939,11 @@ During canonical cutover the old signing key is installed only as a previous
 verification key. Retire it as soon as no unexpired record bears its key ID and
 never retain it beyond the remaining 90-day signed-record lifetime. Verify the
 ledger with the current and configured previous keys before every restore.
+Before running the replay, export the exact comma-separated, path-only
+`PRIVACY_LEDGER_PREVIOUS_KEY_FILES` value from the protected installed
+environment without printing that file or any key value. During the current
+rotation it is the installed previous-production key path below; set it empty
+only after formal retirement.
 
 Supervised restore outline:
 
@@ -950,6 +955,7 @@ node /usr/local/lib/bitcraft-claim-monitor-relay/backup-crypto.mjs \
   /etc/bitcraft-claim-monitor-relay/backup-encryption.key
 sqlite3 "$RESTORE" 'PRAGMA quick_check;'
 
+export PRIVACY_LEDGER_PREVIOUS_KEY_FILES="/etc/bitcraft-claim-monitor-relay/privacy-ledger.previous-production.key"
 DATA_DIR=/var/lib/bitcraft-claim-monitor-relay \
 BACKUP_DIR=/var/backups/bitcraft-claim-monitor-relay \
 CONFIG_DIR=/etc/bitcraft-claim-monitor-relay \
@@ -973,6 +979,14 @@ systemctl start \
   bitcraft-claim-monitor-relay-collector.timer
 curl --fail --silent --show-error http://127.0.0.1:19430/api/local/health
 ```
+
+Replay succeeds only after all ledger signatures verify. It applies
+Timbersteel and public-profile receipts in one transaction and prints a bounded
+JSON result containing record/key counts and per-profile status/scanned/deleted
+counts, never identifiers, receipt subjects, or keys. `public.status` may be
+`not-present` only when restoring a pre-additive backup. Any replay failure or
+invalid/duplicate key configuration leaves the restored database unchanged and
+blocks service start.
 
 Never restore or copy preview data into the maintained application. Finish by
 checking both public health endpoints and recording that the maintained app
