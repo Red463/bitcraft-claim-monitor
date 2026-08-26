@@ -242,7 +242,7 @@ test("individual restore failure attempts every path and retains the recovery sn
 
     [[ "$rollback_status" -ne 0 ]]
     [[ "$cleanup_status" -ne 0 ]]
-    [[ "$(wc -l <"$2/restore-attempts")" -eq 20 ]]
+    [[ "$(wc -l <"$2/restore-attempts")" -eq 21 ]]
     [[ -f "$2/daemon-reload-attempted" ]]
     [[ -d "$transaction_dir" ]]
     grep -Fq "Recovery snapshot retained at: $transaction_dir" "$LOG_FILE"
