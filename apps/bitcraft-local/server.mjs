@@ -8035,12 +8035,16 @@ const server = createServer(async (req, res) => {
     // Route order matters: public health/proxy/config endpoints are handled
     // before authenticated admin routes, while static frontend fallback stays at
     // the end so API typos do not accidentally return index.html.
+    const url = new URL(req.url ?? "/", "http://localhost");
     const hostProfile = resolveRequestHostProfile(req, {
       isProduction,
       allowDevelopmentHosts: !isProduction,
+      allowDirectLoopbackHealthHost:
+        isProduction
+        && req.method === "GET"
+        && url.pathname === "/api/local/health",
     });
     if (!hostProfile) return send(res, 421, { error: "Unknown host" });
-    const url = new URL(req.url ?? "/", "http://localhost");
     if (await routeHostProfileRequest({
       profile: hostProfile,
       method: req.method,

@@ -27,13 +27,24 @@ export function isLoopbackAddress(address) {
   return value === "127.0.0.1" || value === "::1" || value === "::ffff:127.0.0.1";
 }
 
-export function resolveHostProfile(request, { isProduction = false, allowDevelopmentHosts = !isProduction } = {}) {
+export function resolveHostProfile(request, {
+  isProduction = false,
+  allowDevelopmentHosts = !isProduction,
+  allowDirectLoopbackHealthHost = false,
+} = {}) {
   const directHost = hostname(request?.host);
+  const hasForwardedHost = request?.forwardedHost !== undefined;
   const forwardedHost = isLoopbackAddress(request?.remoteAddress) ? hostname(request?.forwardedHost) : null;
   const resolvedHost = forwardedHost ?? directHost;
 
   if (resolvedHost === "app.timbersteeltrade.com") return TIMBERSTEEL_PROFILE;
   if (resolvedHost === "claim-monitor.com") return PUBLIC_PROFILE;
+  if (
+    allowDirectLoopbackHealthHost
+    && !hasForwardedHost
+    && isLoopbackAddress(request?.remoteAddress)
+    && (directHost === "localhost" || directHost === "127.0.0.1")
+  ) return TIMBERSTEEL_PROFILE;
   if (!allowDevelopmentHosts) return null;
   if (resolvedHost === "localhost" || resolvedHost === "127.0.0.1") return TIMBERSTEEL_PROFILE;
   if (resolvedHost === "public.localhost") return PUBLIC_PROFILE;

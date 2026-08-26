@@ -125,6 +125,14 @@ test("production rejects public.localhost even in the test runtime", async (t) =
   assert.equal((await requestAsPublicHost(origin, "/api/profile")).status, 421);
 });
 
+test("production accepts only the direct loopback health probe without a canonical host", async (t) => {
+  const { origin } = await startTestServer(t, { nodeEnv: "production" });
+
+  assert.equal((await requestAsHost(origin, "/api/local/health", { host: "127.0.0.1" })).status, 200);
+  assert.equal((await requestAsHost(origin, "/api/profile", { host: "127.0.0.1" })).status, 421);
+  assert.equal((await requestAsHost(origin, "/api/local/members", { host: "127.0.0.1" })).status, 421);
+});
+
 test("enabled public settlement reads leave Timbersteel settings, repositories, history, and outboxes byte-identical", async (t) => {
   const relayPort = await availablePort();
   const relay = createServer((req, res) => {
