@@ -32,6 +32,9 @@ test("Stage 1 workflow requires approval and verifies both isolated profiles", (
   assert.match(workflow, /api\/public\/settlements\/search/);
   assert.match(workflow, /search\.hints\[0\]\.claimId/);
   assert.match(workflow, /domains=claim%2Cmembers%2Ccitizens%2Cinventories%2Ccrafts/);
+  assert.match(workflow, /public-snapshot\.json/);
+  assert.match(workflow, /readFileSync\(`\$\{root\}\/public-snapshot\.json`/);
+  assert.doesNotMatch(workflow, /' "\$PROFILE" "\$SEARCH" "\$SNAPSHOT"/);
   assert.match(workflow, /api\/local\/health/);
   assert.match(workflow, /https:\/\/app\.timbersteeltrade\.com\/bot/);
   assert.match(workflow, /Capture Timbersteel invariant baseline/);
