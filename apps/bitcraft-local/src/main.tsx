@@ -64,7 +64,7 @@ function Root() {
 
   // The server validates the host for every request. This response only picks
   // an isolated frontend entrypoint; it never grants client-side authority.
-  const entry = rootForProfile(profile) === "public" ? <PublicRoot /> : <TimbersteelRoot />;
+  const entry = rootForProfile(profile) === "public" ? <PublicRoot profile={profile} /> : <TimbersteelRoot />;
   return <RouteErrorBoundary><React.Suspense fallback={<EntryLoadingState />}>{entry}</React.Suspense></RouteErrorBoundary>;
 }
 
