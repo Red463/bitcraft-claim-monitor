@@ -9,6 +9,7 @@ import {
 const MAX_UNSIGNED_64 = 18_446_744_073_709_551_615n;
 const MAX_PUBLIC_PLAN_BYTES = 256 * 1024;
 const MAX_PUBLIC_PLAN_TARGETS = 100;
+const MAX_PUBLIC_PLAN_MULTIPLIER = 20;
 
 export class PublicPlanError extends Error {
   constructor(message, status = 400, code = "public_plan_invalid") {
@@ -95,8 +96,11 @@ export function normalizePublicCraftPlanDocument(input) {
   const multipliers = stringRecord(source.multipliers, "Public plan multipliers", (value, key) => {
     const multiplier = record(value, `Public plan multiplier ${key}`);
     exactKeys(multiplier, new Set(["multiplier", "note"]), `Public plan multiplier ${key}`);
-    if (typeof multiplier.multiplier !== "number" || !Number.isFinite(multiplier.multiplier) || multiplier.multiplier <= 0) {
-      throw new PublicPlanError(`Public plan multiplier ${key} must be a positive finite number.`);
+    if (typeof multiplier.multiplier !== "number"
+      || !Number.isFinite(multiplier.multiplier)
+      || multiplier.multiplier < 1
+      || multiplier.multiplier > MAX_PUBLIC_PLAN_MULTIPLIER) {
+      throw new PublicPlanError(`Public plan multiplier ${key} must be a finite number from 1 through ${MAX_PUBLIC_PLAN_MULTIPLIER}.`);
     }
     return {
       multiplier: multiplier.multiplier,
@@ -274,7 +278,8 @@ export function createPublicPlanRepository(db, {
         FROM public_craft_plans AS plan
         LEFT JOIN public_craft_plan_members AS member
           ON member.plan_id = plan.id AND member.user_id = ?
-        WHERE plan.owner_user_id = ? OR member.user_id IS NOT NULL
+        WHERE plan.status <> 'suspended'
+          AND (plan.owner_user_id = ? OR member.user_id IS NOT NULL)
         ORDER BY plan.updated_at DESC, plan.id
       `).all(userId, userId, userId).map(planView);
     },
@@ -766,11 +771,31 @@ function publicComputationConfig(plan, targets, craftPlayerIds) {
   };
 }
 
+function safePublicComputationValue(value, seen = new Set()) {
+  if (typeof value === "number") return Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER;
+  if (typeof value === "bigint") return false;
+  if (!value || typeof value !== "object") return true;
+  if (seen.has(value)) return false;
+  seen.add(value);
+  const safe = (Array.isArray(value) ? value : Object.values(value))
+    .every((child) => safePublicComputationValue(child, seen));
+  seen.delete(value);
+  return safe;
+}
+
+function publicComputationIdentityKey(key) {
+  const normalized = String(key).replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return normalized === "sources"
+    || normalized === "activecraftsources"
+    || normalized === "sourcerules"
+    || /(?:source|player|crafter|container|entity|craft|owner|building|storage|bank|deployable)ids?$/.test(normalized);
+}
+
 export function redactPublicPlanComputation(value) {
   if (Array.isArray(value)) return value.map(redactPublicPlanComputation);
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => key !== "sources" && key !== "activeCraftSources")
+    .filter(([key]) => !publicComputationIdentityKey(key))
     .map(([key, child]) => [key, redactPublicPlanComputation(child)]));
 }
 
@@ -832,6 +857,9 @@ export function createPublicPlanComputationService({ data, catalog, maxEntries =
         craftSourceErrors: [],
         catalogWarnings: [],
       });
+      if (!safePublicComputationValue(computed)) {
+        return remember(cacheKey, computationUnavailable(document, "Public plan computation is unavailable because a calculated quantity cannot be represented safely."));
+      }
       const warnings = [
         ...(Array.isArray(snapshot.warnings) ? snapshot.warnings : []),
         ...(Array.isArray(snapshot.domains?.inventories?.warnings) ? snapshot.domains.inventories.warnings : []),

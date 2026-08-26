@@ -2,7 +2,18 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { loadHostProfile, rootForProfile, type FrontendProfile } from "./api/profile";
 import { RouteLoadingState } from "./components/main/RouteLoadingState";
+import { capturePublicPlanFragmentSecret } from "./public/planSecrets.mjs";
 import "./styles.css";
+
+try {
+  capturePublicPlanFragmentSecret({
+    location: window.location,
+    history: window.history,
+    sessionStorage: window.sessionStorage,
+  });
+} catch {
+  // Storage can be disabled; the fragment remains unusable rather than moving to persistent storage.
+}
 
 const TimbersteelRoot = React.lazy(() => import("./TimbersteelRoot"));
 const PublicRoot = React.lazy(() => import("./public/PublicRoot"));

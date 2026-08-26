@@ -38,6 +38,21 @@ test("public plan documents preserve exact typed decimal targets and reject non-
   }), { name: "PublicPlanError", status: 400 });
 });
 
+test("public plan multipliers stay within the planner's safe one-to-twenty domain", () => {
+  const document = emptyDocument();
+  const boundary = publicPlans.normalizePublicCraftPlanDocument({
+    ...document,
+    multipliers: { "items:7": { multiplier: 20, note: "Maximum public buffer" } },
+  });
+  assert.equal(boundary.multipliers["items:7"].multiplier, 20);
+  for (const multiplier of [0.5, 20.000000000000004, Number.MAX_VALUE, Number.POSITIVE_INFINITY]) {
+    assert.throws(() => publicPlans.normalizePublicCraftPlanDocument({
+      ...document,
+      multipliers: { "items:7": { multiplier } },
+    }), { name: "PublicPlanError", status: 400 });
+  }
+});
+
 test("public plan documents enforce target, byte, exact-schema, and plain-text label limits", () => {
   const empty = {
     schemaVersion: 1,
@@ -373,6 +388,9 @@ test("public plan revisions and lifecycle enforce ACL, archive, suspension, tran
   repository.updateStatus({ planId: plan.id, actorUserId: ownerId, status: "active", expectedAccessRevision: 2 });
   repository.updateStatus({ planId: plan.id, actorUserId: ownerId, status: "suspended", expectedAccessRevision: 3 });
   assert.throws(() => repository.planForUser(plan.id, editorId), { name: "PublicPlanError", status: 423, code: "plan_suspended" });
+  assert.deepEqual(repository.listPlans(ownerId), [], "owners must not recover suspended documents from the collection route");
+  assert.deepEqual(repository.listPlans(editorId), [], "editors must not recover suspended documents from the collection route");
+  assert.deepEqual(repository.listPlans(viewerId), [], "viewers must not recover suspended documents from the collection route");
 
   const share = db.prepare(`
     INSERT INTO public_craft_plan_share_links (id, plan_id, created_by_user_id, label, token_hash, created_at)
@@ -503,6 +521,7 @@ test("public plan computation uses only public settlement sources and isolates p
   assert.equal(detailed42.plan.targets[0].missing, 5);
   assert.equal(detailed42.plan.materials[0].sources[0].sourceId, "420");
   assert.equal(detailed42.plan.materials[0].activeCraftSources[0].craftId, "421");
+  assert.deepEqual(detailed42.plan.config.sourceRules.craftPlayerIds, ["900"]);
 
   const cached42 = await computation.compute(plan42);
   assert.strictEqual(cached42, detailed42);
@@ -510,6 +529,8 @@ test("public plan computation uses only public settlement sources and isolates p
   assert.equal(redacted42.available, true);
   assert.equal("sources" in redacted42.plan.materials[0], false);
   assert.equal("activeCraftSources" in redacted42.plan.materials[0], false);
+  assert.equal("sourceRules" in redacted42.plan.config, false);
+  assert.doesNotMatch(JSON.stringify(redacted42.plan), /"(?:source|player|crafter|container|entity|craft|owner|building|storage|bank|deployable)Ids?"/i);
   assert.notStrictEqual(redacted42, detailed42);
 
   const detailed43 = await computation.compute(plan43);
@@ -574,6 +595,50 @@ test("public plan computation fails closed when any required catalog node is una
   assert.equal(result.warnings[0].code, "public_plan_computation_unavailable");
 });
 
+test("public plan computation fails closed before returning an unsafe aggregate quantity", async () => {
+  const document = emptyDocument([{ catalogKey: "items:7", quantity: "1" }]);
+  const unsafeQuantity = String(Number.MAX_SAFE_INTEGER);
+  const computation = publicPlans.createPublicPlanComputationService({
+    data: {
+      snapshot: async () => ({
+        claimId: "42",
+        sourceRevision: "unsafe-aggregate-a",
+        receivedAt: "2026-08-25T10:00:00.000Z",
+        domains: {
+          inventories: {
+            data: {
+              buildings: ["420", "421"].map((entityId) => ({
+                entityId,
+                name: `Shared chest ${entityId}`,
+                items: [{ itemId: "7", itemType: "item", quantity: unsafeQuantity, catalogKey: "items:7" }],
+              })),
+            },
+            warnings: [],
+          },
+          crafts: { data: { craftResults: [] }, warnings: [] },
+        },
+        warnings: [],
+      }),
+    },
+    catalog: {
+      recipe: async () => ({ detail: { item: { id: "7", itemType: 0, name: "Item 7" }, craftingRecipes: [], extractionRecipes: [] }, provider: "relay" }),
+    },
+  });
+
+  const result = await computation.compute({
+    id: "unsafe-aggregate",
+    claimId: "42",
+    title: "Unsafe aggregate",
+    document,
+    revisions: { document: 1, access: 1 },
+    role: "owner",
+  });
+
+  assert.equal(result.available, false);
+  assert.deepEqual(result.document, document);
+  assert.equal(result.warnings[0].code, "public_plan_computation_unavailable");
+});
+
 test("public plan computation retains all one hundred validated targets without changing Timbersteel limits", async () => {
   const targets = Array.from({ length: 100 }, (_, index) => ({ catalogKey: `items:${index + 1}`, quantity: "1" }));
   const computation = publicPlans.createPublicPlanComputationService({
@@ -608,16 +673,30 @@ test("public plan computation retains all one hundred validated targets without 
   assert.equal(result.plan.materials.length, 100);
 });
 
-test("public viewer computation projection recursively removes storage and craft source breakdowns", () => {
+test("public viewer computation projection removes every source and crafter identity while detailed views remain intact", () => {
   const detailed = {
-    materials: [{ key: "items:7", sources: [{ sourceId: "chest-1" }], activeCraftSources: [{ craftId: "craft-1" }] }],
-    personalViews: { fishing: { tiers: [{ routes: { ocean: { sources: [{ sourceId: "chest-2" }], activeCraftSources: [{ craftId: "craft-2" }] } } }] } },
+    config: {
+      targets: [{ id: "7", kind: "items" }],
+      sourceRules: {
+        storageContainerIds: ["container-1"],
+        playerIds: [],
+        craftPlayerIds: ["crafter-900"],
+        bankPlayerIds: [],
+        bankContainerIds: [],
+        deployableContainerIds: [],
+      },
+    },
+    materials: [{ key: "items:7", id: "7", sources: [{ sourceId: "chest-1", entityId: "building-420" }], activeCraftSources: [{ craftId: "craft-421", playerId: "crafter-900" }] }],
+    personalViews: { fishing: { tiers: [{ routes: { ocean: { playerEntityId: "crafter-900", sources: [{ sourceId: "chest-2" }], activeCraftSources: [{ craftId: "craft-2" }] } } }] } },
     source: { revision: "snapshot-a" },
   };
   const redacted = publicPlans.redactPublicPlanComputation(detailed);
-  assert.doesNotMatch(JSON.stringify(redacted), /activeCraftSources|"sources"|chest-|craft-/);
+  const serialized = JSON.stringify(redacted);
+  assert.doesNotMatch(serialized, /sourceRules|activeCraftSources|"sources"|sourceId|craftId|playerId|entityId|chest-|container-|crafter-|building-|craft-/i);
+  assert.match(serialized, /"id":"7"/, "typed item identity must remain available in the aggregate projection");
   assert.deepEqual(redacted.source, { revision: "snapshot-a" });
   assert.equal(detailed.materials[0].sources[0].sourceId, "chest-1");
+  assert.deepEqual(detailed.config.sourceRules.craftPlayerIds, ["crafter-900"], "owner/editor detail must remain intact");
 });
 
 test("public plan ownership transfer enforces the recipient active and total owner quotas atomically", () => {

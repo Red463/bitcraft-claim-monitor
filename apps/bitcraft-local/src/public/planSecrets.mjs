@@ -10,7 +10,7 @@ function fragmentToken(hash) {
   const fragment = String(hash ?? "").replace(/^#/, "");
   if (!fragment) return null;
   const params = new URLSearchParams(fragment);
-  const candidate = params.get("token") ?? params.get("secret") ?? (fragment.includes("=") ? "" : fragment);
+  const candidate = params.get("share") ?? params.get("token") ?? params.get("secret") ?? (fragment.includes("=") ? "" : fragment);
   return SECRET_VALUE.test(String(candidate ?? "")) ? String(candidate) : null;
 }
 

@@ -106,3 +106,40 @@ The host-profile test initially could not spawn its server in the restricted san
 
 - Collaboration intentionally fails closed when `PUBLIC_PLAN_TOKEN_HMAC_KEY` is absent. Deployment must provide a strong persistent value before enabling public collaboration. Rotating it intentionally invalidates every outstanding invite and share token.
 - No database backfill or destructive migration is required.
+
+## Fix round 1: Important review findings
+
+Date: 2026-08-26
+
+### Changes
+
+- Viewer/bearer computation redaction now removes `sourceRules` and recursively removes source, craft, crafter, player, container, entity, owner, building, storage, bank, and deployable ID fields. Typed item/cargo IDs and aggregate snapshot metadata remain available. Owner/editor computation still retains `craftPlayerIds`, settlement sources, and active-craft details.
+- The production entrypoint now synchronously invokes the pure fragment-secret helper before the host-profile request or React rendering. Real `/shared-plans/:id#share=...` and `/invites/:id#token=...` routes move their secret to per-tab `sessionStorage`, remove the fragment with `history.replaceState`, and expose only an Authorization header projection. Task 7 placeholders remain unchanged.
+- Suspended plans are excluded from every authenticated collection projection, so owner/editor/viewer list reads cannot recover the saved document. Direct member reads remain `423`; bearer reads remain generic `404`.
+- Public multipliers now use the existing planner-safe inclusive range `1..20`. A recursive post-computation safety gate rejects non-finite numbers, numeric magnitudes above `Number.MAX_SAFE_INTEGER`, BigInts, and cyclic output, returning the saved document plus `public_plan_computation_unavailable` instead of exposing an unsafe result.
+
+### RED/GREEN evidence
+
+- Deep identity redaction RED: `1` test, `0` pass, `1` fail; serialized aggregate still contained `sourceRules`, `craftPlayerIds`, `crafter-900`, and `playerEntityId`. GREEN: `1` pass, `0` fail after recursive identity-key filtering. The integrated computation test also asserts detailed `craftPlayerIds: ["900"]` remains while the viewer config has no `sourceRules` or identity-ID keys.
+- Shared fragment RED: `1` test, `0` pass, `1` fail; `#share=one-time-share-secret` returned `null`. GREEN: `1` pass after accepting the approved fragment key.
+- Production integration RED: `1` test, `0` pass, `1` fail; `main.tsx` had no `capturePublicPlanFragmentSecret` import/call. GREEN: the complete secret suite passed `2/2`, proving both real route forms, address replacement, per-tab storage, Authorization projection, and invocation ordering before `loadHostProfile(fetch)` and `createRoot(...)`.
+- Suspended collection RED: `1` test, `0` pass, `1` fail; the owner list returned the suspended plan including its exact saved document. GREEN: `1` pass after the collection query excluded suspended rows for owner, editor, and viewer.
+- Multiplier RED: `1` test, `0` pass, `1` fail with `Missing expected exception (PublicPlanError)` for an out-of-range finite multiplier. GREEN: `1` pass, `0` fail for the inclusive `1..20` boundary and rejection of under-range, over-range, maximum finite, and infinite values.
+- Computed-output safety RED: `1` test, `0` pass, `1` fail (`available` was `true`) when two individually safe inventory quantities produced an unsafe aggregate. GREEN: `1` pass, `0` fail after the final recursive safety gate returned the saved document and explicit unavailable warning.
+
+### Verification
+
+- `node --experimental-strip-types --test test/public-plans.test.mjs test/public-plan-routes.test.mjs test/public-plan-secrets.test.mjs test/public-shell.test.mjs test/appshell-import-boundary.test.mjs`
+  - PASS: `32` tests, `32` passed, `0` failed.
+- `corepack pnpm --filter @workspace/bitcraft-local run build`
+  - PASS: server/provider/bindings TypeScript, assets, frontend TypeScript, Vite production build, and Relay runtime boundary verification.
+- First `corepack pnpm --filter @workspace/bitcraft-local test`
+  - `2,716` tests: `2,712` passed, `1` failed, `3` skipped. The unrelated `server collection paginates listings and protects production mutations` test observed configured channel `555555555555555555` while asserting the last sandbox message remained on `666666666666666666`.
+- Exact isolated rerun: `node --experimental-strip-types --test --test-name-pattern "server collection paginates listings and protects production mutations" test/server.test.mjs`
+  - PASS: `1` test, `1` passed, `0` failed. No Task 6 or server-production code was changed in response.
+- Final `corepack pnpm --filter @workspace/bitcraft-local test` rerun
+  - PASS: `2,716` tests; `2,713` passed, `0` failed, `3` expected environment skips.
+
+### Deferred by instruction
+
+- Malformed JSON response mapping and invitation clock consistency were not changed in this round.

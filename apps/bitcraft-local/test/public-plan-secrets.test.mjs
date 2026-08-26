@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 let secrets = null;
@@ -20,7 +21,7 @@ test("public plan fragment secrets move to per-tab storage, leave the address ba
   const location = {
     pathname: "/shared-plans/plan-7",
     search: "?mode=compact",
-    hash: "#token=one-time-share-secret",
+    hash: "#share=one-time-share-secret",
   };
   const history = { replaceState: (...args) => replacements.push(args) };
 
@@ -34,8 +35,27 @@ test("public plan fragment secrets move to per-tab storage, leave the address ba
   secrets.clearPublicPlanSecret("/shared-plans/plan-7", sessionStorage);
   assert.deepEqual(secrets.publicPlanAuthorization("/shared-plans/plan-7", sessionStorage), {});
   assert.equal(secrets.capturePublicPlanFragmentSecret({
+    location: { pathname: "/invites/invite-8", search: "", hash: "#token=one-time-invite-secret" },
+    history,
+    sessionStorage,
+  }), "one-time-invite-secret");
+  assert.deepEqual(secrets.publicPlanAuthorization("/invites/invite-8", sessionStorage), {
+    authorization: "Bearer one-time-invite-secret",
+  });
+  assert.equal(secrets.capturePublicPlanFragmentSecret({
     location: { pathname: "/plans/plan-7", search: "", hash: "#token=must-not-store" },
     history,
     sessionStorage,
   }), null);
+});
+
+test("the production entrypoint captures plan fragments before host-profile requests", () => {
+  const main = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  assert.match(main, /import \{ capturePublicPlanFragmentSecret \} from "\.\/public\/planSecrets\.mjs"/);
+  const capture = main.indexOf("capturePublicPlanFragmentSecret({");
+  const profileRequest = main.indexOf("loadHostProfile(fetch");
+  const render = main.indexOf("createRoot(document");
+  assert.ok(capture >= 0 && capture < profileRequest, "fragment capture must precede the first normal host-profile request");
+  assert.ok(capture < render, "fragment capture must precede React effects and analytics-capable route rendering");
+  assert.match(main.slice(capture, profileRequest), /location: window\.location[\s\S]*history: window\.history[\s\S]*sessionStorage: window\.sessionStorage/);
 });
