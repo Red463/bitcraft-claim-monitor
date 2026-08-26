@@ -1,3 +1,5 @@
+import { normalizeSettlementHints } from "./settlementHints.ts";
+
 type Fetcher = typeof fetch;
 
 export type RelayHttpClientOptions = {
@@ -7,6 +9,16 @@ export type RelayHttpClientOptions = {
   retryDelayMs?: number;
   now?: () => number;
 };
+
+export class RelayHttpMalformedResponseError extends Error {
+  readonly code = "RELAY_MALFORMED_JSON";
+  readonly status = 502;
+
+  constructor(options?: ErrorOptions) {
+    super("Relay HTTP returned malformed JSON.", options);
+    this.name = "RelayHttpMalformedResponseError";
+  }
+}
 
 export class RelayHttpClient {
   readonly #baseUrl: string;
@@ -35,6 +47,11 @@ export class RelayHttpClient {
 
   claim(claimId: string) {
     return this.#request(`/claim/${encodeURIComponent(claimId)}`);
+  }
+
+  async searchClaims(name: string) {
+    const parameters = new URLSearchParams({ name });
+    return normalizeSettlementHints(await this.#request(`/claim?${parameters}`), name);
   }
 
   members(claimId: string) {
@@ -119,13 +136,19 @@ export class RelayHttpClient {
         error.status = response.status;
         throw error;
       }
-      return response.json();
+      try {
+        return await response.json();
+      } catch (error) {
+        if (error instanceof SyntaxError) throw new RelayHttpMalformedResponseError({ cause: error });
+        throw error;
+      }
     } finally {
       clearTimeout(timer);
     }
   }
 
   #retryable(error: unknown) {
+    if ((error as { code?: unknown })?.code === "RELAY_MALFORMED_JSON") return false;
     const status = (error as { status?: unknown })?.status;
     return status == null || status === 429 || (typeof status === "number" && status >= 500);
   }

@@ -472,6 +472,86 @@ test("Relay HTTP retries one transient response but never retries a permanent 4x
   assert.equal(permanentCalls, 1);
 });
 
+test("Relay HTTP claim search sends a case-insensitive substring through the documented name query", async () => {
+  const requested = [];
+  const client = new RelayHttpClient({
+    baseUrl: "https://relay.example",
+    fetcher: async (input) => {
+      requested.push(String(input));
+      return Response.json([{ entity_id: "42", name: "Oak Haven", region: 19 }]);
+    },
+    retryDelayMs: 0,
+  });
+
+  assert.deepEqual(await client.searchClaims("Oak & Stone"), []);
+  assert.deepEqual(requested, ["https://relay.example/claim?name=Oak+%26+Stone"]);
+});
+
+test("Relay provider normalizes claim-search wire rows into ranked settlement hints", async () => {
+  const client = new RelayHttpClient({
+    baseUrl: "https://relay.example",
+    fetcher: async () => Response.json([
+      { entity_id: "4", name: "West Oak", region: 19, owner_player_username: "Owner", secret: "hidden" },
+      { entity_id: "2", name: "Oakland", region: "7", tier: 4 },
+      { entity_id: "3", name: "Oak", region: 8, tier: 5 },
+    ]),
+    retryDelayMs: 0,
+  });
+
+  assert.deepEqual(await client.searchClaims("oak"), [
+    { claimId: "3", name: "Oak", regionId: "8", tier: 5 },
+    { claimId: "2", name: "Oakland", regionId: "7", tier: 4 },
+    { claimId: "4", name: "West Oak", regionId: "19", ownerName: "Owner" },
+  ]);
+});
+
+test("Relay provider rejects malformed or unsafe claim-search wire identities before public data sees them", async () => {
+  for (const row of [
+    { entity_id: Number.MAX_SAFE_INTEGER + 1, name: "Oak", region: 19 },
+    { entity_id: "42", name: "Oak", region: { value: 19 } },
+    { entity_id: "42", name: "Oak\nHidden", region: 19 },
+    { entity_id: "42", name: "Oak", region: 19, tier: "4" },
+    { entity_id: "42", name: "Oak", region: 19, owner_player_username: { name: "Owner" } },
+  ]) {
+    const client = new RelayHttpClient({ baseUrl: "https://relay.example", fetcher: async () => Response.json([row]), retryDelayMs: 0 });
+    await assert.rejects(client.searchClaims("oak"), { name: "RelaySettlementHintsError", status: 502, code: "RELAY_MALFORMED_SETTLEMENT_HINTS" });
+  }
+});
+
+test("Relay HTTP classifies malformed JSON without retrying it as source unavailability", async () => {
+  let calls = 0;
+  const client = new RelayHttpClient({
+    baseUrl: "https://relay.example",
+    fetcher: async () => {
+      calls += 1;
+      return new Response('{"claims":', { status: 200, headers: { "content-type": "application/json" } });
+    },
+    retryDelayMs: 0,
+  });
+
+  await assert.rejects(client.searchClaims("Oak"), {
+    name: "RelayHttpMalformedResponseError",
+    code: "RELAY_MALFORMED_JSON",
+    status: 502,
+  });
+  assert.equal(calls, 1);
+});
+
+test("Relay HTTP keeps response-body transport failures retryable", async () => {
+  let calls = 0;
+  const client = new RelayHttpClient({
+    baseUrl: "https://relay.example",
+    fetcher: async () => {
+      calls += 1;
+      return { ok: true, json: async () => { throw new Error("body stream reset"); } };
+    },
+    retryDelayMs: 0,
+  });
+
+  await assert.rejects(client.claim("42"), { name: "Error", message: "body stream reset" });
+  assert.equal(calls, 2);
+});
+
 test("Relay HTTP requests bounded player detail, inventory, and housing by encoded player ID", async () => {
   const requested = [];
   const client = new RelayHttpClient({

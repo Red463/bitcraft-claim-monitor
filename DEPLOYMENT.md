@@ -13,6 +13,10 @@ Record the result of this check before and after each supervised bootstrap:
 curl --fail --silent --show-error https://app.timbersteeltrade.com/api/local/health
 ```
 
+The additive `claim-monitor.com` host profile uses this same deployment. Its
+preflight, staged rollout, observation, and rollback procedure is documented in
+[`docs/public-claim-monitor-operations.md`](docs/public-claim-monitor-operations.md).
+
 ## Locked preview identity
 
 | Purpose | Value |
@@ -27,6 +31,7 @@ curl --fail --silent --show-error https://app.timbersteeltrade.com/api/local/hea
 | Key directory | `/etc/bitcraft-claim-monitor-relay` |
 | Local health | `http://127.0.0.1:19430/api/local/health` |
 | Public preview | `https://relay.timbersteeltrade.com` |
+| Public Claim Monitor | `https://claim-monitor.com` |
 
 The updater keeps immutable releases under
 `/opt/bitcraft-claim-monitor-relay/releases/<sha>` and atomically moves the
@@ -39,6 +44,10 @@ backups never live inside a release.
   systemd.
 - A `bitcraft` runtime account.
 - DNS for `relay.timbersteeltrade.com` pointing at the VPS.
+- Before public-profile activation, DNS for the exact apex
+  `claim-monitor.com` and `www.claim-monitor.com` must point at this VPS, and
+  `privacy@claim-monitor.com` must be able to receive mail. See the public
+  operations runbook; repository work does not create DNS or the mailbox.
 - Ports 80 and 443 exposed through Caddy. The Relay process stays bound to
   `127.0.0.1:19430`.
 - A reviewed full commit SHA reachable from the standalone repository's
@@ -252,10 +261,10 @@ curl --fail --silent --show-error http://127.0.0.1:19430/api/local/health
 
 ## One-time supervised Caddy bootstrap
 
-`deploy/Caddyfile.example` deliberately contains both the maintained route and
-the Relay preview route so an operator can merge the preview beside production.
-It is a validation/reference file, not a replacement for the live
-configuration.
+`deploy/Caddyfile.example` deliberately contains the maintained Timbersteel
+route, the public Claim Monitor route, and the historical redirects. Both apex
+profiles proxy to the one existing `127.0.0.1:19430` web process. It is a
+validation/reference file, not a replacement for the live configuration.
 
 Routine deployment must not copy `Caddyfile.example` to
 `/etc/caddy/Caddyfile`. The updater validates the tracked example but never
@@ -264,10 +273,15 @@ installs it or reloads Caddy.
 For the one-time supervised Caddy bootstrap:
 
 1. Save a root-only copy of the live configuration.
-2. Manually merge only the `relay.timbersteeltrade.com` site block from the
-   reviewed release into the live file.
-3. Inspect the diff and confirm the maintained site block is unchanged.
-4. Validate before reloading.
+2. Manually merge only the reviewed `claim-monitor.com` and
+   `www.claim-monitor.com` blocks and the explicit trusted forwarding-header
+   overrides into the existing `app.timbersteeltrade.com` proxy. Preserve every
+   other live block.
+3. Inspect the diff. Confirm both apex hosts proxy only to
+   `127.0.0.1:19430`, `www` redirects only to `https://claim-monitor.com`, and
+   no public host redirects to Timbersteel.
+4. Validate before reloading. Do this only after the DNS preflight in the
+   public operations runbook.
 
 ```sh
 install -o root -g root -m 0600 \
@@ -279,11 +293,15 @@ caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
 curl --fail --silent --show-error https://relay.timbersteeltrade.com/api/local/health
 curl --fail --silent --show-error https://app.timbersteeltrade.com/api/local/health
+curl --fail --silent --show-error https://claim-monitor.com/api/profile
+curl --fail --silent --show-error --head https://www.claim-monitor.com/
 ```
 
-If validation or either health check fails, restore the saved Caddy file,
-validate it, and reload Caddy. This is the only step that changes the shared
-proxy configuration.
+If validation or a Timbersteel health check fails, restore the saved Caddy
+file, validate it, and reload Caddy. After the public profile has served users,
+use the flag/maintenance rollback in the public operations runbook instead of
+redirecting it or removing its route. This is the only step that changes the
+shared proxy configuration.
 
 ## Restricted deployment account
 
@@ -921,6 +939,11 @@ During canonical cutover the old signing key is installed only as a previous
 verification key. Retire it as soon as no unexpired record bears its key ID and
 never retain it beyond the remaining 90-day signed-record lifetime. Verify the
 ledger with the current and configured previous keys before every restore.
+Before running the replay, export the exact comma-separated, path-only
+`PRIVACY_LEDGER_PREVIOUS_KEY_FILES` value from the protected installed
+environment without printing that file or any key value. During the current
+rotation it is the installed previous-production key path below; set it empty
+only after formal retirement.
 
 Supervised restore outline:
 
@@ -932,6 +955,7 @@ node /usr/local/lib/bitcraft-claim-monitor-relay/backup-crypto.mjs \
   /etc/bitcraft-claim-monitor-relay/backup-encryption.key
 sqlite3 "$RESTORE" 'PRAGMA quick_check;'
 
+export PRIVACY_LEDGER_PREVIOUS_KEY_FILES="/etc/bitcraft-claim-monitor-relay/privacy-ledger.previous-production.key"
 DATA_DIR=/var/lib/bitcraft-claim-monitor-relay \
 BACKUP_DIR=/var/backups/bitcraft-claim-monitor-relay \
 CONFIG_DIR=/etc/bitcraft-claim-monitor-relay \
@@ -955,6 +979,14 @@ systemctl start \
   bitcraft-claim-monitor-relay-collector.timer
 curl --fail --silent --show-error http://127.0.0.1:19430/api/local/health
 ```
+
+Replay succeeds only after all ledger signatures verify. It applies
+Timbersteel and public-profile receipts in one transaction and prints a bounded
+JSON result containing record/key counts and per-profile status/scanned/deleted
+counts, never identifiers, receipt subjects, or keys. `public.status` may be
+`not-present` only when restoring a pre-additive backup. Any replay failure or
+invalid/duplicate key configuration leaves the restored database unchanged and
+blocks service start.
 
 Never restore or copy preview data into the maintained application. Finish by
 checking both public health endpoints and recording that the maintained app

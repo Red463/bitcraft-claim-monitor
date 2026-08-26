@@ -352,6 +352,14 @@
 .floating-save .toolbar-button { min-height: 34px; white-space: nowrap; }
 
 .admin-section { display: grid; gap: 16px; }
+
+.public-admin-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+.public-admin-metrics > div { display: grid; gap: 3px; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+.public-admin-record { max-height: 340px; overflow: auto; }
+.public-admin-capabilities,
+.public-admin-disposition { display: grid; gap: 8px; margin-top: 12px; }
+.public-admin-disposition { grid-template-columns: minmax(180px, 1fr) minmax(180px, .7fr) minmax(180px, .8fr); align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+@media (max-width: 760px) { .public-admin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .public-admin-disposition { grid-template-columns: 1fr; } }
 .admin-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .admin-metrics .stat { min-height: 96px; }
 .admin-page .form-card {

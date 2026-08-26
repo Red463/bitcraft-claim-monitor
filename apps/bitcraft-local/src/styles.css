@@ -1,3 +1,5 @@
+@import url("./styles/public-shell.css");
+
 :root {
   color-scheme: dark;
   --canvas: #050506;
@@ -1388,4 +1390,3 @@ body .market-page tbody tr:hover td {
 .app-shell:not(.surface-mode-map) .page-view > .panel :where(tbody tr:hover td) {
   background: color-mix(in srgb, var(--active-bg) 28%, var(--surface-2));
 }
-

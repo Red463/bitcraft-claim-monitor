@@ -60,12 +60,16 @@ test("AppShell imports only top-level shell dependencies after admin/settings ex
   assert.equal(appShell.includes('import { UserSettingsDialog } from "./components/main/UserSettingsDialog";'), true);
 });
 
-test("main gates AppShell on bootstrap and AppShell consumes the resolved initial state", () => {
+test("TimbersteelRoot gates AppShell on bootstrap after main selects a host profile", () => {
   const main = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const timbersteelRoot = readFileSync(new URL("../src/TimbersteelRoot.tsx", import.meta.url), "utf8");
   const appShell = readFileSync(new URL("../src/AppShell.tsx", import.meta.url), "utf8");
 
-  assert.match(main, /loadBootstrap/);
-  assert.match(main, /<App initialBootstrap=\{bootstrap\}/);
+  assert.match(main, /loadHostProfile/);
+  assert.match(main, /React\.lazy\(\(\) => import\("\.\/TimbersteelRoot"\)\)/);
+  assert.match(main, /React\.lazy\(\(\) => import\("\.\/public\/PublicRoot"\)\)/);
+  assert.match(timbersteelRoot, /loadBootstrap/);
+  assert.match(timbersteelRoot, /<App initialBootstrap=\{bootstrap\}/);
   assert.doesNotMatch(main, /\/api\/local\/auth\/me/);
   assert.match(appShell, /function DashboardApp\(\{ initialBootstrap \}/);
   assert.match(appShell, /useState\<AppSettings\>\(\(\) => normalizeAppSettings\(initialBootstrap\.config\)\)/);

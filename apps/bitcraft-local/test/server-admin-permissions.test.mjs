@@ -24,7 +24,7 @@ test("admin role helpers preserve public labels and safe role fallback", () => {
 });
 
 test("admin permission helpers keep owner wildcard and scoped roles", () => {
-  assert.deepEqual(adminPermissions("viewer"), ["status.view", "settings.view", "data.view", "analytics.view", "audit.view", "discord.view"]);
+  assert.deepEqual(adminPermissions("viewer"), ["status.view", "settings.view", "data.view", "analytics.view", "audit.view", "discord.view", "public.health"]);
   assert.equal(adminHasPermission({ role: "owner" }, "settings.manage"), true);
   assert.equal(adminHasPermission({ role: "admin" }, "discord.manage"), true);
   assert.equal(adminHasPermission({ role: "discord-manager" }, "discord.manage"), true);
@@ -66,4 +66,32 @@ test("server monitoring requires the owner-only wildcard permission", () => {
   assert.equal(adminHasPermission({ role: "owner" }, "server.monitor.view"), true);
   assert.equal(adminHasPermission({ role: "admin" }, "server.monitor.view"), false);
   assert.equal(adminHasPermission({ role: "viewer" }, "server.monitor.view"), false);
+});
+
+test("public service permissions are independent of Discord-manager and legacy Admin permissions", () => {
+  for (const role of ["owner", "admin"]) {
+    assert.equal(adminHasPermission({ role }, "public.health"), true);
+    assert.equal(adminHasPermission({ role }, "public.lookup"), true);
+    assert.equal(adminHasPermission({ role }, "public.moderate"), true);
+    assert.equal(adminHasPermission({ role }, "public.restore"), true);
+    assert.equal(adminHasPermission({ role }, "public.privacy"), true);
+  }
+  assert.equal(adminHasPermission({ role: "moderator" }, "public.health"), true);
+  assert.equal(adminHasPermission({ role: "moderator" }, "public.lookup"), false);
+  assert.equal(adminHasPermission({ role: "moderator" }, "public.moderate"), true);
+  assert.equal(adminHasPermission({ role: "moderator" }, "public.restore"), false);
+  assert.equal(adminHasPermission({ role: "moderator" }, "public.privacy"), false);
+  assert.equal(adminHasPermission({ role: "viewer" }, "public.health"), true);
+  assert.equal(adminHasPermission({ role: "viewer" }, "public.moderate"), false);
+  assert.equal(adminHasPermission({ role: "discord-manager" }, "public.health"), false);
+  assert.equal(adminHasPermission({ role: "discord-manager" }, "public.moderate"), false);
+  assert.equal(adminPermissionFor("GET", "/api/local/admin/public-service/health"), "public.health");
+  assert.equal(adminPermissionFor("GET", "/api/local/admin/public-service/account"), "public.lookup");
+  assert.equal(adminPermissionFor("GET", "/api/local/admin/public-service/plan"), "public.lookup");
+  assert.equal(adminPermissionFor("POST", "/api/local/admin/public-service/accounts/suspend"), "public.moderate");
+  assert.equal(adminPermissionFor("POST", "/api/local/admin/public-service/accounts/restore"), "public.restore");
+  assert.equal(adminPermissionFor("POST", "/api/local/admin/public-service/plans/suspend"), "public.moderate");
+  assert.equal(adminPermissionFor("POST", "/api/local/admin/public-service/plans/restore"), "public.restore");
+  assert.equal(adminPermissionFor("GET", "/api/local/admin/public-service/privacy/review"), "public.privacy");
+  assert.equal(adminPermissionFor("POST", "/api/local/admin/public-service/privacy/delete"), "public.privacy");
 });

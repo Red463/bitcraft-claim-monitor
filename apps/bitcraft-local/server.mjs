@@ -10,6 +10,16 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseMemberPermissions } from "./shared/member-permissions.mjs";
+import { resolveRequestHostProfile } from "./src/server/public/hostProfiles.mjs";
+import { publicFeatureFlags, routeHostProfileRequest } from "./src/server/public/router.mjs";
+import { createPublicApiRouter, createPublicCatalogService, createPublicDataService } from "./src/server/public/publicData.mjs";
+import { resolvePublicDiscordOAuthConfig } from "./src/server/public/auth.mjs";
+import { createPublicAuthRouter } from "./src/server/public/authRouter.mjs";
+import { createPublicIdentityRepository } from "./src/server/public/identity.mjs";
+import { createPublicPlanRouter } from "./src/server/public/planRouter.mjs";
+import { createPublicPlanComputationService, createPublicPlanRepository } from "./src/server/public/publicPlans.mjs";
+import { createPublicModerationRepository } from "./src/server/public/moderation.mjs";
+import { createPublicAdminRouter } from "./src/server/public/adminRouter.mjs";
 import { mimeType, routeGroup, securityHeaders, shouldFallbackToFrontend, shouldLogVisitor, staticCacheControl } from "./src/server/httpRoutes.mjs";
 import { sendBinary, sendJson as send, sendText } from "./src/server/httpResponses.mjs";
 import { createGameIconFallbackService, serveGameIconRequest } from "./src/server/gameIconFallback.mjs";
@@ -146,8 +156,7 @@ import { discordAvatarUrl, publicAdminUser, publicAppUser } from "./src/server/p
 import { createFeaturebaseJwt } from "./src/server/featurebaseJwt.mjs";
 import { adminMutationRejection } from "./src/server/adminRequestGuards.mjs";
 import { discordProfileDisplayName, validAdminUsername, validDiscordId } from "./src/server/authIdentity.mjs";
-import { createAdminLoginAttemptStore, loginAttemptKey } from "./src/server/adminLoginAttempts.mjs";
-import { hashPassword, validLegacyAdminPassword, verifyPassword } from "./src/server/passwordAuth.mjs";
+import { hashPassword, validLegacyAdminPassword } from "./src/server/passwordAuth.mjs";
 import { DEFAULT_APP_PAGE, normalizeSavedRefreshIntervalSeconds, normalizeStoredExcludedMemberIds, normalizeSubmittedExcludedMemberIds, parseRegionIds, validAppPage, validBitcraftSyncUrl, validClaimId, validRefreshIntervalSeconds, validRegionId } from "./src/server/appSettingsPolicy.mjs";
 import { applyDefaultAppSettings, defaultTheme } from "./src/server/defaultAppSettings.mjs";
 import { applySchemaBootstrap } from "./src/server/schemaBootstrap.mjs";
@@ -189,8 +198,13 @@ import {
   mapSnapshotStatusCode,
   publicGenerationEvent,
   mergeClaimInventoryWithBanks,
+  normalizeClaimCraftPayloads,
   normalizeClaimInventory,
+  normalizeClaimPayload,
+  normalizeCitizensPayload,
+  normalizeMembersPayload,
   parseDomainKeys,
+  relayTopologyFromPayloads,
   RelayHttpClient,
   RelayBitCraftProvider,
   RelayClaimMarketRuntime,
@@ -258,7 +272,7 @@ import {
   readOAuthStateCookie,
   resolveOAuthStateSecret,
 } from "./src/server/oauthState.mjs";
-import { legalPolicyForEnvironment } from "./src/legal/legalPolicy.mjs";
+import { claimMonitorLegalPolicyForEnvironment, legalPolicyForEnvironment } from "./src/legal/legalPolicy.mjs";
 import { legalPolicyDigests } from "./src/server/legalPolicyDigest.mjs";
 import {
   currentLegalSnapshot,
@@ -279,9 +293,12 @@ import {
   unlinkUserCharacter,
 } from "./src/server/userPrivacy.mjs";
 import { deleteUserAccount } from "./src/server/accountDeletion.mjs";
+import { deletePublicAccount, publicAccountDeletionReview } from "./src/server/public/accountDeletion.mjs";
 import {
+  coordinatePublicPrivacyDeletion,
   coordinatePrivacyDeletion,
   readDeletionLedger,
+  replayPublicPrivacyDeletions,
   replayPrivacyDeletions,
 } from "./src/server/privacyDeletionLedger.mjs";
 import { runPrivacyRetention } from "./src/server/privacyRetention.mjs";
@@ -443,8 +460,10 @@ const configuredDiscordSandboxChannelId = String(process.env.DISCORD_SANDBOX_CHA
 const legalPolicy = legalPolicyForEnvironment(process.env);
 const legalDigests = legalPolicyDigests(legalPolicy);
 const legalSnapshot = currentLegalSnapshot(legalPolicy, legalDigests);
+const claimMonitorLegalPolicy = claimMonitorLegalPolicyForEnvironment(process.env);
+const claimMonitorLegalDigests = legalPolicyDigests(claimMonitorLegalPolicy);
+const claimMonitorLegalSnapshot = currentLegalSnapshot(claimMonitorLegalPolicy, claimMonitorLegalDigests);
 const serveFrontend = isProduction || process.env.SERVE_STATIC === "true";
-const adminSetupKey = process.env.ADMIN_SETUP_KEY ?? "";
 const featurebaseJwtSecret = process.env.FEATUREBASE_JWT_SECRET ?? "";
 const legacyAdminPasswordAuth = process.env.ENABLE_LEGACY_ADMIN_PASSWORD_AUTH === "true";
 const processRole = resolveProcessRole(process.env, { isProduction });
@@ -594,6 +613,7 @@ cleanupRetiredRegionalMarketState();
 installRetiredTableAuthorizer(db);
 
 const statements = createPreparedStatements(db);
+const publicIdentityRepository = createPublicIdentityRepository(db);
 const discordOutboxLeaser = createDiscordOutboxLeaser(db, {
   workerId: `${processRole}:${os.hostname()}:${process.pid}:${randomBytes(8).toString("hex")}`,
   leaseMs: discordNotificationLeaseMs,
@@ -1259,6 +1279,18 @@ async function runPrivacyRetentionJob() {
         randomUUID: () => operationId,
       }),
     }),
+    deleteInactivePublicAccount: async (account) => coordinatePublicPrivacyDeletion({
+      ledgerPath: privacyLedgerPath,
+      key: privacyLedgerKey(),
+      discordId: account.discordId,
+      deleteAccount: (operationId) => deletePublicAccount(db, {
+        userId: account.id,
+        discordId: account.discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions: [],
+        randomUUID: () => operationId,
+      }),
+    }),
   });
 }
 
@@ -1779,7 +1811,6 @@ function audit(user, action, details = {}) {
   statements.insertAudit.run(user?.id ?? null, user?.username ?? "system", action, JSON.stringify(details), new Date().toISOString());
 }
 
-const adminLoginAttempts = createAdminLoginAttemptStore();
 const SLOW_REQUEST_LOG_MS = Math.max(1000, Number(process.env.SLOW_REQUEST_LOG_MS ?? 8000));
 
 const CRAFT_PLAN_KEY = "active";
@@ -3185,7 +3216,7 @@ function requireAdminMutation(req, res, user) {
   return Boolean(user);
 }
 
-function createSession(userId) {
+function createAdminSessionFromTimbersteelOAuth(userId) {
   const session = createHttpSession({
     cookieName: ADMIN_SESSION_COOKIE_NAME,
     maxAgeSeconds: ADMIN_SESSION_MAX_AGE_SECONDS,
@@ -3319,7 +3350,7 @@ function createAdminSessionForDiscordProfile(profile, loginAt) {
   );
   statements.insertLoginEvent.run(username, 1, loginAt, "discord-oauth");
   audit({ id: admin.id, username }, "admin.discord_login", { discordId });
-  return createSession(admin.id);
+  return createAdminSessionFromTimbersteelOAuth(admin.id);
 }
 
 function oauthStateSecret() {
@@ -7322,6 +7353,12 @@ async function handleDiscordInteraction(req) {
   }
   const interaction = JSON.parse(rawBody.toString("utf8") || "{}");
   if (interaction.type === 1) return { status: 200, body: { type: 1 } };
+  if (!settings.guildId || String(interaction.guild_id ?? "") !== settings.guildId) {
+    return {
+      status: 200,
+      body: discordResponse("This interaction is only available in the configured Timbersteel Discord server.", { ephemeral: true }),
+    };
+  }
   if (interaction.type === 4) return { status: 200, body: await discordAutocomplete(interaction) };
   if (interaction.type === 3) return { status: 200, body: await handleDiscordComponent(interaction) };
   if (interaction.type !== 2) return { status: 200, body: discordResponse("Unsupported Discord interaction.", { ephemeral: true }) };
@@ -7841,6 +7878,141 @@ async function serveBuiltFrontend(url, method, res) {
   return true;
 }
 
+function publicOAuthStateSecret() {
+  const keyName = "public_discord_oauth_state_secret";
+  const stored = String(statements.getSecret.get(keyName)?.value ?? "").trim();
+  if (stored) return stored;
+  const generated = randomBytes(32).toString("base64url");
+  statements.upsertSecret.run(keyName, generated, new Date().toISOString());
+  return generated;
+}
+
+const publicDataService = createPublicDataService({
+  http: new RelayHttpClient({ baseUrl: relayBaseUrl }),
+  normalizers: {
+    normalizeClaimPayload,
+    normalizeMembersPayload,
+    normalizeCitizensPayload,
+    normalizeClaimInventory,
+    normalizeClaimCraftPayloads,
+  },
+  topologyFromPayloads: relayTopologyFromPayloads,
+});
+const publicCatalogService = createPublicCatalogService({
+  searchEntities: (query, limit) => gameCatalogRepository.searchEntities(query, limit),
+  recipeDetail: recipeDetailFromLocalCatalog,
+});
+const publicDataApiRequest = createPublicApiRouter({
+  data: publicDataService,
+  catalog: publicCatalogService,
+  serveIcon: (pathname, res) => serveGameIconRequest(
+    pathname.replace("/api/public/game-icon/", "/api/local/game-icon/"),
+    res,
+    gameIconFallbackService,
+  ),
+});
+const configuredPublicFeatures = publicFeatureFlags();
+const resolvedPublicOAuthConfig = resolvePublicDiscordOAuthConfig(process.env);
+const publicAuthRequest = createPublicAuthRouter({
+  repository: publicIdentityRepository,
+  legalPolicy: claimMonitorLegalPolicy,
+  legalSnapshot: claimMonitorLegalSnapshot,
+  stateSecret: publicOAuthStateSecret(),
+  config: {
+    ...resolvedPublicOAuthConfig,
+    enabled: resolvedPublicOAuthConfig.enabled
+      && configuredPublicFeatures.publicCollaborationEnabled
+      && configuredPublicFeatures.publicLegalConfigurationConfirmed,
+  },
+  deletion: {
+    review: (userId) => publicAccountDeletionReview(db, userId),
+    deleteAccount: ({ userId, discordId, dispositions }) => coordinatePublicPrivacyDeletion({
+      ledgerPath: privacyLedgerPath,
+      key: privacyLedgerKey(),
+      discordId,
+      deleteAccount: (operationId) => deletePublicAccount(db, {
+        userId,
+        discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions,
+        randomUUID: () => operationId,
+      }),
+    }),
+  },
+});
+const configuredPublicPlanTokenHmacKey = String(process.env.PUBLIC_PLAN_TOKEN_HMAC_KEY ?? "").trim();
+const publicPlanRepository = configuredPublicFeatures.publicCollaborationEnabled && configuredPublicPlanTokenHmacKey
+  ? createPublicPlanRepository(db, { tokenHmacKey: configuredPublicPlanTokenHmacKey })
+  : null;
+const publicPlanComputation = publicPlanRepository
+  ? createPublicPlanComputationService({ data: publicDataService, catalog: publicCatalogService })
+  : null;
+const publicPlanRequest = publicPlanRepository && publicPlanComputation
+  ? createPublicPlanRouter({
+      repository: publicPlanRepository,
+      identityRepository: publicIdentityRepository,
+      legalSnapshot: claimMonitorLegalSnapshot,
+      computation: publicPlanComputation,
+    })
+  : null;
+const publicModerationRepository = createPublicModerationRepository(db);
+const publicAdminRequest = createPublicAdminRouter({
+  repository: publicModerationRepository,
+  privacy: {
+    review: (userId) => publicAccountDeletionReview(db, userId),
+    deleteAccount: ({ userId, discordId, dispositions }) => coordinatePublicPrivacyDeletion({
+      ledgerPath: privacyLedgerPath,
+      key: privacyLedgerKey(),
+      discordId,
+      deleteAccount: (operationId) => deletePublicAccount(db, {
+        userId,
+        discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions,
+        randomUUID: () => operationId,
+      }),
+    }),
+  },
+  hasPermission: adminHasPermission,
+  audit,
+  healthSnapshot: () => ({
+    cache: publicDataService.health(),
+    gate: {
+      profileEnabled: configuredPublicFeatures.publicProfileEnabled,
+      collaborationEnabled: configuredPublicFeatures.publicCollaborationEnabled,
+      legalConfigurationConfirmed: configuredPublicFeatures.publicLegalConfigurationConfirmed,
+    },
+    oauth: { enabled: resolvedPublicOAuthConfig.enabled },
+    rateTotals: {
+      publicReads: publicDataApiRequest.health(),
+      limiter: rateLimit.stats(),
+      routes: routePerformanceTelemetry.snapshot().rateLimits,
+    },
+  }),
+});
+async function publicApiRequest(request) {
+  const isLegalRequest = request.url.pathname === "/api/public/legal";
+  const isAuthRequest = request.url.pathname.startsWith("/api/public/auth/");
+  if (isLegalRequest || (isAuthRequest
+    && configuredPublicFeatures.publicCollaborationEnabled
+    && configuredPublicFeatures.publicLegalConfigurationConfirmed)) {
+    if (isAuthRequest
+      && request.url.pathname !== "/api/public/auth/session"
+      && !rateLimit(request.req, request.res, "auth", RATE_LIMITS.auth)) return true;
+    if (await publicAuthRequest(request)) return true;
+  }
+  const isPlanRequest = request.url.pathname === "/api/public/plans"
+    || request.url.pathname.startsWith("/api/public/plans/")
+    || request.url.pathname.startsWith("/api/public/invites/")
+    || request.url.pathname.startsWith("/api/public/shared-plans/");
+  if (isPlanRequest
+    && configuredPublicFeatures.publicCollaborationEnabled
+    && configuredPublicFeatures.publicLegalConfigurationConfirmed
+    && publicPlanRequest
+    && await publicPlanRequest(request)) return true;
+  return publicDataApiRequest(request);
+}
+
 function manualRefreshAccess(req, res) {
   const rawHeader = req.headers[MANUAL_REFRESH_HEADER];
   const refreshId = String(Array.isArray(rawHeader) ? rawHeader[0] ?? "" : rawHeader ?? "").trim();
@@ -7863,7 +8035,21 @@ const server = createServer(async (req, res) => {
     // Route order matters: public health/proxy/config endpoints are handled
     // before authenticated admin routes, while static frontend fallback stays at
     // the end so API typos do not accidentally return index.html.
-    const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    const hostProfile = resolveRequestHostProfile(req, {
+      isProduction,
+      allowDevelopmentHosts: !isProduction,
+    });
+    if (!hostProfile) return send(res, 421, { error: "Unknown host" });
+    const url = new URL(req.url ?? "/", "http://localhost");
+    if (await routeHostProfileRequest({
+      profile: hostProfile,
+      method: req.method,
+      url,
+      res,
+      send,
+      features: configuredPublicFeatures,
+      publicRequest: (request) => publicApiRequest({ ...request, req, address: clientAddress(req) }),
+    })) return;
     const routeMeasurement = measuredRoutePaths.has(url.pathname)
       ? routePerformanceTelemetry.observe(req, res, { path: url.pathname })
       : null;
@@ -8989,44 +9175,10 @@ const server = createServer(async (req, res) => {
     if (smokeReviewRejection) return send(res, 403, { error: smokeReviewRejection });
     if (req.method === "GET" && url.pathname === "/api/local/admin/me") return send(res, 200, adminStatus(req));
     if (req.method === "POST" && url.pathname === "/api/local/admin/setup") {
-      if (!legacyAdminPasswordAuth) return send(res, 410, { error: "Password administrator setup has been replaced by Discord administrator access" });
-      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
-      if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator setup rejected" });
-      if (toNumber(statements.adminCount.get()?.count) > 0) return send(res, 409, { error: "Admin user already exists" });
-      const body = await readJson(req, BODY_LIMITS.auth);
-      if (isProduction && !adminSetupKey) return send(res, 503, { error: "Admin setup is disabled until ADMIN_SETUP_KEY is configured on the server" });
-      if (isProduction && String(body.setupKey ?? "") !== adminSetupKey) return send(res, 403, { error: "Invalid server setup key" });
-      const username = String(body.username ?? "admin").trim();
-      if (!validAdminUsername(username)) return send(res, 400, { error: "Username must be 3-32 letters, numbers, underscores or hyphens" });
-      const password = String(body.password ?? "");
-      if (!validLegacyAdminPassword(password)) return send(res, 400, { error: "Password must be at least 12 characters" });
-      const createdAt = new Date().toISOString();
-      const result = statements.insertAdmin.run(username, await hashPassword(password), "owner", createdAt);
-      statements.updateLastLogin.run(createdAt, result.lastInsertRowid);
-      audit({ id: result.lastInsertRowid, username }, "admin.setup", { username });
-      const session = createSession(result.lastInsertRowid);
-      return send(res, 200, adminStatus({ headers: { cookie: session.cookie } }), { "set-cookie": session.cookie });
+      return send(res, 410, { error: "Administrator sign-in now uses Discord. Sign in with an approved Discord admin account." });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/login") {
-      if (!legacyAdminPasswordAuth) return send(res, 410, { error: "Administrator sign-in now uses Discord. Sign in with an approved Discord admin account." });
-      if (!rateLimit(req, res, "auth", RATE_LIMITS.auth)) return;
-      if (!sameOriginRequest(req)) return send(res, 403, { error: "Cross-origin administrator sign-in rejected" });
-      const body = await readJson(req, BODY_LIMITS.auth);
-      const username = String(body.username ?? "admin").trim();
-      const attemptKey = loginAttemptKey(clientAddress(req), username);
-      if (adminLoginAttempts.blocked(attemptKey)) return send(res, 429, { error: "Too many failed sign-in attempts. Try again in 15 minutes." });
-      const user = statements.adminByUsername.get(username);
-      const successful = Boolean(user && await verifyPassword(String(body.password ?? ""), user.password_hash));
-      statements.insertLoginEvent.run(username, successful ? 1 : 0, new Date().toISOString(), clientAddress(req));
-      if (!successful) {
-        adminLoginAttempts.recordFailure(attemptKey);
-        return send(res, 401, { error: "Invalid username or password" });
-      }
-      adminLoginAttempts.clear(attemptKey);
-      statements.updateLastLogin.run(new Date().toISOString(), user.id);
-      audit(user, "admin.login");
-      const session = createSession(user.id);
-      return send(res, 200, adminStatus({ headers: { cookie: session.cookie } }), { "set-cookie": session.cookie });
+      return send(res, 410, { error: "Administrator sign-in now uses Discord. Sign in with an approved Discord admin account." });
     }
     if (req.method === "POST" && url.pathname === "/api/local/admin/logout") {
       const user = requireAdmin(req, res);
@@ -9040,6 +9192,7 @@ const server = createServer(async (req, res) => {
       if (!requireAdminMutation(req, res, user)) return;
       const requiredPermission = adminPermissionFor(req.method, url.pathname);
       if (!requireAdminPermission(req, res, user, requiredPermission)) return;
+      if (await publicAdminRequest({ req, res, user, method: req.method, url })) return;
       if (req.method === "GET" && url.pathname === "/api/local/admin/status") return send(res, 200, databaseStatus());
       if (req.method === "GET" && url.pathname === "/api/local/admin/empire-membership") {
         return send(res, 200, empireMembershipAdminPayload());
@@ -9751,9 +9904,14 @@ const server = createServer(async (req, res) => {
         const body = await readJson(req);
         const userId = Number(body.userId);
         const active = Boolean(body.active);
-        if (userId === user.id && !active) return send(res, 400, { error: "You cannot disable your current account" });
-        const target = db.prepare("SELECT id, username FROM admin_users WHERE id = ?").get(userId);
+        const target = db.prepare("SELECT id, username, role, active FROM admin_users WHERE id = ?").get(userId);
         if (!target) return send(res, 404, { error: "Admin user not found" });
+        const targetIsActiveOwner = normalizeAdminRole(target.role) === "owner" && Boolean(target.active);
+        if (targetIsActiveOwner && !active) {
+          if (normalizeAdminRole(user.role) !== "owner") return send(res, 403, { error: "Only active owners can revoke owner access" });
+          if (toNumber(statements.activeOwnerCount.get()?.count) <= 1) return send(res, 409, { error: "At least one active owner must remain" });
+        }
+        if (userId === user.id && !active) return send(res, 400, { error: "You cannot disable your current account" });
         statements.updateAdminActive.run(active ? 1 : 0, userId);
         if (!active) statements.deleteUserSessions.run(userId);
         audit(user, "user.status", { id: target.id, username: target.username, active });
@@ -9764,9 +9922,16 @@ const server = createServer(async (req, res) => {
         const userId = Number(body.userId);
         const role = normalizeAdminRole(body.role);
         if (!userId) return send(res, 400, { error: "Select an administrator and role" });
-        if (userId === user.id && role !== "owner") return send(res, 400, { error: "You cannot remove owner access from your current account" });
-        const target = db.prepare("SELECT id, username, role FROM admin_users WHERE id = ?").get(userId);
+        const target = db.prepare("SELECT id, username, role, active FROM admin_users WHERE id = ?").get(userId);
         if (!target) return send(res, 404, { error: "Admin user not found" });
+        const targetIsOwner = normalizeAdminRole(target.role) === "owner";
+        if ((role === "owner" || targetIsOwner) && normalizeAdminRole(user.role) !== "owner") {
+          return send(res, 403, { error: "Only active owners can grant or revoke owner access" });
+        }
+        if (targetIsOwner && role !== "owner" && Boolean(target.active) && toNumber(statements.activeOwnerCount.get()?.count) <= 1) {
+          return send(res, 409, { error: "At least one active owner must remain" });
+        }
+        if (userId === user.id && role !== "owner") return send(res, 400, { error: "You cannot remove owner access from your current account" });
         statements.updateAdminRole.run(role, userId);
         statements.deleteUserSessions.run(userId);
         audit(user, "user.role", { id: target.id, username: target.username, previousRole: normalizeAdminRole(target.role), role });
@@ -10836,11 +11001,35 @@ function replayCurrentPrivacyDeletionLedger() {
   });
 }
 
+function replayCurrentPublicPrivacyDeletionLedger() {
+  const key = privacyLedgerKey();
+  const keys = privacyLedgerVerificationKeys();
+  const records = readDeletionLedger(privacyLedgerPath, keys);
+  const accounts = db.prepare("SELECT id, discord_id AS discordId FROM public_user_accounts").all();
+  return replayPublicPrivacyDeletions({
+    records,
+    accounts,
+    key,
+    keys,
+    deleteAccount: (account) => {
+      const dispositions = publicAccountDeletionReview(db, account.id).ownedPlans
+        .map((plan) => ({ planId: plan.id, action: "delete" }));
+      return deletePublicAccount(db, {
+        userId: account.id,
+        discordId: account.discordId,
+        deletionKey: privacyDeletionKey(),
+        dispositions,
+      });
+    },
+  });
+}
+
 assertCanonicalDiscordGatewayReady(deploymentRuntime, {
   settings: getDiscordSettingsRaw(),
   webSocketAvailable: typeof WebSocket === "function",
 });
 replayCurrentPrivacyDeletionLedger();
+replayCurrentPublicPrivacyDeletionLedger();
 await relayClaimScopeFence.reconcile(currentClaimId());
 
 if (processRoleConfig.serveHttp) {

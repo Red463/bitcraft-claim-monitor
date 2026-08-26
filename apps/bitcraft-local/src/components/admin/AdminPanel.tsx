@@ -72,6 +72,7 @@ import { AdminDataSection } from "./AdminDataSection";
 import { AdminEmpireMembershipSection } from "./AdminEmpireMembershipSection";
 import type { EmpireMembershipAdminView } from "./AdminEmpireMembershipSection";
 import { ServerHealthSection } from "./ServerHealthSection";
+import { PublicServiceAdminSection } from "./PublicServiceAdminSection";
 import { RarityBadge, TierBadge, TrackedOwnerName } from "../main/Badges";
 import { DashboardMetric } from "../main/DashboardWidgets";
 import { DataTable } from "../main/DataTable";
@@ -174,6 +175,7 @@ const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     tabs: [
       { key: "status", label: "Status", description: "Health, reconciliation, jobs, and endpoint checks" },
       { key: "server-health", label: "Server Health", description: "Owner-only VPS performance, services, trends, and logs" },
+      { key: "public-service", label: "Public Service", description: "Public health, exact lookups, moderation, and privacy processing" },
       { key: "configuration", label: "Configuration", description: "Settlement defaults, privacy, reconciliation, and branding" },
       { key: "diagnostics", label: "Diagnostics", description: "Browser and map troubleshooting data" },
     ],
@@ -902,10 +904,15 @@ export function AdminPanel({
   }
 
   const canViewServerHealth = Boolean(auth?.user?.permissions?.includes("*"));
-  const visibleTabGroups = React.useMemo(() => (botOnly ? BOT_CONSOLE_TAB_GROUPS : ADMIN_TAB_GROUPS).map((group) => ({ ...group, tabs: group.tabs.filter((item) => item.key !== "server-health" || canViewServerHealth) })).filter((group) => group.tabs.length), [botOnly, canViewServerHealth]);
+  const canViewPublicService = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("public.health"));
+  const canInspectPublicService = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("public.lookup"));
+  const canModeratePublicService = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("public.moderate"));
+  const canRestorePublicService = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("public.restore"));
+  const canProcessPublicPrivacy = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("public.privacy"));
+  const visibleTabGroups = React.useMemo(() => (botOnly ? BOT_CONSOLE_TAB_GROUPS : ADMIN_TAB_GROUPS).map((group) => ({ ...group, tabs: group.tabs.filter((item) => (item.key !== "server-health" || canViewServerHealth) && (item.key !== "public-service" || canViewPublicService)) })).filter((group) => group.tabs.length), [botOnly, canViewPublicService, canViewServerHealth]);
   const tabs = React.useMemo<AdminTabMeta[]>(() => visibleTabGroups.flatMap((group) => group.tabs), [visibleTabGroups]);
   const activeTabMeta = tabs.find((item) => item.key === tab);
-  const extractedTabOwnsMessage = tab === "analytics" || tab === "empire-membership" || tab === "database" || tab === "users" || tab === "accounts" || tab === "audit" || tab === "backups";
+  const extractedTabOwnsMessage = tab === "analytics" || tab === "empire-membership" || tab === "database" || tab === "users" || tab === "accounts" || tab === "audit" || tab === "backups" || tab === "public-service";
   const tabLoadPending = [...pendingActions].some((key) => key.startsWith(`tab-load:${tab}:`));
   React.useEffect(() => { if (tab === "server-health" && !canViewServerHealth) setTab("status"); }, [tab, canViewServerHealth, setTab]);
   const auditRows: AnyRecord[] = Array.isArray(auditData.auditLog) ? auditData.auditLog : [];
@@ -1283,6 +1290,14 @@ export function AdminPanel({
       ) : null}
 
       {tab === "server-health" && canViewServerHealth ? <ServerHealthSection /> : null}
+
+      {tab === "public-service" && canViewPublicService ? <PublicServiceAdminSection
+        canInspect={canInspectPublicService}
+        canModerate={canModeratePublicService}
+        canRestore={canRestorePublicService}
+        canProcessPrivacy={canProcessPublicPrivacy}
+        onRequest={api}
+      /> : null}
 
       {tab === "status" ? (
         <div className="admin-section">
