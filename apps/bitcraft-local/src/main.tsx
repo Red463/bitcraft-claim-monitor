@@ -4,6 +4,7 @@ import { loadHostProfile, rootForProfile, type FrontendProfile } from "./api/pro
 import { RouteLoadingState } from "./components/main/RouteLoadingState";
 import { capturePublicPlanFragmentSecret } from "./public/planSecrets.mjs";
 import "./styles.css";
+import "./styles/app-chrome.css";
 
 try {
   capturePublicPlanFragmentSecret({
