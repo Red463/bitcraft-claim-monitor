@@ -72,7 +72,7 @@ test("enabled read-only profile presents settlement search without unfinished pl
   }
 });
 
-test("first-time public visitors receive compact settlement selection guidance", async () => {
+test("first-time public visitors receive compact claim selection guidance", async () => {
   const dom = installDom("http://localhost/");
   const vite = await createViteServer({ root: appRoot, appType: "custom", logLevel: "silent", server: { middlewareMode: true } });
   let view;
@@ -86,9 +86,9 @@ test("first-time public visitors receive compact settlement selection guidance",
     assert.match(document.body.textContent, /Welcome to Claim Monitor/);
     assert.match(document.body.textContent, /current, read-only data/i);
     assert.match(document.body.textContent, /Enter at least three characters/i);
-    assert.match(document.body.textContent, /Select the correct result/i);
-    assert.match(document.body.textContent, /Use the settlement navigation/i);
-    assert.match(document.body.textContent, /does not continuously monitor public settlements/i);
+    assert.match(document.body.textContent, /Select the correct claim/i);
+    assert.match(document.body.textContent, /Use the claim navigation/i);
+    assert.match(document.body.textContent, /does not continuously monitor public claims/i);
     assert.match(document.body.textContent, /public history, notifications, or Discord services/i);
   } finally {
     if (view) await view.unmount();
@@ -131,7 +131,7 @@ test("returning public visitors receive compact search until clearing recents re
   }
 });
 
-test("public Help explains settlement selection and on-demand limitations", async () => {
+test("public Help explains claim selection and on-demand limitations", async () => {
   const dom = installDom("http://localhost/help");
   const vite = await createViteServer({ root: appRoot, appType: "custom", logLevel: "silent", server: { middlewareMode: true } });
   let view;
@@ -142,7 +142,7 @@ test("public Help explains settlement selection and on-demand limitations", asyn
       features: { ...disabledFeatures, publicProfileEnabled: true, publicLegalConfigurationConfirmed: true },
     }));
 
-    assert.match(document.body.textContent, /Finding a settlement/i);
+    assert.match(document.body.textContent, /Finding a claim/i);
     assert.match(document.body.textContent, /at least three characters/i);
     assert.match(document.body.textContent, /loaded on demand/i);
     assert.match(document.body.textContent, /no public history, alerts, notifications, or Discord services/i);
