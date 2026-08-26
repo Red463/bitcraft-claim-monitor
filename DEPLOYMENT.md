@@ -283,6 +283,17 @@ For the one-time supervised Caddy bootstrap:
 4. Validate before reloading. Do this only after the DNS preflight in the
    public operations runbook.
 
+The preferred path is the protected `Configure public Claim Monitor Caddy`
+GitHub Actions workflow. Run it from `main`, enter `claim-monitor.com` exactly,
+and approve the `relay-cutover` environment. The revision-bound updater merges
+only the reviewed public blocks, refuses partial or unsafe existing routing,
+keeps a root-only backup, validates before reload, verifies both local host
+profiles, and restores the original file if either profile fails. It is safe to
+rerun after a successful bootstrap and does not enable any public feature flag.
+
+The following commands are the manual recovery/bootstrap equivalent when the
+protected workflow is unavailable:
+
 ```sh
 install -o root -g root -m 0600 \
   /etc/caddy/Caddyfile \
