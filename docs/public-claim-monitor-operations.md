@@ -227,8 +227,10 @@ PUBLIC_COLLABORATION_ENABLED=false
 PUBLIC_LEGAL_CONFIGURATION_CONFIRMED=true
 ```
 
-Leave public OAuth credentials blank. Restart only the existing web service;
-do not stop or replace the worker. Smoke anonymous search, exact settlement ID,
+Leave public OAuth credentials blank unless they have already been installed
+dormant through the protected Stage 2 credential workflow while all three
+public gates were `false`. Restart only the existing web service; do not stop
+or replace the worker. Smoke anonymous search, exact settlement ID,
 overview/members/inventory/crafts, recipe/catalog/icon reads, stale/unavailable
 warnings, public unsupported routes, and every cross-profile denial. Observe for
 24 continuous hours before proceeding: review Caddy/Node errors, public cache
@@ -238,9 +240,25 @@ Do not create a new observation timer or service.
 
 ### Stage 2: prepare separate OAuth while collaboration remains closed
 
-After the 24-hour read-only observation succeeds, put the separate public
-Discord client ID/secret in the installed environment and verify the exact
-callback and `identify` scope in the Discord Developer Portal. Keep
+The credentials may be installed dormant before the 24-hour read-only
+observation finishes; doing so does not authorize advancing to Stage 2 or
+enabling any public feature. Configure these GitHub environment secrets in
+`relay-preview`:
+
+- `PUBLIC_DISCORD_OAUTH_CLIENT_ID`
+- `PUBLIC_DISCORD_OAUTH_CLIENT_SECRET`
+
+Run `Install public Claim Monitor OAuth credentials` from `main`, enter
+`claim-monitor.com` exactly, and approve its `relay-cutover` gate. The workflow
+sends both values only through SSH stdin to a revision-bound root helper. It
+atomically replaces only the two public OAuth environment values, restarts only
+the web service, verifies the running process loaded the credentials, confirms
+the worker PID did not change, and rolls the environment back on failure. It
+must finish with all three public flags still `false` and the public OAuth start
+route returning `404`.
+
+After the 24-hour read-only observation succeeds, verify the exact callback and
+`identify` scope in the Discord Developer Portal. Keep
 `PUBLIC_COLLABORATION_ENABLED=false`, so login, sessions, mutations, and plans
 remain unreachable. This is a configuration preflight, not an OAuth launch.
 
