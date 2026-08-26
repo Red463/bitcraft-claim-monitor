@@ -12,6 +12,7 @@ type PublicPlan = {
   title: string;
   claimId: string;
   document: { targets?: unknown[] };
+  revisions: { document: number; access: number };
   [key: string]: unknown;
 };
 

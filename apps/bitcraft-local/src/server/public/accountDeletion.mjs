@@ -13,6 +13,30 @@ function count(result) {
   return Number(result?.changes ?? 0);
 }
 
+function scrubDeletedUserReferences(value, userId) {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const scrubbed = value.map((child) => {
+      const result = scrubDeletedUserReferences(child, userId);
+      changed ||= result.changed;
+      return result.value;
+    });
+    return { value: scrubbed, changed };
+  }
+  if (!value || typeof value !== "object") return { value, changed: false };
+  let changed = false;
+  const scrubbed = Object.fromEntries(Object.entries(value).map(([key, child]) => {
+    if (/userId$/i.test(key) && (typeof child === "number" || typeof child === "string") && String(child) === String(userId)) {
+      changed = true;
+      return [key, "deleted"];
+    }
+    const result = scrubDeletedUserReferences(child, userId);
+    changed ||= result.changed;
+    return [key, result.value];
+  }));
+  return { value: scrubbed, changed };
+}
+
 export function deletedPublicSubjectMarker(discordId, deletionKey) {
   return `deleted:${createHmac("sha256", String(deletionKey))
     .update(`public-profile:discord:${String(discordId)}`)
@@ -127,11 +151,21 @@ export function deletePublicAccount(db, {
       db.prepare(`
         INSERT INTO public_craft_plan_events (plan_id, actor_user_id, event_type, payload_json, created_at)
         VALUES (?, ?, 'plan.transferred.account_deletion', ?, ?)
-      `).run(disposition.planId, userId, JSON.stringify({ ownerUserId: disposition.userId }), deletedAt);
+      `).run(disposition.planId, userId, JSON.stringify({ previousOwnerUserId: userId, ownerUserId: disposition.userId }), deletedAt);
       transferredPlans += 1;
     }
 
     const marker = deletedPublicSubjectMarker(account.discord_id, deletionKey);
+    let anonymizedPayloads = 0;
+    const retainedEvents = db.prepare("SELECT id, payload_json FROM public_craft_plan_events ORDER BY id").all();
+    const updatePayload = db.prepare("UPDATE public_craft_plan_events SET payload_json = ? WHERE id = ?");
+    for (const event of retainedEvents) {
+      let parsed;
+      try { parsed = JSON.parse(String(event.payload_json)); } catch { continue; }
+      const scrubbed = scrubDeletedUserReferences(parsed, userId);
+      if (!scrubbed.changed) continue;
+      anonymizedPayloads += count(updatePayload.run(JSON.stringify(scrubbed.value), event.id));
+    }
     const anonymizedEvents = count(db.prepare(`
       UPDATE public_craft_plan_events
       SET actor_user_id = NULL, actor_deleted_marker = ?
@@ -149,7 +183,7 @@ export function deletePublicAccount(db, {
       receiptId,
       deletedAt,
       deleted,
-      anonymized: { public_craft_plan_events: anonymizedEvents },
+      anonymized: { public_craft_plan_events: anonymizedEvents, public_craft_plan_event_payloads: anonymizedPayloads },
       transferredPlans,
       deletedPlans,
     };

@@ -903,7 +903,9 @@ export function AdminPanel({
 
   const canViewServerHealth = Boolean(auth?.user?.permissions?.includes("*"));
   const canViewPublicService = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("public.health"));
+  const canInspectPublicService = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("public.lookup"));
   const canModeratePublicService = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("public.moderate"));
+  const canRestorePublicService = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("public.restore"));
   const canProcessPublicPrivacy = Boolean(auth?.user?.permissions?.includes("*") || auth?.user?.permissions?.includes("public.privacy"));
   const visibleTabGroups = React.useMemo(() => (botOnly ? BOT_CONSOLE_TAB_GROUPS : ADMIN_TAB_GROUPS).map((group) => ({ ...group, tabs: group.tabs.filter((item) => (item.key !== "server-health" || canViewServerHealth) && (item.key !== "public-service" || canViewPublicService)) })).filter((group) => group.tabs.length), [botOnly, canViewPublicService, canViewServerHealth]);
   const tabs = React.useMemo<AdminTabMeta[]>(() => visibleTabGroups.flatMap((group) => group.tabs), [visibleTabGroups]);
@@ -1275,7 +1277,9 @@ export function AdminPanel({
       {tab === "server-health" && canViewServerHealth ? <ServerHealthSection /> : null}
 
       {tab === "public-service" && canViewPublicService ? <PublicServiceAdminSection
+        canInspect={canInspectPublicService}
         canModerate={canModeratePublicService}
+        canRestore={canRestorePublicService}
         canProcessPrivacy={canProcessPublicPrivacy}
         onRequest={api}
       /> : null}

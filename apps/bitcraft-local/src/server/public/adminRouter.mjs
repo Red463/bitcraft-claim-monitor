@@ -66,20 +66,20 @@ export function createPublicAdminRouter({
         send(res, plan ? 200 : 404, plan ? { plan } : { error: "Public plan was not found." }, { "cache-control": "no-store" });
         return true;
       }
-      if (method === "POST" && pathname === "/api/local/admin/public-service/accounts/status") {
+      if (method === "POST" && (pathname === "/api/local/admin/public-service/accounts/suspend" || pathname === "/api/local/admin/public-service/accounts/restore")) {
         const body = await readRequestJson(req);
-        const input = { accountId: positiveId(body.accountId, "Public account ID"), suspended: body.suspended === true };
+        const input = { accountId: positiveId(body.accountId, "Public account ID"), suspended: pathname.endsWith("/suspend") };
         const result = repository.setAccountSuspended(input);
         audit(user, input.suspended ? "public.account.suspended" : "public.account.restored", { accountId: input.accountId });
-        send(res, 200, result, { "cache-control": "no-store" });
+        send(res, 200, { [input.suspended ? "suspended" : "restored"]: true, revoked: result.revoked ?? {} }, { "cache-control": "no-store" });
         return true;
       }
-      if (method === "POST" && pathname === "/api/local/admin/public-service/plans/status") {
+      if (method === "POST" && (pathname === "/api/local/admin/public-service/plans/suspend" || pathname === "/api/local/admin/public-service/plans/restore")) {
         const body = await readRequestJson(req);
-        const input = { planId: exactText(body.planId, "Public plan ID"), suspended: body.suspended === true };
+        const input = { planId: exactText(body.planId, "Public plan ID"), suspended: pathname.endsWith("/suspend") };
         const result = repository.setPlanSuspended(input);
         audit(user, input.suspended ? "public.plan.suspended" : "public.plan.restored", { planId: input.planId });
-        send(res, 200, result, { "cache-control": "no-store" });
+        send(res, 200, { [input.suspended ? "suspended" : "restored"]: true, revoked: result.revoked ?? {} }, { "cache-control": "no-store" });
         return true;
       }
       if (method === "POST" && pathname === "/api/local/admin/public-service/invites/revoke") {

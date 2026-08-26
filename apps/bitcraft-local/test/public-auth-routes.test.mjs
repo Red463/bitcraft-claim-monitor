@@ -8,6 +8,7 @@ import { legalPolicyDigests } from "../src/server/legalPolicyDigest.mjs";
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import { createPublicAuthRouter } from "../src/server/public/authRouter.mjs";
 import { createPublicIdentityRepository } from "../src/server/public/identity.mjs";
+import { createPublicModerationRepository } from "../src/server/public/moderation.mjs";
 import { deletePublicAccount, publicAccountDeletionReview } from "../src/server/public/accountDeletion.mjs";
 import { sessionTokenHash } from "../src/server/serverSessions.mjs";
 
@@ -123,6 +124,47 @@ test("public OAuth persists only a public account/session and never promotes a m
   assert.equal(tokenBody.get("client_secret"), "public-secret");
   assert.equal(tokenBody.get("redirect_uri"), "https://claim-monitor.com/api/public/auth/discord/callback");
   assert.equal(discord.calls[1][1].headers.authorization, "Bearer public-access-token");
+  f.db.close();
+});
+
+test("suspended public OAuth cannot mint a latent session and restoration requires a fresh login", async () => {
+  const discordId = "111222333444555666";
+  const f = fixture({ fetchImpl: discordFetch(discordId).fetchImpl });
+  const firstLogin = await oauthLogin(f, discordId);
+  const account = f.db.prepare("SELECT id, last_login_at FROM public_user_accounts WHERE discord_id = ?").get(discordId);
+  const moderation = createPublicModerationRepository(f.db, { now: () => new Date("2026-08-25T10:05:00.000Z") });
+  moderation.setAccountSuspended({ accountId: account.id, suspended: true });
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM public_user_sessions WHERE user_id = ?").get(account.id).count, 0);
+  const legalBefore = f.db.prepare("SELECT COUNT(*) AS count FROM public_user_legal_acceptances WHERE user_id = ?").get(account.id).count;
+
+  const start = await call(f.router, "POST", "/api/public/auth/discord/start", request({
+    body: { acceptedTerms: true, ageConfirmed: true, returnTo: "/settings" },
+  }));
+  const stateCookie = cookiePair(start.res, "__Host-cm_oauth_state");
+  const state = new URL(json(start.res).authorizeUrl).searchParams.get("state");
+  const suspendedCallback = await call(
+    f.router,
+    "GET",
+    `/api/public/auth/discord/callback?code=suspended-code&state=${encodeURIComponent(state)}`,
+    request({ cookie: stateCookie, origin: "" }),
+  );
+
+  assert.equal(suspendedCallback.res.status, 302);
+  assert.equal(suspendedCallback.res.headers.location, "/settings?auth=discord-suspended");
+  assert.equal(cookiePair(suspendedCallback.res, "__Host-cm_user_session"), "__Host-cm_user_session=");
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM public_user_sessions WHERE user_id = ?").get(account.id).count, 0);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM public_user_legal_acceptances WHERE user_id = ?").get(account.id).count, legalBefore);
+  assert.equal(f.db.prepare("SELECT last_login_at FROM public_user_accounts WHERE id = ?").get(account.id).last_login_at, account.last_login_at);
+
+  moderation.setAccountSuspended({ accountId: account.id, suspended: false });
+  const oldCookie = await call(f.router, "GET", "/api/public/auth/session", request({ cookie: firstLogin.sessionCookie, origin: "" }));
+  assert.equal(json(oldCookie.res).user, null, "a cookie revoked by suspension must not revive after restoration");
+
+  const freshLogin = await oauthLogin(f, discordId);
+  assert.match(freshLogin.sessionCookie, /^__Host-cm_user_session=.+/);
+  assert.notEqual(freshLogin.sessionCookie, firstLogin.sessionCookie);
+  const freshSession = await call(f.router, "GET", "/api/public/auth/session", request({ cookie: freshLogin.sessionCookie, origin: "" }));
+  assert.equal(json(freshSession.res).user.discordId, discordId);
   f.db.close();
 });
 

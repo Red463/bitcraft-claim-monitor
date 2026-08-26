@@ -58,17 +58,25 @@ test("public-service Admin router enforces the exact role matrix", async () => {
   assert.equal((await call(f.router, "viewer", "GET", "/api/local/admin/public-service/health")).status, 200);
   assert.equal((await call(f.router, "viewer", "GET", "/api/local/admin/public-service/account?accountId=7")).status, 403);
   assert.equal((await call(f.router, "discord-manager", "GET", "/api/local/admin/public-service/health")).status, 403);
-  assert.equal((await call(f.router, "moderator", "GET", "/api/local/admin/public-service/account?accountId=7")).status, 200);
-  assert.equal((await call(f.router, "moderator", "POST", "/api/local/admin/public-service/accounts/status", { accountId: 7, suspended: true })).status, 200);
+  assert.equal((await call(f.router, "moderator", "GET", "/api/local/admin/public-service/account?accountId=7")).status, 403);
+  assert.equal((await call(f.router, "moderator", "GET", "/api/local/admin/public-service/plan?planId=plan-7")).status, 403);
+  const moderatorSuspend = await call(f.router, "moderator", "POST", "/api/local/admin/public-service/accounts/suspend", { accountId: 7 });
+  assert.equal(moderatorSuspend.status, 200);
+  assert.deepEqual(moderatorSuspend.body, { suspended: true, revoked: {} }, "moderator action results must not include account metadata");
+  assert.equal((await call(f.router, "moderator", "POST", "/api/local/admin/public-service/accounts/restore", { accountId: 7 })).status, 403);
+  assert.equal((await call(f.router, "moderator", "POST", "/api/local/admin/public-service/plans/restore", { planId: "plan-7" })).status, 403);
   assert.equal((await call(f.router, "moderator", "GET", "/api/local/admin/public-service/privacy/review?accountId=7")).status, 403);
+  assert.equal((await call(f.router, "admin", "GET", "/api/local/admin/public-service/account?accountId=7")).status, 200);
+  assert.equal((await call(f.router, "admin", "POST", "/api/local/admin/public-service/accounts/restore", { accountId: 7 })).status, 200);
   assert.equal((await call(f.router, "admin", "GET", "/api/local/admin/public-service/privacy/review?accountId=7")).status, 200);
 });
 
 test("moderation actions audit exact identifiers and privacy processing still requires recent public reauthentication", async () => {
   assert.ok(routerModule, "public-service Admin router must exist");
   const f = fixture();
-  const suspended = await call(f.router, "moderator", "POST", "/api/local/admin/public-service/plans/status", { planId: "plan-7", suspended: true });
+  const suspended = await call(f.router, "moderator", "POST", "/api/local/admin/public-service/plans/suspend", { planId: "plan-7" });
   assert.equal(suspended.status, 200);
+  assert.deepEqual(suspended.body, { suspended: true, revoked: {} }, "moderator action results must not include plan metadata");
   const invite = await call(f.router, "moderator", "POST", "/api/local/admin/public-service/invites/revoke", { planId: "plan-7", inviteId: "invite-7" });
   assert.equal(invite.status, 200);
   const blocked = await call(f.router, "admin", "POST", "/api/local/admin/public-service/privacy/delete", { accountId: 7, dispositions: [] });

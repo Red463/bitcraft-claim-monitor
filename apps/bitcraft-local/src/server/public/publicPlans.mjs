@@ -348,6 +348,7 @@ export function createPublicPlanRepository(db, {
       if (!plan) throw new PublicPlanError("Public plan was not found.", 404, "plan_not_found");
       const rows = db.prepare(`
         SELECT event.id, event.event_type, event.payload_json, event.created_at,
+          event.actor_deleted_marker IS NOT NULL AS actor_deleted,
           account.id AS actor_user_id, account.discord_username, account.discord_global_name
         FROM public_craft_plan_events AS event
         LEFT JOIN public_user_accounts AS account ON account.id = event.actor_user_id
@@ -372,11 +373,13 @@ export function createPublicPlanRepository(db, {
           id: Number(event.id),
           type: String(event.event_type),
           createdAt: String(event.created_at),
-          actor: event.actor_user_id == null ? null : {
-            userId: Number(event.actor_user_id),
-            username: String(event.discord_username ?? ""),
-            globalName: String(event.discord_global_name ?? ""),
-          },
+          actor: event.actor_user_id == null
+            ? Number(event.actor_deleted) === 1 ? { deleted: true } : null
+            : {
+              userId: Number(event.actor_user_id),
+              username: String(event.discord_username ?? ""),
+              globalName: String(event.discord_global_name ?? ""),
+            },
           payload,
         };
       });

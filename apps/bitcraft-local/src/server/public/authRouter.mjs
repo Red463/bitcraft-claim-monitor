@@ -262,6 +262,16 @@ export function createPublicAuthRouter({
 
     const loginAt = now().toISOString();
     const profileAccount = discordOAuthProfileAccount(profile, loginAt);
+    const existingAccount = repository.userByDiscordId(profileAccount.discordId);
+    if (String(existingAccount?.status ?? "active") === "suspended") {
+      repository.deleteSessionsForUser(existingAccount.id);
+      const separator = stateCookie.returnTo.includes("?") ? "&" : "?";
+      return redirect(res, `${stateCookie.returnTo}${separator}auth=discord-suspended`, [
+        clearPublicOAuthStateCookie(),
+        clearPublicUserSessionCookie(),
+        clearPublicPrivacyReauthCookie(),
+      ]);
+    }
     const account = repository.upsertAccount(profileAccount, loginAt);
     repository.acceptLegal({
       userId: account.id,

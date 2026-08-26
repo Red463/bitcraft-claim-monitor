@@ -80,6 +80,7 @@ function NewPlan({ csrfToken }: { csrfToken: string }) {
 function PlanEditor({ initialPlan, csrfToken }: { initialPlan: Row; csrfToken: string }) {
   const [plan, setPlan] = React.useState(initialPlan);
   const [draft, setDraft] = React.useState(() => JSON.stringify(initialPlan.document, null, 2));
+  const [draftDocumentRevision, setDraftDocumentRevision] = React.useState(() => Number(initialPlan.revisions.document));
   const [events, setEvents] = React.useState<Row[]>([]);
   const [busy, setBusy] = React.useState("");
   const [message, setMessage] = React.useState("");
@@ -93,7 +94,10 @@ function PlanEditor({ initialPlan, csrfToken }: { initialPlan: Row; csrfToken: s
   const refresh = React.useCallback(async ({ replaceDraft = true } = {}) => {
     const [next, nextEvents] = await Promise.all([loadPublicPlan(String(plan.id)), loadPublicPlanEvents(String(plan.id))]);
     setPlan(next); setEvents(nextEvents);
-    if (replaceDraft) setDraft(JSON.stringify(next.document, null, 2));
+    if (replaceDraft) {
+      setDraft(JSON.stringify(next.document, null, 2));
+      setDraftDocumentRevision(Number(next.revisions.document));
+    }
   }, [plan.id]);
   React.useEffect(() => { void loadPublicPlanEvents(String(plan.id)).then(setEvents).catch(() => setEvents([])); }, [plan.id]);
 
@@ -123,8 +127,8 @@ function PlanEditor({ initialPlan, csrfToken }: { initialPlan: Row; csrfToken: s
     await run("save", async () => {
       let document;
       try { document = JSON.parse(draft); } catch { throw new Error("Plan document must be valid JSON."); }
-      const saved = await savePublicPlanDocument({ planId: String(plan.id), document, documentRevision: Number(plan.revisions.document), csrfToken });
-      setPlan(saved); setDraft(JSON.stringify(saved.document, null, 2));
+      const saved = await savePublicPlanDocument({ planId: String(plan.id), document, documentRevision: draftDocumentRevision, csrfToken });
+      setPlan(saved); setDraft(JSON.stringify(saved.document, null, 2)); setDraftDocumentRevision(Number(saved.revisions.document));
     });
   }
 

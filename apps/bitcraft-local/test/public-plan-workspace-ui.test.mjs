@@ -170,3 +170,113 @@ test("access mutations reload full plan details instead of replacing them with a
     dom.restore();
   }
 });
+
+test("access refresh does not rebase an unsaved draft onto a newer server document revision", async () => {
+  const dom = installDom("http://localhost/plans/plan-7");
+  const originalFetch = globalThis.fetch;
+  let planReads = 0;
+  const documentSaves = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const path = String(input);
+    if (path === "/api/public/auth/session") return json(200, session());
+    if (path === "/api/public/plans/plan-7/events") return json(200, { events: [] });
+    if (path === "/api/public/plans/plan-7" && !init.method) {
+      planReads += 1;
+      return json(200, { plan: planReads === 1 ? serverPlan : {
+        ...serverPlan,
+        status: "archived",
+        revisions: { document: 5, access: 8 },
+        document: { ...serverPlan.document, targets: [{ catalogKey: "items:99", quantity: "5" }] },
+      } });
+    }
+    if (path === "/api/public/plans/plan-7/status") return json(200, { plan: { ...serverPlan, status: "archived", revisions: { document: 5, access: 8 } } });
+    if (path === "/api/public/plans/plan-7/document") {
+      documentSaves.push(init);
+      return json(409, { code: "revision_conflict", currentRevisions: { document: 5, access: 8 } });
+    }
+    throw new Error(`Unexpected request ${path}`);
+  };
+  const vite = await createViteServer({ root: appRoot, appType: "custom", logLevel: "silent", server: { middlewareMode: true } });
+  let view;
+  try {
+    const { PublicAppShell } = await vite.ssrLoadModule("/src/public/PublicAppShell.tsx");
+    view = await mount(React.createElement(PublicAppShell, { route: { id: "plan", params: { id: "plan-7" } } }));
+    await dom.flush();
+
+    const editor = document.querySelector("textarea[aria-label='Plan document JSON']");
+    const unsaved = JSON.stringify({ ...serverPlan.document, targets: [{ catalogKey: "items:7", quantity: "12" }] }, null, 2);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set.call(editor, unsaved);
+      editor.dispatchEvent(new window.Event("input", { bubbles: true }));
+    });
+    const archive = [...document.querySelectorAll("button")].find((button) => button.textContent.includes("Archive"));
+    await act(async () => archive.click());
+    await dom.flush();
+    const save = [...document.querySelectorAll("button")].find((button) => button.textContent.includes("Save plan"));
+    await act(async () => save.click());
+    await dom.flush();
+
+    assert.equal(planReads, 2);
+    assert.equal(documentSaves.length, 1);
+    assert.equal(documentSaves[0].headers["if-match"], '"document:4"', "save must use the revision on which the retained draft was based");
+    assert.equal(editor.value, unsaved);
+    assert.match(document.body.textContent, /unsaved draft has been kept/i);
+  } finally {
+    if (view) await view.unmount();
+    await vite.close();
+    globalThis.fetch = originalFetch;
+    dom.restore();
+  }
+});
+
+test("Public service Admin UI keeps lookup and restore controls above moderator authority", async () => {
+  const dom = installDom("https://app.timbersteeltrade.com/admin?section=public-service");
+  const vite = await createViteServer({ root: appRoot, appType: "custom", logLevel: "silent", server: { middlewareMode: true } });
+  const onRequest = async () => ({ totals: { accounts: 2, plans: 3, suspendedAccounts: 0, suspendedPlans: 0 } });
+  let view;
+  try {
+    const { PublicServiceAdminSection } = await vite.ssrLoadModule("/src/components/admin/PublicServiceAdminSection.tsx");
+
+    view = await mount(React.createElement(PublicServiceAdminSection, {
+      canInspect: false,
+      canModerate: true,
+      canRestore: false,
+      canProcessPrivacy: false,
+      onRequest,
+    }));
+    await dom.flush();
+    assert.match(document.body.textContent, /Exact moderation actions/);
+    assert.match(document.body.textContent, /Suspend account/);
+    assert.match(document.body.textContent, /Revoke invitation/);
+    assert.doesNotMatch(document.body.textContent, /Exact account lookup|Exact plan lookup|Restore account|Restore plan|privacy deletion/i);
+
+    await view.unmount();
+    view = await mount(React.createElement(PublicServiceAdminSection, {
+      canInspect: false,
+      canModerate: false,
+      canRestore: false,
+      canProcessPrivacy: false,
+      onRequest,
+    }));
+    await dom.flush();
+    assert.match(document.body.textContent, /view health only/i);
+    assert.doesNotMatch(document.body.textContent, /Exact moderation actions|Suspend account|Revoke invitation|Exact account lookup/);
+
+    await view.unmount();
+    view = await mount(React.createElement(PublicServiceAdminSection, {
+      canInspect: true,
+      canModerate: true,
+      canRestore: true,
+      canProcessPrivacy: true,
+      onRequest,
+    }));
+    await dom.flush();
+    assert.match(document.body.textContent, /Exact account lookup/);
+    assert.match(document.body.textContent, /Exact plan lookup/);
+    assert.doesNotMatch(document.body.textContent, /Exact moderation actions/);
+  } finally {
+    if (view) await view.unmount();
+    await vite.close();
+    dom.restore();
+  }
+});

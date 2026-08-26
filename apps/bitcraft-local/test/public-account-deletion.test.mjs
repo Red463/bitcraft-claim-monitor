@@ -3,6 +3,8 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
+import { createPublicModerationRepository } from "../src/server/public/moderation.mjs";
+import { createPublicPlanRepository } from "../src/server/public/publicPlans.mjs";
 
 let deletion = null;
 try {
@@ -42,7 +44,8 @@ function fixture() {
   db.prepare("INSERT INTO public_user_sessions (token_hash, user_id, expires_at, created_at) VALUES ('public-token-hash', ?, '2026-09-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')").run(ownerId);
   db.prepare("INSERT INTO public_user_legal_acceptances (user_id, legal_version, terms_digest, privacy_digest, age_confirmed, accepted_at, source) VALUES (?, 'v1', 't', 'p', 1, '2026-01-01T00:00:00.000Z', 'oauth')").run(ownerId);
   db.prepare("INSERT INTO public_craft_plan_invites (id, plan_id, created_by_user_id, role, token_hash, expires_at, created_at) VALUES ('invite-owned', 'plan-viewed', ?, 'viewer', 'hash', '2026-09-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')").run(ownerId);
-  db.prepare("INSERT INTO public_craft_plan_events (plan_id, actor_user_id, event_type, payload_json, created_at) VALUES ('plan-transfer', ?, 'document.updated', '{}', '2026-08-01T00:00:00.000Z')").run(ownerId);
+  db.prepare("INSERT INTO public_craft_plan_events (plan_id, actor_user_id, event_type, payload_json, created_at) VALUES ('plan-transfer', ?, 'member.changed', ?, '2026-08-01T00:00:00.000Z')")
+    .run(ownerId, JSON.stringify({ userId: ownerId, previousOwnerUserId: ownerId, ownerUserId: editorId, nested: { userId: ownerId }, quantity: String(ownerId) }));
 
   db.prepare(`
     INSERT INTO user_accounts (discord_id, discord_username, character_status, settings_json, created_at)
@@ -96,9 +99,62 @@ test("public deletion transfers only to an accepted editor, deletes selected pla
   assert.equal(event.actor_user_id, null);
   assert.match(event.actor_deleted_marker, /^deleted:/);
   assert.doesNotMatch(event.actor_deleted_marker, /111111111111111111/);
+  const storedEvents = db.prepare("SELECT event_type, payload_json FROM public_craft_plan_events WHERE plan_id = 'plan-transfer' ORDER BY id").all()
+    .map((row) => ({ type: row.event_type, payload: JSON.parse(row.payload_json) }));
+  assert.deepEqual(storedEvents[0].payload, {
+    userId: "deleted",
+    previousOwnerUserId: "deleted",
+    ownerUserId: editorId,
+    nested: { userId: "deleted" },
+    quantity: String(ownerId),
+  });
+  assert.deepEqual(storedEvents.find((row) => row.type === "plan.transferred.account_deletion").payload, {
+    previousOwnerUserId: "deleted",
+    ownerUserId: editorId,
+  });
+  const plans = createPublicPlanRepository(db, { tokenHmacKey: "public-plan-hmac" });
+  const memberEvents = plans.eventsForUser("plan-transfer", editorId);
+  assert.deepEqual(memberEvents.find((row) => row.type === "plan.transferred.account_deletion").actor, { deleted: true });
+  assert.equal(memberEvents.find((row) => row.type === "plan.transferred.account_deletion").payload.previousOwnerUserId, "deleted");
+  const adminEvents = createPublicModerationRepository(db).lookupPlan("plan-transfer").events;
+  assert.deepEqual(adminEvents.find((row) => row.type === "plan.transferred.account_deletion").actor, { deleted: true });
+  assert.equal(adminEvents.find((row) => row.type === "plan.transferred.account_deletion").payload.previousOwnerUserId, "deleted");
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM user_accounts WHERE discord_id = '111111111111111111'").get().count, 1, "Timbersteel account must be untouched");
   assert.equal(receipt.receiptId, "public-operation");
   assert.doesNotMatch(JSON.stringify(receipt), /111111111111111111|owner-name|timbersteel-owner/);
+  db.close();
+});
+
+test("public deletion rolls back transferred ownership and event anonymization together", () => {
+  assert.ok(deletion, "public-profile deletion module must exist");
+  const { db, ownerId, editorId } = fixture();
+  db.exec(`
+    CREATE TRIGGER reject_public_account_delete
+    BEFORE DELETE ON public_user_accounts
+    WHEN OLD.id = ${ownerId}
+    BEGIN
+      SELECT RAISE(ABORT, 'forced public account delete failure');
+    END
+  `);
+
+  assert.throws(() => deletion.deletePublicAccount(db, {
+    userId: ownerId,
+    discordId: "111111111111111111",
+    deletionKey: "public-deletion-key",
+    dispositions: [
+      { planId: "plan-transfer", action: "transfer", userId: editorId },
+      { planId: "plan-delete", action: "delete" },
+    ],
+  }), /forced public account delete failure/);
+
+  assert.equal(db.prepare("SELECT owner_user_id FROM public_craft_plans WHERE id = 'plan-transfer'").get().owner_user_id, ownerId);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM public_craft_plans WHERE id = 'plan-delete'").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM public_user_accounts WHERE id = ?").get(ownerId).count, 1);
+  const event = db.prepare("SELECT actor_user_id, actor_deleted_marker, payload_json FROM public_craft_plan_events WHERE plan_id = 'plan-transfer' ORDER BY id LIMIT 1").get();
+  assert.equal(event.actor_user_id, ownerId);
+  assert.equal(event.actor_deleted_marker, null);
+  assert.equal(JSON.parse(event.payload_json).previousOwnerUserId, ownerId);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM public_craft_plan_events WHERE event_type = 'plan.transferred.account_deletion'").get().count, 0);
   db.close();
 });
 

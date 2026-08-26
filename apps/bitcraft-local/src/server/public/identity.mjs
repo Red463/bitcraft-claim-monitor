@@ -100,6 +100,9 @@ export function createPublicIdentityRepository(db) {
     deleteSession(tokenHash) {
       return db.prepare("DELETE FROM public_user_sessions WHERE token_hash = ?").run(tokenHash);
     },
+    deleteSessionsForUser(userId) {
+      return db.prepare("DELETE FROM public_user_sessions WHERE user_id = ?").run(userId);
+    },
     acceptLegal({ userId, version, termsDigest, privacyDigest, acceptedAt, source }) {
       return db.prepare(`
         INSERT OR IGNORE INTO public_user_legal_acceptances (

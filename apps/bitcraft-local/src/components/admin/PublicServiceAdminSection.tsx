@@ -15,7 +15,9 @@ export type AdminPublicServiceSectionProps = {
   data?: JsonRecord | null;
   pending?: boolean;
   error?: string | null;
+  canInspect: boolean;
   canModerate: boolean;
+  canRestore: boolean;
   canProcessPrivacy: boolean;
   onRequest: AdminRequest;
 };
@@ -37,7 +39,9 @@ export function PublicServiceAdminSection({
   data = null,
   pending = false,
   error = null,
+  canInspect,
   canModerate,
+  canRestore,
   canProcessPrivacy,
   onRequest,
 }: AdminPublicServiceSectionProps) {
@@ -97,21 +101,29 @@ export function PublicServiceAdminSection({
   });
 
   const setAccountSuspended = (suspended: boolean) => run("account-status", async () => {
-    const result = await onRequest("/admin/public-service/accounts/status", {
+    const id = account?.id ?? Number(accountId);
+    await onRequest(`/admin/public-service/accounts/${suspended ? "suspend" : "restore"}`, {
       method: "POST",
-      body: JSON.stringify({ accountId: account?.id, suspended }),
+      body: JSON.stringify({ accountId: id }),
     });
-    setAccount(result.account ?? null);
+    if (canInspect) {
+      const result = await onRequest(`/admin/public-service/account?accountId=${encodeURIComponent(String(id))}`);
+      setAccount(result.account ?? null);
+    }
     setMessage(suspended ? "Public account suspended and active capabilities revoked." : "Public account restored.");
     await refreshHealth();
   });
 
   const setPlanSuspended = (suspended: boolean) => run("plan-status", async () => {
-    const result = await onRequest("/admin/public-service/plans/status", {
+    const id = String(plan?.id ?? planId.trim());
+    await onRequest(`/admin/public-service/plans/${suspended ? "suspend" : "restore"}`, {
       method: "POST",
-      body: JSON.stringify({ planId: plan?.id, suspended }),
+      body: JSON.stringify({ planId: id }),
     });
-    setPlan(result.plan ?? null);
+    if (canInspect) {
+      const result = await onRequest(`/admin/public-service/plan?planId=${encodeURIComponent(id)}`);
+      setPlan(result.plan ?? null);
+    }
     setMessage(suspended ? "Public plan suspended." : "Public plan restored.");
     await refreshHealth();
   });
@@ -124,7 +136,10 @@ export function PublicServiceAdminSection({
       body: JSON.stringify({ planId: plan?.id ?? planId.trim(), [idKey]: identifier.trim() }),
     });
     setMessage(kind === "invites" ? "Invitation revoked." : "Share link revoked.");
-    await lookupPlan();
+    if (canInspect) {
+      const result = await onRequest(`/admin/public-service/plan?planId=${encodeURIComponent(String(plan?.id ?? planId.trim()))}`);
+      setPlan(result.plan ?? null);
+    }
   });
 
   const reviewPrivacyDeletion = () => run("privacy-review", async () => {
@@ -172,7 +187,7 @@ export function PublicServiceAdminSection({
       <details><summary>Runtime detail</summary><SafeRecord value={health ? { cache: health.cache, gate: health.gate, oauth: health.oauth, rateTotals: health.rateTotals } : null} empty="Health has not loaded." /></details>
     </section>
 
-    {canModerate ? <div className="admin-grid">
+    {canInspect ? <div className="admin-grid">
       <section className="form-card">
         <h3>Exact account lookup</h3>
         <p className="legend">Enter exactly one numeric Public account ID or exact Discord ID.</p>
@@ -181,7 +196,9 @@ export function PublicServiceAdminSection({
         <button className="toolbar-button" disabled={Boolean(busy) || (!accountId.trim() && !discordId.trim())} onClick={() => void lookupAccount()}>Look up account</button>
         <SafeRecord value={account} empty="No account loaded." />
         {account ? <div className="toolbar">
-          <button className="toolbar-button" disabled={Boolean(busy)} onClick={() => void setAccountSuspended(account.status !== "suspended")}>{account.status === "suspended" ? "Restore account" : "Suspend account"}</button>
+          {account.status === "suspended"
+            ? canRestore ? <button className="toolbar-button" disabled={Boolean(busy)} onClick={() => void setAccountSuspended(false)}>Restore account</button> : null
+            : canModerate ? <button className="toolbar-button" disabled={Boolean(busy)} onClick={() => void setAccountSuspended(true)}>Suspend account</button> : null}
           {canProcessPrivacy ? <button className="toolbar-button" disabled={Boolean(busy)} onClick={() => void reviewPrivacyDeletion()}>Review privacy deletion</button> : null}
         </div> : null}
       </section>
@@ -193,16 +210,31 @@ export function PublicServiceAdminSection({
         <button className="toolbar-button" disabled={Boolean(busy) || !planId.trim()} onClick={() => void lookupPlan()}>Look up plan</button>
         <SafeRecord value={plan} empty="No plan loaded." />
         {plan ? <>
-          <div className="toolbar"><button className="toolbar-button" disabled={Boolean(busy)} onClick={() => void setPlanSuspended(plan.status !== "suspended")}>{plan.status === "suspended" ? "Restore plan" : "Suspend plan"}</button></div>
-          <div className="public-admin-capabilities">
+          <div className="toolbar">{plan.status === "suspended"
+            ? canRestore ? <button className="toolbar-button" disabled={Boolean(busy)} onClick={() => void setPlanSuspended(false)}>Restore plan</button> : null
+            : canModerate ? <button className="toolbar-button" disabled={Boolean(busy)} onClick={() => void setPlanSuspended(true)}>Suspend plan</button> : null}</div>
+          {canModerate ? <div className="public-admin-capabilities">
             <label className="field"><span>Invitation ID</span><input value={inviteId} onChange={(event) => setInviteId(event.target.value)} /></label>
             <button className="toolbar-button" disabled={Boolean(busy) || !inviteId.trim()} onClick={() => void revokeCapability("invites")}>Revoke invitation</button>
             <label className="field"><span>Share-link ID</span><input value={shareId} onChange={(event) => setShareId(event.target.value)} /></label>
             <button className="toolbar-button" disabled={Boolean(busy) || !shareId.trim()} onClick={() => void revokeCapability("share-links")}>Revoke share link</button>
-          </div>
+          </div> : null}
         </> : null}
       </section>
-    </div> : <p className="legend">Your role can view health only.</p>}
+    </div> : canModerate ? <section className="form-card">
+      <h3>Exact moderation actions</h3>
+      <p className="legend">Enter exact identifiers. Results confirm only the bounded action; account, plan, and event metadata remain restricted.</p>
+      <div className="public-admin-capabilities">
+        <label className="field"><span>Public account ID</span><input value={accountId} onChange={(event) => setAccountId(event.target.value)} /></label>
+        <button className="toolbar-button" disabled={Boolean(busy) || !accountId.trim()} onClick={() => void setAccountSuspended(true)}>Suspend account</button>
+        <label className="field"><span>Plan ID</span><input value={planId} onChange={(event) => setPlanId(event.target.value)} /></label>
+        <button className="toolbar-button" disabled={Boolean(busy) || !planId.trim()} onClick={() => void setPlanSuspended(true)}>Suspend plan</button>
+        <label className="field"><span>Invitation ID</span><input value={inviteId} onChange={(event) => setInviteId(event.target.value)} /></label>
+        <button className="toolbar-button" disabled={Boolean(busy) || !planId.trim() || !inviteId.trim()} onClick={() => void revokeCapability("invites")}>Revoke invitation</button>
+        <label className="field"><span>Share-link ID</span><input value={shareId} onChange={(event) => setShareId(event.target.value)} /></label>
+        <button className="toolbar-button" disabled={Boolean(busy) || !planId.trim() || !shareId.trim()} onClick={() => void revokeCapability("share-links")}>Revoke share link</button>
+      </div>
+    </section> : <p className="legend">Your role can view health only.</p>}
 
     {canProcessPrivacy && privacyReview ? <section className="form-card danger-zone">
       <h3>Documented privacy deletion processing</h3>

@@ -123,3 +123,43 @@ Built assets were served with the repository smoke launcher at `http://127.0.0.1
 - Public-ledger replay deliberately uses deletion dispositions of permanent delete for any restored owned public plans. The signed privacy ledger stores no raw identifiers or plan-disposition detail, so it cannot reconstruct an earlier transfer; deleting prevents account/plan resurrection and preserves ledger privacy.
 - Live Discord OAuth was intentionally not exercised. The local smoke environment has OAuth disabled, while same-account reauthentication, purpose binding, origin, CSRF, and deletion behavior are covered by integration tests.
 - The three full-suite skips are existing Windows filesystem/symlink environment skips, not Task 7 failures.
+
+## Fix round 1/5 — 2026-08-26
+
+### Findings addressed
+
+1. **Draft-base revision safety.** `PlanEditor` now tracks the document revision on which the editable draft is based separately from the latest plan/access projection. Access-only refreshes may advance displayed access and server metadata but cannot rebase a retained draft. Explicit reload/replacement and a successful document save are the only operations that advance the draft-base revision.
+2. **Moderator authority split.** Public-service permissions are now independently scoped as `public.health`, `public.lookup`, `public.moderate`, `public.restore`, and `public.privacy`. Owner/administrator retain all five; moderator receives health plus suspend/revoke only; viewer receives health only; Discord manager receives none. Lookup and restore use distinct routes and are enforced server-side. Moderator UI accepts exact account/plan/invite/share identifiers and shows bounded action confirmations without fetching metadata.
+3. **Suspended OAuth denial.** After Discord profile exchange and before account upsert, legal acceptance, login timestamp, or session creation, the callback checks the existing public profile. A suspended profile has every public session removed, receives cleared OAuth/session/reauth cookies, and is redirected with the suspended outcome. Restoration does not revive an old cookie; a complete fresh OAuth login is required.
+4. **Deleted event-reference privacy.** In the existing deletion transaction, retained event payload fields ending in `userId` are recursively replaced with the literal deletion marker when they reference the deleted public user. Transfer-before-deletion events therefore retain the new owner but expose `previousOwnerUserId: "deleted"`. Actor rows use `{ deleted: true }` in both owner/editor and Admin projections; the private HMAC marker and stable deleted ID are never returned. Forced account-delete failure rolls back ownership, inserted transfer event, actor anonymization, and payload scrubbing together.
+
+### Permission matrix after correction
+
+| Timbersteel Admin role | Health | Exact lookup metadata/events | Suspend/revoke by exact ID | Restore | Privacy |
+| --- | --- | --- | --- | --- | --- |
+| Owner | Yes | Yes | Yes | Yes | Yes |
+| Administrator | Yes | Yes | Yes | Yes | Yes |
+| Moderator | Yes | No | Yes, bounded result only | No | No |
+| Viewer | Yes | No | No | No | No |
+| Discord manager | No | No | No | No | No |
+
+### TDD RED/GREEN evidence
+
+- Draft RED: the mounted revision-4 draft / revision-5 server / access mutation / save sequence sent `If-Match: "document:5"`; the test expected `"document:4"` and failed. GREEN: all 5 workspace tests passed with the local draft preserved and the server returning the expected conflict.
+- Authority RED: the router returned `200` for moderator account lookup, the split suspend/restore routes were absent, the mounted moderator UI rendered lookup metadata controls, and the new permission assertions failed (4 expected failures). GREEN: the Admin permission/router/UI/session compatibility run passed 17/17.
+- OAuth RED: a suspended callback redirected normally to `/settings` and would have created a session. GREEN: the 9-test auth route file passed, including suspended denial, no new legal/session state, cleared cookie, restored old-cookie rejection, and fresh-login success; the auth plus public-user compatibility run passed 12/12.
+- Event privacy RED: retained payloads still contained numeric `userId`, `previousOwnerUserId`, and nested `userId` values. GREEN: deletion/moderation tests passed 7/7, including transfer-before-delete projections and the forced SQLite rollback test.
+- Build RED: TypeScript correctly rejected two draft-base assignments because the API plan contract left `revisions` as `unknown`. The public plan response type was narrowed to its existing `{ document, access }` contract; the complete production build then passed.
+
+### Fix-round verification
+
+- Consolidated Task 7 matrix (collaboration, account/auth/deletion, public plans, moderation, Admin, ledger, retention): 78 passed, 0 failed, 0 skipped in 26.5 seconds.
+- Production build: passed server/provider/bindings compilation, 1,462-asset verification, TypeScript, Vite, and Relay runtime boundaries.
+- Complete suite: 2,752 total; 2,749 passed, 0 failed, 3 existing Windows symlink skips in 113.3 seconds.
+- During verification, two initial all-file runs exposed an unrelated asynchronous Discord sandbox assertion in `server.test.mjs` (`555…` observed after expecting `666…`). The unchanged server file passed 4/4 in isolation. The new mounted Admin UI matrix was moved into the existing sequential Vite test file to avoid a second concurrent Vite process; the same UI assertions remain in the focused matrix, and the final full suite passed without editing the unrelated server test.
+- `git diff --check`: passed with only the repository's Windows LF/CRLF notices.
+
+### Scope notes
+
+- The requested typed-confirmation and stale-link minor findings remain deliberately deferred and were not changed in this round.
+- No dependency, version, changelog, service definition, database artifact, real Discord login, or notification delivery was added.
