@@ -1,7 +1,7 @@
 # Public Profile Removal Design
 
-**Date:** 2026-08-27  
-**Status:** Approved  
+**Date:** 2026-08-27
+**Status:** Approved
 **Scope:** Remove the `claim-monitor.com` public product profile and all of its data and deployment paths while preserving the dedicated application at `app.timbersteeltrade.com`.
 
 ## Objective
