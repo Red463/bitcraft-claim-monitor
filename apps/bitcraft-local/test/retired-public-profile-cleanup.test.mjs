@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { applySchemaBootstrap } from "../src/server/schemaBootstrap.mjs";
 import {
+  dedicatedStateFingerprint,
   inspectRetiredPublicProfile,
   removeRetiredPublicProfileData,
   RETIRED_PUBLIC_PROFILE_TABLES,
@@ -122,11 +123,13 @@ test("retired public profile cleanup removes only public data and is idempotent"
     publicAuditRows: 1,
   });
   const before = readDedicatedSentinels(db);
+  const dedicatedBefore = dedicatedStateFingerprint(db);
 
   const result = removeRetiredPublicProfileData(db);
   assert.equal(result.deletedAuditRows, 1);
   assert.deepEqual(inspectRetiredPublicProfile(db), { tables: [], publicAuditRows: 0 });
   assert.deepEqual(readDedicatedSentinels(db), before);
+  assert.deepEqual(dedicatedStateFingerprint(db), dedicatedBefore);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
 
   const repeated = removeRetiredPublicProfileData(db);
@@ -134,5 +137,19 @@ test("retired public profile cleanup removes only public data and is idempotent"
   assert.deepEqual(repeated.before, { tables: [], publicAuditRows: 0 });
   assert.deepEqual(repeated.after, { tables: [], publicAuditRows: 0 });
   assert.deepEqual(readDedicatedSentinels(db), before);
+  db.close();
+});
+
+test("dedicated fingerprint detects settings, plan, and row-count drift without exposing values", () => {
+  const db = new DatabaseSync(":memory:");
+  applySchemaBootstrap(db);
+  seedMixedData(db);
+  const before = dedicatedStateFingerprint(db);
+  assert.match(before.appSettingsSha256, /^[0-9a-f]{64}$/);
+  assert.match(before.craftPlanSha256, /^[0-9a-f]{64}$/);
+  assert.doesNotMatch(JSON.stringify(before), /preserve|dedicated-user|dedicated-admin/);
+
+  db.prepare("UPDATE app_settings SET value = 'changed' WHERE key = 'sentinel'").run();
+  assert.notEqual(dedicatedStateFingerprint(db).appSettingsSha256, before.appSettingsSha256);
   db.close();
 });

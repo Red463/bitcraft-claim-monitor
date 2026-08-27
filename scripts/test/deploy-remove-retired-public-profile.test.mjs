@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import {
   assertPathWithin,
+  assertRemovalPathSafety,
   assertSafeExistingPath,
   backupContainsRetiredPublicSchema,
   inspectRemovalTargets,
@@ -14,6 +15,7 @@ import {
   publicEnvironmentRemoval,
   removePublicCaddySites,
   removePublicEnvironmentValues,
+  restoreActiveServices,
 } from "../../deploy/remove-retired-public-profile.mjs";
 
 test("public environment removal deletes every retired key without exposing values", () => {
@@ -87,6 +89,36 @@ test("target safety rejects escapes and symbolic links", () => {
   }
 });
 
+test("production removal preflight requires exact regular targets and a real backup directory", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "retired-public-production-paths-"));
+  const backupDirectory = path.join(directory, "backups");
+  mkdirSync(backupDirectory);
+  const paths = {
+    databasePath: path.join(directory, "app.sqlite"),
+    environmentPath: path.join(directory, "app.env"),
+    caddyPath: path.join(directory, "Caddyfile"),
+    backupDirectory,
+    backupBinary: path.join(directory, "backup"),
+    backupCryptoHelper: path.join(directory, "crypto.mjs"),
+    backupKeyFile: path.join(directory, "backup.key"),
+    deployLock: path.join(directory, "deploy.lock"),
+    backupLock: path.join(directory, "backup.lock"),
+  };
+  for (const pathname of [paths.databasePath, paths.environmentPath, paths.caddyPath, paths.backupBinary, paths.backupCryptoHelper, paths.backupKeyFile]) {
+    writeFileSync(pathname, "fixture");
+  }
+  assert.deepEqual(assertRemovalPathSafety(paths, paths), paths);
+  assert.throws(() => assertRemovalPathSafety({ ...paths, databasePath: path.join(directory, "other.sqlite") }, paths), /exact approved path/i);
+  try {
+    const linked = path.join(directory, "linked.sqlite");
+    symlinkSync(paths.databasePath, linked);
+    const linkedPaths = { ...paths, databasePath: linked };
+    assert.throws(() => assertRemovalPathSafety(linkedPaths, linkedPaths), /symbolic link/i);
+  } catch (error) {
+    if (error?.code !== "EPERM") throw error;
+  }
+});
+
 test("backup schema inspection distinguishes clean and retired databases", () => {
   const clean = new DatabaseSync(":memory:");
   clean.exec("CREATE TABLE app_settings (key TEXT PRIMARY KEY)");
@@ -120,6 +152,7 @@ test("inspection mode reports counts and key names without mutating files or exp
 
 test("protected workflow requires main, tests first, sanitised inspection, and relay-cutover approval", () => {
   const workflow = readFileSync(new URL("../../.github/workflows/remove-retired-public-profile.yml", import.meta.url), "utf8");
+  const helper = readFileSync(new URL("../../deploy/remove-retired-public-profile.mjs", import.meta.url), "utf8");
   assert.match(workflow, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
   assert.match(workflow, /remove-claim-monitor\.com/);
   assert.match(workflow, /corepack pnpm --filter @workspace\/bitcraft-local run build/);
@@ -127,8 +160,34 @@ test("protected workflow requires main, tests first, sanitised inspection, and r
   assert.match(workflow, /--inspect[\s\S]*upload-artifact@v4/);
   assert.match(workflow, /environment: relay-cutover[\s\S]*BITCRAFT_RETIRED_PUBLIC_REMOVAL=1[\s\S]*--apply/);
   assert.match(workflow, /app\.timbersteeltrade\.com\/api\/local\/health/);
+  assert.match(workflow, /bootstrap\.config\?\.claimId/);
+  assert.match(workflow, /health\.buildSha !== expectedRevision/);
+  assert.doesNotMatch(workflow, /bootstrap\.claim\?\.id|bootstrap\.craftPlan/);
   assert.match(workflow, /bitcraft-claim-monitor-relay-worker\.service/);
   assert.match(workflow, /bitcraft-claim-monitor-relay-collector\.timer/);
+  assert.match(workflow, /gateway_pids=.*sudo pgrep -f/);
   assert.match(workflow, /PRAGMA integrity_check/);
   assert.doesNotMatch(workflow, /PUBLIC_DISCORD_OAUTH_CLIENT_SECRET|PUBLIC_PLAN_TOKEN_HMAC_KEY/);
+  assert.doesNotMatch(helper, /BITCRAFT_(?:DATABASE_PATH|ENVIRONMENT_PATH|CADDY_PATH|BACKUP_DIRECTORY)/);
+  assert.match(helper, /recoveryFailures/);
+  assert.match(helper, /AggregateError/);
+  assert.doesNotMatch(helper, /catch \{\}/);
+});
+
+test("service restoration attempts every previously active unit and reports all failures", () => {
+  const calls = [];
+  assert.throws(() => restoreActiveServices({
+    "bitcraft-claim-monitor-relay.service": true,
+    "bitcraft-claim-monitor-relay-worker.service": true,
+    "bitcraft-claim-monitor-relay-collector.service": false,
+    "bitcraft-claim-monitor-relay-collector.timer": true,
+  }, { systemctlBinary: "systemctl" }, (_command, args, label) => {
+    calls.push({ args, label });
+    if (args[1] !== "bitcraft-claim-monitor-relay-collector.timer") throw new Error(`failed ${args[1]}`);
+  }), /relay\.service.*relay-worker\.service/s);
+  assert.deepEqual(calls.map(({ args }) => args[1]), [
+    "bitcraft-claim-monitor-relay.service",
+    "bitcraft-claim-monitor-relay-worker.service",
+    "bitcraft-claim-monitor-relay-collector.timer",
+  ]);
 });

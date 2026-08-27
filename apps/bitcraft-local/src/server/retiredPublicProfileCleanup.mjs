@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export const RETIRED_PUBLIC_PROFILE_TABLES = Object.freeze([
   "public_craft_plan_events",
   "public_craft_plan_share_links",
@@ -19,6 +21,35 @@ function existingTables(db) {
 
 function tableExists(db, name) {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+}
+
+function rowsDigest(rows) {
+  return createHash("sha256").update(JSON.stringify(rows)).digest("hex");
+}
+
+export function dedicatedStateFingerprint(db) {
+  const retired = new Set(RETIRED_PUBLIC_PROFILE_TABLES);
+  const tableNames = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all()
+    .map((row) => String(row.name))
+    .filter((name) => !retired.has(name));
+  const tableRowCounts = Object.fromEntries(tableNames.map((name) => [
+    name,
+    Number(db.prepare(name === "admin_audit_log"
+      ? "SELECT COUNT(*) AS count FROM admin_audit_log WHERE action NOT LIKE 'public.%'"
+      : `SELECT COUNT(*) AS count FROM "${name}"`).get()?.count ?? 0),
+  ]));
+  const appSettings = tableExists(db, "app_settings")
+    ? db.prepare("SELECT * FROM app_settings ORDER BY key").all()
+    : [];
+  const craftPlan = tableExists(db, "craft_plan_settings")
+    ? db.prepare("SELECT * FROM craft_plan_settings ORDER BY plan_key").all()
+    : [];
+  return {
+    tableRowCounts,
+    appSettingsSha256: rowsDigest(appSettings),
+    craftPlanSha256: rowsDigest(craftPlan),
+  };
 }
 
 export function inspectRetiredPublicProfile(db) {

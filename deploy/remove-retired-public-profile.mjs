@@ -20,6 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  dedicatedStateFingerprint,
   inspectRetiredPublicProfile,
   removeRetiredPublicProfileData,
   RETIRED_PUBLIC_PROFILE_TABLES,
@@ -161,6 +162,34 @@ export function assertSafeExistingPath(root, target) {
   return resolved;
 }
 
+export function assertRemovalPathSafety(paths, expected = DEFAULT_PATHS) {
+  const exactPathKeys = [
+    "databasePath",
+    "environmentPath",
+    "caddyPath",
+    "backupDirectory",
+    "backupBinary",
+    "backupCryptoHelper",
+    "backupKeyFile",
+    "deployLock",
+    "backupLock",
+  ];
+  for (const key of exactPathKeys) {
+    if (path.resolve(paths[key]) !== path.resolve(expected[key])) {
+      throw new Error(`${key} must use the exact approved path`);
+    }
+  }
+  for (const key of ["databasePath", "environmentPath", "caddyPath", "backupBinary", "backupCryptoHelper", "backupKeyFile"]) {
+    const details = lstatSync(paths[key]);
+    if (details.isSymbolicLink()) throw new Error(`${key} must not be a symbolic link`);
+    if (!details.isFile()) throw new Error(`${key} must be a regular file`);
+  }
+  const backupDirectory = lstatSync(paths.backupDirectory);
+  if (backupDirectory.isSymbolicLink()) throw new Error("backupDirectory must not be a symbolic link");
+  if (!backupDirectory.isDirectory()) throw new Error("backupDirectory must be a directory");
+  return paths;
+}
+
 export function backupContainsRetiredPublicSchema(db) {
   const names = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all().map((row) => String(row.name));
   const retired = new Set(RETIRED_PUBLIC_PROFILE_TABLES);
@@ -268,10 +297,17 @@ function serviceState(unit, paths) {
   return spawnSync(paths.systemctlBinary, ["is-active", "--quiet", unit]).status === 0;
 }
 
-function restoreActiveServices(states, paths) {
+export function restoreActiveServices(states, paths, execute = runCommand) {
+  const failures = [];
   for (const unit of SERVICE_UNITS) {
-    if (states[unit]) runCommand(paths.systemctlBinary, ["start", unit], `Restore ${unit}`);
+    if (!states[unit]) continue;
+    try {
+      execute(paths.systemctlBinary, ["start", unit], `Restore ${unit}`);
+    } catch (error) {
+      failures.push(`${unit}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
+  if (failures.length) throw new Error(`Service restoration failed: ${failures.join("; ")}`);
 }
 
 function verifyDedicatedHealth(paths) {
@@ -295,11 +331,16 @@ function actualApply(paths) {
     let cleanup;
     try {
       db.exec("PRAGMA secure_delete=ON");
+      const dedicatedBefore = dedicatedStateFingerprint(db);
       cleanup = removeRetiredPublicProfileData(db);
       db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
       db.exec("VACUUM");
       const integrity = db.prepare("PRAGMA integrity_check").get()?.integrity_check;
       if (integrity !== "ok") throw new Error(`Database integrity check failed: ${integrity}`);
+      const dedicatedAfter = dedicatedStateFingerprint(db);
+      if (JSON.stringify(dedicatedAfter) !== JSON.stringify(dedicatedBefore)) {
+        throw new Error("Dedicated database fingerprint changed during retired public profile removal");
+      }
     } finally {
       db.close();
     }
@@ -330,16 +371,32 @@ function actualApply(paths) {
     if (existsSync(caddyRecovery)) rmSync(caddyRecovery, { force: true });
     return {
       cleanup,
+      dedicatedStatePreserved: true,
       removedEnvironmentKeys: environment.removedKeys,
       removedCaddyHosts: caddy.removedHosts,
     };
   } catch (error) {
+    const recoveryFailures = [];
     if (caddyChanged && existsSync(caddyRecovery)) {
-      copyFileSync(caddyRecovery, paths.caddyPath);
-      try { runCommand(paths.caddyBinary, ["validate", "--config", paths.caddyPath], "Validate restored Caddy configuration"); } catch {}
-      try { runCommand(paths.systemctlBinary, ["reload", "caddy"], "Reload restored Caddy configuration"); } catch {}
+      try {
+        copyFileSync(caddyRecovery, paths.caddyPath);
+        runCommand(paths.caddyBinary, ["validate", "--config", paths.caddyPath], "Validate restored Caddy configuration");
+        runCommand(paths.systemctlBinary, ["reload", "caddy"], "Reload restored Caddy configuration");
+      } catch (recoveryError) {
+        recoveryFailures.push(recoveryError);
+      }
     }
-    try { restoreActiveServices(states, paths); } catch {}
+    try {
+      restoreActiveServices(states, paths);
+    } catch (recoveryError) {
+      recoveryFailures.push(recoveryError);
+    }
+    if (recoveryFailures.length) {
+      throw new AggregateError(
+        [error, ...recoveryFailures],
+        `Retired public profile removal failed and recovery also failed: ${recoveryFailures.map((failure) => failure instanceof Error ? failure.message : String(failure)).join("; ")}`,
+      );
+    }
     throw error;
   }
 }
@@ -377,13 +434,7 @@ export function parseArguments(argv) {
 }
 
 function cliPaths() {
-  return {
-    ...DEFAULT_PATHS,
-    databasePath: process.env.BITCRAFT_DATABASE_PATH || DEFAULT_PATHS.databasePath,
-    environmentPath: process.env.BITCRAFT_ENVIRONMENT_PATH || DEFAULT_PATHS.environmentPath,
-    caddyPath: process.env.BITCRAFT_CADDY_PATH || DEFAULT_PATHS.caddyPath,
-    backupDirectory: process.env.BITCRAFT_BACKUP_DIRECTORY || DEFAULT_PATHS.backupDirectory,
-  };
+  return { ...DEFAULT_PATHS };
 }
 
 function reexecWithLock(lockPath, args, paths) {
@@ -394,6 +445,7 @@ function reexecWithLock(lockPath, args, paths) {
 async function main() {
   const parsed = parseArguments(process.argv.slice(2));
   const paths = cliPaths();
+  assertRemovalPathSafety(paths);
   if (parsed.mode === "inspect") {
     process.stdout.write(`${JSON.stringify(inspectRemovalTargets(paths), null, 2)}\n`);
     return;
