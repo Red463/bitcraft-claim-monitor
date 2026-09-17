@@ -1142,6 +1142,7 @@ export const ClothingMask = __t.enum("ClothingMask", {
   HairFront: __t.unit(),
   HairBottom: __t.unit(),
   HairFull: __t.unit(),
+  Bald: __t.unit(),
 });
 export type ClothingMask = __Infer<typeof ClothingMask>;
 
@@ -2460,6 +2461,9 @@ export const EquipmentDesc = __t.object("EquipmentDesc", {
   requiredAchievements: __t.array(__t.i32()),
   requiredKnowledges: __t.array(__t.i32()),
   showInProgression: __t.bool(),
+  equipmentBuffId: __t.i32(),
+  equipmentBuffChancePerHit: __t.f32(),
+  equipmentBuffSkillId: __t.i32(),
 });
 export type EquipmentDesc = __Infer<typeof EquipmentDesc>;
 
@@ -3166,6 +3170,8 @@ export const InteriorNetworkDesc = __t.object("InteriorNetworkDesc", {
   triggerCollapseTime: __t.u32(),
   respawnTime: __t.u32(),
   childInteriorInstances: __t.array(__t.i32()),
+  startCollapsing: __t.bool(),
+  destroyBuildingOnCollapse: __t.bool(),
 });
 export type InteriorNetworkDesc = __Infer<typeof InteriorNetworkDesc>;
 
@@ -5798,8 +5804,19 @@ export const ResourceDesc = __t.object("ResourceDesc", {
   waterDepthMin: __t.i32(),
   waterDepthMax: __t.i32(),
   maxElevationDelta: __t.i32(),
+  get onDestroyBuildingOutcomes() {
+    return __t.option(__t.array(ResourceDestroyBuildingOutcome));
+  },
 });
 export type ResourceDesc = __Infer<typeof ResourceDesc>;
+
+export const ResourceDestroyBuildingOutcome = __t.object("ResourceDestroyBuildingOutcome", {
+  probability: __t.f32(),
+  buildingId: __t.i32(),
+  radiusMin: __t.i32(),
+  radiusMax: __t.i32(),
+});
+export type ResourceDestroyBuildingOutcome = __Infer<typeof ResourceDestroyBuildingOutcome>;
 
 export const ResourceGrowthRecipeDesc = __t.object("ResourceGrowthRecipeDesc", {
   id: __t.i32(),
@@ -5942,6 +5959,14 @@ export const SkillDesc = __t.object("SkillDesc", {
   maxLevel: __t.i32(),
 });
 export type SkillDesc = __Infer<typeof SkillDesc>;
+
+export const SkillLevelKnowledgeDesc = __t.object("SkillLevelKnowledgeDesc", {
+  id: __t.i32(),
+  skillId: __t.i32(),
+  level: __t.i32(),
+  secondaryKnowledgeId: __t.i32(),
+});
+export type SkillLevelKnowledgeDesc = __Infer<typeof SkillLevelKnowledgeDesc>;
 
 // The tagged union or sum type for the algebraic type `SkillType`.
 export const SkillType = __t.enum("SkillType", {
